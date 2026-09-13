@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 )
@@ -42,7 +41,7 @@ func validateDomainEnums(root string) error {
 			}
 			actual = append(actual, text)
 		}
-		if !reflect.DeepEqual(actual, expected) {
+		if !sameUniqueStrings(actual, expected) {
 			return fmt.Errorf("common schema enum %q = %#v, want domain values %#v", name, actual, expected)
 		}
 	}
@@ -131,6 +130,32 @@ func domainEnums() map[string][]string {
 			domain.CapabilityRetainedSessions,
 		),
 	}
+}
+
+func sameUniqueStrings(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	actualSet := make(map[string]struct{}, len(actual))
+	for _, value := range actual {
+		if _, exists := actualSet[value]; exists {
+			return false
+		}
+		actualSet[value] = struct{}{}
+	}
+	expectedSet := make(map[string]struct{}, len(expected))
+	for _, value := range expected {
+		if _, exists := expectedSet[value]; exists {
+			return false
+		}
+		expectedSet[value] = struct{}{}
+	}
+	for value := range actualSet {
+		if _, exists := expectedSet[value]; !exists {
+			return false
+		}
+	}
+	return true
 }
 
 func stringsOf[T ~string](values ...T) []string {
