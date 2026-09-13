@@ -20,13 +20,92 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 1024,
-      "pattern": "^(?:\\.|(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*[\\\\\\u0000-\\u001F]).+)$"
+      "anyOf": [
+        {
+          "const": "."
+        },
+        {
+          "allOf": [
+            {
+              "not": {
+                "pattern": "^/"
+              }
+            },
+            {
+              "not": {
+                "pattern": "^[A-Za-z]:"
+              }
+            },
+            {
+              "not": {
+                "pattern": "\\\\"
+              }
+            },
+            {
+              "not": {
+                "pattern": "[\\x00-\\x1F]"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(^|/)\\.{1,2}(/|$)"
+              }
+            },
+            {
+              "not": {
+                "pattern": "//"
+              }
+            },
+            {
+              "not": {
+                "pattern": "/$"
+              }
+            }
+          ]
+        }
+      ]
     },
     "relative_file_path": {
       "type": "string",
       "minLength": 1,
       "maxLength": 1024,
-      "pattern": "^(?!/)(?!\\.\\.?$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*[\\\\\\u0000-\\u001F])[^/].*[^/]$|^[A-Za-z0-9._-]$"
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^/"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[A-Za-z]:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "\\\\"
+          }
+        },
+        {
+          "not": {
+            "pattern": "[\\x00-\\x1F]"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.{1,2}(/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "//"
+          }
+        },
+        {
+          "not": {
+            "pattern": "/$"
+          }
+        }
+      ]
     },
     "profile_name": {
       "type": "string",

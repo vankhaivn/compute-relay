@@ -118,8 +118,8 @@
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",
-      "sha256": "da25c0134a0d5ca5360b8d9517b7c0adf767c1db0eb49f0eeba74d75fb96baeb",
-      "bytes": 7125
+      "sha256": "1a6b67843e442b18425e57823f4aeab17278dc73dbda175392468cde2f947bf0",
+      "bytes": 8379
     },
     {
       "path": "api/schemas/error.v1alpha1.schema.json",
