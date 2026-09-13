@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a focused capability that fits the approved product boundaries.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read docs/proposal.md before proposing scope. Retained sessions, dashboards, and additional providers are future work, not automatic MVP requirements.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What operator or application problem should be solved?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable behavior, not only an implementation preference.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and boundaries
+      description: Explain how the proposal fits the provider-neutral core, batch-first MVP, security model, and no-mandatory-paid-infrastructure rule.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or references
+      description: Link primary provider documentation, measurements, or related issues where relevant. State what remains unverified.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List concrete tests or evidence that would establish completion.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I read the approved proposal and searched existing issues.
+          required: true
+        - label: This proposal does not rely on quota evasion, hidden paid fallback, or unsupported browser automation.
+          required: true

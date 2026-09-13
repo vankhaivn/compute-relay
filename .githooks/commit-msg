@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+message_file=${1:?commit message file is required}
+repo_root=$(git rev-parse --show-toplevel)
+subject=$(sed -n '1p' "$message_file")
+
+"$repo_root/scripts/check-commit-subject.sh" "$subject"

@@ -1,0 +1,10 @@
+# <type>(<scope>)!: <summary>
+#
+# Explain what changed and why. Wrap body lines near 100 characters.
+#
+# Optional trailers:
+# Refs: #123
+# BREAKING CHANGE: describe the incompatible behavior and migration path
+#
+# Types: feat, fix, docs, refactor, perf, test, build, ci, chore, revert
+# Canonical policy: docs/development/commit-convention.md

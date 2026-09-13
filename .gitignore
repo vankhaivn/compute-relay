@@ -1,0 +1,59 @@
+# Build and test output
+/bin/
+/dist/
+/build/
+/coverage/
+*.test
+*.out
+*.prof
+*.coverprofile
+
+# Go workspaces and local tooling
+go.work
+go.work.sum
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Runtime state and generated provider material
+.compute-relay/
+.compute-connector/
+state/
+blobs/
+diagnostics/
+provider-tools/
+*.db
+*.db-shm
+*.db-wal
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+config.toml
+!config.example.toml
+kaggle.json
+*.pem
+*.key
+*.p12
+*.token
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local scratch
+.tmp/
+tmp/
+*.log

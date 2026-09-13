@@ -1,0 +1,66 @@
+name: Bug report
+description: Report reproducible incorrect behavior in implemented project code or documentation.
+title: "fix: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private data, or vulnerability details. Use SECURITY.md for security reports.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: commit SHA, tag, or branch
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Execution context
+      options:
+        - Documentation only
+        - Offline/unit/component test
+        - Fake provider
+        - Kaggle fixture or parser test
+        - Authorized live Kaggle test
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide a minimal, sanitized, deterministic reproduction.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, language/client versions, and relevant configuration with secrets removed.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized diagnostics
+      description: Include only the smallest useful log or error excerpt. Remove tokens, account identifiers, private paths, and data.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials and private data.
+          required: true
+        - label: This is not a security vulnerability report.
+          required: true

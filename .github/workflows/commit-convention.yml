@@ -1,0 +1,72 @@
+name: Commit convention
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate commit subjects
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: ./scripts/check-commit-subject.sh "$PR_TITLE"
+
+      - name: Determine commit range
+        id: range
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          zero=0000000000000000000000000000000000000000
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            range="$BASE_SHA..$HEAD_SHA"
+          elif [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" == "$zero" ]]; then
+            range="$HEAD_SHA"
+          else
+            range="$BEFORE_SHA..$HEAD_SHA"
+          fi
+
+          echo "range=$range" >> "$GITHUB_OUTPUT"
+
+      - name: Validate commit subjects
+        shell: bash
+        env:
+          COMMIT_RANGE: ${{ steps.range.outputs.range }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$COMMIT_RANGE" == *".."* ]]; then
+            mapfile -t commits < <(git rev-list --reverse "$COMMIT_RANGE")
+          else
+            commits=("$COMMIT_RANGE")
+          fi
+
+          if [[ ${#commits[@]} -eq 0 ]]; then
+            echo "No commits to validate."
+            exit 0
+          fi
+
+          for commit in "${commits[@]}"; do
+            subject=$(git show -s --format=%s "$commit")
+            echo "Checking ${commit:0:12}: $subject"
+            ./scripts/check-commit-subject.sh "$subject"
+          done
