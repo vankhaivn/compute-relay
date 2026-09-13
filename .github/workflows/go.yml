@@ -1,0 +1,71 @@
+name: Go
+
+on:
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "scripts/dev.*"
+      - ".github/workflows/go.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "scripts/dev.*"
+      - ".github/workflows/go.yml"
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.1"
+
+jobs:
+  quality:
+    name: Quality and race tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Verify toolchain
+        shell: bash
+        run: test "$(go env GOVERSION)" = "go${GO_VERSION}"
+
+      - name: Run repository checks
+        run: go run ./cmd/devtool check
+
+      - name: Run race tests
+        run: go run ./cmd/devtool test-race
+
+  native:
+    name: Native ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Run native tests
+        run: go run ./cmd/devtool test
+
+      - name: Build without CGo
+        run: go run ./cmd/devtool build
