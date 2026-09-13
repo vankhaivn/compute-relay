@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay job status v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "job_id",
+    "workspace_id",
+    "name",
+    "active_attempt_id",
+    "state",
+    "revision",
+    "created_at",
+    "updated_at",
+    "links"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "compute-connector/v1alpha1"
+    },
+    "job_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+    },
+    "workspace_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "active_attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orchestration",
+        "execution",
+        "result",
+        "cancellation",
+        "remote_activity",
+        "release_evidence",
+        "deadline_exceeded"
+      ],
+      "properties": {
+        "orchestration": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/orchestration_state"
+        },
+        "execution": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/execution_state"
+        },
+        "result": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/result_state"
+        },
+        "cancellation": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/cancellation_state"
+        },
+        "remote_activity": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/remote_activity_state"
+        },
+        "release_evidence": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/release_evidence"
+        },
+        "deadline_exceeded": {
+          "type": "boolean"
+        }
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "updated_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "problem": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/problem"
+        }
+      ]
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "self",
+        "events",
+        "attempts",
+        "artifacts"
+      ],
+      "properties": {
+        "self": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "events": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "attempts": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "artifacts": {
+          "type": "string",
+          "format": "uri-reference"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "stage",
+        "safe_operation_retry",
+        "compute_may_have_started",
+        "recommended_action"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/error_code"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "stage": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/failure_stage"
+        },
+        "request_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+        },
+        "workspace_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+        },
+        "job_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+        },
+        "attempt_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+        },
+        "operation_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
+        },
+        "safe_operation_retry": {
+          "type": "boolean"
+        },
+        "compute_may_have_started": {
+          "type": "boolean"
+        },
+        "recommended_action": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/recommended_action"
+        },
+        "details": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "default": {}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "compute_may_have_started": {
+                "const": true
+              }
+            },
+            "required": [
+              "compute_may_have_started"
+            ]
+          },
+          "then": {
+            "not": {
+              "allOf": [
+                {
+                  "properties": {
+                    "safe_operation_retry": {
+                      "const": true
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "recommended_action": {
+                      "const": "retry_compute_explicitly"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "properties": {
+              "orchestration": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "orchestration"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "state": {
+            "properties": {
+              "execution": {
+                "const": "succeeded"
+              },
+              "result": {
+                "enum": [
+                  "available",
+                  "expired"
+                ]
+              },
+              "remote_activity": {
+                "const": "inactive"
+              }
+            },
+            "required": [
+              "execution",
+              "result",
+              "remote_activity"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "properties": {
+              "orchestration": {
+                "const": "cancelled"
+              }
+            },
+            "required": [
+              "orchestration"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "state": {
+            "properties": {
+              "cancellation": {
+                "enum": [
+                  "prevented",
+                  "confirmed"
+                ]
+              }
+            },
+            "required": [
+              "cancellation"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay execution result manifest v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "job_id",
+    "attempt_id",
+    "attempt_nonce",
+    "runner_version",
+    "bundle_sha256",
+    "input_manifest_sha256",
+    "started_at",
+    "finished_at",
+    "phase",
+    "exit_code",
+    "timed_out",
+    "resource_check",
+    "artifacts",
+    "error"
+  ],
+  "properties": {
+    "manifest_version": {
+      "const": "1"
+    },
+    "job_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+    },
+    "attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "attempt_nonce": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "runner_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "bundle_sha256": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/sha256"
+    },
+    "input_manifest_sha256": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/sha256"
+    },
+    "started_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "finished_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "setup_failed",
+        "resource_check_failed"
+      ]
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": -2147483648,
+      "maximum": 2147483647
+    },
+    "timed_out": {
+      "type": "boolean"
+    },
+    "resource_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gpu_required",
+        "gpu_verified"
+      ],
+      "properties": {
+        "gpu_required": {
+          "type": "boolean"
+        },
+        "gpu_verified": {
+          "type": "boolean"
+        },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "cuda_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "framework": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "bytes",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "common.v1alpha1.schema.json#/$defs/relative_file_path"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967296
+          },
+          "sha256": {
+            "$ref": "common.v1alpha1.schema.json#/$defs/sha256"
+          },
+          "media_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        }
+      }
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "stage"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "common.v1alpha1.schema.json#/$defs/error_code"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "stage": {
+              "$ref": "common.v1alpha1.schema.json#/$defs/failure_stage"
+            },
+            "details": {
+              "type": "object",
+              "maxProperties": 32,
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "completed"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "exit_code": {
+            "const": 0
+          },
+          "timed_out": {
+            "const": false
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "timed_out"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "timed_out": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resource_check": {
+            "properties": {
+              "gpu_required": {
+                "const": true
+              },
+              "gpu_verified": {
+                "const": true
+              }
+            },
+            "required": [
+              "gpu_required",
+              "gpu_verified"
+            ]
+          }
+        },
+        "required": [
+          "resource_check"
+        ]
+      },
+      "then": true
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "completed"
+          },
+          "resource_check": {
+            "properties": {
+              "gpu_required": {
+                "const": true
+              }
+            },
+            "required": [
+              "gpu_required"
+            ]
+          }
+        },
+        "required": [
+          "phase",
+          "resource_check"
+        ]
+      },
+      "then": {
+        "properties": {
+          "resource_check": {
+            "properties": {
+              "gpu_verified": {
+                "const": true
+              }
+            },
+            "required": [
+              "gpu_verified"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

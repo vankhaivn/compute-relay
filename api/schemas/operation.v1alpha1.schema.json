@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay operation v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "workspace_id",
+    "kind",
+    "status",
+    "revision",
+    "created_at",
+    "updated_at",
+    "problem"
+  ],
+  "properties": {
+    "operation_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
+    },
+    "workspace_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+    },
+    "job_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+    },
+    "attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "kind": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/operation_kind"
+    },
+    "status": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/operation_status"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "updated_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "problem": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/problem"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "stage",
+        "safe_operation_retry",
+        "compute_may_have_started",
+        "recommended_action"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/error_code"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "stage": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/failure_stage"
+        },
+        "request_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+        },
+        "workspace_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+        },
+        "job_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+        },
+        "attempt_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+        },
+        "operation_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
+        },
+        "safe_operation_retry": {
+          "type": "boolean"
+        },
+        "compute_may_have_started": {
+          "type": "boolean"
+        },
+        "recommended_action": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/recommended_action"
+        },
+        "details": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "default": {}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "compute_may_have_started": {
+                "const": true
+              }
+            },
+            "required": [
+              "compute_may_have_started"
+            ]
+          },
+          "then": {
+            "not": {
+              "allOf": [
+                {
+                  "properties": {
+                    "safe_operation_retry": {
+                      "const": true
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "recommended_action": {
+                      "const": "retry_compute_explicitly"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "not": {
+              "const": "cleanup"
+            }
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "job_id",
+          "attempt_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "problem": {
+            "$ref": "#/$defs/problem"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "accepted",
+              "running",
+              "succeeded"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "problem": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

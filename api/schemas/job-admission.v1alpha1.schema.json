@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay job admission v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "job_id",
+    "attempt_id",
+    "status",
+    "created_at",
+    "idempotency_replay",
+    "links"
+  ],
+  "properties": {
+    "job_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+    },
+    "attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "status": {
+      "const": "queued"
+    },
+    "created_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "idempotency_replay": {
+      "type": "boolean"
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "self",
+        "events",
+        "attempts",
+        "artifacts"
+      ],
+      "properties": {
+        "self": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "events": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "attempts": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "artifacts": {
+          "type": "string",
+          "format": "uri-reference"
+        }
+      }
+    }
+  }
+}

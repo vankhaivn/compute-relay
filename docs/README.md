@@ -28,7 +28,8 @@ owner-approved proposal update.
 | [`proposal.md`](proposal.md) | Approved brief | Product decisions, defaults, boundaries, risks, and feasibility gates. |
 | [`scope-and-requirements.md`](scope-and-requirements.md) | M-0 baseline | Stable requirement IDs mapped to components, acceptance evidence, and milestones. |
 | [`architecture.md`](architecture.md) | Approved baseline | Provider-neutral layers, responsibilities, entities, and invariants. |
-| [`domain-model.md`](domain-model.md) | M2-02 implemented offline; in review | Typed IDs, entities, capability evidence, structured errors, independent state dimensions, and transition invariants. |
+| [`domain-model.md`](domain-model.md) | M2-02 implemented offline | Typed IDs, entities, capability evidence, structured errors, independent state dimensions, and transition invariants. |
+| [`../api/README.md`](../api/README.md) | M2-03 implemented offline; in review | Strict JSON Schema/OpenAPI contracts, fixtures, lock, and validation workflow. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
@@ -38,13 +39,13 @@ owner-approved proposal update.
 | [`research/kaggle-interface-review.md`](research/kaggle-interface-review.md) | Upstream review complete | Pinned official client surfaces, gaps, transport gate, and M-1 probe sequence. |
 | [`research/kaggle-feasibility.md`](research/kaggle-feasibility.md) | Upstream review complete; live blocked | K-01 through K-16 evidence ledger and go/no-go rule. |
 | [`providers/`](providers/README.md) | Provider-doc template | Adapter-specific capability and compatibility documentation. |
-| [`development/go-toolchain.md`](development/go-toolchain.md) | M2-01 implemented offline | Go module, developer commands, CI, build metadata, and dependency baseline. |
+| [`development/go-toolchain.md`](development/go-toolchain.md) | Active | Go module, developer commands, CI, build metadata, and dependency baseline. |
 | [`development/commit-convention.md`](development/commit-convention.md) | Active policy | Commit subject and history rules. |
 | [`development/repository-workflow.md`](development/repository-workflow.md) | Active policy | Branch, PR, validation, and direct-main rules. |
 
-API, job-contract, operations, testing, provider support, troubleshooting, and security
-design documents should be added when implementation makes them concrete. Do not create
-empty documents merely to mirror a proposed tree.
+Operations, testing, provider support, troubleshooting, and security design documents should
+be added when implementation makes them concrete. Do not create empty documents merely to
+mirror a proposed tree.
 
 ## Status vocabulary
 
@@ -67,8 +68,8 @@ level and capability support must not be collapsed into one optimistic checkbox.
 | Change | Documents to review |
 |---|---|
 | Owner-approved scope | proposal, requirement matrix, roadmap, plan, risks |
-| Public API/job contract | requirement matrix, architecture, domain model, OpenAPI/schema docs, compatibility, plan |
-| Domain state/error semantics | domain model, architecture, requirement matrix, plan, tests |
+| Public API/job contract | requirement matrix, architecture, domain model, `api/`, compatibility, plan |
+| Domain state/error semantics | domain model, architecture, requirement matrix, `api/schemas/common*`, plan, tests |
 | Persistence/recovery | ADR, architecture, domain model, risks, plan, operations/testing |
 | Provider client/version/capability | interface review, feasibility, provider docs, compatibility, risk register |
 | Live probe | feasibility gate, sanitized evidence, capability matrix, compatibility date |

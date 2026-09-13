@@ -1,0 +1,36 @@
+{
+  "manifest_version": "1",
+  "job_id": "job_01",
+  "attempt_id": "attempt_01",
+  "attempt_nonce": "nonce_0123456789abcdef",
+  "runner_version": "0.1.0",
+  "bundle_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "input_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "started_at": "2026-09-13T13:00:00Z",
+  "finished_at": "2026-09-13T13:02:00Z",
+  "phase": "completed",
+  "exit_code": 0,
+  "timed_out": false,
+  "resource_check": {
+    "gpu_required": true,
+    "gpu_verified": false,
+    "device_name": "Test GPU",
+    "cuda_version": "13.0",
+    "framework": "torch 3.0"
+  },
+  "artifacts": [
+    {
+      "path": "responses.jsonl",
+      "bytes": 1234,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "media_type": "application/x-ndjson"
+    },
+    {
+      "path": "metrics.json",
+      "bytes": 321,
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "media_type": "application/json"
+    }
+  ],
+  "error": null
+}

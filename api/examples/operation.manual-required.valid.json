@@ -1,0 +1,20 @@
+{
+  "operation_id": "operation_01",
+  "workspace_id": "workspace_01",
+  "job_id": "job_01",
+  "attempt_id": "attempt_01",
+  "kind": "cancel",
+  "status": "manual_required",
+  "revision": 2,
+  "created_at": "2026-09-13T13:04:00Z",
+  "updated_at": "2026-09-13T13:04:01Z",
+  "problem": {
+    "code": "REMOTE_CANCEL_UNSUPPORTED",
+    "message": "Remote cancellation is unavailable for this attempt.",
+    "stage": "operation",
+    "safe_operation_retry": false,
+    "compute_may_have_started": true,
+    "recommended_action": "inspect_provider",
+    "details": {}
+  }
+}

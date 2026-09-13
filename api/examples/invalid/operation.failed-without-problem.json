@@ -1,0 +1,12 @@
+{
+  "operation_id": "operation_01",
+  "workspace_id": "workspace_01",
+  "job_id": "job_01",
+  "attempt_id": "attempt_01",
+  "kind": "cancel",
+  "status": "failed",
+  "revision": 2,
+  "created_at": "2026-09-13T13:04:00Z",
+  "updated_at": "2026-09-13T13:04:01Z",
+  "problem": null
+}
