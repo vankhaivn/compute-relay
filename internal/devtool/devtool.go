@@ -85,12 +85,13 @@ func (r Runner) format(ctx context.Context, write bool) error {
 	cmd.Dir = r.Dir
 	cmd.Stdout = &output
 	cmd.Stderr = r.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gofmt: %w", err)
-	}
+	runErr := cmd.Run()
 	if strings.TrimSpace(output.String()) != "" {
 		fmt.Fprint(r.Stderr, output.String())
 		return errors.New("Go files are not formatted; run scripts/dev.sh fmt (or the PowerShell/CMD equivalent)")
+	}
+	if runErr != nil {
+		return fmt.Errorf("gofmt: %w", runErr)
 	}
 	return nil
 }
