@@ -178,7 +178,7 @@ type CancellationState string
 const (
 	CancellationNotRequested CancellationState = "not_requested"
 	CancellationRequested    CancellationState = "requested"
-	CancellationRequesting    CancellationState = "requesting"
+	CancellationRequesting   CancellationState = "requesting"
 	CancellationAccepted     CancellationState = "accepted"
 	CancellationPrevented    CancellationState = "prevented"
 	CancellationConfirmed    CancellationState = "confirmed"
