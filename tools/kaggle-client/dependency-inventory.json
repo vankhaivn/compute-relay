@@ -1,0 +1,539 @@
+{
+  "metadata_notice": "License fields are package-publisher declarations; review distributed license files before release.",
+  "metadata_scope": "installed runtime distributions",
+  "packages": [
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "attrs",
+      "project_urls": [
+        "Changelog, https://www.attrs.org/en/stable/changelog.html",
+        "Documentation, https://www.attrs.org/",
+        "Funding, https://github.com/sponsors/hynek",
+        "GitHub, https://github.com/python-attrs/attrs",
+        "Tidelift, https://tidelift.com/subscription/pkg/pypi-attrs?utm_source=pypi-attrs&utm_medium=pypi"
+      ],
+      "version": "26.1.0"
+    },
+    {
+      "license": "Apache Software License",
+      "license_classifiers": [],
+      "license_expression": null,
+      "license_text_bytes": 23,
+      "license_text_sha256": "8abaac38411f199b1e71efd166c3218c95be016c8a2d672de0c6c168de02d5c1",
+      "license_truncated": false,
+      "name": "bleach",
+      "project_urls": [],
+      "version": "6.4.0"
+    },
+    {
+      "license": "MPL-2.0",
+      "license_classifiers": [
+        "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 7,
+      "license_text_sha256": "09962c1dc23fac80a0e5a88b2eb7051b74a6443a568ca2a045a4ec2fb82aeee5",
+      "license_truncated": false,
+      "name": "certifi",
+      "project_urls": [
+        "Source, https://github.com/certifi/python-certifi"
+      ],
+      "version": "2026.7.22"
+    },
+    {
+      "license": "MIT",
+      "license_classifiers": [],
+      "license_expression": null,
+      "license_text_bytes": 3,
+      "license_text_sha256": "e5dcffe836b6ec8a58e492419b550e65fb8cbdc308503979e5dacb33ac7ea3b7",
+      "license_truncated": false,
+      "name": "charset-normalizer",
+      "project_urls": [
+        "Changelog, https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md",
+        "Code, https://github.com/jawah/charset_normalizer",
+        "Documentation, https://charset-normalizer.readthedocs.io/",
+        "Issue tracker, https://github.com/jawah/charset_normalizer/issues"
+      ],
+      "version": "3.5.1"
+    },
+    {
+      "license": "BSD-3-Clause",
+      "license_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 12,
+      "license_text_sha256": "118dbcd2d5c9f9b296a9ede9fcc469c5840f7b98ad2c88461055bf2ceda38037",
+      "license_truncated": false,
+      "name": "fastjsonschema",
+      "project_urls": [],
+      "version": "2.22.2"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "BSD-3-Clause",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "idna",
+      "project_urls": [
+        "Changelog, https://github.com/kjd/idna/blob/master/HISTORY.md",
+        "Issue tracker, https://github.com/kjd/idna/issues",
+        "Source, https://github.com/kjd/idna"
+      ],
+      "version": "3.19"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "jsonschema",
+      "project_urls": [
+        "Changelog, https://github.com/python-jsonschema/jsonschema/blob/main/CHANGELOG.rst",
+        "Documentation, https://python-jsonschema.readthedocs.io/",
+        "Funding, https://github.com/sponsors/Julian",
+        "Homepage, https://github.com/python-jsonschema/jsonschema",
+        "Issues, https://github.com/python-jsonschema/jsonschema/issues/",
+        "Source, https://github.com/python-jsonschema/jsonschema",
+        "Tidelift, https://tidelift.com/subscription/pkg/pypi-jsonschema?utm_source=pypi-jsonschema&utm_medium=referral&utm_campaign=pypi-link"
+      ],
+      "version": "4.26.0"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "jsonschema-specifications",
+      "project_urls": [
+        "Documentation, https://jsonschema-specifications.readthedocs.io/",
+        "Funding, https://github.com/sponsors/Julian",
+        "Homepage, https://github.com/python-jsonschema/jsonschema-specifications",
+        "Issues, https://github.com/python-jsonschema/jsonschema-specifications/issues/",
+        "Source, https://github.com/python-jsonschema/jsonschema-specifications",
+        "Tidelift, https://tidelift.com/subscription/pkg/pypi-jsonschema-specifications?utm_source=pypi-jsonschema-specifications&utm_medium=referral&utm_campaign=pypi-link"
+      ],
+      "version": "2025.9.1"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "BSD-3-Clause",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "jupyter_core",
+      "project_urls": [
+        "Documentation, https://jupyter-core.readthedocs.io/",
+        "Homepage, https://jupyter.org",
+        "Source, https://github.com/jupyter/jupyter_core",
+        "Tracker, https://github.com/jupyter/jupyter_core/issues"
+      ],
+      "version": "5.9.1"
+    },
+    {
+      "license": "MIT License Copyright (c) 2018-2026 Marc Wouts Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and t",
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 1071,
+      "license_text_sha256": "6835796f4366cc588b95d8d6d908bf58c4117780e79c671b6ea397f327889f0f",
+      "license_truncated": true,
+      "name": "jupytext",
+      "project_urls": [
+        "Documentation, https://jupytext.org",
+        "Homepage, https://github.com/jupytext/jupytext",
+        "Source Code, https://github.com/jupytext/jupytext"
+      ],
+      "version": "1.19.5"
+    },
+    {
+      "license": "Apache License Version 2.0, January 2004 http://www.apache.org/licenses/ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION 1. Definitions. \"License\" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document. \"Licensor\" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License. \"Legal Entity\" shall mean the union of the acting entity and all other entities that control, are controlle",
+      "license_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 11306,
+      "license_text_sha256": "2ae7264581533dfd2acc64dfcba3f5bd5bb9db252634b09085b62f3d448b7efb",
+      "license_truncated": true,
+      "name": "kaggle",
+      "project_urls": [
+        "Homepage, https://github.com/Kaggle/kaggle-cli",
+        "Issues, https://github.com/Kaggle/kaggle-cli/issues"
+      ],
+      "version": "2.2.4"
+    },
+    {
+      "license": "Apache License Version 2.0, January 2004 http://www.apache.org/licenses/ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION 1. Definitions. \"License\" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document. \"Licensor\" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License. \"Legal Entity\" shall mean the union of the acting entity and all other entities that control, are controlle",
+      "license_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 11306,
+      "license_text_sha256": "2ae7264581533dfd2acc64dfcba3f5bd5bb9db252634b09085b62f3d448b7efb",
+      "license_truncated": true,
+      "name": "kagglesdk",
+      "project_urls": [
+        "Bug Tracker, https://github.com/Kaggle/kagglesdk/issues",
+        "Homepage, https://github.com/Kaggle/kagglesdk"
+      ],
+      "version": "0.1.35"
+    },
+    {
+      "license": null,
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "markdown-it-py",
+      "project_urls": [
+        "Documentation, https://markdown-it-py.readthedocs.io",
+        "Homepage, https://github.com/executablebooks/markdown-it-py"
+      ],
+      "version": "4.2.0"
+    },
+    {
+      "license": null,
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "mdit-py-plugins",
+      "project_urls": [
+        "Documentation, https://mdit-py-plugins.readthedocs.io",
+        "Homepage, https://github.com/executablebooks/mdit-py-plugins"
+      ],
+      "version": "0.6.1"
+    },
+    {
+      "license": null,
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "mdurl",
+      "project_urls": [
+        "Homepage, https://github.com/executablebooks/mdurl"
+      ],
+      "version": "0.1.2"
+    },
+    {
+      "license": "BSD 3-Clause License - Copyright (c) 2001-2015, IPython Development Team - Copyright (c) 2015-, Jupyter Development Team All rights reserved. Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met: 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. 2. Redistributions in binary form must reproduce the above copyright notice, this list of condition",
+      "license_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 1587,
+      "license_text_sha256": "175d2234db876789e50b8f3a3695c5314ab9d408c420048c43f6bbcfd87fc345",
+      "license_truncated": true,
+      "name": "nbformat",
+      "project_urls": [
+        "Changelog, https://github.com/jupyter/nbformat/blob/main/CHANGELOG.md",
+        "Documentation, https://nbformat.readthedocs.io/",
+        "Homepage, https://jupyter.org",
+        "Repository, https://github.com/jupyter/nbformat.git"
+      ],
+      "version": "5.11.1"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "Apache-2.0 OR BSD-2-Clause",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "packaging",
+      "project_urls": [
+        "Documentation, https://packaging.pypa.io/",
+        "Source, https://github.com/pypa/packaging"
+      ],
+      "version": "26.3"
+    },
+    {
+      "license": null,
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "platformdirs",
+      "project_urls": [
+        "Changelog, https://platformdirs.readthedocs.io/en/latest/changelog.html",
+        "Documentation, https://platformdirs.readthedocs.io",
+        "Homepage, https://github.com/tox-dev/platformdirs",
+        "Source, https://github.com/tox-dev/platformdirs",
+        "Tracker, https://github.com/tox-dev/platformdirs/issues"
+      ],
+      "version": "4.11.8"
+    },
+    {
+      "license": "3-Clause BSD License",
+      "license_classifiers": [],
+      "license_expression": null,
+      "license_text_bytes": 20,
+      "license_text_sha256": "15934bcfcb57d72b1b73d913180ce7f86d2773c32725efa41ddb6b14e143cb84",
+      "license_truncated": false,
+      "name": "protobuf",
+      "project_urls": [],
+      "version": "7.36.1"
+    },
+    {
+      "license": "Dual License",
+      "license_classifiers": [
+        "License :: OSI Approved :: Apache Software License",
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 12,
+      "license_text_sha256": "199628ddb098f90709bb2dc43f816a5a40fe31690de0e25d0f4d6455fe6bc609",
+      "license_truncated": false,
+      "name": "python-dateutil",
+      "project_urls": [
+        "Documentation, https://dateutil.readthedocs.io/en/stable/",
+        "Source, https://github.com/dateutil/dateutil"
+      ],
+      "version": "2.9.0.post0"
+    },
+    {
+      "license": "BSD-3-Clause",
+      "license_classifiers": [],
+      "license_expression": null,
+      "license_text_bytes": 12,
+      "license_text_sha256": "118dbcd2d5c9f9b296a9ede9fcc469c5840f7b98ad2c88461055bf2ceda38037",
+      "license_truncated": false,
+      "name": "python-dotenv",
+      "project_urls": [
+        "Source, https://github.com/theskumar/python-dotenv"
+      ],
+      "version": "1.2.3"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "python-slugify",
+      "project_urls": [
+        "Changelog, https://github.com/un33k/python-slugify/blob/master/CHANGELOG.md",
+        "Homepage, https://github.com/un33k/python-slugify",
+        "Issues, https://github.com/un33k/python-slugify/issues"
+      ],
+      "version": "9.0.0"
+    },
+    {
+      "license": "MIT",
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 3,
+      "license_text_sha256": "e5dcffe836b6ec8a58e492419b550e65fb8cbdc308503979e5dacb33ac7ea3b7",
+      "license_truncated": false,
+      "name": "PyYAML",
+      "project_urls": [
+        "Bug Tracker, https://github.com/yaml/pyyaml/issues",
+        "CI, https://github.com/yaml/pyyaml/actions",
+        "Documentation, https://pyyaml.org/wiki/PyYAMLDocumentation",
+        "Mailing lists, http://lists.sourceforge.net/lists/listinfo/yaml-core",
+        "Source Code, https://github.com/yaml/pyyaml"
+      ],
+      "version": "6.0.3"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "referencing",
+      "project_urls": [
+        "Changelog, https://referencing.readthedocs.io/en/stable/changes/",
+        "Documentation, https://referencing.readthedocs.io/",
+        "Funding, https://github.com/sponsors/Julian",
+        "Homepage, https://github.com/python-jsonschema/referencing",
+        "Issues, https://github.com/python-jsonschema/referencing/issues/",
+        "Source, https://github.com/python-jsonschema/referencing",
+        "Tidelift, https://tidelift.com/subscription/pkg/pypi-referencing?utm_source=pypi-referencing&utm_medium=referral&utm_campaign=pypi-link"
+      ],
+      "version": "0.37.0"
+    },
+    {
+      "license": "Apache-2.0",
+      "license_classifiers": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 10,
+      "license_text_sha256": "2af71558e438db0b73a20beab92dc278a94e1bbe974c00c1a33e3ab62d53a608",
+      "license_truncated": false,
+      "name": "requests",
+      "project_urls": [
+        "Documentation, https://requests.readthedocs.io",
+        "Source, https://github.com/psf/requests"
+      ],
+      "version": "2.34.2"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "rpds-py",
+      "project_urls": [
+        "Documentation, https://rpds.readthedocs.io/",
+        "Funding, https://github.com/sponsors/Julian",
+        "Homepage, https://github.com/crate-py/rpds",
+        "Issues, https://github.com/crate-py/rpds/issues/",
+        "Source, https://github.com/crate-py/rpds",
+        "Tidelift, https://tidelift.com/subscription/pkg/pypi-rpds-py?utm_source=pypi-rpds-py&utm_medium=referral&utm_campaign=pypi-link",
+        "Upstream, https://github.com/orium/rpds"
+      ],
+      "version": "2026.6.3"
+    },
+    {
+      "license": "MIT",
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 3,
+      "license_text_sha256": "e5dcffe836b6ec8a58e492419b550e65fb8cbdc308503979e5dacb33ac7ea3b7",
+      "license_truncated": false,
+      "name": "six",
+      "project_urls": [],
+      "version": "1.17.0"
+    },
+    {
+      "license": "Artistic License",
+      "license_classifiers": [
+        "License :: OSI Approved :: Artistic License",
+        "License :: OSI Approved :: GNU General Public License (GPL)",
+        "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 16,
+      "license_text_sha256": "cccd92b07bbed0dd642b7a0ce718d5507c99fba5170b76660e6ec377485b7826",
+      "license_truncated": false,
+      "name": "text-unidecode",
+      "project_urls": [],
+      "version": "1.3"
+    },
+    {
+      "license": "MPL-2.0 AND MIT",
+      "license_classifiers": [],
+      "license_expression": null,
+      "license_text_bytes": 15,
+      "license_text_sha256": "497716e0cebf8fb1944bbac349083f8ba656e10320c3f9811a955fc8786d0cc1",
+      "license_truncated": false,
+      "name": "tqdm",
+      "project_urls": [
+        "changelog, https://tqdm.github.io/releases",
+        "homepage, https://tqdm.github.io",
+        "repository, https://github.com/tqdm/tqdm",
+        "wiki, https://github.com/tqdm/tqdm/wiki"
+      ],
+      "version": "4.70.1"
+    },
+    {
+      "license": "BSD 3-Clause License - Copyright (c) 2001-, IPython Development Team All rights reserved. Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met: 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer. 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation ",
+      "license_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 1535,
+      "license_text_sha256": "6cddaa55a70b1265dedf19ac12d910cee0e1277a110fd81faa0c807011086521",
+      "license_truncated": true,
+      "name": "traitlets",
+      "project_urls": [
+        "Documentation, https://traitlets.readthedocs.io",
+        "Homepage, https://github.com/ipython/traitlets",
+        "Source, https://github.com/ipython/traitlets",
+        "Tracker, https://github.com/ipython/traitlets/issues"
+      ],
+      "version": "5.16.1"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "PSF-2.0",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "typing_extensions",
+      "project_urls": [
+        "Bug Tracker, https://github.com/python/typing_extensions/issues",
+        "Changes, https://github.com/python/typing_extensions/blob/main/CHANGELOG.md",
+        "Documentation, https://typing-extensions.readthedocs.io/",
+        "Home, https://github.com/python/typing_extensions",
+        "Q & A, https://github.com/python/typing/discussions",
+        "Repository, https://github.com/python/typing_extensions"
+      ],
+      "version": "4.16.0"
+    },
+    {
+      "license": null,
+      "license_classifiers": [],
+      "license_expression": "MIT",
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "urllib3",
+      "project_urls": [
+        "Changelog, https://github.com/urllib3/urllib3/blob/main/CHANGES.rst",
+        "Code, https://github.com/urllib3/urllib3",
+        "Documentation, https://urllib3.readthedocs.io",
+        "Issue tracker, https://github.com/urllib3/urllib3/issues"
+      ],
+      "version": "2.7.0"
+    },
+    {
+      "license": null,
+      "license_classifiers": [
+        "License :: OSI Approved :: BSD License"
+      ],
+      "license_expression": null,
+      "license_text_bytes": 0,
+      "license_text_sha256": null,
+      "license_truncated": false,
+      "name": "webencodings",
+      "project_urls": [
+        "Changelog, https://github.com/CourtBouillon/webencodings/releases",
+        "Code, https://github.com/CourtBouillon/webencodings",
+        "Documentation, https://doc.courtbouillon.org/webencodings",
+        "Donation, https://opencollective.com/courtbouillon",
+        "Homepage, https://github.com/CourtBouillon/webencodings",
+        "Issues, https://github.com/CourtBouillon/webencodings/issues"
+      ],
+      "version": "0.6.1"
+    }
+  ],
+  "schema_version": "compute-relay/python-dependency-inventory/v1alpha1"
+}
