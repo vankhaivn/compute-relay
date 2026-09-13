@@ -22,5 +22,12 @@ Semantic Versioning once a public compatibility surface exists.
 - Dependency-aware M-0 through M-6 implementation plan with explicit credential/compute
   authorization boundaries.
 - Risk register, compatibility target matrix, and live-verification checklist.
+- Pinned credential-free Kaggle client probe environment with cross-platform offline
+  safety tests and dependency/license inventory.
+- Go module, pre-release executable, cross-platform developer commands, and offline CI
+  foundation.
+- Provider-neutral Go domain model with typed opaque identities, capability/evidence
+  semantics, stable structured errors, explicit entities, independent attempt-state
+  dimensions, and monotonic transition tests.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
