@@ -29,5 +29,7 @@ Semantic Versioning once a public compatibility surface exists.
 - Provider-neutral Go domain model with typed opaque identities, capability/evidence
   semantics, stable structured errors, explicit entities, independent attempt-state
   dimensions, and monotonic transition tests.
+- Strict Draft 2020-12 JSON Schemas, OpenAPI 3.1 skeleton, positive/negative fixtures,
+  domain-enum drift checks, and a reviewable contract-content lock.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
