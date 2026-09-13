@@ -86,3 +86,15 @@ Without explicit authorization, do not:
 - push to a repository or branch other than the requested target.
 
 When an external prerequisite is unavailable, mark the precise block and continue all safe offline work.
+
+## Operator runtime and CI boundary
+
+- Operators configure credentials in their own runtime environments. Do not centralize
+  users' credentials or runtime operation in maintainer-controlled GitHub Actions.
+- GitHub Actions are for offline format/lint/compile/unit/component/contract/security checks,
+  not deployment, real Kaggle executions, GPU allocation or secret-backed live probes.
+- Build and run executable local smoke checks in the available Linux runtime whenever
+  possible. Report toolchain or sandbox limitations precisely; do not silently weaken the
+  committed toolchain or substitute CI-only execution for feasible local checks.
+- Keep live probes as explicit opt-in operator-run commands with separately authorized
+  credentials and finite budgets. Do not ask for credentials in chat.

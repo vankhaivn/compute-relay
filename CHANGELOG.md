@@ -31,5 +31,9 @@ Semantic Versioning once a public compatibility surface exists.
   dimensions, and monotonic transition tests.
 - Strict Draft 2020-12 JSON Schemas, OpenAPI 3.1 skeleton, positive/negative fixtures,
   domain-enum drift checks, and a reviewable contract-content lock.
+- Provider-neutral execution and infrastructure ports, explicit instance registry, optional
+  capability handling, and a deterministic fixture-only provider with reusable contracts.
+- Local provider smoke command with identity/digest-checked artifacts, fault/race tests,
+  and an explicit operator-runtime versus offline-CI boundary.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

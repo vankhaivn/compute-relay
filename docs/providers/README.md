@@ -2,6 +2,10 @@
 
 Provider documents describe adapter-specific configuration, capabilities, evidence, limits, and operational recovery while keeping the public application contract provider-neutral.
 
+The implemented offline [provider contract and deterministic fake](contract.md) document the
+M2-04 interfaces, registry, reusable tests and local smoke command. This is not live Kaggle
+support or a production local execution provider.
+
 A provider document should include:
 
 - supported and tested client versions;

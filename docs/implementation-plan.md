@@ -1,6 +1,6 @@
 # Dependency-aware implementation plan
 
-> **Status:** M-0 plan in review.
+> **Status:** active; M-0, M1-01 and M2-01 through M2-03 merged. M2-04 in review.
 >
 > **Planning date:** 2026-09-13
 >
@@ -10,6 +10,16 @@ This plan converts the approved proposal and
 [`scope-and-requirements.md`](scope-and-requirements.md) into executable tasks. It keeps
 provider research, deterministic offline implementation, and authorized live verification
 separate.
+
+## Current execution record
+
+M-0 was merged in PR #1, M2-01 in PR #2, M1-01 in PR #3, M2-02 in PR #4,
+and M2-03 in PR #5. M2-04 adds the [provider ports, fake and local smoke](providers/contract.md)
+and remains `in-review` until its PR is merged. M2 as a whole is not complete.
+
+Operator credentials and live probes belong to the operator's own runtime, not GitHub
+Actions. Actions are offline code-quality/build/test only. Use the available local Linux
+runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 
 ## Status vocabulary
 
@@ -66,23 +76,23 @@ go decision and M3 has the durable semantics the adapter must use.
 | ID | Type / status | Intended behavior and components | Requirements | Dependencies | External credentials / compute | Acceptance evidence |
 |---|---|---|---|---|---|---|
 | M0-01 | documentation / `complete` | Establish repository policy, approved proposal, architecture baseline, roadmap scaffold, evidence vocabulary, and commit convention. | PRD-01–PRD-10, VER-01 | None | No / No | Root bootstrap commit and passing commit-convention workflow. |
-| M0-02 | documentation / `in-review` | Create stable requirement IDs and map product behavior to components, tests, and milestones. | All matrix rows | M0-01 | No / No | [`scope-and-requirements.md`](scope-and-requirements.md) has no required behavior without target evidence. |
-| M0-03 | research / `in-review` | Review the current stable official Kaggle CLI/client surfaces, versions, identity, outputs, logs, quota, timeout, staging, and cancellation gaps. | PRD-04, DAT-04, PRV-02/03, OPS-02/04, VER-03 | M0-01 | No / No | Dated primary-source review at an exact release/tag; no live claims. |
-| M0-04 | research / `in-review` | Populate K-01…K-16, risk responses, compatibility target matrix, and live checklist. | PRD-04, PRV-02/03, OPS-02/04, SEC-03, VER-03, DX-01 | M0-03 | No / No | Every gate has evidence level, fallback, and M-1 acceptance procedure. |
-| M0-05 | ADR / `in-review` | Record official-client boundary, attempt-scoped provider identity, and Go/SQLite baseline. | PRD-03/05, DUR-01/03/04, PRV-01/02, SEC-01 | M0-03 | No / No | ADR-0001…0003 accepted with alternatives, consequences, and verification. |
-| M0-06 | planning / `in-review` | Replace the template with this dependency-aware backlog and explicit live/offline boundaries. | All | M0-02–M0-05 | No / No | Every implementation task states dependencies, external effects, and acceptance evidence. |
-| M0-07 | review / `in-progress` | Review and merge the M-0 documentation set; close M-0 without upgrading any live capability. | VER-01/03 | M0-02–M0-06 | No / No | PR checks pass, reviewer findings resolved, documents merged on `main`. |
+| M0-02 | documentation / `complete` | Create stable requirement IDs and map product behavior to components, tests, and milestones. | All matrix rows | M0-01 | No / No | [`scope-and-requirements.md`](scope-and-requirements.md) has no required behavior without target evidence. |
+| M0-03 | research / `complete` | Review the current stable official Kaggle CLI/client surfaces, versions, identity, outputs, logs, quota, timeout, staging, and cancellation gaps. | PRD-04, DAT-04, PRV-02/03, OPS-02/04, VER-03 | M0-01 | No / No | Dated primary-source review at an exact release/tag; no live claims. |
+| M0-04 | research / `complete` | Populate K-01…K-16, risk responses, compatibility target matrix, and live checklist. | PRD-04, PRV-02/03, OPS-02/04, SEC-03, VER-03, DX-01 | M0-03 | No / No | Every gate has evidence level, fallback, and M-1 acceptance procedure. |
+| M0-05 | ADR / `complete` | Record official-client boundary, attempt-scoped provider identity, and Go/SQLite baseline. | PRD-03/05, DUR-01/03/04, PRV-01/02, SEC-01 | M0-03 | No / No | ADR-0001…0003 accepted with alternatives, consequences, and verification. |
+| M0-06 | planning / `complete` | Replace the template with this dependency-aware backlog and explicit live/offline boundaries. | All | M0-02–M0-05 | No / No | Every implementation task states dependencies, external effects, and acceptance evidence. |
+| M0-07 | review / `complete` | Review and merge the M-0 documentation set; close M-0 without upgrading any live capability. | VER-01/03 | M0-02–M0-06 | No / No | PR checks pass, reviewer findings resolved, documents merged on `main`. |
 
 ### M-0 exit decision
 
-M-0 closes when M0-07 is complete. That authorizes M1 and M2 work; it does not authorize
+M-0 is closed after PR #1. Its completion allows M1 and M2 work; it does not authorize
 credentials, GPU allocation, or destructive provider cleanup by itself.
 
 ## M-1 — Thin real-provider proof
 
 | ID | Type / status | Intended behavior and components | Requirements | Dependencies | External credentials / compute | Acceptance evidence |
 |---|---|---|---|---|---|---|
-| M1-01 | implementation / `proposed` | Build an isolated pinned Python 3.11 Kaggle client environment and narrow probe harness; inventory CLI/bridge operations and exact SDK lock. | PRD-04, PRV-01, SEC-01, VER-03 | M0-07, ADR-0001 | No / No | Reproducible install/version output, command fixtures, subprocess safety tests, dependency/license record. |
+| M1-01 | implementation / `complete` | Build an isolated pinned Python 3.11 Kaggle client environment and narrow probe harness; inventory CLI/bridge operations and exact SDK lock. | PRD-04, PRV-01, SEC-01, VER-03 | M0-07, ADR-0001 | No / No | Reproducible install/version output, command fixtures, subprocess safety tests, dependency/license record. |
 | M1-02 | live verification / `blocked` | Run read-only authentication and quota probes with actionable redacted diagnostics. | OPS-02, SEC-01, VER-03 | M1-01, explicit credential authorization | Yes / No GPU | K-01/K-12 sanitized fixtures; missing/invalid credential negative case; no secret disclosure. |
 | M1-03 | live verification / `blocked` | Create a unique synthetic private staging dataset, verify uploaded bytes/privacy/readiness, and record ownership. | DAT-04, SEC-03, OPS-05, VER-03 | M1-02, explicit provider-side-effect authorization | Yes / No GPU; provider storage/API | K-03/K-04 checksums, private visibility, readiness transitions, cleanup dry run. |
 | M1-04 | implementation + live / `blocked` | Generate an attempt-scoped private kernel and runner manifest; execute a <=120-second real GPU smoke computation. | JOB-03/05, PRV-02, OPS-03, VER-03 | M1-03, ADR-0002, finite GPU authorization | Yes / Finite GPU | K-02/K-05/K-09/K-13: actual GPU calculation, environment/result manifest, persisted identities. |
@@ -104,10 +114,10 @@ live tasks remain `blocked-environment`.
 
 | ID | Type / status | Intended behavior and components | Requirements | Dependencies | External credentials / compute | Acceptance evidence |
 |---|---|---|---|---|---|---|
-| M2-01 | implementation / `proposed` | Create the Go module, pin Go/dependencies, license inventory, cross-platform developer command wrappers, and base CI. | PRD-05, VER-01, DX-01 | M0-07, ADR-0003 | No / No | Format/vet/static/unit commands on CI; exact module pins; no Docker/CGo required for baseline build. |
-| M2-02 | implementation / `proposed` | Define opaque IDs, stable error taxonomy, job/attempt/operation/event models, capability states, and monotonic transition rules. | JOB-01, DOM-01/02/03, PRV-03, API-03 | M2-01 | No / No | Table-driven domain tests, unknown states, cancellation/result separation, no provider imports. |
-| M2-03 | implementation / `proposed` | Create versioned job/result/config JSON schemas and OpenAPI skeleton with strict validation. | JOB-01/02/03, API-01/03 | M2-02 | No / No | Schema/example validation; unknown fields/path/enums/limits rejected; generated contract diff checked. |
-| M2-04 | implementation / `proposed` | Define narrow provider/store/blob/credential/clock/event ports and registry; implement deterministic fake provider. | PRD-03, PRV-01/03, VER-01 | M2-02 | No / No | Contract suite completes generic lifecycle with no Kaggle import and with missing cancel/log/quota variants. |
+| M2-01 | implementation / `complete` | Create the Go module, pin Go/dependencies, license inventory, cross-platform developer command wrappers, and base CI. | PRD-05, VER-01, DX-01 | M0-07, ADR-0003 | No / No | Format/vet/static/unit commands on CI; exact module pins; no Docker/CGo required for baseline build. |
+| M2-02 | implementation / `complete` | Define opaque IDs, stable error taxonomy, job/attempt/operation/event models, capability states, and monotonic transition rules. | JOB-01, DOM-01/02/03, PRV-03, API-03 | M2-01 | No / No | Table-driven domain tests, unknown states, cancellation/result separation, no provider imports. |
+| M2-03 | implementation / `complete` | Create versioned job/result/config JSON schemas and OpenAPI skeleton with strict validation. | JOB-01/02/03, API-01/03 | M2-02 | No / No | Schema/example validation; unknown fields/path/enums/limits rejected; generated contract diff checked. |
+| M2-04 | implementation / `in-review` | Define narrow provider/store/blob/credential/clock/event ports and registry; implement deterministic fake provider. | PRD-03, PRV-01/03, VER-01 | M2-02 | No / No | Contract suite completes generic lifecycle with no Kaggle import and with missing cancel/log/quota variants. |
 | M2-05 | implementation / `proposed` | Implement workspace tokens/digests, authorization service, loopback HTTP middleware, request IDs, body/rate limits. | PRD-07, API-01/02, SEC-02 | M2-02/M2-03 | No / No | Full cross-workspace matrix and default exposure/auth tests. |
 | M2-06 | implementation / `proposed` | Implement streaming object upload and filesystem blob lifecycle with immutable digests and atomic publication. | DAT-01, DUR-01, API-01, SEC-02 | M2-02/M2-03 | No / No | Temp-file/disk/error/restart component tests; incomplete bytes never become usable. |
 | M2-07 | implementation / `proposed` | Implement safe `.tar.gz` packaging/inspection and allowlisted local import. | DAT-01/02, SEC-02 | M2-06 | No / No | Archive corpus covers traversal, links, collisions, bombs, path limits, and snapshot races. |
@@ -179,11 +189,11 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Immediate next work after M-0 merge
+## Next work after M2-04 review
 
-1. Start M1-01 and M2-01 on separate focused branches.
-2. M1-01 produces a no-credential probe harness and reproducible provider-client lock.
-3. M2-01 establishes the Go module and offline CI/toolchain.
-4. Do not start M1-02 or any provider mutation until explicit credential/side-effect
-   authorization exists.
-5. Do not implement the full Kaggle adapter until M1-08 records a go decision.
+M2-05 (workspace authentication/HTTP middleware) and M2-06 (immutable object storage)
+have their domain/schema prerequisites. Start only the owner's next authorized task on a
+focused branch. No live credential or provider capability was verified by M2-04.
+
+M1-02 remains an operator-run, explicitly authorized read-only probe. Provider mutation,
+GPU allocation, cleanup and the full Kaggle adapter retain their separate evidence gates.
