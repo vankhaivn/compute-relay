@@ -1,0 +1,63 @@
+{
+  "api_version": "compute-connector/v1alpha1",
+  "name": "small-llm-batch",
+  "profile": "default-gpu",
+  "labels": {
+    "application": "llm-client",
+    "purpose": "example"
+  },
+  "bundle": {
+    "object_id": "obj_code_01"
+  },
+  "execution": {
+    "kind": "python",
+    "command": [
+      "python",
+      "main.py",
+      "--max-new-tokens",
+      "32"
+    ],
+    "working_directory": ".",
+    "environment": {
+      "BATCH_SIZE": "1"
+    },
+    "dependencies": {
+      "python_requirements": "requirements.txt"
+    }
+  },
+  "inputs": [
+    {
+      "name": "prompts",
+      "source": {
+        "kind": "object",
+        "object_id": "obj_prompts_01"
+      },
+      "target": "prompts.jsonl"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "responses.jsonl",
+      "kind": "file",
+      "required": true,
+      "max_bytes": 10485760
+    },
+    {
+      "path": "metrics.json",
+      "required": true
+    }
+  ],
+  "resources": {
+    "accelerator": "gpu",
+    "minimum_gpu_count": 1
+  },
+  "network": {
+    "remote_internet": "required"
+  },
+  "timeouts": {
+    "remote_wall_seconds": 900,
+    "setup_seconds": 300,
+    "finalization_grace_seconds": 60
+  },
+  "unexpected": true
+}

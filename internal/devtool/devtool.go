@@ -25,7 +25,7 @@ type Runner struct {
 // Run executes one developer task.
 func (r Runner) Run(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: devtool <fmt|fmt-check|mod-check|vet|test|test-race|build|check>")
+		return errors.New("usage: devtool <fmt|fmt-check|mod-check|contract-check|contract-lock|vet|test|test-race|build|check>")
 	}
 
 	switch args[0] {
@@ -38,6 +38,10 @@ func (r Runner) Run(ctx context.Context, args []string) error {
 			return fmt.Errorf("module files are not tidy: %w", err)
 		}
 		return r.command(ctx, nil, "go", "mod", "verify")
+	case "contract-check":
+		return r.command(ctx, nil, "go", "run", "./cmd/contractcheck", "check")
+	case "contract-lock":
+		return r.command(ctx, nil, "go", "run", "./cmd/contractcheck", "write-lock")
 	case "vet":
 		return r.command(ctx, nil, "go", "vet", "./...")
 	case "test":
@@ -47,7 +51,7 @@ func (r Runner) Run(ctx context.Context, args []string) error {
 	case "build":
 		return r.command(ctx, []string{"CGO_ENABLED=0"}, "go", "build", "-trimpath", "./...")
 	case "check":
-		for _, task := range []string{"fmt-check", "mod-check", "vet", "test", "build"} {
+		for _, task := range []string{"fmt-check", "mod-check", "contract-check", "vet", "test", "build"} {
 			fmt.Fprintf(r.Stdout, "==> %s\n", task)
 			if err := r.Run(ctx, []string{task}); err != nil {
 				return err

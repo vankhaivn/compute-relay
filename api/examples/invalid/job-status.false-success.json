@@ -1,0 +1,36 @@
+{
+  "api_version": "compute-connector/v1alpha1",
+  "job_id": "job_01",
+  "workspace_id": "workspace_01",
+  "name": "small-llm-batch",
+  "active_attempt_id": "attempt_01",
+  "state": {
+    "orchestration": "succeeded",
+    "execution": "unknown",
+    "result": "not_available",
+    "cancellation": "manual_required",
+    "remote_activity": "possible",
+    "release_evidence": "unknown",
+    "deadline_exceeded": false
+  },
+  "revision": 7,
+  "created_at": "2026-09-13T13:00:00Z",
+  "updated_at": "2026-09-13T13:05:00Z",
+  "problem": {
+    "code": "REMOTE_CANCEL_UNSUPPORTED",
+    "message": "The provider does not expose a verified cancellation operation.",
+    "stage": "operation",
+    "safe_operation_retry": false,
+    "compute_may_have_started": true,
+    "recommended_action": "inspect_provider",
+    "details": {
+      "provider_instance": "personal-kaggle"
+    }
+  },
+  "links": {
+    "self": "/v1/workspaces/workspace_01/jobs/job_01",
+    "events": "/v1/workspaces/workspace_01/jobs/job_01/events",
+    "attempts": "/v1/workspaces/workspace_01/jobs/job_01/attempts",
+    "artifacts": "/v1/workspaces/workspace_01/jobs/job_01/artifacts"
+  }
+}

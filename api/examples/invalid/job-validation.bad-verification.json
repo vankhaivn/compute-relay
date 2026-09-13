@@ -1,0 +1,12 @@
+{
+  "valid": true,
+  "warnings": [
+    "Quota availability is unknown until a read-only provider check runs."
+  ],
+  "requirements": [
+    {
+      "name": "gpu",
+      "verification": "maybe"
+    }
+  ]
+}

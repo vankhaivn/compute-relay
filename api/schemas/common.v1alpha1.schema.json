@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay common contract definitions",
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "rfc3339": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?:\\.|(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*[\\\\\\u0000-\\u001F]).+)$"
+    },
+    "relative_file_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?!\\.\\.?$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*[\\\\\\u0000-\\u001F])[^/].*[^/]$|^[A-Za-z0-9._-]$"
+    },
+    "profile_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "label_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9._/-]{0,63}$"
+    },
+    "environment_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+    },
+    "input_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"
+    },
+    "orchestration_state": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "preparing",
+        "dispatching",
+        "submitted",
+        "running",
+        "collecting",
+        "blocked",
+        "reconciling",
+        "cancelling",
+        "needs_attention",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed_out"
+      ]
+    },
+    "execution_state": {
+      "type": "string",
+      "enum": [
+        "not_submitted",
+        "unknown",
+        "queued",
+        "starting",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed_out"
+      ]
+    },
+    "result_state": {
+      "type": "string",
+      "enum": [
+        "not_available",
+        "collecting",
+        "available",
+        "incomplete",
+        "invalid",
+        "expired"
+      ]
+    },
+    "cancellation_state": {
+      "type": "string",
+      "enum": [
+        "not_requested",
+        "requested",
+        "requesting",
+        "accepted",
+        "prevented",
+        "confirmed",
+        "too_late",
+        "manual_required"
+      ]
+    },
+    "remote_activity_state": {
+      "type": "string",
+      "enum": [
+        "not_started",
+        "unknown",
+        "possible",
+        "active",
+        "inactive"
+      ]
+    },
+    "release_evidence": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "not_applicable",
+        "not_observable",
+        "provider_reported",
+        "confirmed"
+      ]
+    },
+    "error_code": {
+      "type": "string",
+      "enum": [
+        "INVALID_JOB_SPEC",
+        "UNSUPPORTED_CAPABILITY",
+        "INVALID_INPUT_PATH",
+        "RESOURCE_REQUIREMENT_UNSATISFIED",
+        "RUNTIME_AUTH_REQUIRED",
+        "WORKSPACE_FORBIDDEN",
+        "PROVIDER_AUTH_FAILED",
+        "PROVIDER_ACCESS_DENIED",
+        "INPUT_NOT_FOUND",
+        "INPUT_FETCH_FAILED",
+        "INPUT_CHANGED",
+        "INPUT_DIGEST_MISMATCH",
+        "INPUT_TOO_LARGE",
+        "STAGING_FAILED",
+        "STAGING_NOT_READY",
+        "PRIVATE_STAGING_UNAVAILABLE",
+        "PROVIDER_STORAGE_LIMIT",
+        "PROVIDER_REJECTED",
+        "PROVIDER_SUBMISSION_UNKNOWN",
+        "PROVIDER_RATE_LIMITED",
+        "QUOTA_EXHAUSTED",
+        "DEPENDENCY_SETUP_FAILED",
+        "COMMAND_FAILED",
+        "REMOTE_TIMEOUT",
+        "RESOURCE_EXHAUSTED",
+        "PROVIDER_EXECUTION_LOST",
+        "PROVIDER_UNREACHABLE",
+        "PROVIDER_STATE_UNKNOWN",
+        "REMOTE_IDENTITY_MISMATCH",
+        "RESULT_MANIFEST_MISSING",
+        "ARTIFACT_MISSING",
+        "ARTIFACT_DIGEST_MISMATCH",
+        "ARTIFACT_COLLECTION_FAILED",
+        "REMOTE_CANCEL_UNSUPPORTED",
+        "REMOTE_EXECUTION_UNRESOLVED",
+        "ILLEGAL_STATE_TRANSITION",
+        "IDEMPOTENCY_CONFLICT",
+        "STATE_STORE_UNAVAILABLE",
+        "DISK_LIMIT_EXCEEDED",
+        "STATE_DIRECTORY_LOCKED",
+        "CONFIGURATION_INVALID"
+      ]
+    },
+    "failure_stage": {
+      "type": "string",
+      "enum": [
+        "validation",
+        "authentication",
+        "input_preparation",
+        "provider_preparation",
+        "submission",
+        "execution",
+        "observation",
+        "results",
+        "operation",
+        "local_runtime"
+      ]
+    },
+    "recommended_action": {
+      "type": "string",
+      "enum": [
+        "none",
+        "fix_request",
+        "configure",
+        "wait",
+        "retry_read",
+        "reconcile",
+        "collect",
+        "retry_compute_explicitly",
+        "inspect_provider",
+        "free_space",
+        "contact_operator"
+      ]
+    },
+    "capability_support": {
+      "type": "string",
+      "enum": [
+        "supported",
+        "unsupported",
+        "unknown"
+      ]
+    },
+    "evidence_level": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "implemented_offline",
+        "documented_upstream",
+        "passed_live",
+        "not_tested",
+        "blocked_environment"
+      ]
+    },
+    "operation_kind": {
+      "type": "string",
+      "enum": [
+        "cancel",
+        "retry_compute",
+        "reconcile",
+        "collect",
+        "cleanup"
+      ]
+    },
+    "operation_status": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "running",
+        "succeeded",
+        "failed",
+        "manual_required"
+      ]
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "job.accepted",
+        "inputs.ready",
+        "provider.staging.ready",
+        "submission.intent_recorded",
+        "submission.accepted",
+        "submission.unknown",
+        "execution.observed",
+        "cancellation.requested",
+        "collection.failed",
+        "artifact.verified",
+        "job.completed"
+      ]
+    },
+    "capability_name": {
+      "type": "string",
+      "enum": [
+        "batch_execution",
+        "python",
+        "shell",
+        "gpu",
+        "private_input_staging",
+        "remote_cancellation",
+        "logs_while_running",
+        "logs_after_completion",
+        "quota_reporting",
+        "execution_timeout",
+        "remote_network_control",
+        "strong_execution_identity",
+        "custom_container",
+        "retained_sessions"
+      ]
+    },
+    "workspace_id": {
+      "$ref": "#/$defs/opaque_id"
+    },
+    "job_id": {
+      "$ref": "#/$defs/opaque_id"
+    },
+    "attempt_id": {
+      "$ref": "#/$defs/opaque_id"
+    },
+    "operation_id": {
+      "$ref": "#/$defs/opaque_id"
+    },
+    "event_id": {
+      "$ref": "#/$defs/opaque_id"
+    },
+    "object_id": {
+      "$ref": "#/$defs/opaque_id"
+    },
+    "artifact_id": {
+      "$ref": "#/$defs/opaque_id"
+    },
+    "provider_instance_id": {
+      "$ref": "#/$defs/opaque_id"
+    }
+  }
+}

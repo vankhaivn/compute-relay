@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "server": {
+    "listen": "127.0.0.1:7331",
+    "auth_required": true
+  },
+  "storage": {
+    "state_dir": "./.compute-relay/state",
+    "blob_dir": "./.compute-relay/blobs",
+    "max_local_bytes": 21474836480,
+    "min_free_bytes": 2147483648
+  },
+  "scheduler": {
+    "max_active_per_account": 1,
+    "max_queued_per_workspace": 100,
+    "max_queued_total": 1000,
+    "status_poll_seconds": 15
+  },
+  "execution": {
+    "default_remote_wall_seconds": 1800,
+    "setup_seconds": 300,
+    "finalization_grace_seconds": 60,
+    "automatic_compute_retries": 0
+  },
+  "policy": {
+    "free_only": true,
+    "allow_remote_internet": true,
+    "automatic_provider_fallback": false,
+    "unknown_quota": "warn_and_allow_bounded",
+    "automatic_paid_fallback": true
+  },
+  "providers": {
+    "personal-kaggle": {
+      "type": "kaggle",
+      "enabled": true,
+      "credential_ref": "env:KAGGLE_API_TOKEN",
+      "account_scope": "personal",
+      "cost_class": "free_allowance",
+      "private_resources": true
+    }
+  },
+  "profiles": {
+    "default-gpu": {
+      "provider": "personal-kaggle",
+      "accelerator": "gpu",
+      "minimum_gpu_count": 1,
+      "remote_internet": "disabled"
+    }
+  },
+  "workspaces": {
+    "example": {
+      "allowed_profiles": [
+        "default-gpu"
+      ]
+    }
+  },
+  "retention": {
+    "job_metadata_days": 30,
+    "artifacts_days": 7,
+    "completed_input_days": 7,
+    "unreferenced_object_hours": 24
+  }
+}

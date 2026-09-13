@@ -1,0 +1,18 @@
+{
+  "error": {
+    "code": "PROVIDER_SUBMISSION_UNKNOWN",
+    "message": "The submission response was lost; the remote execution may exist.",
+    "stage": "submission",
+    "request_id": "request_01",
+    "workspace_id": "workspace_01",
+    "job_id": "job_01",
+    "attempt_id": "attempt_01",
+    "safe_operation_retry": false,
+    "compute_may_have_started": true,
+    "recommended_action": "reconcile",
+    "details": {
+      "provider_instance": "personal-kaggle"
+    },
+    "retryable": true
+  }
+}

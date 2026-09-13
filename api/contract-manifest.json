@@ -1,0 +1,86 @@
+{
+  "manifest_version": 1,
+  "openapi": "openapi.json",
+  "shared_schemas": [
+    "schemas/common.v1alpha1.schema.json"
+  ],
+  "roots": [
+    {
+      "schema": "schemas/job-spec.v1alpha1.schema.json",
+      "valid": [
+        "examples/job.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/job.unknown-field.json",
+        "examples/invalid/job.unsafe-path.json",
+        "examples/invalid/job.empty-command.json",
+        "examples/invalid/job.cpu-with-gpu-requirement.json"
+      ]
+    },
+    {
+      "schema": "schemas/result-manifest.v1alpha1.schema.json",
+      "valid": [
+        "examples/result-manifest.success.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/result-manifest.success-with-error.json",
+        "examples/invalid/result-manifest.success-without-gpu.json"
+      ]
+    },
+    {
+      "schema": "schemas/runtime-config.v1alpha1.schema.json",
+      "valid": [
+        "examples/runtime-config.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/runtime-config.automatic-retry.json",
+        "examples/invalid/runtime-config.unknown-field.json"
+      ]
+    },
+    {
+      "schema": "schemas/job-status.v1alpha1.schema.json",
+      "valid": [
+        "examples/job-status.needs-attention.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/job-status.false-success.json"
+      ]
+    },
+    {
+      "schema": "schemas/operation.v1alpha1.schema.json",
+      "valid": [
+        "examples/operation.manual-required.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/operation.failed-without-problem.json"
+      ]
+    },
+    {
+      "schema": "schemas/error.v1alpha1.schema.json",
+      "valid": [
+        "examples/error.submission-unknown.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/error.bare-retryable.json"
+      ]
+    },
+    {
+      "schema": "schemas/job-admission.v1alpha1.schema.json",
+      "valid": [
+        "examples/job-admission.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/job-admission.not-queued.json"
+      ]
+    },
+    {
+      "schema": "schemas/job-validation.v1alpha1.schema.json",
+      "valid": [
+        "examples/job-validation.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/job-validation.bad-verification.json"
+      ]
+    }
+  ]
+}
