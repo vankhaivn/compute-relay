@@ -1,6 +1,16 @@
 # Architecture decision records
 
-Use ADRs for material choices that affect public contracts, dependency boundaries, persistence, provider transport, security properties, compatibility, or major operational defaults.
+Use ADRs for material choices that affect public contracts, dependency boundaries,
+persistence, provider transport, security properties, compatibility, or major operational
+defaults.
+
+## Index
+
+| ADR | Status | Decision |
+|---|---|---|
+| [`0001-official-kaggle-client-boundary.md`](0001-official-kaggle-client-boundary.md) | accepted | Isolate a pinned official-client environment; use CLI plus a narrow public-client bridge where structured results require it. |
+| [`0002-attempt-scoped-kaggle-resources.md`](0002-attempt-scoped-kaggle-resources.md) | accepted | Use one persisted Kaggle execution resource per attempt plus manifest identity; make no exactly-once claim. |
+| [`0003-go-and-sqlite-baseline.md`](0003-go-and-sqlite-baseline.md) | accepted | Start with Go 1.27.1 and a CGo-free `modernc.org/sqlite` driver family, exact dependency pin deferred to module creation. |
 
 ## Naming
 
@@ -8,7 +18,8 @@ Use ADRs for material choices that affect public contracts, dependency boundarie
 NNNN-short-kebab-case-title.md
 ```
 
-Numbers are sequential and never reused. Copy [`template.md`](template.md) and replace every placeholder.
+Numbers are sequential and never reused. Copy [`template.md`](template.md) and replace every
+placeholder.
 
 ## Status
 
@@ -20,7 +31,9 @@ Use one of:
 - `deprecated`
 - `rejected`
 
-An accepted ADR records the decision at that point in time. Do not edit its outcome silently after implementation. Add a superseding ADR when the decision changes; minor typo and link corrections are acceptable.
+An accepted ADR records the decision at that point in time. Do not edit its outcome silently
+after implementation. Add a superseding ADR when the decision changes; minor typo and link
+corrections are acceptable.
 
 ## When an ADR is required
 
@@ -34,4 +47,5 @@ Examples include:
 - changing authentication, credential, or workspace boundaries; or
 - changing no-retry, fallback, or cleanup behavior.
 
-Do not create ADRs for routine variable names, formatting, or an easily reversible library helper.
+Do not create ADRs for routine variable names, formatting, or an easily reversible library
+helper.
