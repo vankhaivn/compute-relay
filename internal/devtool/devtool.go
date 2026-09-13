@@ -72,7 +72,7 @@ func (r Runner) format(ctx context.Context, write bool) error {
 	if write {
 		args = append(args, "-w")
 	} else {
-		args = append(args, "-l")
+		args = append(args, "-d")
 	}
 	args = append(args, files...)
 
