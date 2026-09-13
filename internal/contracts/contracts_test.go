@@ -44,7 +44,7 @@ func TestValidateRefRejectsRemoteAndEscapingLocations(t *testing.T) {
 		"https://example.invalid/schema.json",
 		"/etc/passwd",
 		"../outside.json",
-		`..\\outside.json`,
+		`..\outside.json`,
 	} {
 		if err := validateRef(apiRoot, containing, ref); err == nil {
 			t.Fatalf("validateRef(%q) succeeded, want rejection", ref)
@@ -55,6 +55,29 @@ func TestValidateRefRejectsRemoteAndEscapingLocations(t *testing.T) {
 	}
 	if err := validateRef(apiRoot, containing, "#/$defs/value"); err != nil {
 		t.Fatalf("fragment-only ref rejected: %v", err)
+	}
+}
+
+func TestSameUniqueStringsIgnoresOrderAndRejectsDrift(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   []string
+		expected []string
+		want     bool
+	}{
+		{name: "same order", actual: []string{"a", "b"}, expected: []string{"a", "b"}, want: true},
+		{name: "different order", actual: []string{"b", "a"}, expected: []string{"a", "b"}, want: true},
+		{name: "missing", actual: []string{"a"}, expected: []string{"a", "b"}},
+		{name: "unexpected", actual: []string{"a", "c"}, expected: []string{"a", "b"}},
+		{name: "duplicate actual", actual: []string{"a", "a"}, expected: []string{"a", "b"}},
+		{name: "duplicate expected", actual: []string{"a", "b"}, expected: []string{"a", "a"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sameUniqueStrings(test.actual, test.expected); got != test.want {
+				t.Fatalf("sameUniqueStrings(%v, %v) = %v, want %v", test.actual, test.expected, got, test.want)
+			}
+		})
 	}
 }
 
