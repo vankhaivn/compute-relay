@@ -1,89 +1,171 @@
 # Outcome roadmap
 
-> **Status:** approved outcome scaffold. Dates, sprint estimates, and detailed tasks have not been assigned.
+> **Status:** acceptance-based roadmap active.
+>
+> **Current milestone:** M-0 — evidence and scope, `in-review`.
+>
+> Dates and sprint estimates are intentionally not assigned without an execution context.
 
-This roadmap follows acceptance gates rather than a calendar. Some research and core scaffolding may proceed in parallel, but extensive abstraction or product polish must not outrun proof of the first real compute path.
+This roadmap follows acceptance gates rather than a calendar. Research and provider-neutral
+core work may overlap after M-0, but extensive abstraction or product polish must not outrun
+proof of the first real compute path.
+
+## Milestone status
+
+| Milestone | Status | Gate |
+|---|---|---|
+| M-0 — Evidence and scope | `in-review` | Merge the traceability, evidence, ADR, risk, compatibility, and dependency-aware plan set. |
+| M-1 — Thin real-provider proof | `not-started` | Authorized private bounded GPU path with identity-safe verified outputs. |
+| M-2 — Portable core | `not-started` | Provider-neutral API/domain/objects/auth/fake-provider contract. |
+| M-3 — Durable orchestration | `not-started` | SQLite queue, attempts, intent, recovery, and artifact-only retry under faults. |
+| M-4 — Integrated Kaggle batch | `not-started` | Evidence-matching Kaggle adapter inside the durable core. |
+| M-5 — Usable developer product | `not-started` | CLI, doctor, install, examples, and three thin clients. |
+| M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
+
+Detailed task dependencies and authorization boundaries are in
+[`implementation-plan.md`](implementation-plan.md).
 
 ## M-0 — Evidence and scope
 
-**Outcome:** repository instructions are active; approved requirements are traceable; current official Kaggle surfaces have been reviewed; feasibility risks and candidate transport decisions are recorded.
+**Outcome:** repository instructions are active; approved requirements are traceable;
+current official Kaggle surfaces have been reviewed; feasibility risks and candidate
+transport/default decisions are recorded.
+
+**Artifacts:**
+
+- [`scope-and-requirements.md`](scope-and-requirements.md)
+- [`research/kaggle-interface-review.md`](research/kaggle-interface-review.md)
+- [`research/kaggle-feasibility.md`](research/kaggle-feasibility.md)
+- [`risk-register.md`](risk-register.md)
+- [`compatibility.md`](compatibility.md)
+- ADR-0001 through ADR-0003 under [`decisions/`](decisions/README.md)
+- [`implementation-plan.md`](implementation-plan.md)
 
 **Exit evidence:**
 
-- proposal requirements mapped to components and tests;
-- Kaggle feasibility report populated with source versions and evidence levels;
-- initial ADRs for material implementation choices; and
-- no live capability presented as verified without an authorized test.
+- proposal requirements mapped to components, tests, and milestones;
+- Kaggle feasibility report populated with exact source versions and evidence levels;
+- initial material decisions recorded with alternatives and verification;
+- dependency-aware task plan separates offline work from credential/compute tasks;
+- no live capability presented as verified without an authorized test; and
+- the M-0 PR is merged with required checks passing.
+
+**Current conclusion:** the offline M-0 package is in review. No Kaggle credential was used,
+no provider resource was created, and no quota was consumed. M-1 live tasks remain blocked
+until explicit authorization; M-2 offline foundation may begin after M-0 merges.
 
 ## M-1 — Thin real-provider proof
 
-**Outcome:** the smallest supported private GPU job path is proven before building a broad abstraction around assumptions.
+**Outcome:** prove the smallest supported private GPU job path before building a broad
+adapter around assumptions.
 
 **Exit evidence:**
 
+- reproducible pinned official-client environment and sanitized command/response fixtures;
 - authorized private input and multi-file code reach one bounded execution;
 - actual GPU computation is demonstrated, not only device listing;
 - terminal provider evidence and correct-attempt output checksums are recorded;
-- local restart does not create a second execution; and
-- no hidden paid or maintainer-operated dependency participates.
+- status, logs, quota, timeout, cancellation, and release-observability conclusions match
+  the tested environment;
+- local restart/ambiguous response does not create a second execution;
+- test-owned resource cleanup is identity-safe; and
+- an ADR records the adapter go/blocked decision and final transport mapping.
+
+M-1 does not require cancellation or live logs to exist. It requires their absence or limits
+to be represented honestly.
 
 ## M-2 — Portable core
 
-**Outcome:** a versioned provider-neutral job model and application boundary exist independently of Kaggle details.
+**Outcome:** a versioned provider-neutral job model and application boundary exist
+independently of Kaggle details.
 
 **Exit evidence:**
 
-- workspace authorization, immutable object ingestion, generic job validation, and fake provider;
-- contract tests for providers with missing cancellation, logs, or quota; and
-- no Kaggle branches in common HTTP or domain state logic.
+- pinned Go module/toolchain and offline CI;
+- strict job/result/config schemas and OpenAPI baseline;
+- domain states, structured errors, and provider ports;
+- workspace authorization and loopback-authenticated API;
+- immutable streamed object ingestion, safe bundles/local import, and protected HTTPS
+  ingestion;
+- generic runner contract; and
+- fake-provider contract tests, including providers with no cancellation/live logs/quota.
+
+No Kaggle package or provider-name branch appears in HTTP handlers or common state
+transitions.
 
 ## M-3 — Durable orchestration
 
-**Outcome:** queueing, attempts, idempotency, submission intent, recovery, and artifact-only retries survive local failures.
+**Outcome:** queueing, attempts, idempotency, submission intent, recovery, operations, and
+artifact-only retries survive local failures.
 
 **Exit evidence:**
 
-- SQLite-backed durable state and filesystem blob lifecycle;
-- restart and ambiguous-submission fault tests;
-- no automatic compute rerun or provider fallback; and
-- verified attempt-scoped artifact publication.
+- SQLite-backed durable metadata, migrations, state lock, backup baseline, and filesystem
+  blob lifecycle;
+- idempotent admission and immutable job/attempt history;
+- bounded fair scheduler and conservative account capacity;
+- write-ahead submission intent and accepted/rejected/unknown handling;
+- explicit cancel/retry/reconcile/collect operations;
+- attempt-scoped verified artifact publication;
+- ownership ledger and dry-run cleanup; and
+- required crash/ambiguity/disk/stale-observation fault matrix passes.
+
+No automatic compute rerun or provider fallback exists.
 
 ## M-4 — Integrated Kaggle batch
 
-**Outcome:** the validated Kaggle lifecycle is implemented inside the durable provider-neutral core.
+**Outcome:** the M-1-validated Kaggle lifecycle is implemented inside the durable
+provider-neutral core.
 
 **Exit evidence:**
 
-- capability, identity, state, error, quota, log, and cancellation behavior matches recorded evidence;
+- client/config/credential preflight matches the pinned evidence;
 - private staging and readiness are safe and explicit;
-- unsupported or unknown capabilities remain visible; and
-- collection and recovery preserve attempt identity.
+- submission identity and ambiguity use the common durable semantics;
+- capability, raw-state, error, quota, log, timeout, and cancellation mappings match
+  fixtures/live evidence;
+- paginated collection verifies the correct attempt; and
+- a sanitized durable end-to-end acceptance run survives local restart.
+
+Unsupported or unknown capabilities remain visible.
 
 ## M-5 — Usable developer product
 
-**Outcome:** an operator can install, configure, diagnose, run, and integrate the connector without provider-specific application code.
+**Outcome:** an operator can install, configure, diagnose, run, and integrate the connector
+without provider-specific application code.
 
 **Exit evidence:**
 
-- CLI, doctor/preflight, configuration, direct-install path, and optional container path;
-- bounded GPU smoke test and small open-access LLM batch example;
-- thin Node.js, Python, and Go HTTP clients; and
-- documented cross-platform developer commands and validated compatibility claims.
+- unified runtime/CLI, strict configuration, and local/read-only/compute doctor modes;
+- direct-install path and optional unprivileged container path;
+- cross-platform developer commands;
+- bounded GPU smoke test and small pinned open-access LLM batch example;
+- thin Node.js, Python, and Go HTTP clients using one contract; and
+- first-run documentation from install through verified artifacts.
 
 ## M-6 — Release hardening
 
-**Outcome:** security, retention, cleanup, compatibility, evidence, and release artifacts support an honest first release.
+**Outcome:** security, retention, cleanup, compatibility, evidence, and artifacts support an
+honest first release.
 
 **Exit evidence:**
 
-- security and failure-case tests, ownership-safe cleanup, backup/migration guidance, and support diagnostics;
-- sanitized live-provider acceptance record;
-- reproducible release artifacts and checksums; and
-- release documentation that distinguishes implemented, verified, unknown, and out-of-scope behavior.
+- security and failure-case tests, redacted diagnostics, ownership-safe cleanup,
+  backup/migration guidance, and disk/retention behavior;
+- native evidence for every claimed host platform;
+- current sanitized live-provider acceptance record;
+- reproducible artifacts, checksums, SBOM/license notices, support/security policy; and
+- final traceability audit distinguishing implemented, verified, unknown, and out-of-scope
+  behavior.
 
 ## Stop/go rules
 
-- Proceed with the Kaggle batch adapter only when private staging, bounded execution, identity-safe observation, and result collection are supportable through authorized interfaces.
-- Ship missing optional capabilities as explicitly unsupported or unknown rather than faking cancellation, logs, or quota.
-- If live credentials are unavailable, continue offline architecture, tests, fixtures, and the executable live-test procedure while marking live acceptance `blocked-environment`.
-- Do not silently redesign the project into a hosted service, paid fallback, browser automation system, or always-on notebook worker to avoid a feasibility limitation.
+- Proceed with the production Kaggle batch adapter only after a supported private input →
+  bounded execution → identified terminal result → verified artifact path is demonstrated.
+- Ship missing optional capabilities as explicitly unsupported or unknown rather than
+  faking cancellation, logs, quota, or hardware release evidence.
+- If live credentials are unavailable, continue offline core, fixtures, harnesses, and
+  procedures while marking live acceptance `blocked-environment`.
+- If private staging, identity-safe collection, or bounded termination fails, record the
+  precise block; do not silently redesign the project into a hosted service, paid fallback,
+  public-data workaround, browser automation system, or always-on notebook worker.
