@@ -2,7 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
-The format follows the principles of Keep a Changelog, and released versions will use Semantic Versioning once a public compatibility surface exists.
+The format follows the principles of Keep a Changelog, and released versions will use
+Semantic Versioning once a public compatibility surface exists.
 
 ## [Unreleased]
 
@@ -13,6 +14,13 @@ The format follows the principles of Keep a Changelog, and released versions wil
 - Apache-2.0 license, security policy, governance, support, and contribution guidance.
 - Repository-wide instructions for human and automated contributors.
 - Conventional Commits documentation, local hooks, commit template, and CI validation.
-- ADR, roadmap, implementation-plan, provider-research, and Kaggle-feasibility scaffolding.
+- Requirement-to-component-to-test traceability for the approved MVP boundaries.
+- Dated Kaggle CLI `v2.2.4` interface review and populated K-01 through K-16 feasibility
+  ledger.
+- Initial ADRs for the official-client boundary, attempt-scoped Kaggle identity, and
+  Go/SQLite baseline.
+- Dependency-aware M-0 through M-6 implementation plan with explicit credential/compute
+  authorization boundaries.
+- Risk register, compatibility target matrix, and live-verification checklist.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
