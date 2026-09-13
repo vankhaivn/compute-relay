@@ -22,7 +22,7 @@ case "$task" in
     exec uv lock --check "$@"
     ;;
   test)
-    uv run --locked python -m compileall -q src tests
+    uv run --locked python -m compileall -q src tests ci_validate.py
     exec uv run --locked python -m unittest discover -s tests -v "$@"
     ;;
   inventory)
@@ -33,7 +33,7 @@ case "$task" in
     ;;
   check)
     uv lock --check
-    uv run --locked python -m compileall -q src tests
+    uv run --locked python -m compileall -q src tests ci_validate.py
     uv run --locked python -m unittest discover -s tests -v
     tmp_dir=$(mktemp -d)
     trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM

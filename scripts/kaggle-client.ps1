@@ -24,14 +24,14 @@ switch ($Task) {
     "sync" { Invoke-Uv (@("sync", "--locked", "--no-dev") + $TaskArgs) }
     "lock-check" { Invoke-Uv (@("lock", "--check") + $TaskArgs) }
     "test" {
-        Invoke-Uv @("run", "--locked", "python", "-m", "compileall", "-q", "src", "tests")
+        Invoke-Uv @("run", "--locked", "python", "-m", "compileall", "-q", "src", "tests", "ci_validate.py")
         Invoke-Uv (@("run", "--locked", "python", "-m", "unittest", "discover", "-s", "tests", "-v") + $TaskArgs)
     }
     "inventory" { Invoke-Uv (@("run", "--locked", "compute-relay-kaggle-probe", "inventory") + $TaskArgs) }
     "dependencies" { Invoke-Uv (@("run", "--locked", "compute-relay-kaggle-probe", "dependencies") + $TaskArgs) }
     "check" {
         Invoke-Uv @("lock", "--check")
-        Invoke-Uv @("run", "--locked", "python", "-m", "compileall", "-q", "src", "tests")
+        Invoke-Uv @("run", "--locked", "python", "-m", "compileall", "-q", "src", "tests", "ci_validate.py")
         Invoke-Uv @("run", "--locked", "python", "-m", "unittest", "discover", "-s", "tests", "-v")
         $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("compute-relay-kaggle-" + [Guid]::NewGuid())
         New-Item -ItemType Directory -Path $TempDir | Out-Null

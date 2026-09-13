@@ -1,0 +1,66 @@
+name: Kaggle client
+
+on:
+  pull_request:
+    paths:
+      - "tools/kaggle-client/**"
+      - "scripts/kaggle-client.*"
+      - ".github/workflows/kaggle-client.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tools/kaggle-client/**"
+      - "scripts/kaggle-client.*"
+      - ".github/workflows/kaggle-client.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: Offline ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up exact uv and Python
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.13"
+          python-version: "3.11.16"
+          working-directory: tools/kaggle-client
+          enable-cache: true
+          cache-dependency-glob: tools/kaggle-client/uv.lock
+
+      - name: Install locked environment
+        working-directory: tools/kaggle-client
+        run: uv sync --locked --no-dev
+
+      - name: Verify exact tools and lock
+        working-directory: tools/kaggle-client
+        run: |
+          uv --version
+          uv lock --check
+          uv run --locked python -c "import platform; assert platform.python_version() == '3.11.16', platform.python_version()"
+
+      - name: Run offline test suite
+        working-directory: tools/kaggle-client
+        run: |
+          uv run --locked python -m compileall -q src tests ci_validate.py
+          uv run --locked python -m unittest discover -s tests -v
+
+      - name: Run credential-free client inventory
+        working-directory: tools/kaggle-client
+        env:
+          KAGGLE_API_TOKEN: ci-secret-token-canary
+          KAGGLE_USERNAME: ci-secret-user-canary
+          KAGGLE_KEY: ci-secret-key-canary
+        run: |
+          uv run --locked compute-relay-kaggle-probe inventory --output inventory-ci.json
+          uv run --locked compute-relay-kaggle-probe dependencies --output dependencies-ci.json
+          uv run --locked python ci_validate.py inventory-ci.json dependencies-ci.json dependency-inventory.json
