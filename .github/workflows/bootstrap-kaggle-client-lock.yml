@@ -1,0 +1,74 @@
+name: Bootstrap Kaggle client lock
+
+on:
+  push:
+    branches: [feat/m1-01-kaggle-probe]
+    paths:
+      - "tools/kaggle-client/**"
+      - "scripts/kaggle-client.*"
+      - ".github/workflows/bootstrap-kaggle-client-lock.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/m1-01-kaggle-probe
+
+      - name: Set up exact uv and Python
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.13"
+          python-version: "3.11.16"
+          working-directory: tools/kaggle-client
+          enable-cache: false
+
+      - name: Resolve and install exact environment
+        working-directory: tools/kaggle-client
+        run: |
+          uv lock
+          uv sync --locked --no-dev
+
+      - name: Run offline tests
+        working-directory: tools/kaggle-client
+        run: |
+          uv run --locked python -m compileall -q src tests
+          uv run --locked python -m unittest discover -s tests -v
+
+      - name: Generate local-only evidence
+        working-directory: tools/kaggle-client
+        env:
+          KAGGLE_API_TOKEN: ci-secret-token-canary
+          KAGGLE_USERNAME: ci-secret-user-canary
+          KAGGLE_KEY: ci-secret-key-canary
+        run: |
+          uv run --locked compute-relay-kaggle-probe inventory --output inventory.json
+          uv run --locked compute-relay-kaggle-probe dependencies --output dependency-inventory.json
+          python - <<'PY'
+          from pathlib import Path
+          content = Path("inventory.json").read_text(encoding="utf-8")
+          canaries = ("ci-secret-token-canary", "ci-secret-user-canary", "ci-secret-key-canary")
+          if any(canary in content for canary in canaries):
+              raise SystemExit("credential canary leaked into inventory")
+          PY
+          rm inventory.json
+
+      - name: Commit generated lock and dependency record
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tools/kaggle-client/uv.lock tools/kaggle-client/dependency-inventory.json
+          if git diff --cached --quiet; then
+            echo "Generated files are already current."
+            exit 0
+          fi
+          git commit -m "build(provider): lock Kaggle client environment"
+          git push origin HEAD:feat/m1-01-kaggle-probe
