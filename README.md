@@ -1,8 +1,8 @@
 # Compute Relay
 
-> **Project status:** portable-core components and the first SQLite metadata foundation
-> are implemented offline. Durable job admission, orchestration, production `serve`
-> composition and the live Kaggle path remain separate implementation gates.
+> **Project status:** portable-core components, SQLite metadata and durable idempotent
+> job admission are implemented offline. Scheduling, provider dispatch, production
+> `serve` composition and the live Kaggle path remain separate implementation gates.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -47,14 +47,17 @@ The repository currently establishes:
 - Go tooling, a pre-release help/version/bundle executable, strict API schemas, domain
   state semantics, provider ports and a deterministic fake provider;
 - workspace token/authorization services, guarded loopback HTTP, immutable upload/import/
-  HTTPS snapshots, finite runner assets and offline smoke/fault tests; and
+  HTTPS snapshots, finite runner assets and offline smoke/fault tests;
 - SQLite installation/workspace/token-digest/object metadata, embedded migrations,
-  OS state locking and consistent database-only backup/restore.
+  OS state locking and consistent database-only backup/restore; and
+- durable job/attempt admission, immutable profile resolution and object pins, original
+  receipt replay, state/event transactions and authenticated create/validate/status handlers.
 
-SQLite-backed workspace, token and object repositories now exist as components. Durable
-job admission, scheduling and production `serve` composition are still pending. The upload
-smoke retains its explicitly nondurable metadata fixture; the separate store smoke exercises
+Admission returns `202` only after committing local metadata. It does not fetch pending URL
+inputs, inspect bundle bytes, start a scheduler or allocate compute. The upload smoke retains
+its explicitly nondurable metadata fixture; store/admission smoke commands use temporary
 SQLite. A database-only backup does not include blob bytes or prove full runtime recovery.
+Production `serve` and complete orchestration remain pending.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -70,6 +73,7 @@ live Kaggle support.
 | [`docs/architecture.md`](docs/architecture.md) | Provider-neutral architecture baseline and invariants. |
 | [`docs/auth-and-objects.md`](docs/auth-and-objects.md) | Implemented workspace auth, HTTP/upload boundary, blob recovery and smoke checks. |
 | [`docs/storage.md`](docs/storage.md) | SQLite repositories, locking, migrations, database-only backup/restore and evidence limits. |
+| [`docs/admission.md`](docs/admission.md) | Durable job acceptance, canonical request identity, replay, frozen references and pending preparation. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -91,16 +95,18 @@ With the pinned Go toolchain, from the repository root:
 ```text
 go run ./cmd/uploadsmoke
 go run ./cmd/storesmoke
+go run ./cmd/admissionsmoke
 ```
 
 The upload check exercises loopback HTTP, synthetic workspace tokens, streamed upload,
 digest verification, isolation, revocation and reopened temporary blobs with fixture
 metadata. The store check separately exercises actual SQLite persistence, revocation and
-database-only backup/restore, explicitly reporting `blob_bytes_checked=false`.
+database-only backup/restore. The admission check verifies concurrent/restarted receipt
+replay and changed-request conflicts. The latter two report `blob_bytes_checked=false`.
 
-Both checks are finite, clean up their temporary files, and never call Kaggle. Neither is
-a production runtime. See [`docs/auth-and-objects.md`](docs/auth-and-objects.md) and
-[`docs/storage.md`](docs/storage.md) for their distinct evidence limits.
+These checks are finite, clean up temporary files and never call Kaggle. None is a
+production runtime. See the auth/object, storage and admission guides for their distinct
+evidence limits and exact local-versus-CI verification disclosures.
 
 ## Current execution boundary
 

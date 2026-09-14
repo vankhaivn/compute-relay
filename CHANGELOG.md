@@ -61,5 +61,11 @@ Semantic Versioning once a public compatibility surface exists.
   tests and a finite local store smoke command.
 - ADR-0008 and storage guidance documenting transaction, permission, backup and evidence
   boundaries without claiming durable job admission or a production server.
+- M3-02 strict embedded-schema job validation, versioned canonical request hashing and
+  atomic SQLite job/attempt/object-pin/event/idempotency admission with original receipt replay.
+- Immutable profile revisions, current-authority transaction checks, bounded outstanding
+  jobs and state/event CAS persistence without provider calls or workload execution.
+- Authenticated create/validate/status handlers, process-crash/lost-response/rollback tests,
+  metadata-only admission smoke and ADR-0009 documenting pending preparation and replay limits.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
