@@ -35,5 +35,12 @@ Semantic Versioning once a public compatibility surface exists.
   capability handling, and a deterministic fixture-only provider with reusable contracts.
 - Local provider smoke command with identity/digest-checked artifacts, fault/race tests,
   and an explicit operator-runtime versus offline-CI boundary.
+- Workspace token issuance/revocation, digest-only repository contracts, scope/profile and
+  resource authorization, guarded loopback HTTP and bounded request handling.
+- Streamed object upload, immutable filesystem blobs, OS locking, private Unix/Windows
+  permissions, crash/fault tests and an explicit ownership-commit boundary.
+- Object metadata schema, local request error codes, implemented-handler OpenAPI status,
+  and a finite local upload/isolation/revocation/restart smoke command.
+- ADR-0004 documenting separate workspace authority, byte publication and durable admission.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
