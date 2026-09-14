@@ -26,6 +26,7 @@ import (
 )
 
 type Config struct {
+	HTTPSInputs    *objects.Ingestor // nil disables HTTPS ingestion; operator composition supplies the guarded client.
 	LocalImports   *objects.Importer // nil disables local import; configured by the operator composition root.
 	Listen         string
 	MaxJSONBytes   int64
@@ -154,11 +155,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	segments := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	isUpload := len(segments) == 4 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && r.Method == http.MethodPost
 	isImport := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "import" && r.Method == http.MethodPost
+	isIngest := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "ingest" && r.Method == http.MethodPost
 	timeout, maxBody := h.config.RequestTimeout, h.config.MaxJSONBytes
 	if isUpload {
 		timeout, maxBody = h.config.UploadTimeout, h.config.MaxUploadBytes
 	}
-	if isImport {
+	if isImport || isIngest {
 		timeout = h.config.UploadTimeout // JSON body stays bounded by MaxJSONBytes.
 	}
 	if r.ContentLength > maxBody {
@@ -201,6 +203,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if workspace != principal.WorkspaceID() {
 		mapError(w, r, auth.ErrForbidden)
+		return
+	}
+	if isIngest {
+		h.ingestObject(w, r, principal, workspace)
 		return
 	}
 	if isImport {
