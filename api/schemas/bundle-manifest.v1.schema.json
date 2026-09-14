@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay bundle manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bundle_version",
+    "files"
+  ],
+  "properties": {
+    "bundle_version": {
+      "const": "compute-relay/bundle/v1"
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "bytes",
+          "sha256",
+          "executable"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "allOf": [
+              {
+                "pattern": "^[\\x20-\\x7e]+$"
+              },
+              {
+                "pattern": "^[^/]{1,100}(/[^/]{1,100})*$"
+              },
+              {
+                "not": {
+                  "pattern": "[\\\\:*?\"<>|]"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "(^|/)\\.{1,2}(/|$)"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "[ .](/|$)"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "(^|/)([Cc][Oo][Nn]|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Nn][Ii][Nn]\\$|[Cc][Oo][Nn][Oo][Uu][Tt]\\$|[Cc][Oo][Mm][0-9]|[Ll][Pp][Tt][0-9])([.]|/|$)"
+                }
+              }
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967296
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "executable": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

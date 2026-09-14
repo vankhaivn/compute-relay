@@ -79,3 +79,4 @@ func run() error {
 		return errors.New("workspace root isolation failed")
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{"status": "passed-offline", "bundle_files": len(p.Manifest.Files), "raw_input_bytes": len(copied), "manifest_identity_verified": true, "workspace_root_isolation": true, "provider_calls": 0, "workload_executed": false})
+}

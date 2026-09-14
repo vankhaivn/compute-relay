@@ -1,0 +1,8 @@
+{
+  "root": "source",
+  "kind": "file",
+  "path": "inputs/prompts.jsonl",
+  "includes": [
+    "main.py"
+  ]
+}

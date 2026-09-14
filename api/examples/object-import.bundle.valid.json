@@ -1,0 +1,8 @@
+{
+  "root": "source",
+  "kind": "bundle",
+  "includes": [
+    "main.py",
+    "src"
+  ]
+}
