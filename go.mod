@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	modernc.org/sqlite v1.58.0
 )
 
 require (
@@ -14,4 +15,5 @@ require (
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	golang.org/x/text v0.14.0 // indirect
+	modernc.org/libc v1.75.6 // indirect
 )
