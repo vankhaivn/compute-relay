@@ -1,0 +1,47 @@
+{
+  "manifest_version": "compute-relay/runner/v1",
+  "job_id": "job_fixture",
+  "attempt_id": "att_fixture",
+  "attempt_nonce": "fixture-nonce-0123456789",
+  "bundle": {
+    "path": "bundle.tar.gz",
+    "bytes": 520,
+    "sha256": "fcb4710435348c22116d05c60a9a7d38a5b89600c8177b75b00ce20aaea5c173"
+  },
+  "inputs": [
+    {
+      "name": "input",
+      "path": "data",
+      "target": "data.txt",
+      "bytes": 13,
+      "sha256": "3da74ddbc05dd910e0afa2aead90bde0c87629c5d68e52a740942966300a19e5"
+    }
+  ],
+  "input_manifest_sha256": "7c157dc2bce8400c6ac931ec84bfad45a95f1028f33cbb8fee6764d507cfa278",
+  "execution": {
+    "kind": "python",
+    "command": [
+      "python",
+      "main.py",
+      "$CC_INPUT_DIR"
+    ]
+  },
+  "outputs": [
+    {
+      "path": "answer.json",
+      "required": true
+    }
+  ],
+  "resources": {
+    "accelerator": "cpu"
+  },
+  "network": {
+    "remote_internet": "disabled"
+  },
+  "timeouts": {
+    "remote_wall_seconds": 10,
+    "setup_seconds": 5,
+    "finalization_grace_seconds": 2
+  },
+  "secret": "not-a-valid-field"
+}

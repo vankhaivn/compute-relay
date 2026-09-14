@@ -1,0 +1,13 @@
+{
+  "inventory_version": 1,
+  "runtime_dependencies": [],
+  "python_minimum": "3.11",
+  "ci_python": "3.11.16",
+  "execution_platform": "linux",
+  "notes": [
+    "Runner and unit tests use only the Python standard library.",
+    "GPU verification uses the remote environment's PyTorch installation; it is not installed by the runner.",
+    "Optional job requirements are separate trusted workload dependencies in an attempt-local venv.",
+    "Go schema tests reuse the repository's existing pinned jsonschema dependency."
+  ]
+}

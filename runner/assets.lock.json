@@ -1,0 +1,70 @@
+{
+  "lock_version": 1,
+  "files": [
+    {
+      "path": "runner/check.py",
+      "bytes": 2471,
+      "sha256": "745ec2cf7014f165d0f11b3dd5610457c83dc4ef61854c4eeadd796a63f78102"
+    },
+    {
+      "path": "runner/dependency-inventory.json",
+      "bytes": 528,
+      "sha256": "c9d6335344651dbc8f4c3359e856ff223aeb6a21bab470bd99f8720f9a393925"
+    },
+    {
+      "path": "runner/examples/request.path.invalid.json",
+      "bytes": 1030,
+      "sha256": "5791f56f636fbdd5779a1dbc97a34123c996974908af7438dc6636643ed98a76"
+    },
+    {
+      "path": "runner/examples/request.unknown.invalid.json",
+      "bytes": 1057,
+      "sha256": "603183d4a58d6eada18ae8aeaafe5cb3da0d3b9f6563035c96490d5d5952fadb"
+    },
+    {
+      "path": "runner/examples/request.valid.json",
+      "bytes": 1024,
+      "sha256": "7c9cd0cadc1fc125f544759108a58784f30bd332dd1d6d038702ee5442a4793d"
+    },
+    {
+      "path": "runner/manifest.schema.json",
+      "bytes": 4505,
+      "sha256": "400af720dbdde34dfd02bc0ca97dc31693d49fcb9457ebd686b28436951e755b"
+    },
+    {
+      "path": "runner/python/relay_runner/__init__.py",
+      "bytes": 93,
+      "sha256": "3882745912cdae4818f1c81d93a2480d3383d202a76975b57ddc0c401505f221"
+    },
+    {
+      "path": "runner/python/relay_runner/contract.py",
+      "bytes": 8132,
+      "sha256": "20a84861b13cdc1f3bbf1fb5e8405386dc7516429d343a55b8985ae287d138a7"
+    },
+    {
+      "path": "runner/python/relay_runner/files.py",
+      "bytes": 9360,
+      "sha256": "33a3c4eae399be6bc35d4d774861516027131222d029b68dd2924fa8f7e39317"
+    },
+    {
+      "path": "runner/python/relay_runner/main.py",
+      "bytes": 16186,
+      "sha256": "d8bb03d82abe9b1be07863d1cf0434bc14d0b306bcaa8ca05daa77af1e01cf41"
+    },
+    {
+      "path": "runner/python/relay_runner/process.py",
+      "bytes": 5018,
+      "sha256": "35605a88faf151847b56cd1d7d568a1db2033e6d09426fc16a568ed09835d179"
+    },
+    {
+      "path": "runner/python/run.py",
+      "bytes": 180,
+      "sha256": "d0f6f28d65806646ed9305a37cef0919557f29bfeb0efeabc2fed7e82ee328a8"
+    },
+    {
+      "path": "runner/tests/test_runner.py",
+      "bytes": 21801,
+      "sha256": "377df470cf204daa5e2f03e380de750fe95fd44cd41adfb27635088d14903f9d"
+    }
+  ]
+}
