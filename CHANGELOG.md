@@ -67,5 +67,11 @@ Semantic Versioning once a public compatibility surface exists.
   jobs and state/event CAS persistence without provider calls or workload execution.
 - Authenticated create/validate/status handlers, process-crash/lost-response/rollback tests,
   metadata-only admission smoke and ADR-0009 documenting pending preparation and replay limits.
+- M3-03 durable FIFO/round-robin queue ownership, shared-account capacity and fenced local
+  leases, with paused initialization and a conservative no-redispatch barrier.
+- Bounded local worker pool, explicit quota uncertainty/strict/exhaustion policy, scheduler
+  events and migration/restart/concurrency/disk-full/process-kill tests.
+- Finite metadata-only scheduler smoke and ADR-0010 distinguishing local claims from remote
+  preparation/submission intent; no provider execution is enabled by a claim.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
