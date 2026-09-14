@@ -75,12 +75,17 @@ func (h *handler) jobs(w http.ResponseWriter, r *http.Request, p auth.Principal,
 
 func jobStatus(record admission.Record) map[string]any {
 	a := record.Attempt
-	return map[string]any{
+	status := map[string]any{
 		"api_version": record.Job.SpecificationVersion, "job_id": record.Job.ID, "workspace_id": record.Job.WorkspaceID,
 		"name": record.Job.Name, "active_attempt_id": a.ID, "revision": a.Revision, "created_at": record.Job.CreatedAt, "updated_at": a.UpdatedAt,
 		"state": map[string]any{"orchestration": a.State.Orchestration, "execution": a.State.Execution, "result": a.State.Result, "cancellation": a.State.Cancellation, "remote_activity": a.State.RemoteActivity, "release_evidence": a.State.ReleaseEvidence, "deadline_exceeded": a.State.DeadlineExceeded},
 		"links": admission.JobLinks(record.Job.WorkspaceID, record.Job.ID),
 	}
+	if p := record.Problem; p != nil {
+		// Deliberately exclude arbitrary details and internal causes from public status.
+		status["problem"] = map[string]any{"code": p.Code, "message": p.Message, "stage": p.Stage, "safe_operation_retry": p.SafeOperationRetry, "compute_may_have_started": p.ComputeMayHaveStarted, "recommended_action": p.RecommendedAction}
+	}
+	return status
 }
 func jobError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {

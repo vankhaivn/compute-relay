@@ -34,6 +34,10 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 		}
 		var err error
 		result, err = readJobRecord(ctx, tx, w, id)
+		if err != nil {
+			return err
+		}
+		result.Problem, err = readDispatchProblem(ctx, tx, w, id, result.Attempt.ID)
 		return err
 	})
 	if err != nil {
