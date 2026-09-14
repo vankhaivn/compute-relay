@@ -35,7 +35,7 @@ type fixture struct {
 	url      string
 }
 
-func setupHTTP(t *testing.T, mutate func(*Config), ready func(context.Context) error) *fixture {
+func setupHTTP(t *testing.T, mutate func(*Config), ready func(context.Context) error, serverOptions ...func(*http.Server)) *fixture {
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.MaxUploadBytes = 1 << 20
@@ -68,6 +68,9 @@ func setupHTTP(t *testing.T, mutate func(*Config), ready func(context.Context) e
 		ln.Close()
 		b.Close()
 		t.Fatal(err)
+	}
+	for _, configure := range serverOptions {
+		configure(server)
 	}
 	f := &fixture{server: server, access: a, catalog: m, blobs: b, url: "http://" + ln.Addr().String(), tokens: map[string]string{}, tokenIDs: map[string]string{}}
 	for _, name := range []string{"a", "b", "read"} {
@@ -246,7 +249,12 @@ func TestDeclaredAndChunkedUploadLimits(t *testing.T) {
 }
 
 func TestHTTPDeadlineInterruptsBlockedBody(t *testing.T) {
-	f := setupHTTP(t, func(c *Config) { c.RequestTimeout = 50 * time.Millisecond; c.UploadTimeout = 200 * time.Millisecond }, nil)
+	// Isolate the read-deadline assertion: cleanup/scheduling on a loaded runner can
+	// consume the original 50 ms response margin. Keep the 200 ms read deadline and
+	// a separate bounded write window; production server configuration is unchanged.
+	f := setupHTTP(t, func(c *Config) { c.RequestTimeout = 50 * time.Millisecond; c.UploadTimeout = 200 * time.Millisecond }, nil, func(server *http.Server) {
+		server.WriteTimeout = 2 * time.Second
+	})
 	connection, err := net.DialTimeout("tcp", strings.TrimPrefix(f.url, "http://"), time.Second)
 	if err != nil {
 		t.Fatal(err)

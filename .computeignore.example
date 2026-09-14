@@ -1,0 +1,11 @@
+# Copy to .computeignore at the explicit project root.
+# Exclusion-only syntax: no ! reinclusion, leading /, backslash or .. components.
+# Built-in credential/VCS/cache/state exclusions remain active and cannot be overridden.
+# Review `compute-relay bundle preview` before creating or uploading a bundle.
+
+*.log
+generated/
+assets/**/draft?.txt
+
+# Add operator-specific state/cache directories; defaults cannot identify custom names.
+local-runtime-state/

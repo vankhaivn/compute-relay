@@ -1,6 +1,6 @@
 # Workspace authentication and immutable object uploads
 
-> **Tasks:** M2-05 and M2-06, implemented offline; PR #7 in review.
+> **Tasks:** M2-05 and M2-06, implemented offline and merged in PR #7.
 >
 > **Boundary:** tested library components and a developer smoke command, not a complete
 > production runtime. SQLite-backed token/object ownership and `compute-relay serve` are
@@ -46,9 +46,12 @@ are stored as opaque bytes, not extracted. Optional `Content-Length` and
 are accepted within configured limits. The receipt contains `object_id`, `workspace_id`,
 `bytes` and canonical `sha256`, with a metadata `Location` header.
 
-Job/operation routes remain planned. No handler returns a successful job `202` before
-durable admission exists. Local import, URL ingestion, artifact download and archive
-inspection belong to later tasks.
+M2-07 adds opt-in `POST /v1/workspaces/{w}/objects/import` using this same upload/ownership
+path. See [packaging-and-import](packaging-and-import.md) for named roots, strict JSON,
+snapshot verification and bundle commands. The table above describes the original M2-05/06
+surface. Job/operation routes remain planned; no handler returns successful job `202`
+before durable admission exists. URL ingestion, artifact download and runner extraction
+belong to later tasks.
 
 The server factory accepts only literal loopback binds (default `127.0.0.1:7331`). Host
 must match the configured IP/port. Origin must be absent or exactly same-origin. Cross-site

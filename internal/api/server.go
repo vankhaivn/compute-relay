@@ -26,6 +26,7 @@ import (
 )
 
 type Config struct {
+	LocalImports   *objects.Importer // nil disables local import; configured by the operator composition root.
 	Listen         string
 	MaxJSONBytes   int64
 	MaxUploadBytes int64
@@ -152,9 +153,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	segments := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	isUpload := len(segments) == 4 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && r.Method == http.MethodPost
+	isImport := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "import" && r.Method == http.MethodPost
 	timeout, maxBody := h.config.RequestTimeout, h.config.MaxJSONBytes
 	if isUpload {
 		timeout, maxBody = h.config.UploadTimeout, h.config.MaxUploadBytes
+	}
+	if isImport {
+		timeout = h.config.UploadTimeout // JSON body stays bounded by MaxJSONBytes.
 	}
 	if r.ContentLength > maxBody {
 		mapError(w, r, blobfs.ErrTooLarge)
@@ -196,6 +201,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if workspace != principal.WorkspaceID() {
 		mapError(w, r, auth.ErrForbidden)
+		return
+	}
+	if isImport {
+		h.importObject(w, r, principal, workspace)
 		return
 	}
 	if isUpload {

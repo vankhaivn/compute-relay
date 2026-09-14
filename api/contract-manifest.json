@@ -92,6 +92,29 @@
         "examples/invalid/object.unknown-field.json",
         "examples/invalid/object.bad-digest.json"
       ]
+    },
+    {
+      "schema": "schemas/bundle-manifest.v1.schema.json",
+      "valid": [
+        "examples/bundle-manifest.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/bundle-manifest.missing-mode.json",
+        "examples/invalid/bundle-manifest.traversal.json"
+      ]
+    },
+    {
+      "schema": "schemas/object-import.v1alpha1.schema.json",
+      "valid": [
+        "examples/object-import.file.valid.json",
+        "examples/object-import.bundle.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/object-import.traversal.json",
+        "examples/invalid/object-import.unknown-field.json",
+        "examples/invalid/object-import.implicit-root.json",
+        "examples/invalid/object-import.mixed.json"
+      ]
     }
   ]
 }

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay local object import v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "root",
+    "kind"
+  ],
+  "properties": {
+    "root": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "kind": {
+      "enum": [
+        "file",
+        "bundle"
+      ]
+    },
+    "path": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/relative_path"
+        },
+        {
+          "const": ""
+        }
+      ]
+    },
+    "includes": {
+      "type": "array",
+      "maxItems": 100000,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/relative_path"
+      }
+    },
+    "sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "const": ""
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "file"
+        },
+        "path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "includes": {
+          "maxItems": 0
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "bundle"
+        },
+        "path": {
+          "const": ""
+        },
+        "includes": {
+          "minItems": 1,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/relative_path"
+              },
+              {
+                "maxLength": 240
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "includes"
+      ]
+    }
+  ],
+  "$defs": {
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "allOf": [
+        {
+          "pattern": "^[\\x20-\\x7e]+$"
+        },
+        {
+          "pattern": "^[^/]{1,100}(/[^/]{1,100})*$"
+        },
+        {
+          "not": {
+            "pattern": "[\\\\:*?\"<>|]"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.{1,2}(/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "[ .](/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)([Cc][Oo][Nn]|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Nn][Ii][Nn]\\$|[Cc][Oo][Nn][Oo][Uu][Tt]\\$|[Cc][Oo][Mm][0-9]|[Ll][Pp][Tt][0-9])([.]|/|$)"
+          }
+        }
+      ]
+    }
+  }
+}

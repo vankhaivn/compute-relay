@@ -1,0 +1,6 @@
+{
+  "root": "source",
+  "kind": "file",
+  "path": "inputs/prompts.jsonl",
+  "host_path": "/outside"
+}

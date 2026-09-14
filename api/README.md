@@ -1,8 +1,9 @@
 # API contracts
 
-> **Tasks:** M2-03 contract baseline; M2-05/M2-06 authentication and object handlers.
+> **Tasks:** M2-03 contract baseline; M2-05/M2-06 authentication and object handlers;
+> M2-07 bundle manifests and allowlisted local import.
 >
-> **Status:** contracts and five handler operations are implemented offline. The production
+> **Status:** contracts and six handler operations are implemented offline. The production
 > runtime composition and all job/operation routes remain planned; no live provider claim.
 
 ## Contract versions
@@ -13,6 +14,7 @@
 - Job/status API version: `compute-connector/v1alpha1`
 - Runner result-manifest version: `1`
 - Normalized runtime-config schema version: `1`
+- Bundle manifest version: `compute-relay/bundle/v1`
 
 The working job version intentionally keeps the proposal's `compute-connector/v1alpha1`
 identifier while repository branding remains Compute Relay. Changing a published identifier
@@ -33,6 +35,8 @@ later requires an explicit compatibility decision rather than a silent rename.
 | [`schemas/job-admission.v1alpha1.schema.json`](schemas/job-admission.v1alpha1.schema.json) | Durable asynchronous admission response. |
 | [`schemas/job-validation.v1alpha1.schema.json`](schemas/job-validation.v1alpha1.schema.json) | No-compute validation response and verification requirements. |
 | [`schemas/object.v1alpha1.schema.json`](schemas/object.v1alpha1.schema.json) | Committed workspace object ID, byte count and digest; never physical paths. |
+| [`schemas/object-import.v1alpha1.schema.json`](schemas/object-import.v1alpha1.schema.json) | Named-root raw-file or explicitly selected bundle import request. |
+| [`schemas/bundle-manifest.v1.schema.json`](schemas/bundle-manifest.v1.schema.json) | Regular-file bundle manifest with portable paths, sizes, hashes and executable flags. |
 | [`examples/`](examples/) | Valid examples and deliberately invalid negative fixtures. |
 | [`contract-manifest.json`](contract-manifest.json) | Explicit schema-to-fixture inventory. No untracked root schema is allowed. |
 | [`contract.lock.json`](contract.lock.json) | SHA-256/byte-size identity of every committed JSON contract and fixture. |
@@ -60,9 +64,16 @@ normalized input/output targets, setup/finalization budgets within the remote wa
 workspace ownership, profile/provider references, policy upper bounds, immutable object
 existence, and actual provider capability.
 
+Bundle/import schemas impose a stricter portable ASCII path subset. Runtime validation
+additionally checks case/prefix collisions, manifest ordering, allowed roots, exclusions,
+USTAR encoding, total sizes and actual digests. Schema ceilings are hard representational
+bounds; lower configured/default policy limits still apply. Strict import decoding also
+rejects duplicate JSON keys and nulls, which ordinary schema validation cannot disambiguate
+after a parser has already discarded duplicate keys.
+
 ## OpenAPI status
 
-The following five operations have offline handler and loopback integration evidence:
+The following six operations have offline handler and loopback integration evidence:
 
 ```text
 GET  /healthz
@@ -70,13 +81,19 @@ GET  /readyz
 GET  /v1/info
 POST /v1/workspaces/{workspace_id}/objects
 GET  /v1/workspaces/{workspace_id}/objects/{object_id}
+POST /v1/workspaces/{workspace_id}/objects/import
 ```
 
 Only `/healthz` is public. The readiness callback checks local services, not provider or
-GPU availability. Upload requires workspace write scope; metadata requires read scope.
-Raw binary uploads return 201 only after verified bytes and ownership metadata commit.
-See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for headers, limits,
-permissions, recovery and the explicitly nondurable developer fixture boundary.
+GPU availability. Upload/import require workspace write scope; metadata requires read scope.
+Uploads return 201 only after verified bytes and ownership metadata commit. Local import is
+disabled unless the operator explicitly composes a named, workspace-allowed root manager.
+
+See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for HTTP/ownership limits,
+and [`../docs/packaging-and-import.md`](../docs/packaging-and-import.md) for import semantics,
+bundle commands, manifest safety and the distinction between offline components and
+production configuration. Runtime token/object repositories are still test fixtures until
+persistent SQLite composition is implemented.
 
 These eight operations remain `planned`:
 
@@ -92,14 +109,15 @@ GET  /v1/workspaces/{workspace_id}/operations/{operation_id}
 ```
 
 The root status remains `planned` because a production CLI/SQLite runtime is not composed
-yet. Artifact transfer, local import, listings, logs, events, attempts, profiles and quota
+yet. Artifact transfer, HTTPS ingestion, listings, logs, events, attempts, profiles and quota
 remain approved API work and must be added with their actual application/storage behavior.
 
 `GET` operations are observational. Compute creation requires an explicit `POST`, and job
 creation/compute retry expose an `Idempotency-Key` requirement. Provider names, notebook
 slugs, credential material, and provider filesystem paths do not appear in the normal
-contract. New `INVALID_REQUEST` and `REQUEST_LIMIT_EXCEEDED` codes distinguish local
-request validation/backpressure from provider failures.
+contract. `INVALID_REQUEST` and `REQUEST_LIMIT_EXCEEDED` distinguish local request
+validation/backpressure from provider failures. Import source changes use `INPUT_CHANGED`;
+unsafe local paths use `INVALID_INPUT_PATH` without exposing absolute host paths.
 
 ## Validation commands
 
@@ -123,7 +141,7 @@ PowerShell and CMD wrappers accept the same task names.
 6. loads and validates OpenAPI 3.1.1 and its operation/status inventory; and
 7. verifies `contract.lock.json` is current.
 
-Tests additionally check actual serialized object/error types against the schemas.
+Tests additionally check actual serialized object/error/import/bundle types against schemas.
 `contract-lock` is the explicit update step after reviewing an intentional JSON contract or
 fixture change. CI runs `contract-check`; CI never contacts Kaggle or allocates compute.
 

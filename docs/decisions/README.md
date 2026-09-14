@@ -12,6 +12,7 @@ defaults.
 | [`0002-attempt-scoped-kaggle-resources.md`](0002-attempt-scoped-kaggle-resources.md) | accepted | Use one persisted Kaggle execution resource per attempt plus manifest identity; make no exactly-once claim. |
 | [`0003-go-and-sqlite-baseline.md`](0003-go-and-sqlite-baseline.md) | accepted | Start with Go 1.27.1 and a CGo-free `modernc.org/sqlite` driver family, exact dependency pin deferred to module creation. |
 | [`0004-workspace-auth-and-atomic-objects.md`](0004-workspace-auth-and-atomic-objects.md) | accepted | Separate token authority, atomic blob publication and ownership metadata commit; no nondurable production fallback. |
+| [`0005-bundle-format-and-rooted-import.md`](0005-bundle-format-and-rooted-import.md) | accepted | Use manifest-bound regular-file USTAR/gzip bundles, explicit selections and rooted, workspace-allowed local snapshots; no local extraction. |
 
 ## Naming
 

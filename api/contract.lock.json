@@ -3,13 +3,28 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "697d995ac867d332621d1e0851f2d97325937e343c3989a8957e98d474bab153",
-      "bytes": 2627
+      "sha256": "1ad1dd14f72a3055eb2a16a6a223c0a36fe30d1f347d34eeaf68054546b23690",
+      "bytes": 3377
+    },
+    {
+      "path": "api/examples/bundle-manifest.valid.json",
+      "sha256": "78ce2360abc5c8d5978edfde1ccf5785ad7a7159f9c912b5f5424c44668bb934",
+      "bytes": 233
     },
     {
       "path": "api/examples/error.submission-unknown.valid.json",
       "sha256": "5579f141bfed88ccfb42b85a834515e773b6fdea64ecb2fdbc8cd77e37e2e2ed",
       "bytes": 479
+    },
+    {
+      "path": "api/examples/invalid/bundle-manifest.missing-mode.json",
+      "sha256": "80be8566bc011acb66fa12037f244c127012edf9d97fb235c264ea3da52a792f",
+      "bytes": 206
+    },
+    {
+      "path": "api/examples/invalid/bundle-manifest.traversal.json",
+      "sha256": "b8a1084c63d153c324086ffb0391ccf9a8fa77a49cdf7e72b1814a98bb70968c",
+      "bytes": 236
     },
     {
       "path": "api/examples/invalid/error.bare-retryable.json",
@@ -50,6 +65,26 @@
       "path": "api/examples/invalid/job.unsafe-path.json",
       "sha256": "a11e8d42cbadb582b06f589ad55c1ede31a591255a62f797add6f8687262a834",
       "bytes": 1160
+    },
+    {
+      "path": "api/examples/invalid/object-import.implicit-root.json",
+      "sha256": "35701f43f3529abde53ec017eda95e23783de72a419cf6910b2d97c3af6f0b87",
+      "bytes": 72
+    },
+    {
+      "path": "api/examples/invalid/object-import.mixed.json",
+      "sha256": "6e356791b3367f3e366236ff8b4f6eea4667fbf5b8f9924760cfd31bb4f7e102",
+      "bytes": 110
+    },
+    {
+      "path": "api/examples/invalid/object-import.traversal.json",
+      "sha256": "d59a7392a39f10ff78cee892c777a935e28b4080f9daa83ee5400cd2d962245b",
+      "bytes": 65
+    },
+    {
+      "path": "api/examples/invalid/object-import.unknown-field.json",
+      "sha256": "a9d5f48781b84481015a31aab219f800a1c56033a496d29415f5e5eaa64a9136",
+      "bytes": 102
     },
     {
       "path": "api/examples/invalid/object.bad-digest.json",
@@ -112,6 +147,16 @@
       "bytes": 1159
     },
     {
+      "path": "api/examples/object-import.bundle.valid.json",
+      "sha256": "19166d530f0195af7d9dc46d3b1b097b3b9f1fd4bcfffad50e5e5c5d1401fc40",
+      "bytes": 89
+    },
+    {
+      "path": "api/examples/object-import.file.valid.json",
+      "sha256": "4c25d12a52aa14b396ae95e24906f9060d7fb6317889b6e95fd6514bae200793",
+      "bytes": 75
+    },
+    {
       "path": "api/examples/object.valid.json",
       "sha256": "866e23ec4076c525323eee294dcdcc302d5916da8da4f2715b6b51b9443de2e0",
       "bytes": 156
@@ -133,8 +178,13 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "7c22a0d417ca045df5769714b8f236d53c2be9d75a37df1226acdbaec269809b",
-      "bytes": 18693
+      "sha256": "86a8c4273f1c3b1334b8e83502085489c02afe687a5ec3daacc0ae87d78bbd80",
+      "bytes": 20789
+    },
+    {
+      "path": "api/schemas/bundle-manifest.v1.schema.json",
+      "sha256": "754e8ac26e4162c5f7c96259fd4bdb93da0ba5f85819c2aa6bd0fd9473d3e316",
+      "bytes": 1895
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",
@@ -165,6 +215,11 @@
       "path": "api/schemas/job-validation.v1alpha1.schema.json",
       "sha256": "f353b3b2de191838c99da59ce2cfc3b0742a0b07b51c7b933ce1c7fc22a386bc",
       "bytes": 1177
+    },
+    {
+      "path": "api/schemas/object-import.v1alpha1.schema.json",
+      "sha256": "9978cf1842b1545719e490bfc6d85741aef1507b98673c6986d37103624d188b",
+      "bytes": 2442
     },
     {
       "path": "api/schemas/object.v1alpha1.schema.json",
