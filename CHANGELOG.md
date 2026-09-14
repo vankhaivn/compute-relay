@@ -55,5 +55,11 @@ Semantic Versioning once a public compatibility surface exists.
   extraction, CC_* environment, bounded setup/process groups/logs and verified outputs.
 - Runner manifest and source locks, real CPU/shell fault tests, generated result-schema
   checks, and ADR-0007 separating runner outcomes from provider terminal/release evidence.
+- M3-01 CGo-free SQLite metadata foundation with persistent installation/workspace/token
+  digests/object ownership, embedded checksum-bound migrations and OS-level state locks.
+- Consistent database-only backup/restore, identity-loss guards, rollback/crash/disk-full
+  tests and a finite local store smoke command.
+- ADR-0008 and storage guidance documenting transaction, permission, backup and evidence
+  boundaries without claiming durable job admission or a production server.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

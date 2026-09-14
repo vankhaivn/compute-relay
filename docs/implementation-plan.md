@@ -1,6 +1,6 @@
 # Dependency-aware implementation plan
 
-> **Status:** active; M-0, M1-01 and M2-01 through M2-08 merged. M2-09 in review.
+> **Status:** active; M-0, M1-01 and M2-01 through M2-09 merged. M3-01 in review.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-14.
 >
@@ -17,8 +17,10 @@ M-0 was merged in PR #1, M2-01 in PR #2, M1-01 in PR #3, M2-02 in PR #4,
 M2-03 in PR #5, M2-04 in PR #6, and M2-05/M2-06 together in PR #7.
 PR #8 merged [safe packaging and allowlisted local import](packaging-and-import.md)
 for M2-07. PR #9 merged [bounded public HTTPS ingestion](https-ingestion.md) for M2-08.
-PR #10 implements the [finite remote runner](../runner/README.md) for M2-09 and remains
-`in-review` until merged. M2 as a whole is not closed before that review/merge.
+PR #10 merged the [finite remote runner](../runner/README.md) for M2-09. These complete
+M2's offline component tasks, not a production runtime or live-provider acceptance.
+PR #11 implements [SQLite metadata and database-only recovery](storage.md) for M3-01;
+it remains `in-review` until owner merge.
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
 real-loopback tests, atomic blob publication and an explicit ownership-commit seam.
@@ -27,15 +29,20 @@ manifest-bound archive inspection and rooted source-change checks. M2-08 adds a 
 HTTPS transport, immutable URL snapshots, strict request contracts and controlled TLS
 smoke/fault tests. M2-09 adds an explicit Linux runner asset with frozen inputs, bounded
 setup/process supervision, result contracts and synthetic CPU tests. No admission handler
-executes that runner locally. SQLite token/object repositories and production `serve`
-composition remain M3/M5 work; developer metadata fixtures are deliberately nondurable,
-not runtime fallbacks.
+executes that runner locally.
+
+M3-01 adds concrete SQLite installation/workspace/token-digest/object repositories,
+ordered migrations, state-root locking and consistent database-only backup/restore.
+Job/attempt/idempotency admission, state/event transactions and scheduling remain later
+M3 tasks. Production `serve` composition remains M5 work. Existing developer fixtures are
+explicitly nondurable; the separate store smoke uses real temporary SQLite and labels
+its backup as metadata-only rather than claiming verified blob recovery.
 
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one subsequent task/PR, report its evidence, and stop for
-owner merge before beginning another task. M3 is not started by PR #10.
+owner merge before beginning another task. PR #11 does not start M3-02 or later tasks.
 
 ## Status vocabulary
 
@@ -94,7 +101,7 @@ go decision and M3 has the durable semantics the adapter must use.
 | M0-01 | documentation / `complete` | Establish repository policy, approved proposal, architecture baseline, roadmap scaffold, evidence vocabulary, and commit convention. | PRD-01–PRD-10, VER-01 | None | No / No | Root bootstrap commit and passing commit-convention workflow. |
 | M0-02 | documentation / `complete` | Create stable requirement IDs and map product behavior to components, tests, and milestones. | All matrix rows | M0-01 | No / No | [`scope-and-requirements.md`](scope-and-requirements.md) has no required behavior without target evidence. |
 | M0-03 | research / `complete` | Review the current stable official Kaggle CLI/client surfaces, versions, identity, outputs, logs, quota, timeout, staging, and cancellation gaps. | PRD-04, DAT-04, PRV-02/03, OPS-02/04, VER-03 | M0-01 | No / No | Dated primary-source review at an exact release/tag; no live claims. |
-| M0-04 | research / `complete` | Populate K-01…K-16, risk responses, compatibility target matrix, and live checklist. | PRD-04, PRV-02/03, OPS-02/04, SEC-03, VER-03 | M0-03 | No / No | Every gate has evidence level, fallback, and M-1 acceptance procedure. |
+| M0-04 | research / `complete` | Populate K-01…K-16, risk responses, compatibility target matrix, and live checklist. | PRD-04, PRV-02/03, OPS-02/04, SEC-03, VER-03, DX-01 | M0-03 | No / No | Every gate has evidence level, fallback, and M-1 acceptance procedure. |
 | M0-05 | ADR / `complete` | Record official-client boundary, attempt-scoped provider identity, and Go/SQLite baseline. | PRD-03/05, DUR-01/03/04, PRV-01/02, SEC-01 | M0-03 | No / No | ADR-0001…0003 accepted with alternatives, consequences, and verification. |
 | M0-06 | planning / `complete` | Replace the template with this dependency-aware backlog and explicit live/offline boundaries. | All | M0-02–M0-05 | No / No | Every implementation task states dependencies, external effects, and acceptance evidence. |
 | M0-07 | review / `complete` | Review and merge the M-0 documentation set; close M-0 without upgrading any live capability. | VER-01/03 | M0-02–M0-06 | No / No | PR checks pass, reviewer findings resolved, documents merged on `main`. |
@@ -138,13 +145,13 @@ live tasks remain `blocked-environment`.
 | M2-06 | implementation / `complete` | Implement streaming object upload and filesystem blob lifecycle with immutable digests and atomic publication. | DAT-01, DUR-01, API-01, SEC-02 | M2-02/M2-03 | No / No | Merged PR #7: streamed checksum/length validation, real process-kill recovery, disk/commit-ambiguity tests, quota/permissions and local smoke; incomplete bytes never usable; SQLite ownership integration deferred to M3. |
 | M2-07 | implementation / `complete` | Implement safe `.tar.gz` packaging/inspection and allowlisted local import. | DAT-01/02, SEC-02 | M2-06 | No / No | Merged PR #8: deterministic bundle/manifest checks, archive traversal/link/collision/bomb corpus, rooted snapshot races, strict workspace import HTTP, local race/repeat/fuzz/smoke and native CI. See ADR-0005 and packaging-and-import.md. |
 | M2-08 | implementation / `complete` | Implement bounded public HTTPS ingestion with SSRF and redirect protection. | DAT-01/03, SEC-02 | M2-06 | No / No | Merged PR #9: public-only DNS/peer/TLS checks per hop, blocked private/mixed/metadata targets, bounded streaming/timeouts, verified EOF, workspace/commit/redaction tests, request schema/OpenAPI, local race/repeat/fuzz/TLS smoke and native offline CI. See ADR-0006 and https-ingestion.md. |
-| M2-09 | implementation / `in-review` | Implement generic remote-runner contract and local deterministic runner tests without executing admitted workload code on the host. | JOB-02/03/05, SEC-02 | M2-02/M2-03 | No / No | PR #10: strict frozen-input manifest, bounded extraction/setup/process groups/logs/results; actual CPU/shell/timeout/SIGTERM fixtures, synthetic GPU and pip-plan checks, generated result JSON/schema and source-lock verification. See ADR-0007 and runner/README.md. No local admission execution or live GPU claim. |
+| M2-09 | implementation / `complete` | Implement generic remote-runner contract and local deterministic runner tests without executing admitted workload code on the host. | JOB-02/03/05, SEC-02 | M2-02/M2-03 | No / No | Merged PR #10: strict frozen-input manifest, bounded extraction/setup/process groups/logs/results; actual CPU/shell/timeout/SIGTERM fixtures, synthetic GPU and pip-plan checks, generated result JSON/schema and source-lock verification. See ADR-0007 and runner/README.md. No local admission execution or live GPU claim. |
 
 ## M-3 — Durable orchestration
 
 | ID | Type / status | Intended behavior and components | Requirements | Dependencies | External credentials / compute | Acceptance evidence |
 |---|---|---|---|---|---|---|
-| M3-01 | implementation / `proposed` | Implement SQLite migrations/store, state-directory lock, transaction policy, and consistent backup/restore baseline. | DUR-01/04, DX-01 | M2-01/M2-02, ADR-0003 | No / No | Migration/restart/lock/concurrency/backup/native-platform tests and documented pragmas/durability. |
+| M3-01 | implementation / `in-review` | Implement SQLite migrations/store, state-directory lock, transaction policy, and consistent backup/restore baseline. | DUR-01/04, DX-01 | M2-01/M2-02, ADR-0003 | No / No | PR #11: concrete workspace/token/object repositories, embedded migration checksums, OS locking, restart/concurrency/disk-full/backup tests, native production-driver CI and disclosed local system-SQLite smoke. See storage.md and ADR-0008; no durable job admission claim. |
 | M3-02 | implementation / `proposed` | Implement durable workspace/object/job/attempt admission with idempotency key and canonical request hash. | JOB-01/04, DUR-01/02, API-03 | M2-03/M2-05/M2-06, M3-01 | No / No | Lost-response replay returns original IDs; changed request yields conflict in same transaction. |
 | M3-03 | implementation / `proposed` | Implement bounded FIFO/round-robin scheduler, account capacity, transactional dispatch claims, and backpressure. | OPS-01/02/03 | M2-04, M3-01/M3-02 | No / No | Fairness/limits/lease/restart tests; possibly active attempts retain capacity. |
 | M3-04 | implementation / `proposed` | Persist preparation resources and submission intent before side effects; implement accepted/rejected/unknown and reconciliation. | DUR-03, PRV-02, VER-02 | M3-01/M3-03 | No / No | Fault injection before/after every intent/submit commit creates no automatic second execution. |
@@ -205,13 +212,12 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M2-09 review
+## Next work after M3-01 review
 
-Stop after reporting PR #10 and wait for owner merge. Do not begin M3 in the same task.
-The remaining portable-core runner task has offline execution/contract evidence, not live
-provider verification or a production runtime. Closing M2 after review does not close M1.
-M3 must supply persistent ownership/token repositories, durable job admission and database
-recovery before a production runtime can advertise durable orchestration.
+Stop after reporting PR #11 and wait for owner merge. Do not begin M3-02 in this task.
+The next task builds durable job/attempt admission and idempotency on the merged storage
+foundation. State/event atomicity, submission-intent recovery and scheduling retain their
+own later acceptance gates. A working metadata store does not complete M3 orchestration.
 
 M1-02 remains an operator-run, explicitly authorized read-only probe. Provider mutation,
 GPU allocation, cleanup and the full Kaggle adapter retain their separate evidence gates.
