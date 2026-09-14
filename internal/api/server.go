@@ -28,8 +28,8 @@ import (
 
 type Config struct {
 	Jobs           *admission.Service // nil disables durable job routes; never use a memory fallback.
-	HTTPSInputs    *objects.Ingestor   // nil disables HTTPS ingestion; operator composition supplies the guarded client.
-	LocalImports   *objects.Importer   // nil disables local import; configured by the operator composition root.
+	HTTPSInputs    *objects.Ingestor  // nil disables HTTPS ingestion; operator composition supplies the guarded client.
+	LocalImports   *objects.Importer  // nil disables local import; configured by the operator composition root.
 	Listen         string
 	MaxJSONBytes   int64
 	MaxUploadBytes int64
