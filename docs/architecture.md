@@ -1,8 +1,8 @@
 # Architecture baseline
 
 > **Status:** approved baseline with offline domain, contract, provider/fake,
-> authentication, HTTP, filesystem-object and finite remote-runner components.
-> Production composition and durable SQLite orchestration are not implemented yet.
+> authentication, HTTP, filesystem-object, finite remote-runner and SQLite components.
+> Durable job admission, orchestration and production composition remain later tasks.
 
 ## System intent
 
@@ -51,8 +51,26 @@ explicitly nondurable and is not wired into a production `serve` command.
 
 See [ADR-0004](decisions/0004-workspace-auth-and-atomic-objects.md) and
 [`auth-and-objects.md`](auth-and-objects.md) for concurrency, permissions, limits, failure
-semantics and the local executable smoke test. SQLite ownership, state locking and the
-runtime composition remain later acceptance gates.
+semantics and the local executable smoke test.
+
+## Implemented SQLite foundation
+
+M3-01 supplies concrete SQLite workspace, token-digest and immutable object-metadata
+repositories behind those existing interfaces. `internal/statefs` owns the state-root OS
+lock and private permissions, independently of the blob-root lock. Embedded checksum-bound
+migrations and installation-identity guards reject incompatible or damaged state rather
+than silently creating a new runtime identity.
+
+The store uses bounded operations, one private connection, WAL/FULL durability and immediate
+transactions. No SQL transaction spans byte transfer or provider work. Database-only
+backups use consistent SQLite snapshots with receipt-last publication; offline restore
+refuses existing destinations and preserves identity. Blob availability and complete
+installation recovery are separate checks.
+
+See [ADR-0008](decisions/0008-sqlite-durability-and-backup.md) and
+[`storage.md`](storage.md). Job/attempt/idempotency persistence starts in M3-02; scheduler,
+submission intents and combined state/event transactions follow their own gates. SQLite
+repository availability is not a claim that these orchestration paths or `serve` exist.
 
 ## Control plane and workload boundary
 
@@ -113,7 +131,8 @@ The approved defaults are:
 
 Material decisions and unresolved implementation gates are recorded in the
 [`decisions/`](decisions/README.md) index and implementation plan. The HTTP foundation
-uses standard-library `net/http`; no new dependency is introduced by M2-05/M2-06.
+uses standard-library `net/http`. M3-01 pins the CGo-free modernc SQLite driver and matching
+libc; exact versions and durability settings are in the storage guide and Go module files.
 The M2-09 runner and its unit tests use the Python standard library; the optional GPU
 probe relies on the separately verified remote environment's PyTorch installation.
 

@@ -10,11 +10,12 @@ defaults.
 |---|---|---|
 | [`0001-official-kaggle-client-boundary.md`](0001-official-kaggle-client-boundary.md) | accepted | Isolate a pinned official-client environment; use CLI plus a narrow public-client bridge where structured results require it. |
 | [`0002-attempt-scoped-kaggle-resources.md`](0002-attempt-scoped-kaggle-resources.md) | accepted | Use one persisted Kaggle execution resource per attempt plus manifest identity; make no exactly-once claim. |
-| [`0003-go-and-sqlite-baseline.md`](0003-go-and-sqlite-baseline.md) | accepted | Start with Go 1.27.1 and a CGo-free `modernc.org/sqlite` driver family, exact dependency pin deferred to module creation. |
+| [`0003-go-and-sqlite-baseline.md`](0003-go-and-sqlite-baseline.md) | accepted | Start with Go 1.27.1 and a CGo-free `modernc.org/sqlite` driver family, exact dependency pin deferred to implementation. |
 | [`0004-workspace-auth-and-atomic-objects.md`](0004-workspace-auth-and-atomic-objects.md) | accepted | Separate token authority, atomic blob publication and ownership metadata commit; no nondurable production fallback. |
 | [`0005-bundle-format-and-rooted-import.md`](0005-bundle-format-and-rooted-import.md) | accepted | Use manifest-bound regular-file USTAR/gzip bundles, explicit selections and rooted, workspace-allowed local snapshots; no local extraction. |
 | [`0006-public-https-ingestion.md`](0006-public-https-ingestion.md) | accepted | Revalidate DNS/peer/TLS on every HTTPS hop, bound transfers and publish immutable inputs only after verified EOF. |
 | [`0007-finite-remote-runner.md`](0007-finite-remote-runner.md) | accepted | Keep one-attempt Python/Linux execution outside admission, with frozen identities, bounded supervision and honest provider-evidence limits. |
+| [`0008-sqlite-durability-and-backup.md`](0008-sqlite-durability-and-backup.md) | accepted | Pin SQLite/libc, protect installation identity with OS locking and ordered migrations, and separate database-only backup/restore from complete runtime recovery. |
 
 ## Naming
 

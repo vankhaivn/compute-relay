@@ -1,6 +1,6 @@
 # Go toolchain and developer commands
 
-> **Origin:** M2-01 Go module/offline CI foundation; updated by M2-03 contract validation.
+> **Origin:** M2-01 Go module/offline CI foundation; updated through M3-01 storage.
 >
 > **Status:** implemented offline. Runtime/API/provider behavior remains scoped to its own
 > implementation tasks.
@@ -9,12 +9,14 @@
 
 - Module: `github.com/vankhaivn/compute-relay`
 - Go directive and CI toolchain: `go1.27.1`
-- CGo: disabled for the baseline build check.
-- Executable: `cmd/compute-relay`, currently exposing only help and build-version output.
+- CGo: disabled for the baseline build check, including the SQLite store and smoke command.
+- Executable: `cmd/compute-relay`, with help/version and explicit bundle commands.
 - Contract tool: `cmd/contractcheck`, for repository-local JSON Schema/OpenAPI validation.
+- Metadata smoke: `cmd/storesmoke`, using temporary SQLite, synthetic tokens and database-only backup/restore.
 
-The SQLite driver, HTTP server, application services, and provider interfaces belong to
-later M2/M3 tasks. A contract file marked `planned` is not endpoint implementation.
+HTTP, input and provider interfaces now have offline components. Production `serve`,
+durable job admission and orchestration remain later tasks. A contract marked `planned`
+is not endpoint implementation.
 
 ## Commands
 
@@ -33,7 +35,11 @@ The repository-owned Go task runner keeps behavior identical across shells:
 | Build | `./scripts/dev.sh build` | `./scripts/dev.ps1 build` | `scripts\dev.cmd build` | Build all packages with `CGO_ENABLED=0` and `-trimpath`. |
 | Required checks | `./scripts/dev.sh check` | `./scripts/dev.ps1 check` | `scripts\dev.cmd check` | Format, module, contract, vet, unit-test, and build checks. |
 
-GNU Make and Docker are not prerequisites.
+GNU Make and Docker are not prerequisites. The finite metadata smoke is shell-independent:
+
+```text
+go run ./cmd/storesmoke
+```
 
 ## CI evidence
 
@@ -43,13 +49,13 @@ GNU Make and Docker are not prerequisites.
 2. native unit tests and CGo-free builds on GitHub-hosted Linux, macOS, and Windows; and
 3. an exact Go toolchain assertion before checks.
 
-The workflow watches `api/**` so a schema-only change cannot bypass contract validation. It
-does not authenticate a provider, create remote resources, deploy the runtime, or allocate
-GPU compute.
+The workflow watches `api/**` and embedded SQLite migration paths, so schema-only changes
+cannot bypass their checks. It does not authenticate a provider, create remote resources,
+deploy the runtime, or allocate GPU compute.
 
-A native CI pass establishes the checked module/tooling behavior on the hosted runner image.
-It does not yet establish SQLite locking, credential permissions, provider-client
-installation, or full release support on that OS.
+M3-01 adds native SQLite/state-lock and private-permission component tests. A CI pass is
+still scoped to the hosted runner image and tested operations, not every filesystem,
+provider-client installation, power-loss scenario or full release support claim.
 
 ## Dependency and license inventory
 
@@ -58,16 +64,16 @@ installation, or full release support on that OS.
 | Go toolchain | `1.27.1` | Compiler, standard library, formatter, vet, test, race, build. | BSD-style Go license; official Go distribution. |
 | `github.com/getkin/kin-openapi` | `v0.149.0` | Parse/resolve/validate the committed OpenAPI 3.1 document offline. | MIT; pinned upstream release. |
 | `github.com/santhosh-tekuri/jsonschema/v6` | `v6.0.3` | Compile Draft 2020-12 schemas and validate examples with format assertions. | Apache-2.0; pinned upstream release. |
+| `modernc.org/sqlite` | `v1.58.0` | CGo-free SQLite metadata store. | BSD-3-Clause; tagged source/license reviewed in ADR-0008. |
+| `modernc.org/libc` | `v1.75.6` | Exact driver-required runtime dependency. | Version follows the driver's tagged `go.mod`; preserve upstream distribution notices. |
 | `actions/checkout` | commit `3d3c42e5...` (`v7.0.1`) | CI source checkout. | MIT; official GitHub action. |
 | `actions/setup-go` | commit `b7ad1dad...` (`v7.0.0`) | Install exact Go toolchain in CI. | MIT; official GitHub action. |
 
-Contract-validation dependencies are development/build dependencies imported only by
-`internal/contracts` and `cmd/contractcheck`; the `compute-relay` executable does not import
-them. Exact transitive module identities are recorded in `go.sum` and verified by
-`mod-check`.
-
-ADR-0003 still requires exact `modernc.org/sqlite`/`modernc.org/libc` alignment when the
-storage task begins.
+Contract validators remain development/build dependencies. SQLite is imported by the store
+and metadata smoke command, not a production `serve` implementation yet. Exact transitive
+module identities/checksums are recorded in `go.mod` and `go.sum` and verified by `mod-check`.
+Do not change SQLite/libc independently; rerun migration, locking, backup and native tests.
+See [storage](../storage.md) and [ADR-0008](../decisions/0008-sqlite-durability-and-backup.md).
 
 ## Build metadata
 
