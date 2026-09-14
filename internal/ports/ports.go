@@ -1,5 +1,5 @@
-// Package ports defines small infrastructure seams. There are deliberately no database,
-// host credential, or production blob implementations in the M2-04 foundation.
+// Package ports defines small infrastructure seams. Implementations are supplied by
+// the composition root; transactional runtime metadata persistence belongs to M3.
 package ports
 
 import (
@@ -27,15 +27,14 @@ type CredentialResolver interface {
 	WithCredential(context.Context, CredentialRef, func([]byte) error) error
 }
 
-type ObjectMetadata struct {
-	ID          domain.ObjectID
-	WorkspaceID domain.WorkspaceID
-	Bytes       int64
-	SHA256      domain.SHA256Digest
-}
+// ObjectMetadata aliases the common value type to preserve the original BlobStore seam.
+// Put declarations use Bytes=-1 for unknown length and SHA256="" to calculate a digest.
+// Successful results always have nonnegative Bytes and a canonical SHA256.
+type ObjectMetadata = domain.ObjectMetadata
 
 // BlobStore owns temporary writes, size/digest verification and atomic publication.
 // Every lookup is workspace-scoped; no arbitrary host path is accepted.
+// Published bytes are not API-visible until a separate ownership metadata commit.
 type BlobStore interface {
 	Put(context.Context, ObjectMetadata, io.Reader) (ObjectMetadata, error)
 	Open(context.Context, domain.WorkspaceID, domain.ObjectID) (io.ReadCloser, error)

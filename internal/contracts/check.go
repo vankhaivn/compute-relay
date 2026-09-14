@@ -209,6 +209,7 @@ func validateOpenAPI(root, relative string) error {
 		"validateJob": {}, "createJob": {}, "getJob": {},
 		"cancelJob": {}, "retryJob": {}, "reconcileJob": {},
 		"collectJob": {}, "getOperation": {},
+		"uploadObject": {}, "getObject": {},
 	}
 	observedOperations := make(map[string]struct{}, len(expectedOperations))
 	for path, pathItem := range document.Paths.Map() {
@@ -216,8 +217,8 @@ func validateOpenAPI(root, relative string) error {
 			if operation == nil || strings.TrimSpace(operation.OperationID) == "" {
 				return fmt.Errorf("OpenAPI operation %s %s has no operationId", strings.ToUpper(method), path)
 			}
-			if status, ok := operation.Extensions["x-implementation-status"]; !ok || status != "planned" {
-				return fmt.Errorf("OpenAPI operation %q must declare x-implementation-status=planned", operation.OperationID)
+			if status, ok := operation.Extensions["x-implementation-status"]; !ok || status != operationStatus(operation.OperationID) {
+				return fmt.Errorf("OpenAPI operation %q must declare x-implementation-status=%s", operation.OperationID, operationStatus(operation.OperationID))
 			}
 			if _, exists := observedOperations[operation.OperationID]; exists {
 				return fmt.Errorf("duplicate OpenAPI operationId %q", operation.OperationID)
@@ -229,6 +230,17 @@ func validateOpenAPI(root, relative string) error {
 		return fmt.Errorf("OpenAPI operation inventory = %v, want %v", sortedKeys(observedOperations), sortedKeys(expectedOperations))
 	}
 	return nil
+}
+
+// Handler-level offline evidence does not claim a usable production CLI/SQLite runtime.
+// All job and operation routes remain planned until their own acceptance gates pass.
+func operationStatus(id string) string {
+	switch id {
+	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject":
+		return "implemented-offline"
+	default:
+		return "planned"
+	}
 }
 
 func mapsEqual(left, right map[string]struct{}) bool {
