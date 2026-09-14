@@ -81,6 +81,17 @@
       "invalid": [
         "examples/invalid/job-validation.bad-verification.json"
       ]
+    },
+    {
+      "schema": "schemas/object.v1alpha1.schema.json",
+      "valid": [
+        "examples/object.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/object.negative-bytes.json",
+        "examples/invalid/object.unknown-field.json",
+        "examples/invalid/object.bad-digest.json"
+      ]
     }
   ]
 }

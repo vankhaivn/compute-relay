@@ -251,7 +251,9 @@
         "STATE_STORE_UNAVAILABLE",
         "DISK_LIMIT_EXCEEDED",
         "STATE_DIRECTORY_LOCKED",
-        "CONFIGURATION_INVALID"
+        "CONFIGURATION_INVALID",
+        "INVALID_REQUEST",
+        "REQUEST_LIMIT_EXCEEDED"
       ]
     },
     "failure_stage": {

@@ -1,9 +1,9 @@
 # API contracts
 
-> **Task:** M2-03 — strict JSON Schema and OpenAPI baseline.
+> **Tasks:** M2-03 contract baseline; M2-05/M2-06 authentication and object handlers.
 >
-> **Status:** implemented offline for review. The OpenAPI operations are marked `planned`;
-> this directory does not claim that an HTTP server or provider integration exists yet.
+> **Status:** contracts and five handler operations are implemented offline. The production
+> runtime composition and all job/operation routes remain planned; no live provider claim.
 
 ## Contract versions
 
@@ -22,7 +22,7 @@ later requires an explicit compatibility decision rather than a silent rename.
 
 | Path | Purpose |
 |---|---|
-| [`openapi.json`](openapi.json) | Provider-neutral `/v1` HTTP skeleton. Every operation is explicitly `planned`. |
+| [`openapi.json`](openapi.json) | Provider-neutral `/v1` HTTP contract with per-operation implementation status. |
 | [`schemas/common.v1alpha1.schema.json`](schemas/common.v1alpha1.schema.json) | Shared typed IDs, digests, state/error/capability enums, and safe relative paths. |
 | [`schemas/job-spec.v1alpha1.schema.json`](schemas/job-spec.v1alpha1.schema.json) | Immutable Python/shell batch job request. |
 | [`schemas/result-manifest.v1alpha1.schema.json`](schemas/result-manifest.v1alpha1.schema.json) | Generic remote runner result manifest. |
@@ -32,6 +32,7 @@ later requires an explicit compatibility decision rather than a silent rename.
 | [`schemas/error.v1alpha1.schema.json`](schemas/error.v1alpha1.schema.json) | Stable error envelope without a dangerous generic `retryable` flag. |
 | [`schemas/job-admission.v1alpha1.schema.json`](schemas/job-admission.v1alpha1.schema.json) | Durable asynchronous admission response. |
 | [`schemas/job-validation.v1alpha1.schema.json`](schemas/job-validation.v1alpha1.schema.json) | No-compute validation response and verification requirements. |
+| [`schemas/object.v1alpha1.schema.json`](schemas/object.v1alpha1.schema.json) | Committed workspace object ID, byte count and digest; never physical paths. |
 | [`examples/`](examples/) | Valid examples and deliberately invalid negative fixtures. |
 | [`contract-manifest.json`](contract-manifest.json) | Explicit schema-to-fixture inventory. No untracked root schema is allowed. |
 | [`contract.lock.json`](contract.lock.json) | SHA-256/byte-size identity of every committed JSON contract and fixture. |
@@ -61,12 +62,25 @@ existence, and actual provider capability.
 
 ## OpenAPI status
 
-The OpenAPI document defines only the first provider-neutral metadata/control slice:
+The following five operations have offline handler and loopback integration evidence:
 
 ```text
 GET  /healthz
 GET  /readyz
 GET  /v1/info
+POST /v1/workspaces/{workspace_id}/objects
+GET  /v1/workspaces/{workspace_id}/objects/{object_id}
+```
+
+Only `/healthz` is public. The readiness callback checks local services, not provider or
+GPU availability. Upload requires workspace write scope; metadata requires read scope.
+Raw binary uploads return 201 only after verified bytes and ownership metadata commit.
+See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for headers, limits,
+permissions, recovery and the explicitly nondurable developer fixture boundary.
+
+These eight operations remain `planned`:
+
+```text
 POST /v1/workspaces/{workspace_id}/jobs/validate
 POST /v1/workspaces/{workspace_id}/jobs
 GET  /v1/workspaces/{workspace_id}/jobs/{job_id}
@@ -77,14 +91,15 @@ POST /v1/workspaces/{workspace_id}/jobs/{job_id}/collect
 GET  /v1/workspaces/{workspace_id}/operations/{operation_id}
 ```
 
-This is a skeleton, not endpoint implementation. Binary object/artifact transfer, listings,
-logs, events, attempts, profiles, and quota remain approved API work but should be added with
-their application/storage behavior rather than optimistic empty handlers.
+The root status remains `planned` because a production CLI/SQLite runtime is not composed
+yet. Artifact transfer, local import, listings, logs, events, attempts, profiles and quota
+remain approved API work and must be added with their actual application/storage behavior.
 
 `GET` operations are observational. Compute creation requires an explicit `POST`, and job
 creation/compute retry expose an `Idempotency-Key` requirement. Provider names, notebook
 slugs, credential material, and provider filesystem paths do not appear in the normal
-contract.
+contract. New `INVALID_REQUEST` and `REQUEST_LIMIT_EXCEEDED` codes distinguish local
+request validation/backpressure from provider failures.
 
 ## Validation commands
 
@@ -105,9 +120,10 @@ PowerShell and CMD wrappers accept the same task names.
 3. compiles every root schema as Draft 2020-12 with format assertions;
 4. requires every positive fixture to pass and every negative fixture to fail;
 5. compares public enum arrays against the Go domain constants;
-6. loads and validates OpenAPI 3.1.1 and its exact planned operation inventory; and
+6. loads and validates OpenAPI 3.1.1 and its operation/status inventory; and
 7. verifies `contract.lock.json` is current.
 
+Tests additionally check actual serialized object/error types against the schemas.
 `contract-lock` is the explicit update step after reviewing an intentional JSON contract or
 fixture change. CI runs `contract-check`; CI never contacts Kaggle or allocates compute.
 

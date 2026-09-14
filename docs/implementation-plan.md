@@ -1,8 +1,8 @@
 # Dependency-aware implementation plan
 
-> **Status:** active; M-0, M1-01 and M2-01 through M2-03 merged. M2-04 in review.
+> **Status:** active; M-0, M1-01 and M2-01 through M2-04 merged. M2-05/M2-06 in review.
 >
-> **Planning date:** 2026-09-13
+> **Planning date:** 2026-09-13; execution record updated 2026-09-14.
 >
 > **Scheduling rule:** milestones are acceptance gates, not calendar promises.
 
@@ -14,8 +14,14 @@ separate.
 ## Current execution record
 
 M-0 was merged in PR #1, M2-01 in PR #2, M1-01 in PR #3, M2-02 in PR #4,
-and M2-03 in PR #5. M2-04 adds the [provider ports, fake and local smoke](providers/contract.md)
-and remains `in-review` until its PR is merged. M2 as a whole is not complete.
+M2-03 in PR #5, and M2-04 in PR #6. The [provider ports, fake and local smoke](providers/contract.md)
+are merged. PR #7 combines M2-05 and M2-06 at the owner's request and remains `in-review`
+until merged. M2 as a whole is not complete.
+
+[Authentication and object storage](auth-and-objects.md) now have offline components,
+real-loopback smoke tests, atomic blob publication and an explicit ownership-commit seam.
+SQLite token/object repositories and production `serve` composition remain M3/M5 work;
+the developer smoke metadata fixture is deliberately nondurable, not a runtime fallback.
 
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
@@ -117,9 +123,9 @@ live tasks remain `blocked-environment`.
 | M2-01 | implementation / `complete` | Create the Go module, pin Go/dependencies, license inventory, cross-platform developer command wrappers, and base CI. | PRD-05, VER-01, DX-01 | M0-07, ADR-0003 | No / No | Format/vet/static/unit commands on CI; exact module pins; no Docker/CGo required for baseline build. |
 | M2-02 | implementation / `complete` | Define opaque IDs, stable error taxonomy, job/attempt/operation/event models, capability states, and monotonic transition rules. | JOB-01, DOM-01/02/03, PRV-03, API-03 | M2-01 | No / No | Table-driven domain tests, unknown states, cancellation/result separation, no provider imports. |
 | M2-03 | implementation / `complete` | Create versioned job/result/config JSON schemas and OpenAPI skeleton with strict validation. | JOB-01/02/03, API-01/03 | M2-02 | No / No | Schema/example validation; unknown fields/path/enums/limits rejected; generated contract diff checked. |
-| M2-04 | implementation / `in-review` | Define narrow provider/store/blob/credential/clock/event ports and registry; implement deterministic fake provider. | PRD-03, PRV-01/03, VER-01 | M2-02 | No / No | Contract suite completes generic lifecycle with no Kaggle import and with missing cancel/log/quota variants. |
-| M2-05 | implementation / `proposed` | Implement workspace tokens/digests, authorization service, loopback HTTP middleware, request IDs, body/rate limits. | PRD-07, API-01/02, SEC-02 | M2-02/M2-03 | No / No | Full cross-workspace matrix and default exposure/auth tests. |
-| M2-06 | implementation / `proposed` | Implement streaming object upload and filesystem blob lifecycle with immutable digests and atomic publication. | DAT-01, DUR-01, API-01, SEC-02 | M2-02/M2-03 | No / No | Temp-file/disk/error/restart component tests; incomplete bytes never become usable. |
+| M2-04 | implementation / `complete` | Define narrow provider/store/blob/credential/clock/event ports and registry; implement deterministic fake provider. | PRD-03, PRV-01/03, VER-01 | M2-02 | No / No | Contract suite completes generic lifecycle with no Kaggle import and with missing cancel/log/quota variants. |
+| M2-05 | implementation / `in-review` | Implement workspace tokens/digests, authorization service, loopback HTTP middleware, request IDs, body/rate limits. | PRD-07, API-01/02, SEC-02 | M2-02/M2-03 | No / No | PR #7: cross-workspace/profile/scope/revocation matrix, Host/Origin/default exposure checks, real-loopback bounded HTTP tests; persistent token repository deferred to M3. |
+| M2-06 | implementation / `in-review` | Implement streaming object upload and filesystem blob lifecycle with immutable digests and atomic publication. | DAT-01, DUR-01, API-01, SEC-02 | M2-02/M2-03 | No / No | PR #7: streamed checksum/length validation, real process-kill recovery, disk/commit-ambiguity tests, quota/permissions and local smoke; incomplete bytes never usable; SQLite ownership integration deferred to M3. |
 | M2-07 | implementation / `proposed` | Implement safe `.tar.gz` packaging/inspection and allowlisted local import. | DAT-01/02, SEC-02 | M2-06 | No / No | Archive corpus covers traversal, links, collisions, bombs, path limits, and snapshot races. |
 | M2-08 | implementation / `proposed` | Implement bounded public HTTPS ingestion with SSRF and redirect protection. | DAT-01/03, SEC-02 | M2-06 | No / No | Controlled DNS/HTTP tests cover private/link-local/metadata endpoints, redirects, size/time budgets, and log redaction. |
 | M2-09 | implementation / `proposed` | Implement generic remote-runner contract and local deterministic runner tests without executing admitted workload code on the host. | JOB-02/03/05, SEC-02 | M2-02/M2-03 | No / No | Manifest/setup/payload/timeout/process-group/failure tests; host admission never runs uploaded commands. |
@@ -189,11 +195,13 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M2-04 review
+## Next work after M2-05/M2-06 review
 
-M2-05 (workspace authentication/HTTP middleware) and M2-06 (immutable object storage)
-have their domain/schema prerequisites. Start only the owner's next authorized task on a
-focused branch. No live credential or provider capability was verified by M2-04.
+After PR #7 merges, M2-07 (safe packaging/local import) and M2-08 (bounded HTTPS ingestion)
+have their object-storage prerequisite. M2-09 remains a separate runner task. Start only
+the owner's next authorized task on a focused branch; do not expand this combined PR.
+M3 must supply persistent ownership/token repositories and database recovery before a
+production runtime can advertise durable uploads or admission.
 
 M1-02 remains an operator-run, explicitly authorized read-only probe. Provider mutation,
 GPU allocation, cleanup and the full Kaggle adapter retain their separate evidence gates.

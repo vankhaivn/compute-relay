@@ -1,6 +1,8 @@
 # Architecture baseline
 
-> **Status:** approved baseline derived from the project proposal; implementation has not started.
+> **Status:** approved baseline with offline domain, contract, provider/fake,
+> authentication, HTTP and filesystem-object components. Production composition and
+> durable SQLite orchestration are not implemented yet.
 
 ## System intent
 
@@ -34,6 +36,23 @@ Kaggle adapter | fake provider | SQLite | filesystem | subprocess boundary
 ```
 
 The composition root selects concrete implementations. HTTP handlers must not contain provider scheduling logic. Provider adapters must not own the durable queue or mutate arbitrary domain rows.
+
+## Implemented auth and object boundary
+
+M2-05/M2-06 add `auth`, `api`, `objects` and `blobfs`. The HTTP layer authenticates and
+bounds requests; the object service verifies authority and coordinates byte publication
+with a separate metadata repository. The BlobStore port retains its M2-04 shape through a
+shared `domain.ObjectMetadata` value.
+
+Filesystem data and an identity manifest are flushed and atomically published together.
+Ownership metadata is committed separately before a successful receipt. Failed or ambiguous
+metadata acknowledgement retains complete blobs for reconciliation. Test support is
+explicitly nondurable and is not wired into a production `serve` command.
+
+See [ADR-0004](decisions/0004-workspace-auth-and-atomic-objects.md) and
+[`auth-and-objects.md`](auth-and-objects.md) for concurrency, permissions, limits, failure
+semantics and the local executable smoke test. SQLite ownership, state locking and the
+runtime composition remain later acceptance gates.
 
 ## Control plane and workload boundary
 
@@ -79,7 +98,9 @@ The approved defaults are:
 - Python and explicit remote Linux shell jobs for MVP; and
 - direct installation as the primary path, with Docker optional.
 
-Concrete router, SQLite driver, migration tooling, process-management details, and Kaggle transport selection require implementation research and ADRs.
+Material decisions and unresolved implementation gates are recorded in the
+[`decisions/`](decisions/README.md) index and implementation plan. The HTTP foundation
+uses standard-library `net/http`; no new dependency is introduced by M2-05/M2-06.
 
 ## Architecture acceptance
 

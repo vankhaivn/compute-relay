@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "f11b59424fa8c230009c73bcb7850cd8619d7ad7c7e6fba40581f38ecbd091db",
-      "bytes": 2310
+      "sha256": "697d995ac867d332621d1e0851f2d97325937e343c3989a8957e98d474bab153",
+      "bytes": 2627
     },
     {
       "path": "api/examples/error.submission-unknown.valid.json",
@@ -52,6 +52,21 @@
       "bytes": 1160
     },
     {
+      "path": "api/examples/invalid/object.bad-digest.json",
+      "sha256": "21e47452a48fdd9c886740cbf16f7d894dfdac2d75821a51daa1078447bd8e9a",
+      "bytes": 104
+    },
+    {
+      "path": "api/examples/invalid/object.negative-bytes.json",
+      "sha256": "055caa8f34eb9d72325c53691956ccc7f264502e9834220d82b23618e9da4a71",
+      "bytes": 157
+    },
+    {
+      "path": "api/examples/invalid/object.unknown-field.json",
+      "sha256": "66b9808f382f4bf3095923f5b75942c26aef6465b2bbe389169311d14bbc1c8c",
+      "bytes": 193
+    },
+    {
       "path": "api/examples/invalid/operation.failed-without-problem.json",
       "sha256": "2a4ff927593d978c4ff0dbf581f86e327f772bc623cea2d151522a1fd0ff599a",
       "bytes": 281
@@ -97,6 +112,11 @@
       "bytes": 1159
     },
     {
+      "path": "api/examples/object.valid.json",
+      "sha256": "866e23ec4076c525323eee294dcdcc302d5916da8da4f2715b6b51b9443de2e0",
+      "bytes": 156
+    },
+    {
       "path": "api/examples/operation.manual-required.valid.json",
       "sha256": "34ed55d0d21ef554526ed2d679fc667d5eaff447e5c8949eab066255b3978693",
       "bytes": 566
@@ -113,13 +133,13 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "3627a8ae954c251666206dcefd9d92f993f5527433454bd58857a66f528bf3d5",
-      "bytes": 15438
+      "sha256": "7c22a0d417ca045df5769714b8f236d53c2be9d75a37df1226acdbaec269809b",
+      "bytes": 18693
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",
-      "sha256": "1a6b67843e442b18425e57823f4aeab17278dc73dbda175392468cde2f947bf0",
-      "bytes": 8379
+      "sha256": "2c571593961d08c44d2e3b628d0173487cbef8af832684100dbb1fa9f1ba246b",
+      "bytes": 8440
     },
     {
       "path": "api/schemas/error.v1alpha1.schema.json",
@@ -145,6 +165,11 @@
       "path": "api/schemas/job-validation.v1alpha1.schema.json",
       "sha256": "f353b3b2de191838c99da59ce2cfc3b0742a0b07b51c7b933ce1c7fc22a386bc",
       "bytes": 1177
+    },
+    {
+      "path": "api/schemas/object.v1alpha1.schema.json",
+      "sha256": "3718f8a5af8659f3f4452c740bab97007de5449c8dac5cb6cde32f78824f18de",
+      "bytes": 651
     },
     {
       "path": "api/schemas/operation.v1alpha1.schema.json",

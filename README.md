@@ -1,8 +1,8 @@
 # Compute Relay
 
-> **Project status:** M-0 evidence, scope, architecture decisions, and implementation
-> planning. No runtime binary, public API, or Kaggle execution path has been implemented or
-> live-verified yet.
+> **Project status:** portable-core implementation. Domain/contracts, fake provider,
+> workspace authentication and immutable upload components are implemented offline.
+> Production server/SQLite composition and the live Kaggle path are not implemented yet.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -42,11 +42,16 @@ The repository currently establishes:
 - an acceptance-based roadmap and dependency-aware M-0 through M-6 implementation plan;
 - a dated review of Kaggle CLI `v2.2.4` and K-01 through K-16 feasibility ledger;
 - initial ADRs for the official-client boundary, attempt-scoped Kaggle identity, and
-  Go/SQLite baseline; and
-- a risk register, compatibility target matrix, and live-verification checklist.
+  Go/SQLite baseline;
+- a risk register, compatibility target matrix, and live-verification checklist;
+- Go tooling, a pre-release help/version executable, strict API schemas, domain state
+  semantics, provider ports and a deterministic fake provider; and
+- workspace token/authorization services, guarded loopback HTTP, streamed immutable object
+  storage, fault/restart tests and a finite upload smoke command.
 
-No Kaggle credential, provider resource, or GPU quota was used to establish the M-0
-baseline. Upstream-documented surfaces remain distinct from authorized live evidence.
+SQLite-backed ownership/token repositories and a production `serve` command are still
+pending. The upload smoke uses an explicitly nondurable metadata fixture, not a production
+fallback. Filesystem blob restart evidence does not imply durable runtime admission.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -60,6 +65,8 @@ live Kaggle support.
 | [`AGENTS.md`](AGENTS.md) | Mandatory repository-wide instructions for humans and coding agents. |
 | [`docs/scope-and-requirements.md`](docs/scope-and-requirements.md) | Requirement-to-component-to-test traceability. |
 | [`docs/architecture.md`](docs/architecture.md) | Provider-neutral architecture baseline and invariants. |
+| [`docs/auth-and-objects.md`](docs/auth-and-objects.md) | Implemented workspace auth, HTTP/upload boundary, blob recovery and smoke checks. |
+| [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
 | [`docs/research/kaggle-interface-review.md`](docs/research/kaggle-interface-review.md) | Pinned official-client source review and M-1 probe sequence. |
@@ -73,10 +80,24 @@ live Kaggle support.
 
 See [`docs/README.md`](docs/README.md) for the complete documentation system.
 
+## Local developer smoke
+
+With the pinned Go toolchain, from the repository root:
+
+```text
+go run ./cmd/uploadsmoke
+```
+
+This finite developer check exercises actual loopback HTTP, synthetic workspace tokens,
+streamed upload, digest verification, isolation, revocation and reopened temporary blob
+storage. It exits and cleans up; it is not a production runtime and never calls Kaggle.
+See [`docs/auth-and-objects.md`](docs/auth-and-objects.md) for its evidence limits.
+
 ## Current execution boundary
 
-Offline implementation can begin after the M-0 planning change is merged. Provider-neutral
-core work does not require Kaggle credentials.
+Provider credentials and live probes belong to each operator's own runtime. GitHub Actions
+are offline code-quality/build/test checks only, not deployment or GPU execution workflows.
+The local Linux engineering runtime is used for executable smoke checks where available.
 
 Live Kaggle tasks require explicit authorization for the exact credential use and finite
 side effect:

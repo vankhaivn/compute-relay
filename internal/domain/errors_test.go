@@ -13,7 +13,7 @@ func TestErrorTaxonomyCategories(t *testing.T) {
 	expected := map[ErrorCategory][]ErrorCode{
 		ErrorCategoryValidation: {
 			CodeInvalidJobSpec, CodeUnsupportedCapability, CodeInvalidInputPath,
-			CodeResourceRequirementUnsatisfied,
+			CodeResourceRequirementUnsatisfied, CodeInvalidRequest,
 		},
 		ErrorCategoryAuthenticationAuthorization: {
 			CodeRuntimeAuthRequired, CodeWorkspaceForbidden, CodeProviderAuthFailed,
@@ -48,7 +48,7 @@ func TestErrorTaxonomyCategories(t *testing.T) {
 		},
 		ErrorCategoryLocalRuntime: {
 			CodeStateStoreUnavailable, CodeDiskLimitExceeded, CodeStateDirectoryLocked,
-			CodeConfigurationInvalid,
+			CodeConfigurationInvalid, CodeRequestLimitExceeded,
 		},
 	}
 
