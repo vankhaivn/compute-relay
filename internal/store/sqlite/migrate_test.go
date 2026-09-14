@@ -43,7 +43,7 @@ func TestUpgradeFromFirstMigrationPreservesIdentity(t *testing.T) {
 	}
 	defer s.Close()
 	info, _ := s.Info(testctx)
-	if info.InstallationID != before || info.SchemaVersion != 2 {
+	if info.InstallationID != before || info.SchemaVersion != len(migrations) {
 		t.Fatal("bad upgrade", info)
 	}
 	workspace(t, s, "upgraded")
@@ -56,7 +56,7 @@ func TestFailedMigrationIsAtomic(t *testing.T) {
 	s, _ := newStore(t)
 	sql := "CREATE TABLE partial_migration (v INTEGER); INSERT INTO nonexistent_table VALUES(1);"
 	sum := sha256.Sum256([]byte(sql))
-	set := append(append([]migration{}, migrations...), migration{3, "0003_injected.sql", sql, hex.EncodeToString(sum[:])})
+	set := append(append([]migration{}, migrations...), migration{len(migrations) + 1, "injected.sql", sql, hex.EncodeToString(sum[:])})
 	if err := migrate(testctx, s.db, set); err == nil {
 		t.Fatal("invalid migration succeeded")
 	}
@@ -64,7 +64,7 @@ func TestFailedMigrationIsAtomic(t *testing.T) {
 	if err := s.db.QueryRow("SELECT count(*) FROM sqlite_schema WHERE name='partial_migration'").Scan(&count); err != nil || count != 0 {
 		t.Fatal("partial DDL persisted", err)
 	}
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
 		t.Fatal("failed migration advanced version")
 	}
 	if err := s.Ready(testctx); err != nil {

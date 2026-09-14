@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
 	"github.com/vankhaivn/compute-relay/internal/buildinfo"
@@ -26,8 +27,9 @@ import (
 )
 
 type Config struct {
-	HTTPSInputs    *objects.Ingestor // nil disables HTTPS ingestion; operator composition supplies the guarded client.
-	LocalImports   *objects.Importer // nil disables local import; configured by the operator composition root.
+	Jobs           *admission.Service // nil disables durable job routes; never use a memory fallback.
+	HTTPSInputs    *objects.Ingestor   // nil disables HTTPS ingestion; operator composition supplies the guarded client.
+	LocalImports   *objects.Importer   // nil disables local import; configured by the operator composition root.
 	Listen         string
 	MaxJSONBytes   int64
 	MaxUploadBytes int64
@@ -189,10 +191,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/v1/info" && r.Method == http.MethodGet {
-		respond(w, 200, map[string]any{"api_version": "compute-connector/v1alpha1", "runtime_version": buildinfo.Current().Version, "implementation_status": "implemented-offline", "features": []string{"workspace_auth", "object_upload", "object_metadata"}, "job_admission": "not_implemented"})
+		features := []string{"workspace_auth", "object_upload", "object_metadata"}
+		admissionStatus := "not_implemented"
+		if h.config.Jobs != nil {
+			features = append(features, "job_admission", "job_validation", "job_status")
+			admissionStatus = "implemented-offline"
+		}
+		respond(w, 200, map[string]any{"api_version": "compute-connector/v1alpha1", "runtime_version": buildinfo.Current().Version, "implementation_status": "implemented-offline", "features": features, "job_admission": admissionStatus})
 		return
 	}
-	if len(segments) < 4 || segments[0] != "v1" || segments[1] != "workspaces" || segments[3] != "objects" {
+	if len(segments) < 4 || segments[0] != "v1" || segments[1] != "workspaces" || (segments[3] != "objects" && segments[3] != "jobs") {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "route not implemented")
 		return
 	}
@@ -203,6 +211,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if workspace != principal.WorkspaceID() {
 		mapError(w, r, auth.ErrForbidden)
+		return
+	}
+	if segments[3] == "jobs" {
+		h.jobs(w, r, principal, workspace, segments)
 		return
 	}
 	if isIngest {

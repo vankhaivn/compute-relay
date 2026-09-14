@@ -48,7 +48,7 @@ func TestIdentityPragmasAndDurableRepositories(t *testing.T) {
 	workspace(t, s, "a")
 	workspace(t, s, "b")
 	info, err := s.Info(testctx)
-	if err != nil || !validID(info.InstallationID) || info.SchemaVersion != 2 || info.JournalMode != "wal" || info.Synchronous != 2 || !info.ForeignKeys {
+	if err != nil || !validID(info.InstallationID) || info.SchemaVersion != len(migrations) || info.JournalMode != "wal" || info.Synchronous != 2 || !info.ForeignKeys {
 		t.Fatalf("bad info: %+v %v", info, err)
 	}
 	if err := s.Ready(testctx); err != nil {
