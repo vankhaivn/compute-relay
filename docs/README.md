@@ -33,7 +33,8 @@ owner-approved proposal update.
 | [`providers/contract.md`](providers/contract.md) | M2-04 implemented offline | Provider contracts, deterministic fake, infrastructure ports and local smoke. |
 | [`auth-and-objects.md`](auth-and-objects.md) | M2-05/M2-06 implemented offline; merged | Workspace authorization, HTTP guards, streaming upload, atomic blobs and recovery boundaries. |
 | [`packaging-and-import.md`](packaging-and-import.md) | M2-07 implemented offline; merged | Explicit bundle commands, strict archive validation, rooted snapshots and opt-in local import. |
-| [`https-ingestion.md`](https-ingestion.md) | M2-08 implemented offline; in review | Public HTTPS snapshots, DNS/peer/TLS and redirect defenses, bounded transfers and no source refresh. |
+| [`https-ingestion.md`](https-ingestion.md) | M2-08 implemented offline; merged | Public HTTPS snapshots, DNS/peer/TLS and redirect defenses, bounded transfers and no source refresh. |
+| [`../runner/README.md`](../runner/README.md) | M2-09 implemented offline; in review | Finite Linux runner, frozen-input manifest, setup/process/log/output bounds, CPU fixtures and provider-evidence limitations. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
@@ -77,6 +78,7 @@ level and capability support must not be collapsed into one optimistic checkbox.
 | Authentication/object lifecycle | auth-and-objects, ADR-0004, architecture, `api/`, plan, tests |
 | Bundle/import safety | packaging-and-import, ADR-0005, `api/`, ignore example, plan, tests |
 | HTTPS/SSRF policy | https-ingestion, ADR-0006, `api/`, plan, transport/service/API tests |
+| Remote runner/execution contract | runner/README, ADR-0007, runner schemas/assets lock, public result schema, architecture, plan, CPU/contract tests |
 | Persistence/recovery | ADR, architecture, domain model, risks, plan, operations/testing |
 | Provider client/version/capability | interface review, feasibility, provider docs, compatibility, risk register |
 | Live probe | feasibility gate, sanitized evidence, capability matrix, compatibility date |
