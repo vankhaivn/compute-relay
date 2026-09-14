@@ -47,5 +47,9 @@ Semantic Versioning once a public compatibility surface exists.
 - Rooted, workspace-allowlisted local file/bundle import through the existing verified
   upload/ownership path, plus HTTP/schema tests and a finite local packaging smoke command.
 - ADR-0005 recording the strict USTAR subset, source snapshot semantics and import boundary.
+- M2-08 opt-in public HTTPS input snapshots with per-hop DNS/peer/TLS checks, bounded
+  redirects/time/bytes, no ambient credentials/proxies, and verified immutable publication.
+- Strict HTTPS ingestion request schema/OpenAPI, service/API fault tests, a finite local
+  TLS smoke and ADR-0006 documenting the public-address and retry/privacy boundaries.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

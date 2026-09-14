@@ -29,10 +29,11 @@ owner-approved proposal update.
 | [`scope-and-requirements.md`](scope-and-requirements.md) | M-0 baseline | Stable requirement IDs mapped to components, acceptance evidence, and milestones. |
 | [`architecture.md`](architecture.md) | Approved baseline | Provider-neutral layers, responsibilities, entities, and invariants. |
 | [`domain-model.md`](domain-model.md) | M2-02 implemented offline | Typed IDs, entities, capability evidence, structured errors, independent state dimensions, and transition invariants. |
-| [`../api/README.md`](../api/README.md) | Contracts and six handlers implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock, operation status and validation workflow. |
+| [`../api/README.md`](../api/README.md) | Contracts and seven handlers implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock, operation status and validation workflow. |
 | [`providers/contract.md`](providers/contract.md) | M2-04 implemented offline | Provider contracts, deterministic fake, infrastructure ports and local smoke. |
 | [`auth-and-objects.md`](auth-and-objects.md) | M2-05/M2-06 implemented offline; merged | Workspace authorization, HTTP guards, streaming upload, atomic blobs and recovery boundaries. |
-| [`packaging-and-import.md`](packaging-and-import.md) | M2-07 implemented offline; in review | Explicit bundle commands, strict archive validation, rooted snapshots and opt-in local import. |
+| [`packaging-and-import.md`](packaging-and-import.md) | M2-07 implemented offline; merged | Explicit bundle commands, strict archive validation, rooted snapshots and opt-in local import. |
+| [`https-ingestion.md`](https-ingestion.md) | M2-08 implemented offline; in review | Public HTTPS snapshots, DNS/peer/TLS and redirect defenses, bounded transfers and no source refresh. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
@@ -75,6 +76,7 @@ level and capability support must not be collapsed into one optimistic checkbox.
 | Domain state/error semantics | domain model, architecture, requirement matrix, `api/schemas/common*`, plan, tests |
 | Authentication/object lifecycle | auth-and-objects, ADR-0004, architecture, `api/`, plan, tests |
 | Bundle/import safety | packaging-and-import, ADR-0005, `api/`, ignore example, plan, tests |
+| HTTPS/SSRF policy | https-ingestion, ADR-0006, `api/`, plan, transport/service/API tests |
 | Persistence/recovery | ADR, architecture, domain model, risks, plan, operations/testing |
 | Provider client/version/capability | interface review, feasibility, provider docs, compatibility, risk register |
 | Live probe | feasibility gate, sanitized evidence, capability matrix, compatibility date |
