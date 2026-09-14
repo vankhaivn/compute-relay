@@ -1,8 +1,7 @@
 # Architecture baseline
 
-> **Status:** approved baseline with offline domain, contract, provider/fake,
-> authentication, HTTP, filesystem-object, finite remote-runner and SQLite components.
-> Durable job admission, orchestration and production composition remain later tasks.
+> **Status:** approved baseline with offline portable-core, SQLite and durable admission
+> components. Scheduling, provider dispatch and production composition remain later tasks.
 
 ## System intent
 
@@ -68,9 +67,26 @@ refuses existing destinations and preserves identity. Blob availability and comp
 installation recovery are separate checks.
 
 See [ADR-0008](decisions/0008-sqlite-durability-and-backup.md) and
-[`storage.md`](storage.md). Job/attempt/idempotency persistence starts in M3-02; scheduler,
-submission intents and combined state/event transactions follow their own gates. SQLite
-repository availability is not a claim that these orchestration paths or `serve` exist.
+[`storage.md`](storage.md). Repository availability is not a claim that scheduling,
+submission-intent recovery or production `serve` exists.
+
+## Implemented durable admission
+
+M3-02 adds `internal/admission` and SQLite migration 3. The application service parses the
+existing embedded job schema and creates a versioned canonical request identity. The store
+rechecks token/workspace authority and commits job, attempt/nonce, frozen profile revision,
+object references, accepted event and original idempotency receipt together.
+
+A replay recovers original IDs and resolution before considering current profile mappings
+or limits, without bypassing current authorization. Direct HTTPS sources remain explicitly
+pending in the durable request; byte inspection/snapshotting belongs to preparation before
+dispatch. No admission path downloads data, contacts a provider or invokes the remote runner.
+
+The existing attempt CAS port commits state and its next sequenced event atomically. Three
+optional HTTP handlers expose create, no-compute validation and cached status. A nil admission
+service does not substitute memory persistence. See [ADR-0009](decisions/0009-durable-idempotent-admission.md)
+and [`admission.md`](admission.md) for normalization, limits, failure tests and unresolved
+preparation/dispatch work. Local admission idempotency is not exactly-once remote execution.
 
 ## Control plane and workload boundary
 
@@ -133,6 +149,7 @@ Material decisions and unresolved implementation gates are recorded in the
 [`decisions/`](decisions/README.md) index and implementation plan. The HTTP foundation
 uses standard-library `net/http`. M3-01 pins the CGo-free modernc SQLite driver and matching
 libc; exact versions and durability settings are in the storage guide and Go module files.
+M3-02 reuses the already pinned JSON Schema validator for closed, embedded runtime validation.
 The M2-09 runner and its unit tests use the Python standard library; the optional GPU
 probe relies on the separately verified remote environment's PyTorch installation.
 

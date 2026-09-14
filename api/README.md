@@ -1,10 +1,10 @@
 # API contracts
 
-> **Tasks:** M2-03 contract baseline; M2-05/M2-06 authentication and object handlers;
-> M2-07 bundle manifests/local import; M2-08 bounded public HTTPS ingestion.
+> **Tasks:** M2-03 contracts; M2-05 through M2-08 auth/object input handlers;
+> M3-02 durable job admission, validation and cached status.
 >
-> **Status:** contracts and seven handler operations are implemented offline. The production
-> runtime composition and all job/operation routes remain planned; no live provider claim.
+> **Status:** contracts and ten handler operations are implemented offline. Production
+> composition, scheduling, provider dispatch and control operations remain planned.
 
 ## Contract versions
 
@@ -59,11 +59,15 @@ bounded labels or diagnostic details. Schemas validate:
 - result-manifest requirements such as zero exit code, no error, and verified GPU when a
   completed run says GPU was required.
 
-Some invariants are intentionally not forced into JSON Schema because they require runtime
-context or arithmetic. Application/config validation must additionally check unique
-normalized input/output targets, setup/finalization budgets within the remote wall budget,
-workspace ownership, profile/provider references, policy upper bounds, immutable object
-existence, and actual provider capability.
+Some invariants require runtime context or arithmetic. Admission additionally checks
+input-name/path collisions, setup/finalization budgets, reserved environment variables,
+workspace ownership and current profile-policy bounds. Byte integrity, bundle layout,
+provider capability and remaining preparation checks must still pass before dispatch.
+
+The admission parser uses these embedded schemas with external loading disabled. It rejects
+duplicate decoded keys, invalid Unicode, trailing values, excessive nesting and oversized
+canonical expansion. Request identity uses a named integer-only format, not raw JSON bytes
+or an RFC 8785 claim. See [`../docs/admission.md`](../docs/admission.md).
 
 Bundle/import schemas impose a stricter portable ASCII path subset. Runtime validation
 additionally checks case/prefix collisions, manifest ordering, allowed roots, exclusions,
@@ -79,7 +83,7 @@ schema can still be rejected as an unsafe destination before a network connectio
 
 ## OpenAPI status
 
-The following seven operations have offline handler and loopback integration evidence:
+The following ten operations have offline component and HTTP integration evidence:
 
 ```text
 GET  /healthz
@@ -89,6 +93,9 @@ POST /v1/workspaces/{workspace_id}/objects
 GET  /v1/workspaces/{workspace_id}/objects/{object_id}
 POST /v1/workspaces/{workspace_id}/objects/import
 POST /v1/workspaces/{workspace_id}/objects/ingest
+POST /v1/workspaces/{workspace_id}/jobs/validate
+POST /v1/workspaces/{workspace_id}/jobs
+GET  /v1/workspaces/{workspace_id}/jobs/{job_id}
 ```
 
 Only `/healthz` is public. The readiness callback checks local services, not provider or
@@ -98,18 +105,27 @@ Local import is disabled unless the operator composes a named, workspace-allowed
 manager. HTTPS ingestion is disabled unless a guarded input service is supplied; it only
 fetches permitted public HTTPS sources, never arbitrary headers or provider credentials.
 
+Job creation requires write scope and exactly one 8–256 byte printable-ASCII
+`Idempotency-Key`, with no whitespace. Job validation/status require read scope. Job,
+first attempt/nonce, profile revision, object references, event and receipt commit together
+before 202. Repeated equivalent requests return original IDs and `idempotency_replay=true`;
+changed requests return 409. Replay preserves original resolution but still checks current
+authority. No job handler executes uploaded commands, downloads URLs or calls a provider.
+
+The admission service must be supplied explicitly; nil configuration has no nondurable
+fallback. `/v1/info` reports whether that service is configured. Validation reports remaining
+`before_dispatch` and `verify_after_start` checks rather than claiming provider eligibility.
+Direct HTTPS input records can be durably accepted while still pending preparation.
+
 See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for HTTP/ownership limits,
 [`../docs/packaging-and-import.md`](../docs/packaging-and-import.md) for import/bundle safety,
-and [`../docs/https-ingestion.md`](../docs/https-ingestion.md) for SSRF policy, streaming
-budgets and URL privacy. Runtime token/object repositories are still test fixtures until
-persistent SQLite composition is implemented.
+[`../docs/https-ingestion.md`](../docs/https-ingestion.md) for SSRF policy, and
+[`../docs/admission.md`](../docs/admission.md) for canonicalization, replay and frozen inputs.
+SQLite repositories exist; production CLI/configuration composition remains separate.
 
-These eight operations remain `planned`:
+These five operations remain `planned`:
 
 ```text
-POST /v1/workspaces/{workspace_id}/jobs/validate
-POST /v1/workspaces/{workspace_id}/jobs
-GET  /v1/workspaces/{workspace_id}/jobs/{job_id}
 POST /v1/workspaces/{workspace_id}/jobs/{job_id}/cancel
 POST /v1/workspaces/{workspace_id}/jobs/{job_id}/retry
 POST /v1/workspaces/{workspace_id}/jobs/{job_id}/reconcile
@@ -117,9 +133,10 @@ POST /v1/workspaces/{workspace_id}/jobs/{job_id}/collect
 GET  /v1/workspaces/{workspace_id}/operations/{operation_id}
 ```
 
-The root status remains `planned` because a production CLI/SQLite runtime is not composed
-yet. Artifact transfer, listings, logs, events, attempts, profiles and quota remain approved
-API work and must be added with their actual application/storage behavior.
+The root status remains `planned` because a production runtime is not composed yet.
+Artifact transfer, listings, logs, events, attempts, profiles and quota retain their own
+implementation gates. Receipt links reserve these contract locations; they do not claim
+that the corresponding collection routes exist.
 
 `GET` operations are observational. Compute creation requires an explicit `POST`, and job
 creation/compute retry expose an `Idempotency-Key` requirement. Provider names, notebook
@@ -150,10 +167,10 @@ PowerShell and CMD wrappers accept the same task names.
 6. loads and validates OpenAPI 3.1.1 and its operation/status inventory; and
 7. verifies `contract.lock.json` is current.
 
-Tests additionally check actual serialized object/error/import/bundle/HTTPS-input types and
-fixture decoding against their contracts. No fixture URL is fetched by schema validation.
-`contract-lock` is the explicit update step after reviewing an intentional JSON contract or
-fixture change. CI runs `contract-check`; CI never contacts Kaggle or allocates compute.
+Tests additionally validate serialized object/error/import/bundle/HTTPS-input types and
+actual admission/validation/status HTTP responses against their contracts. No fixture URL
+is fetched by schema validation. `contract-lock` is the explicit update step after reviewing
+an intentional JSON change. CI never contacts Kaggle or allocates compute.
 
 ## Change policy
 

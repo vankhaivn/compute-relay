@@ -1,6 +1,6 @@
 # Go toolchain and developer commands
 
-> **Origin:** M2-01 Go module/offline CI foundation; updated through M3-01 storage.
+> **Origin:** M2-01 Go module/offline CI foundation; updated through M3-02 admission.
 >
 > **Status:** implemented offline. Runtime/API/provider behavior remains scoped to its own
 > implementation tasks.
@@ -9,14 +9,15 @@
 
 - Module: `github.com/vankhaivn/compute-relay`
 - Go directive and CI toolchain: `go1.27.1`
-- CGo: disabled for the baseline build check, including the SQLite store and smoke command.
+- CGo: disabled for the baseline build check, including SQLite and admission components.
 - Executable: `cmd/compute-relay`, with help/version and explicit bundle commands.
 - Contract tool: `cmd/contractcheck`, for repository-local JSON Schema/OpenAPI validation.
 - Metadata smoke: `cmd/storesmoke`, using temporary SQLite, synthetic tokens and database-only backup/restore.
+- Admission smoke: `cmd/admissionsmoke`, using temporary SQLite for concurrent/restarted receipt replay and conflict checks.
 
-HTTP, input and provider interfaces now have offline components. Production `serve`,
-durable job admission and orchestration remain later tasks. A contract marked `planned`
-is not endpoint implementation.
+HTTP, input, provider interfaces and durable local admission now have offline components.
+Production `serve`, scheduling and provider dispatch remain later tasks. A contract marked
+`planned` is not endpoint implementation.
 
 ## Commands
 
@@ -35,10 +36,11 @@ The repository-owned Go task runner keeps behavior identical across shells:
 | Build | `./scripts/dev.sh build` | `./scripts/dev.ps1 build` | `scripts\dev.cmd build` | Build all packages with `CGO_ENABLED=0` and `-trimpath`. |
 | Required checks | `./scripts/dev.sh check` | `./scripts/dev.ps1 check` | `scripts\dev.cmd check` | Format, module, contract, vet, unit-test, and build checks. |
 
-GNU Make and Docker are not prerequisites. The finite metadata smoke is shell-independent:
+GNU Make and Docker are not prerequisites. The finite metadata smokes are shell-independent:
 
 ```text
 go run ./cmd/storesmoke
+go run ./cmd/admissionsmoke
 ```
 
 ## CI evidence
@@ -53,9 +55,10 @@ The workflow watches `api/**` and embedded SQLite migration paths, so schema-onl
 cannot bypass their checks. It does not authenticate a provider, create remote resources,
 deploy the runtime, or allocate GPU compute.
 
-M3-01 adds native SQLite/state-lock and private-permission component tests. A CI pass is
-still scoped to the hosted runner image and tested operations, not every filesystem,
-provider-client installation, power-loss scenario or full release support claim.
+M3 adds native SQLite/state-lock, permissions, admission, crash and HTTP component tests.
+A CI pass is still scoped to the hosted runner image and tested operations, not every
+filesystem, provider-client installation, power-loss scenario or full release support claim.
+Local isolation-harness limitations are recorded separately in the admission guide.
 
 ## Dependency and license inventory
 
@@ -63,17 +66,22 @@ provider-client installation, power-loss scenario or full release support claim.
 |---|---|---|---|
 | Go toolchain | `1.27.1` | Compiler, standard library, formatter, vet, test, race, build. | BSD-style Go license; official Go distribution. |
 | `github.com/getkin/kin-openapi` | `v0.149.0` | Parse/resolve/validate the committed OpenAPI 3.1 document offline. | MIT; pinned upstream release. |
-| `github.com/santhosh-tekuri/jsonschema/v6` | `v6.0.3` | Compile Draft 2020-12 schemas and validate examples with format assertions. | Apache-2.0; pinned upstream release. |
+| `github.com/santhosh-tekuri/jsonschema/v6` | `v6.0.3` | Draft 2020-12 contract checks and embedded runtime job validation. | Apache-2.0; existing pinned release, no M3-02 version change. |
 | `modernc.org/sqlite` | `v1.58.0` | CGo-free SQLite metadata store. | BSD-3-Clause; tagged source/license reviewed in ADR-0008. |
 | `modernc.org/libc` | `v1.75.6` | Exact driver-required runtime dependency. | Version follows the driver's tagged `go.mod`; preserve upstream distribution notices. |
 | `actions/checkout` | commit `3d3c42e5...` (`v7.0.1`) | CI source checkout. | MIT; official GitHub action. |
 | `actions/setup-go` | commit `b7ad1dad...` (`v7.0.0`) | Install exact Go toolchain in CI. | MIT; official GitHub action. |
 
-Contract validators remain development/build dependencies. SQLite is imported by the store
-and metadata smoke command, not a production `serve` implementation yet. Exact transitive
-module identities/checksums are recorded in `go.mod` and `go.sum` and verified by `mod-check`.
-Do not change SQLite/libc independently; rerun migration, locking, backup and native tests.
-See [storage](../storage.md) and [ADR-0008](../decisions/0008-sqlite-durability-and-backup.md).
+OpenAPI validation remains a development/build dependency. M3-02 also uses the existing JSON
+Schema validator in the admission application service; it loads only embedded schemas, not
+remote resources. SQLite is used by the store and metadata/admission smoke commands. None
+of these components invents a production `serve` implementation.
+
+Exact transitive identities/checksums remain in `go.mod`/`go.sum` and are verified by
+`mod-check`; neither file changes in M3-02. Do not change SQLite/libc independently; rerun
+migration, locking, backup and native tests. See [storage](../storage.md),
+[admission](../admission.md), [ADR-0008](../decisions/0008-sqlite-durability-and-backup.md)
+and [ADR-0009](../decisions/0009-durable-idempotent-admission.md).
 
 ## Build metadata
 

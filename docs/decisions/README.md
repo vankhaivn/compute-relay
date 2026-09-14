@@ -16,6 +16,7 @@ defaults.
 | [`0006-public-https-ingestion.md`](0006-public-https-ingestion.md) | accepted | Revalidate DNS/peer/TLS on every HTTPS hop, bound transfers and publish immutable inputs only after verified EOF. |
 | [`0007-finite-remote-runner.md`](0007-finite-remote-runner.md) | accepted | Keep one-attempt Python/Linux execution outside admission, with frozen identities, bounded supervision and honest provider-evidence limits. |
 | [`0008-sqlite-durability-and-backup.md`](0008-sqlite-durability-and-backup.md) | accepted | Pin SQLite/libc, protect installation identity with OS locking and ordered migrations, and separate database-only backup/restore from complete runtime recovery. |
+| [`0009-durable-idempotent-admission.md`](0009-durable-idempotent-admission.md) | accepted | Atomically persist canonical request identity, original receipt, job/attempt, frozen resolution and references; replay without remapping or executing compute. |
 
 ## Naming
 

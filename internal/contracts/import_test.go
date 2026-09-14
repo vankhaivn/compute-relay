@@ -39,7 +39,7 @@ func TestImportAndBundleWireShapesMatchSchemas(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if operationStatus("importObject") != "implemented-offline" || operationStatus("createJob") != "planned" {
+	if operationStatus("importObject") != "implemented-offline" || operationStatus("retryJob") != "planned" {
 		t.Fatal("incorrect operation evidence")
 	}
 }

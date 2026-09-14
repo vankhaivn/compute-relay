@@ -232,11 +232,11 @@ func validateOpenAPI(root, relative string) error {
 	return nil
 }
 
-// Handler-level offline evidence does not claim a usable production CLI/SQLite runtime.
-// All job and operation routes remain planned until their own acceptance gates pass.
+// Handler-level evidence does not imply production CLI composition or provider dispatch.
+// Control operations remain planned until their separate acceptance gates pass.
 func operationStatus(id string) string {
 	switch id {
-	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject":
+	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob":
 		return "implemented-offline"
 	default:
 		return "planned"
