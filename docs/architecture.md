@@ -1,8 +1,8 @@
 # Architecture baseline
 
-> **Status:** approved baseline with offline portable-core, SQLite, durable admission
-> and fair scheduling/local ownership. Provider dispatch and production composition remain
-> later tasks; a scheduler claim is not a remote submission intent.
+> **Status:** approved baseline with offline portable-core, SQLite, durable admission,
+> scheduling and one-shot preparation/submission recovery. Durable control operations,
+> artifact collection, production composition and live provider evidence remain later gates.
 
 ## System intent
 
@@ -24,7 +24,7 @@ admission | objects | jobs | operations | artifacts
           |
           v
 Domain and orchestration
-job/attempt state | scheduler | reconciliation | policy
+job/attempt state | scheduler | dispatch/reconciliation | policy
           |
           v
 Ports
@@ -68,8 +68,8 @@ refuses existing destinations and preserves identity. Blob availability and comp
 installation recovery are separate checks.
 
 See [ADR-0008](decisions/0008-sqlite-durability-and-backup.md) and
-[`storage.md`](storage.md). Repository availability is not a claim that
-submission-intent recovery or production `serve` exists.
+[`storage.md`](storage.md). Repository availability alone is not a claim of complete
+orchestration or production `serve` composition.
 
 ## Implemented durable admission
 
@@ -86,8 +86,8 @@ dispatch. No admission path downloads data, contacts a provider or invokes the r
 The existing attempt CAS port commits state and its next sequenced event atomically. Three
 optional HTTP handlers expose create, no-compute validation and cached status. A nil admission
 service does not substitute memory persistence. See [ADR-0009](decisions/0009-durable-idempotent-admission.md)
-and [`admission.md`](admission.md) for normalization, limits, failure tests and unresolved
-preparation/dispatch work. Local admission idempotency is not exactly-once remote execution.
+and [`admission.md`](admission.md) for normalization, limits and failure tests. M3-04 adds
+preparation/dispatch separately; local admission idempotency is not exactly-once execution.
 
 ## Implemented scheduling and ownership
 
@@ -105,11 +105,33 @@ explicitly composed and never runs uploaded commands or calls provider mutations
 not mark inputs ready merely because a local callback returned.
 
 The conservative dispatch barrier is not a remote resource/submission-intent ledger.
-M3-04 must add fenced preparation/intent/observation transitions before remote effects.
+M3-04 adds the separate fenced preparation/intent/observation transactions described below.
 No scheduler administration HTTP surface or production `serve` wiring is introduced.
 See [ADR-0010](decisions/0010-fair-scheduling-and-fenced-local-claims.md) and
 [`scheduler.md`](scheduler.md) for quota uncertainty, worker limits, shutdown, migration
 and local-versus-production test evidence.
+
+## Implemented preparation and one-shot dispatch
+
+M3-04 adds `internal/dispatch`, an explicitly composed engine using the existing scheduler,
+blob store and provider-neutral ports. Pending HTTPS roles become immutable job-object pins;
+bundle/input verification and provider calls run outside SQLite transactions. Resolved
+provider plans contain object identities rather than source URLs and retain the accepted
+configuration revision/account. An adapter must verify the effective binding and support
+read-only staging reconciliation before it can be registered for this engine.
+
+Migration 5 records bounded journals, exact provider-resource ownership and submission
+intents. State/events, journal version and scheduler fence checks commit together. A new
+preparation intent grants one Prepare invocation; a new submission intent grants one Submit
+invocation. Restarted or uncertain callers observe the prewritten identity instead of
+repeating either mutation. A not-found lookup cannot rearm the gate.
+
+Recovery retains possible-activity capacity and can continue while new dispatch is paused.
+Repeated unresolved outcomes become needs_attention with a sanitized cached status problem.
+A terminal observation opens collection, never automatic job success. Resource records stay
+pinned for later cleanup policy. No provider cancellation, compute retry, artifact collection
+or production server wiring is supplied here. See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md)
+and [`dispatch.md`](dispatch.md) for recovery trade-offs, exact tests and adapter obligations.
 
 ## Control plane and workload boundary
 
@@ -174,6 +196,8 @@ uses standard-library `net/http`. M3-01 pins the CGo-free modernc SQLite driver 
 libc; exact versions and durability settings are in the storage guide and Go module files.
 M3-02 reuses the already pinned JSON Schema validator for closed, embedded runtime validation.
 M3-03 adds no dependency and makes no provider call while selecting or inspecting work.
+M3-04 adds no dependency and uses only explicitly registered adapters for provider calls;
+the supplied bound adapter is a nonexecuting fixture, not a live Kaggle implementation.
 The M2-09 runner and its unit tests use the Python standard library; the optional GPU
 probe relies on the separately verified remote environment's PyTorch installation.
 
