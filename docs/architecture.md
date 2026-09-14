@@ -1,8 +1,8 @@
 # Architecture baseline
 
 > **Status:** approved baseline with offline domain, contract, provider/fake,
-> authentication, HTTP and filesystem-object components. Production composition and
-> durable SQLite orchestration are not implemented yet.
+> authentication, HTTP, filesystem-object and finite remote-runner components.
+> Production composition and durable SQLite orchestration are not implemented yet.
 
 ## System intent
 
@@ -60,6 +60,19 @@ The local control plane handles credentials, state, transfers, orchestration, an
 
 A generic remote runner prepares the provider environment, verifies declared requirements, executes one explicit command, captures bounded logs and metadata, writes a result manifest, and exits. It does not receive runtime bearer tokens or provider account credentials and does not poll the local runtime for additional work.
 
+M2-09 implements this asset under `runner/python`, targeting one explicit Linux attempt.
+Its versioned resolved manifest contains frozen identities and staged relative paths, not
+provider configuration or source URLs. It verifies M2-07 bundle framing and input digests,
+uses a replacement environment, supervises process groups, and writes the existing result
+schema plus bounded provenance. No Go production component invokes it locally.
+
+Network enforcement and provider termination remain adapter responsibilities. A runner
+GPU check is not a guarantee that arbitrary payload code uses the GPU; a completed result
+is not accelerator-release evidence. Synthetic CPU/process tests establish offline behavior,
+while actual GPU, managed-package and provider integration require separate verification.
+See [ADR-0007](decisions/0007-finite-remote-runner.md) and the
+[runner guide](../runner/README.md) for exact contracts and limitations.
+
 ## Core entities
 
 - **Workspace:** application namespace and authorization scope for one trusted operator.
@@ -101,6 +114,8 @@ The approved defaults are:
 Material decisions and unresolved implementation gates are recorded in the
 [`decisions/`](decisions/README.md) index and implementation plan. The HTTP foundation
 uses standard-library `net/http`; no new dependency is introduced by M2-05/M2-06.
+The M2-09 runner and its unit tests use the Python standard library; the optional GPU
+probe relies on the separately verified remote environment's PyTorch installation.
 
 ## Architecture acceptance
 

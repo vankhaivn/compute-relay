@@ -51,5 +51,9 @@ Semantic Versioning once a public compatibility surface exists.
   redirects/time/bytes, no ambient credentials/proxies, and verified immutable publication.
 - Strict HTTPS ingestion request schema/OpenAPI, service/API fault tests, a finite local
   TLS smoke and ADR-0006 documenting the public-address and retry/privacy boundaries.
+- M2-09 finite Python/Linux remote runner with frozen-input identity, strict bundle
+  extraction, CC_* environment, bounded setup/process groups/logs and verified outputs.
+- Runner manifest and source locks, real CPU/shell fault tests, generated result-schema
+  checks, and ADR-0007 separating runner outcomes from provider terminal/release evidence.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
