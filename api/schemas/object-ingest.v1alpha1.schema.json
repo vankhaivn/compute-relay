@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay public HTTPS object ingestion v1alpha1",
+  "description": "Public HTTPS request only. Runtime additionally validates hostname, port, query policy, DNS answers, connected peer, TLS and every redirect. Passing this structural schema does not authorize a destination.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "url"
+  ],
+  "properties": {
+    "url": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 4096,
+      "format": "uri",
+      "pattern": "^https://[^/?#@]+([/?][^#]*)?$",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "[^\\x21-\\x7e]"
+          }
+        },
+        {
+          "not": {
+            "pattern": "\\\\"
+          }
+        }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}
