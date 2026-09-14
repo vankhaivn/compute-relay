@@ -1,6 +1,6 @@
 # Dependency-aware implementation plan
 
-> **Status:** active; M-0, M1-01 and M2-01 through M2-06 merged. M2-07 in review.
+> **Status:** active; M-0, M1-01 and M2-01 through M2-07 merged. M2-08 in review.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-14.
 >
@@ -15,21 +15,24 @@ separate.
 
 M-0 was merged in PR #1, M2-01 in PR #2, M1-01 in PR #3, M2-02 in PR #4,
 M2-03 in PR #5, M2-04 in PR #6, and M2-05/M2-06 together in PR #7.
-PR #8 implements [safe packaging and allowlisted local import](packaging-and-import.md)
-for M2-07 and remains `in-review` until merged. M2 as a whole is not complete.
+PR #8 merged [safe packaging and allowlisted local import](packaging-and-import.md)
+for M2-07. PR #9 implements [bounded public HTTPS ingestion](https-ingestion.md) for
+M2-08 and remains `in-review` until merged. M2 as a whole is not complete.
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
 real-loopback tests, atomic blob publication and an explicit ownership-commit seam.
 M2-07 reuses that seam for named-root imports and adds explicit bundle CLI commands,
-manifest-bound archive inspection and rooted source-change checks. SQLite token/object
-repositories and production `serve` composition remain M3/M5 work; developer metadata
-fixtures are deliberately nondurable, not runtime fallbacks.
+manifest-bound archive inspection and rooted source-change checks. M2-08 adds a guarded
+HTTPS transport, immutable URL snapshots, strict request contracts and controlled TLS
+smoke/fault tests. SQLite token/object repositories and production `serve` composition
+remain M3/M5 work; developer metadata fixtures are deliberately nondurable, not runtime
+fallbacks.
 
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one subsequent task/PR, report its evidence, and stop for
-owner merge before beginning another task. M2-08 is not started by PR #8.
+owner merge before beginning another task. M2-09 is not started by PR #9.
 
 ## Status vocabulary
 
@@ -130,8 +133,8 @@ live tasks remain `blocked-environment`.
 | M2-04 | implementation / `complete` | Define narrow provider/store/blob/credential/clock/event ports and registry; implement deterministic fake provider. | PRD-03, PRV-01/03, VER-01 | M2-02 | No / No | Contract suite completes generic lifecycle with no Kaggle import and with missing cancel/log/quota variants. |
 | M2-05 | implementation / `complete` | Implement workspace tokens/digests, authorization service, loopback HTTP middleware, request IDs, body/rate limits. | PRD-07, API-01/02, SEC-02 | M2-02/M2-03 | No / No | Merged PR #7: cross-workspace/profile/scope/revocation matrix, Host/Origin/default exposure checks, real-loopback bounded HTTP tests; persistent token repository deferred to M3. |
 | M2-06 | implementation / `complete` | Implement streaming object upload and filesystem blob lifecycle with immutable digests and atomic publication. | DAT-01, DUR-01, API-01, SEC-02 | M2-02/M2-03 | No / No | Merged PR #7: streamed checksum/length validation, real process-kill recovery, disk/commit-ambiguity tests, quota/permissions and local smoke; incomplete bytes never usable; SQLite ownership integration deferred to M3. |
-| M2-07 | implementation / `in-review` | Implement safe `.tar.gz` packaging/inspection and allowlisted local import. | DAT-01/02, SEC-02 | M2-06 | No / No | PR #8: deterministic bundle/manifest checks, archive traversal/link/collision/bomb corpus, rooted snapshot races, strict workspace import HTTP, local race/repeat/fuzz/smoke and native CI. See ADR-0005 and packaging-and-import.md. |
-| M2-08 | implementation / `proposed` | Implement bounded public HTTPS ingestion with SSRF and redirect protection. | DAT-01/03, SEC-02 | M2-06 | No / No | Controlled DNS/HTTP tests cover private/link-local/metadata endpoints, redirects, size/time budgets, and log redaction. |
+| M2-07 | implementation / `complete` | Implement safe `.tar.gz` packaging/inspection and allowlisted local import. | DAT-01/02, SEC-02 | M2-06 | No / No | Merged PR #8: deterministic bundle/manifest checks, archive traversal/link/collision/bomb corpus, rooted snapshot races, strict workspace import HTTP, local race/repeat/fuzz/smoke and native CI. See ADR-0005 and packaging-and-import.md. |
+| M2-08 | implementation / `in-review` | Implement bounded public HTTPS ingestion with SSRF and redirect protection. | DAT-01/03, SEC-02 | M2-06 | No / No | PR #9: public-only DNS/peer/TLS checks per hop, blocked private/mixed/metadata targets, bounded streaming/timeouts, verified EOF, workspace/commit/redaction tests, request schema/OpenAPI, local race/repeat/fuzz/TLS smoke and native offline CI. See ADR-0006 and https-ingestion.md. |
 | M2-09 | implementation / `proposed` | Implement generic remote-runner contract and local deterministic runner tests without executing admitted workload code on the host. | JOB-02/03/05, SEC-02 | M2-02/M2-03 | No / No | Manifest/setup/payload/timeout/process-group/failure tests; host admission never runs uploaded commands. |
 
 ## M-3 — Durable orchestration
@@ -199,10 +202,11 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M2-07 review
+## Next work after M2-08 review
 
-Stop after reporting PR #8 and wait for owner merge. M2-08 (bounded HTTPS ingestion) and
-M2-09 (the generic remote runner) remain separate tasks; neither is included in M2-07.
+Stop after reporting PR #9 and wait for owner merge. M2-09 (the generic remote runner)
+remains a separate task and is not included in M2-08. URL ingestion now supplies immutable
+input snapshots, not a scheduler or implicit refetch path for later attempts.
 M3 must supply persistent ownership/token repositories and database recovery before a
 production runtime can advertise durable uploads or admission.
 

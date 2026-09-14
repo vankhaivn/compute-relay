@@ -1,9 +1,9 @@
 # API contracts
 
 > **Tasks:** M2-03 contract baseline; M2-05/M2-06 authentication and object handlers;
-> M2-07 bundle manifests and allowlisted local import.
+> M2-07 bundle manifests/local import; M2-08 bounded public HTTPS ingestion.
 >
-> **Status:** contracts and six handler operations are implemented offline. The production
+> **Status:** contracts and seven handler operations are implemented offline. The production
 > runtime composition and all job/operation routes remain planned; no live provider claim.
 
 ## Contract versions
@@ -36,6 +36,7 @@ later requires an explicit compatibility decision rather than a silent rename.
 | [`schemas/job-validation.v1alpha1.schema.json`](schemas/job-validation.v1alpha1.schema.json) | No-compute validation response and verification requirements. |
 | [`schemas/object.v1alpha1.schema.json`](schemas/object.v1alpha1.schema.json) | Committed workspace object ID, byte count and digest; never physical paths. |
 | [`schemas/object-import.v1alpha1.schema.json`](schemas/object-import.v1alpha1.schema.json) | Named-root raw-file or explicitly selected bundle import request. |
+| [`schemas/object-ingest.v1alpha1.schema.json`](schemas/object-ingest.v1alpha1.schema.json) | Public HTTPS input request with an optional expected SHA-256; destination policy remains a runtime check. |
 | [`schemas/bundle-manifest.v1.schema.json`](schemas/bundle-manifest.v1.schema.json) | Regular-file bundle manifest with portable paths, sizes, hashes and executable flags. |
 | [`examples/`](examples/) | Valid examples and deliberately invalid negative fixtures. |
 | [`contract-manifest.json`](contract-manifest.json) | Explicit schema-to-fixture inventory. No untracked root schema is allowed. |
@@ -71,9 +72,14 @@ bounds; lower configured/default policy limits still apply. Strict import decodi
 rejects duplicate JSON keys and nulls, which ordinary schema validation cannot disambiguate
 after a parser has already discarded duplicate keys.
 
+HTTPS ingestion likewise rejects duplicate/case-alias fields and nulls in the actual
+decoder. Its structural schema does not replace runtime port/query/host policy, DNS answer
+validation, connected-peer verification or TLS/redirect checks. An input that passes a
+schema can still be rejected as an unsafe destination before a network connection.
+
 ## OpenAPI status
 
-The following six operations have offline handler and loopback integration evidence:
+The following seven operations have offline handler and loopback integration evidence:
 
 ```text
 GET  /healthz
@@ -82,17 +88,20 @@ GET  /v1/info
 POST /v1/workspaces/{workspace_id}/objects
 GET  /v1/workspaces/{workspace_id}/objects/{object_id}
 POST /v1/workspaces/{workspace_id}/objects/import
+POST /v1/workspaces/{workspace_id}/objects/ingest
 ```
 
 Only `/healthz` is public. The readiness callback checks local services, not provider or
-GPU availability. Upload/import require workspace write scope; metadata requires read scope.
-Uploads return 201 only after verified bytes and ownership metadata commit. Local import is
-disabled unless the operator explicitly composes a named, workspace-allowed root manager.
+GPU availability. Upload/import/ingestion require workspace write scope; metadata requires
+read scope. They return 201 only after verified bytes and ownership metadata commit.
+Local import is disabled unless the operator composes a named, workspace-allowed root
+manager. HTTPS ingestion is disabled unless a guarded input service is supplied; it only
+fetches permitted public HTTPS sources, never arbitrary headers or provider credentials.
 
 See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for HTTP/ownership limits,
-and [`../docs/packaging-and-import.md`](../docs/packaging-and-import.md) for import semantics,
-bundle commands, manifest safety and the distinction between offline components and
-production configuration. Runtime token/object repositories are still test fixtures until
+[`../docs/packaging-and-import.md`](../docs/packaging-and-import.md) for import/bundle safety,
+and [`../docs/https-ingestion.md`](../docs/https-ingestion.md) for SSRF policy, streaming
+budgets and URL privacy. Runtime token/object repositories are still test fixtures until
 persistent SQLite composition is implemented.
 
 These eight operations remain `planned`:
@@ -109,8 +118,8 @@ GET  /v1/workspaces/{workspace_id}/operations/{operation_id}
 ```
 
 The root status remains `planned` because a production CLI/SQLite runtime is not composed
-yet. Artifact transfer, HTTPS ingestion, listings, logs, events, attempts, profiles and quota
-remain approved API work and must be added with their actual application/storage behavior.
+yet. Artifact transfer, listings, logs, events, attempts, profiles and quota remain approved
+API work and must be added with their actual application/storage behavior.
 
 `GET` operations are observational. Compute creation requires an explicit `POST`, and job
 creation/compute retry expose an `Idempotency-Key` requirement. Provider names, notebook
@@ -141,7 +150,8 @@ PowerShell and CMD wrappers accept the same task names.
 6. loads and validates OpenAPI 3.1.1 and its operation/status inventory; and
 7. verifies `contract.lock.json` is current.
 
-Tests additionally check actual serialized object/error/import/bundle types against schemas.
+Tests additionally check actual serialized object/error/import/bundle/HTTPS-input types and
+fixture decoding against their contracts. No fixture URL is fetched by schema validation.
 `contract-lock` is the explicit update step after reviewing an intentional JSON contract or
 fixture change. CI runs `contract-check`; CI never contacts Kaggle or allocates compute.
 

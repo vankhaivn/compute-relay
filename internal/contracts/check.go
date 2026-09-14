@@ -209,7 +209,7 @@ func validateOpenAPI(root, relative string) error {
 		"validateJob": {}, "createJob": {}, "getJob": {},
 		"cancelJob": {}, "retryJob": {}, "reconcileJob": {},
 		"collectJob": {}, "getOperation": {},
-		"uploadObject": {}, "getObject": {}, "importObject": {},
+		"uploadObject": {}, "getObject": {}, "importObject": {}, "ingestObject": {},
 	}
 	observedOperations := make(map[string]struct{}, len(expectedOperations))
 	for path, pathItem := range document.Paths.Map() {
@@ -236,7 +236,7 @@ func validateOpenAPI(root, relative string) error {
 // All job and operation routes remain planned until their own acceptance gates pass.
 func operationStatus(id string) string {
 	switch id {
-	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject":
+	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject":
 		return "implemented-offline"
 	default:
 		return "planned"
