@@ -166,7 +166,9 @@ func (s *Store) LoadAttempt(ctx context.Context, w domain.WorkspaceID, j domain.
 
 // CommitAttempt implements the existing M2-04 CAS port. A failed revision or event
 // sequence leaves BOTH state and events untouched. Operation-linked events await the
-// durable operations table in M3-05. No provider call or retry is made.
+// durable operations table in M3-05. Once a scheduler lease has existed, callers
+// must use fenced orchestration instead of this legacy unfenced port.
+// No provider call or retry is made.
 func (s *Store) CommitAttempt(ctx context.Context, c ports.AttemptChange) error {
 	if c.Validate() != nil || c.Event.OperationID != "" || c.After.Revision > math.MaxInt64 || c.Event.Sequence > math.MaxInt64 {
 		return ErrInvalid
@@ -177,6 +179,9 @@ func (s *Store) CommitAttempt(ctx context.Context, c ports.AttemptChange) error 
 	}
 	defer done()
 	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+		if err := checkUnfencedAttempt(ctx, tx, c.WorkspaceID, c.Before.JobID, c.Before.ID); err != nil {
+			return err
+		}
 		before, _, err := loadAttempt(ctx, tx, c.WorkspaceID, c.Before.JobID, c.Before.ID)
 		if err != nil {
 			return err

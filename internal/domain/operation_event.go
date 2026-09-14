@@ -209,6 +209,9 @@ const (
 	EventCollectionFailed         EventType = "collection.failed"
 	EventArtifactVerified         EventType = "artifact.verified"
 	EventJobCompleted             EventType = "job.completed"
+	EventSchedulerClaimed         EventType = "scheduler.claimed"
+	EventSchedulerDeferred        EventType = "scheduler.deferred"
+	EventSchedulerReleased        EventType = "scheduler.released"
 )
 
 func (eventType EventType) Valid() bool {
@@ -216,7 +219,7 @@ func (eventType EventType) Valid() bool {
 	case EventJobAccepted, EventInputsReady, EventProviderStagingReady,
 		EventSubmissionIntentRecorded, EventSubmissionAccepted, EventSubmissionUnknown,
 		EventExecutionObserved, EventCancellationRequested, EventCollectionFailed,
-		EventArtifactVerified, EventJobCompleted:
+		EventArtifactVerified, EventJobCompleted, EventSchedulerClaimed, EventSchedulerDeferred, EventSchedulerReleased:
 		return true
 	default:
 		return false
