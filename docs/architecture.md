@@ -1,7 +1,8 @@
 # Architecture baseline
 
-> **Status:** approved baseline with offline portable-core, SQLite and durable admission
-> components. Scheduling, provider dispatch and production composition remain later tasks.
+> **Status:** approved baseline with offline portable-core, SQLite, durable admission
+> and fair scheduling/local ownership. Provider dispatch and production composition remain
+> later tasks; a scheduler claim is not a remote submission intent.
 
 ## System intent
 
@@ -67,7 +68,7 @@ refuses existing destinations and preserves identity. Blob availability and comp
 installation recovery are separate checks.
 
 See [ADR-0008](decisions/0008-sqlite-durability-and-backup.md) and
-[`storage.md`](storage.md). Repository availability is not a claim that scheduling,
+[`storage.md`](storage.md). Repository availability is not a claim that
 submission-intent recovery or production `serve` exists.
 
 ## Implemented durable admission
@@ -87,6 +88,28 @@ optional HTTP handlers expose create, no-compute validation and cached status. A
 service does not substitute memory persistence. See [ADR-0009](decisions/0009-durable-idempotent-admission.md)
 and [`admission.md`](admission.md) for normalization, limits, failure tests and unresolved
 preparation/dispatch work. Local admission idempotency is not exactly-once remote execution.
+
+## Implemented scheduling and ownership
+
+M3-03 adds a pure FIFO/round-robin selection policy and a SQLite-backed repository for
+queue order, account policy, quota observations and fenced local leases. An attempt is
+enqueued inside admission. Selection, capacity reservation, claim, preparing state/event
+and fairness cursor commit atomically. Missing or ambiguous remote evidence retains account
+capacity independently from worker lease expiry; account binding comes from the accepted
+profile revision, not a current alias.
+
+Migration 4 starts paused and preserves legacy acceptance order. Reclaim is restricted to
+safe local preparation and retains attempt identity. Once a scheduler lease has existed,
+the legacy unfenced CAS cannot bypass ownership checks. A fixed local worker pool is
+explicitly composed and never runs uploaded commands or calls provider mutations. It does
+not mark inputs ready merely because a local callback returned.
+
+The conservative dispatch barrier is not a remote resource/submission-intent ledger.
+M3-04 must add fenced preparation/intent/observation transitions before remote effects.
+No scheduler administration HTTP surface or production `serve` wiring is introduced.
+See [ADR-0010](decisions/0010-fair-scheduling-and-fenced-local-claims.md) and
+[`scheduler.md`](scheduler.md) for quota uncertainty, worker limits, shutdown, migration
+and local-versus-production test evidence.
 
 ## Control plane and workload boundary
 
@@ -150,6 +173,7 @@ Material decisions and unresolved implementation gates are recorded in the
 uses standard-library `net/http`. M3-01 pins the CGo-free modernc SQLite driver and matching
 libc; exact versions and durability settings are in the storage guide and Go module files.
 M3-02 reuses the already pinned JSON Schema validator for closed, embedded runtime validation.
+M3-03 adds no dependency and makes no provider call while selecting or inspecting work.
 The M2-09 runner and its unit tests use the Python standard library; the optional GPU
 probe relies on the separately verified remote environment's PyTorch installation.
 

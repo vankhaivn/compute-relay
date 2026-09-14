@@ -1,7 +1,7 @@
 # Compute Relay
 
-> **Project status:** portable-core components, SQLite metadata and durable idempotent
-> job admission are implemented offline. Scheduling, provider dispatch, production
+> **Project status:** portable-core components, SQLite metadata, durable admission and
+> fair scheduling/local ownership are implemented offline. Provider dispatch, production
 > `serve` composition and the live Kaggle path remain separate implementation gates.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
@@ -49,15 +49,19 @@ The repository currently establishes:
 - workspace token/authorization services, guarded loopback HTTP, immutable upload/import/
   HTTPS snapshots, finite runner assets and offline smoke/fault tests;
 - SQLite installation/workspace/token-digest/object metadata, embedded migrations,
-  OS state locking and consistent database-only backup/restore; and
+  OS state locking and consistent database-only backup/restore;
 - durable job/attempt admission, immutable profile resolution and object pins, original
-  receipt replay, state/event transactions and authenticated create/validate/status handlers.
+  receipt replay, state/event transactions and authenticated create/validate/status handlers; and
+- transactional FIFO/round-robin scheduling, shared-account capacity, fenced local leases,
+  bounded local workers and explicit quota uncertainty policy.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
-inputs, inspect bundle bytes, start a scheduler or allocate compute. The upload smoke retains
-its explicitly nondurable metadata fixture; store/admission smoke commands use temporary
-SQLite. A database-only backup does not include blob bytes or prove full runtime recovery.
-Production `serve` and complete orchestration remain pending.
+inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler composition is
+explicit and migration starts paused; a claim grants local preparation ownership only, not
+permission to submit remotely. Input readiness and submission intents remain the next gate.
+The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler
+checks use temporary SQLite. A database-only backup does not include blob bytes or prove full
+runtime recovery. Production `serve` and complete orchestration remain pending.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -74,6 +78,7 @@ live Kaggle support.
 | [`docs/auth-and-objects.md`](docs/auth-and-objects.md) | Implemented workspace auth, HTTP/upload boundary, blob recovery and smoke checks. |
 | [`docs/storage.md`](docs/storage.md) | SQLite repositories, locking, migrations, database-only backup/restore and evidence limits. |
 | [`docs/admission.md`](docs/admission.md) | Durable job acceptance, canonical request identity, replay, frozen references and pending preparation. |
+| [`docs/scheduler.md`](docs/scheduler.md) | Durable fairness, account/worker reservations, fenced leases, quota policy and the local-only phase boundary. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -96,17 +101,20 @@ With the pinned Go toolchain, from the repository root:
 go run ./cmd/uploadsmoke
 go run ./cmd/storesmoke
 go run ./cmd/admissionsmoke
+go run ./cmd/schedulersmoke
 ```
 
 The upload check exercises loopback HTTP, synthetic workspace tokens, streamed upload,
 digest verification, isolation, revocation and reopened temporary blobs with fixture
 metadata. The store check separately exercises actual SQLite persistence, revocation and
 database-only backup/restore. The admission check verifies concurrent/restarted receipt
-replay and changed-request conflicts. The latter two report `blob_bytes_checked=false`.
+replay and changed-request conflicts. The scheduler check verifies shared-account capacity,
+round-robin restart and stale fencing with explicitly advanced test time. The latter three
+report `blob_bytes_checked=false`; no job command is executed by them.
 
 These checks are finite, clean up temporary files and never call Kaggle. None is a
-production runtime. See the auth/object, storage and admission guides for their distinct
-evidence limits and exact local-versus-CI verification disclosures.
+production runtime. See the auth/object, storage, admission and scheduler guides for their
+distinct evidence limits and exact local-versus-CI verification disclosures.
 
 ## Current execution boundary
 
