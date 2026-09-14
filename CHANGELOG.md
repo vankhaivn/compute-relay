@@ -42,5 +42,10 @@ Semantic Versioning once a public compatibility surface exists.
 - Object metadata schema, local request error codes, implemented-handler OpenAPI status,
   and a finite local upload/isolation/revocation/restart smoke command.
 - ADR-0004 documenting separate workspace authority, byte publication and durable admission.
+- M2-07 manifest-bound `.tar.gz` bundle preview/create/inspect commands, explicit selection,
+  bounded `.computeignore` rules, credential-pattern checks and strict archive validation.
+- Rooted, workspace-allowlisted local file/bundle import through the existing verified
+  upload/ownership path, plus HTTP/schema tests and a finite local packaging smoke command.
+- ADR-0005 recording the strict USTAR subset, source snapshot semantics and import boundary.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
