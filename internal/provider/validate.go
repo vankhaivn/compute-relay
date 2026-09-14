@@ -50,6 +50,9 @@ func (job ResolvedJob) Validate() error {
 	if Digest(job.Specification) != job.SpecificationSHA256 {
 		return errors.New("frozen specification digest mismatch")
 	}
+	if job.Inputs != nil && (job.Inputs.Validate(job.Identity.WorkspaceID) != nil || job.Inputs.Bundle.SHA256 != job.Identity.BundleSHA256 || job.Inputs.InputDigest() != job.Identity.InputManifestSHA256) {
+		return errors.New("frozen input snapshot digest mismatch")
+	}
 	if len(job.Required) == 0 || len(job.Required) > 64 {
 		return errors.New("resolved job requires a bounded capability list")
 	}
@@ -70,6 +73,10 @@ func (job ResolvedJob) Validate() error {
 func (job ResolvedJob) Clone() ResolvedJob {
 	job.Specification = append(json.RawMessage(nil), job.Specification...)
 	job.Required = append([]domain.CapabilityName(nil), job.Required...)
+	if job.Inputs != nil {
+		snapshot := job.Inputs.Clone()
+		job.Inputs = &snapshot
+	}
 	return job
 }
 func (plan Plan) Clone() Plan {

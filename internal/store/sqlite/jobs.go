@@ -32,98 +32,107 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 		if _, err := actorInTx(ctx, tx, w, tokenID, auth.Read); err != nil {
 			return err
 		}
-		var raw, hash, version, profile, created string
-		err := tx.QueryRowContext(ctx, `SELECT j.request,j.request_sha256,j.canonical_version,r.snapshot,j.active_attempt_id,j.created_at FROM jobs j JOIN profile_revisions r ON j.profile=r.profile AND j.profile_revision=r.revision WHERE j.workspace_id=? AND j.job_id=?`, string(w), string(id)).Scan(&raw, &hash, &version, &profile, &result.Job.ActiveAttemptID, &created)
-		if errors.Is(err, sql.ErrNoRows) {
-			return admission.ErrNotFound
-		}
-		if err != nil {
-			return dbError(err)
-		}
-		if version != admission.CanonicalVersion {
-			return ErrSchema
-		}
-		result.Request, err = admission.Parse([]byte(raw))
-		if err != nil || string(result.Request.Hash()) != hash || string(result.Request.Canonical()) != raw {
-			return ErrCorrupt
-		}
-		if len(profile) > 8192 || json.Unmarshal([]byte(profile), &result.Profile) != nil || result.Profile.Check(result.Request.Spec()) != nil {
-			return ErrCorrupt
-		}
-		at, err := time.Parse(time.RFC3339Nano, created)
-		if err != nil {
-			return ErrCorrupt
-		}
-		spec := result.Request.Spec()
-		result.Job, err = domain.NewJob(domain.Job{ID: id, WorkspaceID: w, Name: spec.Name, SpecificationVersion: spec.APIVersion, SpecificationDigest: result.Request.Hash(), Binding: result.Profile.Binding, ActiveAttemptID: result.Job.ActiveAttemptID, CreatedAt: at})
-		if err != nil {
-			return ErrCorrupt
-		}
-		result.Attempt, result.AttemptNonce, err = loadAttempt(ctx, tx, w, id, result.Job.ActiveAttemptID)
-		if err != nil {
-			return err
-		}
-		rows, err := tx.QueryContext(ctx, `SELECT role,object_id,bytes,sha256 FROM job_objects WHERE workspace_id=? AND job_id=? ORDER BY role`, string(w), string(id))
-		if err != nil {
-			return dbError(err)
-		}
-		refs := map[string]bool{}
-		for rows.Next() {
-			var ref admission.FrozenObject
-			ref.Object.WorkspaceID = w
-			if err = rows.Scan(&ref.Role, &ref.Object.ID, &ref.Object.Bytes, &ref.Object.SHA256); err != nil {
-				rows.Close()
-				return dbError(err)
-			}
-			if !ref.Object.Valid() || refs[ref.Role] || len(refs) >= 65 {
-				rows.Close()
-				return ErrCorrupt
-			}
-			refs[ref.Role] = true
-			switch {
-			case ref.Role == "bundle":
-				if ref.Object.ID != spec.Bundle.ObjectID {
-					rows.Close()
-					return ErrCorrupt
-				}
-			case strings.HasPrefix(ref.Role, "input:"):
-				index, err := strconv.Atoi(strings.TrimPrefix(ref.Role, "input:"))
-				if err != nil || index < 0 || index >= len(spec.Inputs) || ref.Role != "input:"+strconv.Itoa(index) {
-					rows.Close()
-					return ErrCorrupt
-				}
-				source := spec.Inputs[index].Source
-				if source.Kind == "object" && source.ObjectID != ref.Object.ID || source.Kind == "https" && source.ExpectedSHA256 != "" && source.ExpectedSHA256 != ref.Object.SHA256 {
-					rows.Close()
-					return ErrCorrupt
-				}
-			default:
-				rows.Close()
-				return ErrCorrupt
-			}
-			result.Objects = append(result.Objects, ref)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return dbError(err)
-		}
-		if !refs["bundle"] {
-			return ErrCorrupt
-		}
-		for i, in := range spec.Inputs {
-			if !refs["input:"+strconv.Itoa(i)] {
-				if in.Source.Kind == "https" {
-					result.PendingHTTPS++
-				} else {
-					return ErrCorrupt
-				}
-			}
-		}
-		return nil
+		var err error
+		result, err = readJobRecord(ctx, tx, w, id)
+		return err
 	})
 	if err != nil {
 		return admission.Record{}, err
+	}
+	return result, nil
+}
+
+// readJobRecord shares validation between authorized HTTP reads and fenced workers.
+// It is not exported: callers must first verify token authority or durable ownership.
+func readJobRecord(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id domain.JobID) (admission.Record, error) {
+	var result admission.Record
+	var raw, hash, version, profile, created string
+	err := tx.QueryRowContext(ctx, `SELECT j.request,j.request_sha256,j.canonical_version,r.snapshot,j.active_attempt_id,j.created_at FROM jobs j JOIN profile_revisions r ON j.profile=r.profile AND j.profile_revision=r.revision WHERE j.workspace_id=? AND j.job_id=?`, string(w), string(id)).Scan(&raw, &hash, &version, &profile, &result.Job.ActiveAttemptID, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, admission.ErrNotFound
+	}
+	if err != nil {
+		return result, dbError(err)
+	}
+	if version != admission.CanonicalVersion {
+		return result, ErrSchema
+	}
+	result.Request, err = admission.Parse([]byte(raw))
+	if err != nil || string(result.Request.Hash()) != hash || string(result.Request.Canonical()) != raw {
+		return admission.Record{}, ErrCorrupt
+	}
+	if len(profile) > 8192 || json.Unmarshal([]byte(profile), &result.Profile) != nil || result.Profile.Check(result.Request.Spec()) != nil {
+		return admission.Record{}, ErrCorrupt
+	}
+	at, err := time.Parse(time.RFC3339Nano, created)
+	if err != nil {
+		return admission.Record{}, ErrCorrupt
+	}
+	spec := result.Request.Spec()
+	result.Job, err = domain.NewJob(domain.Job{ID: id, WorkspaceID: w, Name: spec.Name, SpecificationVersion: spec.APIVersion, SpecificationDigest: result.Request.Hash(), Binding: result.Profile.Binding, ActiveAttemptID: result.Job.ActiveAttemptID, CreatedAt: at})
+	if err != nil {
+		return admission.Record{}, ErrCorrupt
+	}
+	result.Attempt, result.AttemptNonce, err = loadAttempt(ctx, tx, w, id, result.Job.ActiveAttemptID)
+	if err != nil {
+		return admission.Record{}, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT role,object_id,bytes,sha256 FROM job_objects WHERE workspace_id=? AND job_id=? ORDER BY role`, string(w), string(id))
+	if err != nil {
+		return admission.Record{}, dbError(err)
+	}
+	refs := map[string]bool{}
+	for rows.Next() {
+		var ref admission.FrozenObject
+		ref.Object.WorkspaceID = w
+		if err = rows.Scan(&ref.Role, &ref.Object.ID, &ref.Object.Bytes, &ref.Object.SHA256); err != nil {
+			rows.Close()
+			return admission.Record{}, dbError(err)
+		}
+		if !ref.Object.Valid() || refs[ref.Role] || len(refs) >= 65 {
+			rows.Close()
+			return admission.Record{}, ErrCorrupt
+		}
+		refs[ref.Role] = true
+		switch {
+		case ref.Role == "bundle":
+			if ref.Object.ID != spec.Bundle.ObjectID {
+				rows.Close()
+				return admission.Record{}, ErrCorrupt
+			}
+		case strings.HasPrefix(ref.Role, "input:"):
+			index, err := strconv.Atoi(strings.TrimPrefix(ref.Role, "input:"))
+			if err != nil || index < 0 || index >= len(spec.Inputs) || ref.Role != "input:"+strconv.Itoa(index) {
+				rows.Close()
+				return admission.Record{}, ErrCorrupt
+			}
+			source := spec.Inputs[index].Source
+			if source.Kind == "object" && source.ObjectID != ref.Object.ID || source.Kind == "https" && source.ExpectedSHA256 != "" && source.ExpectedSHA256 != ref.Object.SHA256 {
+				rows.Close()
+				return admission.Record{}, ErrCorrupt
+			}
+		default:
+			rows.Close()
+			return admission.Record{}, ErrCorrupt
+		}
+		result.Objects = append(result.Objects, ref)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return admission.Record{}, dbError(err)
+	}
+	if !refs["bundle"] {
+		return admission.Record{}, ErrCorrupt
+	}
+	for i, in := range spec.Inputs {
+		if !refs["input:"+strconv.Itoa(i)] {
+			if in.Source.Kind == "https" {
+				result.PendingHTTPS++
+			} else {
+				return admission.Record{}, ErrCorrupt
+			}
+		}
 	}
 	return result, nil
 }

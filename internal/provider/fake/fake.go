@@ -196,7 +196,7 @@ func (p *Basic) Prepare(ctx context.Context, plan provider.Plan, operation domai
 		}
 		return r.prepared, nil
 	}
-	prepared := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: plan.Job.Identity.ResourceKey, Ready: p.backend.scenario.PreparationReady}
+	prepared := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: plan.Job.Identity.ResourceKey, Ready: p.backend.scenario.PreparationReady, Private: true}
 	remote := provider.RemoteReference{Identity: prepared.Identity, Resource: prepared.Resource, Version: "fixture-1"}
 	r := &record{plan: plan.Clone(), prepared: prepared, remote: remote}
 	p.backend.records[key] = r

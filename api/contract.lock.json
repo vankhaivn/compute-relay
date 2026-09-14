@@ -228,8 +228,8 @@
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",
-      "sha256": "829ca9634e2301c6beb670b5607f589e9074bf911418d924aee0710a44e3cea7",
-      "bytes": 8529
+      "sha256": "8d4019e31f93ed2f8ab22af2316247cf0ce589da7f7b60ca4abb430f0a8b4c39",
+      "bytes": 8666
     },
     {
       "path": "api/schemas/error.v1alpha1.schema.json",
