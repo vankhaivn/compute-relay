@@ -2,13 +2,16 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/buildinfo"
+	"github.com/vankhaivn/compute-relay/internal/bundlectl"
 )
 
 const usage = `Compute Relay (pre-release)
@@ -16,7 +19,11 @@ const usage = `Compute Relay (pre-release)
 Usage:
   compute-relay help
   compute-relay version [--json]
+  compute-relay bundle preview --root DIR --include PATH [--include PATH]
+  compute-relay bundle create --root DIR --include PATH --output FILE
+  compute-relay bundle inspect --file FILE
 
+Bundle commands are local and never execute workload code.
 The runtime and job commands are introduced by later milestones.
 `
 
@@ -30,6 +37,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "help", "-h", "--help":
 		_, _ = io.WriteString(stdout, usage)
+		return 0
+	case "bundle":
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := bundlectl.Run(ctx, args[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
+			fmt.Fprintf(stderr, "compute-relay bundle: %v\n", err)
+			return 2
+		}
 		return 0
 	case "version":
 		if err := runVersion(args[1:], stdout, stderr); err != nil {
