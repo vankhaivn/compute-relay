@@ -25,7 +25,7 @@ type Runner struct {
 // Run executes one developer task.
 func (r Runner) Run(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: devtool <fmt|fmt-check|mod-check|contract-check|contract-lock|vet|test|test-race|build|check>")
+		return errors.New("usage: devtool <fmt|fmt-check|mod-check|contract-check|contract-lock|vet|test|test-race|fault-test|build|check>")
 	}
 
 	switch args[0] {
@@ -48,10 +48,12 @@ func (r Runner) Run(ctx context.Context, args []string) error {
 		return r.command(ctx, nil, "go", "test", "./...")
 	case "test-race":
 		return r.command(ctx, nil, "go", "test", "-race", "./...")
+	case "fault-test":
+		return r.faults(ctx)
 	case "build":
 		return r.command(ctx, []string{"CGO_ENABLED=0"}, "go", "build", "-trimpath", "./...")
 	case "check":
-		for _, task := range []string{"fmt-check", "mod-check", "contract-check", "vet", "test", "build"} {
+		for _, task := range []string{"fmt-check", "mod-check", "contract-check", "vet", "test", "fault-test", "build"} {
 			fmt.Fprintf(r.Stdout, "==> %s\n", task)
 			if err := r.Run(ctx, []string{task}); err != nil {
 				return err
