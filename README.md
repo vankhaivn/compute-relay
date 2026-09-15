@@ -1,9 +1,9 @@
 # Compute Relay
 
 > **Project status:** portable-core components, SQLite metadata, durable admission,
-> scheduling, one-shot dispatch/recovery and explicit durable controls are implemented
-> offline. Artifact collection, production `serve` and live Kaggle remain separate gates.
-> M3-05 is in review in PR #15; M3-06 has not started.
+> scheduling, one-shot dispatch/recovery, durable controls and verified artifact collection
+> are implemented offline. Production `serve`, artifact HTTP routes, retention/cleanup and
+> live Kaggle remain separate gates. M3-05 is merged; M3-06 is in review in PR #16.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -56,9 +56,11 @@ The repository currently establishes:
 - transactional FIFO/round-robin scheduling, shared-account capacity, fenced local leases,
   bounded local workers and explicit quota uncertainty policy;
 - immutable input preparation, private-staging and submission intent ledgers, exact provider
-  binding snapshots, one-shot mutations and read-only same-attempt recovery; and
+  binding snapshots, one-shot mutations and read-only same-attempt recovery;
 - durable attempt-scoped cancel/retry/reconcile/collect records, immutable receipts,
-  current operation status, one-shot cancellation and authenticated control HTTP contracts.
+  current operation status, one-shot cancellation and authenticated control HTTP contracts; and
+- a bounded transfer-only collector, immutable per-attempt result snapshots, verified local
+  blobs, atomic artifact/state/event publication and authenticated internal result reads.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -71,12 +73,15 @@ structured recovery conditions without polling or replaying compute.
 Control requests explicitly name an attempt and require an idempotency key. POST replay
 returns the original receipt; GET returns current operation state. Cancellation intent is
 not termination evidence, and compute retry preserves the original frozen inputs and binding.
-Collect currently accepts a durable transfer-only ticket: the M3-06 collector/verifier is
-not implemented, and no accepted ticket implies available artifacts.
+Collect accepts a durable transfer-only ticket. The separately composed M3-06 engine consumes
+it, verifies the manifest and every selected blob, and publishes the complete metadata set
+atomically. Restart and explicit collection retry reuse the original result pin, never
+another compute execution. No accepted ticket alone implies available artifacts.
 
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
-dispatch checks use temporary SQLite. A database-only backup does not include blob bytes or
-prove full runtime recovery. Production `serve` and complete orchestration remain pending.
+dispatch checks use temporary SQLite. A database-only backup does not include input or result
+blob bytes or prove full runtime recovery. Production `serve` and complete orchestration
+remain pending; M3-07 retention/cleanup has not started.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -96,6 +101,7 @@ live Kaggle support.
 | [`docs/scheduler.md`](docs/scheduler.md) | Durable fairness, account/worker reservations, fenced leases, quota policy and the local-only phase boundary. |
 | [`docs/dispatch.md`](docs/dispatch.md) | Input freeze, private staging, one-shot intents, reconciliation and the collection handoff. |
 | [`docs/operations.md`](docs/operations.md) | Explicit attempt controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only tickets. |
+| [`docs/collection.md`](docs/collection.md) | Pinned result verification, bounded transfers, atomic publication, scoped reads, recovery and directory limitations. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -120,6 +126,7 @@ go run ./cmd/storesmoke
 go run ./cmd/admissionsmoke
 go run ./cmd/schedulersmoke
 go run ./cmd/dispatchsmoke
+go test -run=TestCollection ./internal/store/sqlite
 ```
 
 The upload check exercises loopback HTTP, synthetic workspace tokens, streamed upload,
@@ -132,10 +139,12 @@ scheduler checks report `blob_bytes_checked=false`; no job command is executed b
 The dispatch check additionally verifies real bundle/input bytes, one simulated submission
 with a lost response and same-attempt reconciliation after database reopen. Its terminal
 fixture stops at collection, with no result-success claim or actual workload execution.
+The collection component tests separately verify actual result blobs, complete publication,
+pagination and recovery against a synthetic provider. They never execute the fixture command.
 
 These checks are finite, clean up temporary files and never call Kaggle. None is a
-production runtime. See the auth/object, storage, admission, scheduler, dispatch and operations
-guides for their distinct evidence limits and local-versus-CI verification disclosures.
+production runtime. See the auth/object, storage, admission, scheduler, dispatch, operations
+and collection guides for their distinct evidence limits and local-versus-CI disclosures.
 
 ## Current execution boundary
 

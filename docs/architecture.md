@@ -1,8 +1,8 @@
 # Architecture baseline
 
 > **Status:** approved baseline with offline portable-core, SQLite, durable admission,
-> scheduling, one-shot preparation/submission recovery and attempt-scoped durable controls.
-> Artifact collection, production composition and live provider evidence remain later gates.
+> scheduling, one-shot dispatch/recovery, durable controls and verified artifact collection.
+> Production composition, artifact HTTP routes, retention and live evidence remain gates.
 
 ## System intent
 
@@ -20,7 +20,7 @@ HTTP API / authentication / workspace boundary
           |
           v
 Application services
-admission | objects | jobs | operations | artifacts
+admission | objects | jobs | operations | collection
           |
           v
 Domain and orchestration
@@ -130,9 +130,9 @@ Recovery retains possible-activity capacity and can continue while new dispatch 
 Repeated unresolved outcomes become needs_attention with a sanitized cached status problem.
 A terminal observation opens collection, never automatic job success. Resource records stay
 pinned for later cleanup policy. M3-04 itself did not add cancellation or compute-retry
-controls; M3-05 adds those below. Artifact collection and production server wiring remain
-separate. See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md) and
-[`dispatch.md`](dispatch.md) for recovery trade-offs, exact tests and adapter obligations.
+controls; M3-05 adds those below. M3-06 adds the separately composed collector; production
+server wiring remains separate. See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md)
+and [`dispatch.md`](dispatch.md) for recovery trade-offs, exact tests and adapter obligations.
 
 ## Implemented durable controls
 
@@ -155,11 +155,41 @@ capacity or prove termination. Completion and cancellation observations remain s
 from immutable operation outcomes. Reconcile only observes existing identity.
 
 Collect creates a durable transfer-only ticket after matching terminal execution evidence.
-The M3-06 ticket consumer, artifact verification and atomic publication are not implemented
-here. A `202` receipt is not result availability, remote termination or hardware release.
+The M3-06 consumer below performs verification and publication separately; the handler does
+neither. A `202` receipt is not result availability, remote termination or hardware release.
 The strict public control view excludes reasons, provider references and arbitrary internal
 problem details. See [ADR-0012](decisions/0012-attempt-scoped-durable-controls.md),
 [`operations.md`](operations.md) and [API contracts](../api/README.md).
+
+## Implemented verified collection
+
+M3-06 adds `internal/collection` with a transfer-only engine and an authenticated internal
+result reader. After matching terminal execution evidence, the engine verifies the original
+provider binding, enumerates bounded pages and validates the runner manifest against the
+frozen job, nonce, input digests and output requirements. An immutable per-attempt snapshot
+is committed before output transfers. Remote paths never become host filesystem paths.
+
+A dedicated collector-owned blob root uses the existing create-only filesystem store.
+Independent size/hash checks and a successful provider acknowledgement precede transfer EOF.
+Every complete blob is reopened and verified before publication. The engine's verification
+value is bound to the current lease and snapshot; callers cannot assert verification through
+an exported success flag. This is a trusted-process type boundary, not remote attestation.
+
+Migration 7 persists collection-specific generation/fence/expiry/revision leases, immutable
+snapshots and publications, and scoped artifact metadata. All file rows, result/attempt
+state, sequenced events, safe cached conditions and operation completion commit together.
+No SQL transaction spans provider or blob I/O. Uncommitted blobs remain recovery material,
+not application-visible artifacts. Authenticated reads require an explicit attempt and
+committed artifact ID; no artifact HTTP endpoint is added.
+
+Restart after a durable pin reuses that pin and rehashed complete blobs. Lost publication
+acknowledgements do not create a failure mutation or duplicate events. A committed transfer
+failure requires another explicit collect request; no path repeats compute or refreshes a
+pinned result. Provider wrapper success cannot override payload failure, and cancellation
+or hardware release is never inferred from local download completion. Empty required
+directories cannot prove presence with manifest v1 and fail closed; see
+[ADR-0013](decisions/0013-verified-collection-and-publication.md) and
+[`collection.md`](collection.md) for limits, recovery and exact test evidence.
 
 ## Control plane and workload boundary
 
@@ -188,7 +218,7 @@ See [ADR-0007](decisions/0007-finite-remote-runner.md) and the
 - **Submission intent:** durable proof that a remote side effect may occur or may already have occurred.
 - **Provider resource:** connector-owned remote identity tracked for recovery and cleanup.
 - **Object:** immutable local input or code bundle.
-- **Artifact:** verified output associated with one attempt.
+- **Artifact:** verified output associated with one attempt and an atomic publication.
 - **Operation:** durable cancel, retry, reconcile or collect action with immutable receipt and current status; cleanup remains a later implementation gate.
 - **Event:** sequenced state or operational evidence.
 
@@ -226,7 +256,7 @@ M3-02 reuses the already pinned JSON Schema validator for closed, embedded runti
 M3-03 adds no dependency and makes no provider call while selecting or inspecting work.
 M3-04 adds no dependency and uses only explicitly registered adapters for provider calls;
 the supplied bound adapter is a nonexecuting fixture, not a live Kaggle implementation.
-M3-05 adds no dependency and preserves that provider-neutral, explicit-composition boundary.
+M3-05 and M3-06 add no dependency and preserve explicit provider-neutral composition.
 The M2-09 runner and its unit tests use the Python standard library; the optional GPU
 probe relies on the separately verified remote environment's PyTorch installation.
 

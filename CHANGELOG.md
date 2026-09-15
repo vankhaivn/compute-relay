@@ -83,20 +83,31 @@ Semantic Versioning once a public compatibility surface exists.
   receipts, per-attempt cancellation/retry uniqueness and operation-linked events.
 - Dispatch-preventing or one-shot capability-verified cancellation, conservative unresolved
   outcomes, frozen-input explicit new attempts and observation-only reconciliation.
-- Transfer-only collection tickets after terminal execution evidence; the actual collector,
-  result verifier and artifact publication remain M3-06.
+- Transfer-only collection tickets after terminal execution evidence; M3-06 supplies their
+  separately composed consumer, result verifier and artifact publication.
 - Authenticated cancel/retry/reconcile/collect and current-operation HTTP handlers, strict
   request/receipt schemas, fixture/lock updates and actual-response contract tests.
 - Concurrent retry, cancellation/completion, staging, revocation, event rollback and
   lost-acknowledgement tests; serializer/record truth-table checks cover 880 combinations.
 - Operations guidance and ADR-0012 documenting immutable receipt versus current-state
   reads, cancellation evidence, original-input retry and the collection handoff.
+- M3-06 bounded transfer-only collection engine, strict manifest/frozen-requirement checks,
+  immutable result pins, independent blob hashing and authenticated internal artifact reads.
+- Migration 7 with fenced collection leases and atomic artifact/result/state/event publication;
+  restart and explicit transfer retry preserve the pinned result without rerunning compute.
+- Real SQLite/blob tests for pagination, partial/late-error transfers, wrong identity/digest,
+  missing outputs, stale/concurrent ownership, cancellation races, revocation, schema upgrade,
+  actual disk-full rollback, lost acknowledgements and process kill after durable pin.
+- Collection guidance and ADR-0013 documenting publication/recovery, dedicated result storage,
+  cooperative shutdown, empty-required-directory limitations and separate HTTP/CLI gates.
 
 ### Changed
 
 - Synchronized living README, roadmap, plan, architecture, API and persistence guidance
-  with merged M3-01 through M3-04 and M3-05's in-review boundary. Preserved the approved
+  with merged M3-01 through M3-05 and M3-06's in-review boundary. Preserved the approved
   proposal, historical ADR decisions and dated provider evidence without upgrading live
-  support or claiming a production runtime.
+  support or claiming a production runtime. Updated ADR-0012's status after owner merge.
+- Updated OpenAPI collection descriptions and their content lock without changing wire
+  schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

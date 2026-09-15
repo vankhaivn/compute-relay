@@ -1,6 +1,6 @@
 # ADR-0012: Attempt-scoped durable controls and immutable receipts
 
-- **Status:** proposed; implemented offline in PR #15, pending owner review/merge
+- **Status:** accepted; implemented offline and merged in PR #15
 - **Date:** 2026-09-15
 - **Task:** M3-05
 - **Requirements:** DOM-02/03, API-03, OPS-04; preserves DUR-02/03 and VER-02
