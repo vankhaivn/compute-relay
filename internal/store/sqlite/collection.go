@@ -364,7 +364,11 @@ func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collect
 		if _, err = controlState(ctx, tx, op, a, state, domain.EventCollectionFailed, now); err != nil {
 			return err
 		}
-		p, err := domain.NewProblem(f.Code, "Collection did not verify; recover this attempt's artifacts without rerunning compute.", domain.FailureStageResults)
+		stage := domain.FailureStageResults
+		if f.Code == domain.CodeRemoteIdentityMismatch {
+			stage = domain.FailureStageObservation
+		}
+		p, err := domain.NewProblem(f.Code, "Collection did not verify; recover this attempt's artifacts without rerunning compute.", stage)
 		if err != nil {
 			return err
 		}

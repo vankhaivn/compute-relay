@@ -164,7 +164,7 @@ func collectionFixture(t *testing.T) (*dispatchFixture, scheduler.Identity, *col
 		"started_at": f.clock.Now().Add(-time.Second).Format(time.RFC3339), "finished_at": f.clock.Now().Format(time.RFC3339),
 		"phase": "completed", "exit_code": 0, "timed_out": false, "error": nil,
 		"resource_check": map[string]bool{"gpu_required": false, "gpu_verified": false},
-		"artifacts": []any{map[string]any{"path": "answer.json", "bytes": len(data), "sha256": provider.Digest(data)}},
+		"artifacts":      []any{map[string]any{"path": "answer.json", "bytes": len(data), "sha256": provider.Digest(data)}},
 	}
 	raw, err := json.Marshal(m)
 	if err != nil {
