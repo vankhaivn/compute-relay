@@ -113,7 +113,9 @@ func TestCleanupPreviewRechecksPinsAuthorityAndOutcome(t *testing.T) {
 			probe := &cleanupPreviewProbe{binding: provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, outcome: provider.CleanupOutcome{WouldDelete: true}}
 			switch mode {
 			case "hold":
-				probe.after = func() error { return f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "operator-review", true, f.clock.Now()) }
+				probe.after = func() error {
+					return f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "operator-review", true, f.clock.Now())
+				}
 			case "revoke":
 				probe.after = func() error { return f.s.RevokeToken(ctx, actor.TokenID()) }
 			case "deleted":
