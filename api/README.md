@@ -4,8 +4,8 @@
 > M3-02 durable job admission, validation and cached status; M3-05 durable controls.
 >
 > **Status:** contracts and fifteen composable handler operations are implemented offline.
-> Scheduling and one-shot dispatch are separate offline components. Production composition,
-> artifact collection and live-provider integration remain separate gates.
+> Scheduling, one-shot dispatch and M3-06 verified collection are separate offline components.
+> Production composition, artifact HTTP routes and live-provider integration remain gates.
 
 ## Contract versions
 
@@ -91,6 +91,12 @@ and reasons over 512 UTF-8 bytes. JSON Schema's character ceiling is not a subst
 the byte limit. Retry requires a nonblank reason. Record validation additionally checks
 identities, time ordering and source/new-attempt separation against durable context.
 
+The M3-06 collector reuses the embedded result-manifest schema and checks the actual
+attempt/nonce, frozen input digests, GPU requirements and output declarations separately.
+It rejects duplicate keys, unpaired Unicode, path collisions, missing required outputs and
+incorrect bytes. A schema-valid manifest alone is not proof of verified artifacts. See
+[`../docs/collection.md`](../docs/collection.md), including its empty-directory limitation.
+
 ## OpenAPI status
 
 The following ten base operations have offline component and HTTP integration evidence:
@@ -154,13 +160,18 @@ bytes, and the separately composed worker performs any permitted provider action
 
 Cancellation acknowledgement is not terminal evidence. Retry names both the source attempt
 and a distinct new attempt. Reconcile never repeats submission. Collect accepts a durable
-transfer-only ticket after terminal execution evidence; M3-06 still owns its consumer and
-artifact verification/publication. See [`../docs/operations.md`](../docs/operations.md).
+transfer-only ticket after terminal execution evidence. The separately composed M3-06
+collector consumes tickets and publishes results only after verifying the pinned manifest
+and every selected blob. An interrupted accepted ticket can be reclaimed; a failed ticket
+requires a new explicit collect request/key. Neither path refreshes a durable result pin
+or reruns compute. See [`../docs/operations.md`](../docs/operations.md) and
+[`../docs/collection.md`](../docs/collection.md).
 
 The root status remains `planned` because a production runtime is not composed yet.
-Artifact transfer, listings, logs, events, attempts, profiles and quota retain their own
+Artifact HTTP transfer/listings, logs, events, attempts, profiles and quota retain their own
 implementation gates. Receipt links reserve these contract locations; they do not claim
-that the corresponding collection routes exist.
+that the corresponding collection routes exist. M3-06 adds authenticated internal result
+reads, not new public routes or a change to the fifteen-handler inventory.
 
 `GET` operations are observational. Compute creation requires an explicit `POST`, and job
 creation plus every control POST expose an `Idempotency-Key` requirement. Provider names,

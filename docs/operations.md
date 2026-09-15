@@ -1,16 +1,17 @@
 # Durable attempt-scoped controls
 
-> **Task:** M3-05, implemented offline; PR #15 in review until owner merge.
+> **Task:** M3-05, implemented offline; PR #15 merged.
 >
 > **Scope:** explicit cancellation, compute retry, reconciliation, collection tickets and
-> durable operation status. No production `serve`, live Kaggle integration, artifact
-> verifier/collector or cleanup implementation is delivered by this task.
+> durable operation status. M3-06 adds the separately composed [collector](collection.md).
+> Production `serve`, artifact HTTP routes, live Kaggle and cleanup remain separate gates.
 
 ## HTTP and composition boundary
 
 The composition root supplies `api.Config.Operations` with `internal/operations.Service`
 backed by SQLite. A nil service disables these routes; it does not use an in-memory fallback.
-The service and dispatch engine are composed separately. HTTP handlers never call a provider.
+The service, dispatch engine and collection engine are composed separately. HTTP handlers
+never call a provider or run collection transfers.
 
 | Route | Required workspace scope | Durable effect |
 |---|---|---|
@@ -126,11 +127,17 @@ Collect requires a specific attempt with matching persisted terminal execution e
 It creates a durable `accepted` / `collection_requested` ticket. It does not enqueue a
 compute retry, refresh source inputs, submit a provider job or publish artifacts.
 
-**M3-06 owns the ticket consumer, result-manifest/identity/digest validation and atomic
-artifact publication.** M3-05 does not start that task. An accepted ticket can remain pending
-until the collector is implemented and explicitly composed. `results_available` is only a
-view of results already recorded as verified/available; the control path does not fabricate
-that state. Expired results are not recovered by secretly rerunning compute.
+M3-06 supplies the separately composed ticket consumer, strict result verification and
+atomic artifact publication. The collector uses one immutable result snapshot per attempt
+and a fenced transfer lease. It publishes the complete metadata set and operation outcome
+only after every selected blob is independently verified. `results_available` is not
+fabricated by the control handler. Expired results are not recovered by rerunning compute.
+
+When no collector is running, tickets remain pending. An interrupted accepted ticket can
+be reclaimed after lease expiry; a committed failed ticket requires a new explicit collect
+request/key for the same attempt. Replaying the old key still returns its original receipt.
+Neither recovery path refreshes an already pinned result. See [collection](collection.md)
+for limits, scoped result reads, directory semantics and failure evidence.
 
 ## Error handling and operator recovery
 
@@ -173,6 +180,6 @@ CI results for quality/race tests and native Linux/macOS/Windows tests/CGo-free 
 CI is not an operator runtime and uses no Kaggle credentials, GPU or live-provider probes.
 
 See [ADR-0012](decisions/0012-attempt-scoped-durable-controls.md), [API contracts](../api/README.md),
-[dispatch](dispatch.md) and the [implementation plan](implementation-plan.md). Finish PR #15
-and stop for owner merge; collection, retention/cleanup and production composition remain
-separate work.
+[dispatch](dispatch.md), [collection](collection.md) and the
+[implementation plan](implementation-plan.md). M3-05 is merged; finish M3-06 in PR #16 and
+stop for owner merge. Retention/cleanup and production composition remain separate work.

@@ -19,7 +19,8 @@ defaults.
 | [`0009-durable-idempotent-admission.md`](0009-durable-idempotent-admission.md) | accepted | Atomically persist canonical request identity, original receipt, job/attempt, frozen resolution and references; replay without remapping or executing compute. |
 | [`0010-fair-scheduling-and-fenced-local-claims.md`](0010-fair-scheduling-and-fenced-local-claims.md) | accepted | Persist FIFO/round-robin fairness and fenced local ownership; keep remote capacity evidence independent from lease expiry and submission intent. |
 | [`0011-one-shot-mutations-and-recovery.md`](0011-one-shot-mutations-and-recovery.md) | accepted | Freeze inputs, commit staging/submission identities before one-shot mutations, and recover uncertainty through fenced observation rather than replay. |
-| [`0012-attempt-scoped-durable-controls.md`](0012-attempt-scoped-durable-controls.md) | proposed; PR #15 in review | Separate immutable receipts from current operation status, require explicit attempts and preserve one-shot cancellation, frozen-input retry and transfer-only collection. |
+| [`0012-attempt-scoped-durable-controls.md`](0012-attempt-scoped-durable-controls.md) | accepted; PR #15 merged | Separate immutable receipts from current operation status, require explicit attempts and preserve one-shot cancellation, frozen-input retry and transfer-only collection. |
+| [`0013-verified-collection-and-publication.md`](0013-verified-collection-and-publication.md) | proposed; PR #16 in review | Pin one result snapshot per attempt, independently verify streamed/cached bytes and atomically publish artifacts with fenced collection-only recovery. |
 
 ## Naming
 

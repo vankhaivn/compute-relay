@@ -39,7 +39,8 @@ owner-approved proposal update.
 | [`admission.md`](admission.md) | M3-02 implemented offline; merged | Atomic job/attempt/idempotency, frozen references, pending preparation, state/event CAS and admission HTTP. |
 | [`scheduler.md`](scheduler.md) | M3-03 implemented offline; merged | Durable FIFO/round-robin fairness, account capacity, fenced local claims, quota policy and the no-remote-side-effect boundary. |
 | [`dispatch.md`](dispatch.md) | M3-04 implemented offline; merged | Input freeze, private staging, one-shot mutation intents, fenced reconciliation and cached recovery conditions. |
-| [`operations.md`](operations.md) | M3-05 implemented offline; PR #15 in review | Attempt-scoped controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only collection tickets. |
+| [`operations.md`](operations.md) | M3-05 implemented offline; merged | Attempt-scoped controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only collection tickets. |
+| [`collection.md`](collection.md) | M3-06 implemented offline; PR #16 in review | Immutable result pins, bounded transfers, manifest/byte verification, atomic publication, scoped internal reads and collection-only recovery. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
@@ -55,8 +56,8 @@ owner-approved proposal update.
 
 Additional testing, provider support, troubleshooting and security design documents should
 be added when implementation makes them concrete. Do not create empty documents merely to
-mirror a proposed tree. The operations guide does not imply artifact collection, cleanup or
-production runtime composition is complete.
+mirror a proposed tree. Collection's offline service evidence does not imply artifact HTTP,
+cleanup or production runtime composition is complete.
 
 ## Status vocabulary
 
@@ -86,10 +87,11 @@ level and capability support must not be collapsed into one optimistic checkbox.
 | Scheduling/capacity/leases/quota | scheduler, ADR-0010, architecture, event schema, plan, migration/fencing/crash tests |
 | Preparation/submission/reconciliation | dispatch, ADR-0011, provider contracts, architecture, event schema, plan, intent/crash/status tests |
 | Explicit controls/receipt semantics | operations, ADR-0012, admission, dispatch, architecture, `api/`, plan, migration/race/receipt/HTTP tests |
+| Result collection/publication | collection, ADR-0013, operations, dispatch, storage, architecture, result schema, plan, pin/transfer/publication/authorization tests |
 | Bundle/import safety | packaging-and-import, ADR-0005, `api/`, ignore example, plan, tests |
 | HTTPS/SSRF policy | https-ingestion, ADR-0006, `api/`, plan, transport/service/API tests |
 | Remote runner/execution contract | runner/README, ADR-0007, runner schemas/assets lock, public result schema, architecture, plan, CPU/contract tests |
-| Persistence/recovery | storage, admission, scheduler, dispatch, operations, ADR-0008/0009/0010/0011/0012, architecture, domain model, risks, plan, migrations/tests |
+| Persistence/recovery | storage, admission, scheduler, dispatch, operations, collection, ADR-0008/0009/0010/0011/0012/0013, architecture, domain model, risks, plan, migrations/tests |
 | Provider client/version/capability | interface review, feasibility, provider docs, compatibility, risk register |
 | Live probe | feasibility gate, sanitized evidence, capability matrix, compatibility date |
 | Host support claim | compatibility matrix, installation, CI evidence |

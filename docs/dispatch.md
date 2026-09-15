@@ -1,7 +1,7 @@
 # Durable preparation, dispatch and recovery
 
-> **Task:** M3-04, implemented offline; PR #14 merged. M3-05 control integration is
-> described in [operations](operations.md) and is in review in PR #15.
+> **Task:** M3-04, implemented offline; PR #14 merged. M3-05 controls are merged in PR #15.
+> M3-06 [verified collection](collection.md) is in review in PR #16.
 >
 > This is an explicitly composed orchestration component, not a production `serve`
 > command or live Kaggle adapter. No workload command runs on the control-plane host.
@@ -70,7 +70,7 @@ checks only its fixture binding. No credential value is stored in the journal or
 | `submitted` | Observe the exact persisted resource/version/identity. |
 | `rejected` / `failed` | No automatic new mutation. |
 | `attention` | Automatic recovery stopped; retain unresolved evidence for operator inspection. |
-| `collectible` | Hand off to later artifact verification; do not infer job success. |
+| `collectible` | Hand off to the separate artifact verifier; do not infer job success. |
 | `prevented` | M3-05 cancelled before submission intent; do not reopen dispatch or infer remote termination. |
 
 Only the invocation receiving a successful **new** begin-intent commit may perform that
@@ -105,9 +105,10 @@ or active evidence. Five consecutive unresolved recovery outcomes stop at
 `needs_attention`; successful nonterminal observations can continue while the runtime runs.
 Private staging reported as still processing may likewise continue to be observed.
 
-Terminal execution evidence opens collection with `result=not_available`. Required output
-verification, result-manifest validation and final job success remain M3-06. Hardware-release
-precision remains whatever the adapter can observe; it is not inferred from local time.
+Terminal execution evidence opens collection with `result=not_available`. The separately
+composed M3-06 collector validates the result manifest and required outputs before publishing
+verified availability and final orchestration state. Hardware-release precision remains
+whatever the adapter can observe; it is not inferred from local time or transfer completion.
 
 Defaults are four workers, one-minute control calls, five-minute preparation invocations
 and a 15-second poll delay. Failure backoff doubles to a 120-second base ceiling, followed
@@ -131,9 +132,9 @@ does not repeat cancellation, clear remote capacity or use cleanup instead.
 Explicit reconcile requests only observation of the recorded identity; permanent
 identity/privacy failures cannot be rearmed into new staging/submission. Compute retry
 creates a distinct attempt with the same verified frozen inputs and binding, never resets
-the existing journal. Collection acceptance creates a durable transfer-only ticket and
-still stops before the M3-06 verifier/consumer. See [operations](operations.md) for HTTP,
-idempotency receipts, completion races and recovery guidance.
+the existing journal. Collection acceptance creates a durable transfer-only ticket; it does
+not start a verifier inside the request. See [operations](operations.md) for HTTP, receipt
+and completion-race semantics, and [collection](collection.md) for the consumer and recovery.
 
 ## Verification
 
@@ -167,16 +168,20 @@ component and native tests/build are checked by the existing offline CI. PR #14 
 exact commands, source identities and final-head check results; no workflow was added.
 M3-05's additional control/receipt/race/HTTP evidence is recorded separately in PR #15 and
 the operations guide; the historical M3-04 local harness is not relabeled as that evidence.
+M3-06's real-blob collection, publication and recovery tests are recorded in PR #16 and the
+collection guide; the original dispatch smoke still ends at its collection handoff.
 
 ## Remaining boundaries
 
 The ledger is pinned recovery evidence, not a cleanup authorization. Durable cancellation,
-explicit compute retry/reconcile and collection tickets now have M3-05 offline components.
-Artifact verification/collection remains M3-06 and retention/cleanup M3-07. Production
-CLI/configuration composition and real Kaggle integration retain their separate gates.
-Do not manually reset journal phases, delete intent rows or clear the scheduler barrier to
-resume an uncertain attempt. Stop after PR #15 for owner merge; do not begin M3-06 here.
+explicit compute retry/reconcile and collection tickets have M3-05 offline components.
+M3-06 adds verified artifact collection/publication; retention/cleanup remains M3-07.
+Production CLI/configuration, artifact HTTP routes and real Kaggle integration retain their
+separate gates. Do not manually reset journal phases, delete intent rows or clear the
+scheduler barrier to resume an uncertain attempt. Stop after PR #16 for owner merge;
+do not begin M3-07 here.
 
 See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md),
-[the scheduler guide](scheduler.md), [storage](storage.md), [operations](operations.md) and
+[the scheduler guide](scheduler.md), [storage](storage.md), [operations](operations.md),
+[collection](collection.md) and
 [the approved recovery requirements](proposal.md#13-persistence-idempotency-and-crash-recovery).

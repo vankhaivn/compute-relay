@@ -19,11 +19,12 @@ before committing metadata; SQL does not span an upload, HTTPS request or provid
 `auth.Service`; newly generated secrets are returned only after the SQLite insert succeeds.
 No application-facing administrative API or nondurable production fallback is introduced.
 
-Subsequent migrations now supply [durable admission](admission.md), [fenced scheduling](scheduler.md),
-[preparation/submission journals](dispatch.md) and [durable controls](operations.md). M3-01
-through M3-04 are merged; M3-05 is in review in PR #15. These are explicit composition APIs,
-not a production server. Existing developer upload/import/ingest fixtures remain explicitly
-nondurable unless a caller deliberately composes the SQLite repositories.
+Subsequent migrations supply [durable admission](admission.md), [fenced scheduling](scheduler.md),
+[preparation/submission journals](dispatch.md), [durable controls](operations.md) and
+[verified result publication](collection.md). M3-01 through M3-05 are merged; M3-06 is in
+review in PR #16. These are explicit composition APIs, not a production server. Existing
+developer upload/import/ingest fixtures remain explicitly nondurable unless a caller
+deliberately composes the SQLite repositories.
 
 ## State layout and process ownership
 
@@ -79,12 +80,14 @@ time budgets rather than silently enlarging it.
 
 ## Migration rules
 
-Embedded migration versions 1 through 6 are present on the M3-05 branch. The original
+Embedded migration versions 1 through 7 are present on the M3-06 branch. The original
 `0001_identity.sql` and `0002_workspace_objects.sql` are followed by admission (3), scheduling
-(4), dispatch journals (5) and `0006_operations.sql` (6). Migration 6 preserves prior
-installation/dispatch history and adds operation records, immutable receipts, control
-uniqueness, collection tickets and operation-linked events. Artifact publication and
-retention/cleanup remain later gates.
+(4), dispatch journals (5), operations (6) and `0007_collection.sql` (7). Migration 6 adds
+operation records, immutable receipts, control uniqueness, collection tickets and linked
+events. Migration 7 preserves those records and adds fenced collection leases, immutable
+per-attempt result snapshots, atomic publications and scoped artifact metadata. Publication,
+result/attempt state, events and operation outcome commit together after verified blob I/O.
+Retention/cleanup remains M3-07 and has not started.
 
 Applied migration bytes are immutable. SQL bytes, version and name are checked against
 `schema_migrations`; DDL, ledger insertion and `user_version` changes share one transaction.
@@ -126,11 +129,12 @@ The resulting installation ID is unchanged, and supported older schemas upgrade 
 
 ### Operator recovery procedure
 
-1. Preserve the original state and matching blob store; do not copy only a live
+1. Preserve the original state and matching blob stores; do not copy only a live
    `runtime.db` and assume committed WAL data came with it.
 2. Obtain a verified database-only snapshot through `Store.Backup`. For a whole-installation
-   checkpoint, quiesce writes/retention and separately retain all referenced immutable blob
-   bytes. This API does not automate or verify a combined database/blob backup.
+   checkpoint, quiesce writes/retention and separately retain all referenced immutable input
+   and result blob bytes, including pinned pre-publication collection files. This API does
+   not automate or verify a combined database/blob backup.
 3. Stop the original runtime before activating a restored copy. Restoring local metadata
    does not stop remote compute and must not cause a new dispatch.
 4. Restore into a new private directory with the matching binary/schema support. Open it,
@@ -145,6 +149,11 @@ receipt. Never run original/restored copies concurrently against the same provid
 Windows files are flushed; directory-sync and sudden-power-loss guarantees remain unclaimed.
 An older snapshot also lacks later operation receipts and execution observations; a missing
 receipt in a restored database is not evidence that remote work never started.
+
+Collection uses a dedicated result blob root. Complete files can precede SQLite publication
+and remain recovery material, not visible artifact metadata. Do not delete its pins or files
+to reset a failed operation. [Collection recovery](collection.md) distinguishes accepted
+interruption from committed failure and never obtains results through another compute run.
 
 ## Developer checks and evidence
 
@@ -172,7 +181,8 @@ The existing offline CI checks the actual pinned modernc driver with Go 1.27.1, 
 contracts/vet/tests and Linux race checks, plus native Linux/macOS/Windows tests and
 CGo-free builds. Its trigger includes SQL migration assets. No provider credentials,
 Kaggle API calls, GPU allocation or deployment participate. See the corresponding admission,
-scheduler, dispatch and operations guides for subsequent task-specific evidence and limits.
+scheduler, dispatch, operations and collection guides for task-specific evidence and limits;
+historical M3-01 local evidence is not relabeled as M3-06 verification.
 
 ## Dependency review
 
