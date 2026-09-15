@@ -86,7 +86,7 @@ func (e *Engine) Run(ctx context.Context) error {
 				_, err := e.RunOnce(ctx, fmt.Sprintf("dispatch_%d", index))
 				if err != nil && ctx.Err() == nil {
 					var p *domain.Problem
-					if !errors.As(err, &p) && !errors.Is(err, ErrPolicy) {
+					if !errors.As(err, &p) && !errors.Is(err, ErrPolicy) && !errors.Is(err, scheduler.ErrLeaseLost) && !controlContention(err) {
 						failures <- err
 						cancel()
 						return
@@ -155,6 +155,11 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, checker.VerifyBinding(c, binding) })
 	if err != nil || p.Describe().InstanceID != binding.Binding.ProviderInstanceID {
 		return s.fail(domain.CodeProviderAuthFailed)
+	}
+	// Explicit durable job cancellation is separate from Run's shutdown context.
+	// It shares this lease, the frozen binding and the one-shot mutation discipline.
+	if handled, err := s.cancelOnce(p); handled || err != nil {
+		return err
 	}
 	switch work.Journal.Phase {
 	case Local:
@@ -287,7 +292,7 @@ func (s *session) commit(action Action) error {
 	defer s.mu.Unlock()
 	base := context.Background()
 	if action.Kind == BeginPreparation || action.Kind == BeginSubmission {
-		base = s.ctx // Cancellation can save an outcome, but can never authorize new work.
+		base = s.ctx /* Cancellation can save an outcome, but can never authorize new work. */
 	}
 	ctx, stop := context.WithTimeout(base, 5*time.Second)
 	defer stop()

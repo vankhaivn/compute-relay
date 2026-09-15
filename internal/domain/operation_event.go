@@ -80,17 +80,7 @@ var operationTransitions = map[OperationStatus]map[OperationStatus]struct{}{
 
 // NewOperation creates an accepted durable control operation.
 func NewOperation(id OperationID, workspaceID WorkspaceID, jobID JobID, attemptID AttemptID, kind OperationKind, createdAt time.Time) (Operation, error) {
-	operation := Operation{
-		ID:          id,
-		WorkspaceID: workspaceID,
-		JobID:       jobID,
-		AttemptID:   attemptID,
-		Kind:        kind,
-		Status:      OperationAccepted,
-		Revision:    1,
-		CreatedAt:   createdAt,
-		UpdatedAt:   createdAt,
-	}
+	operation := Operation{ID: id, WorkspaceID: workspaceID, JobID: jobID, AttemptID: attemptID, Kind: kind, Status: OperationAccepted, Revision: 1, CreatedAt: createdAt, UpdatedAt: createdAt}
 	if err := operation.Validate(); err != nil {
 		return Operation{}, err
 	}
@@ -180,10 +170,7 @@ func failuresEqual(left, right *Problem) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	if left.Code != right.Code || left.Message != right.Message || left.Stage != right.Stage ||
-		left.SafeOperationRetry != right.SafeOperationRetry ||
-		left.ComputeMayHaveStarted != right.ComputeMayHaveStarted ||
-		left.RecommendedAction != right.RecommendedAction || len(left.Details) != len(right.Details) {
+	if left.Code != right.Code || left.Message != right.Message || left.Stage != right.Stage || left.SafeOperationRetry != right.SafeOperationRetry || left.ComputeMayHaveStarted != right.ComputeMayHaveStarted || left.RecommendedAction != right.RecommendedAction || len(left.Details) != len(right.Details) {
 		return false
 	}
 	for key, value := range left.Details {
@@ -216,6 +203,13 @@ const (
 	EventPreparationObserved      EventType = "preparation.observed"
 	EventSubmissionRejected       EventType = "submission.rejected"
 	EventReconciliationDeferred   EventType = "reconciliation.deferred"
+	EventOperationAccepted        EventType = "operation.accepted"
+	EventOperationCompleted       EventType = "operation.completed"
+	EventAttemptRetried           EventType = "attempt.retried"
+	EventCancellationInvoked      EventType = "cancellation.intent_recorded"
+	EventCancellationObserved     EventType = "cancellation.observed"
+	EventReconciliationRequested  EventType = "reconciliation.requested"
+	EventCollectionRequested      EventType = "collection.requested"
 )
 
 func (eventType EventType) Valid() bool {
@@ -224,7 +218,9 @@ func (eventType EventType) Valid() bool {
 		EventSubmissionIntentRecorded, EventSubmissionAccepted, EventSubmissionUnknown,
 		EventExecutionObserved, EventCancellationRequested, EventCollectionFailed,
 		EventArtifactVerified, EventJobCompleted, EventSchedulerClaimed, EventSchedulerDeferred, EventSchedulerReleased,
-		EventPreparationIntended, EventPreparationObserved, EventSubmissionRejected, EventReconciliationDeferred:
+		EventPreparationIntended, EventPreparationObserved, EventSubmissionRejected, EventReconciliationDeferred,
+		EventOperationAccepted, EventOperationCompleted, EventAttemptRetried, EventCancellationInvoked,
+		EventCancellationObserved, EventReconciliationRequested, EventCollectionRequested:
 		return true
 	default:
 		return false
