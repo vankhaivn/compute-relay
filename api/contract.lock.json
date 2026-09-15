@@ -258,8 +258,8 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "d6719cb5a5385011eefbd1ea5e4c735fc10c30ba5e0742dd6b7cb7743ee13cb6",
-      "bytes": 34314
+      "sha256": "3425a1a103a7454ff9947ebb3a57b9da0f9cbde6181e590e84a9ef218877b348",
+      "bytes": 34519
     },
     {
       "path": "api/schemas/bundle-manifest.v1.schema.json",
