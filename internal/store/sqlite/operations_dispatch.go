@@ -91,7 +91,7 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 			}
 			switch action.Outcome.Status {
 			case domain.CancellationConfirmed:
-				obs := provider.Observation{Remote: *work.Journal.Remote, Execution: domain.ExecutionCancelled, RemoteActivity: domain.RemoteActivityInactive, ReleaseEvidence: domain.ReleaseEvidenceNotObservable, ObservedAt: now}
+				obs := provider.Observation{Remote: *work.Journal.Remote, Execution: domain.ExecutionCancelled, RemoteActivity: domain.RemoteActivityInactive, ReleaseEvidence: domain.ReleaseEvidenceNotObservable, ObservedAt: now, RawState: string(domain.ExecutionCancelled)}
 				journal, observed, _, err := dispatch.Apply(work.Journal, state, dispatch.Action{Kind: dispatch.ObservationSeen, Observation: &obs}, now)
 				if err != nil {
 					return err

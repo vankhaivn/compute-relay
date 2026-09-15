@@ -109,10 +109,10 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 		}
 		inputs, err := s.repo.RetryInputs(ctx, w, p.TokenID(), job, req.AttemptID)
 		if err != nil {
-			return Record{}, err
+			return s.replayAfterRead(ctx, w, p.TokenID(), kind, keyHash, hash, err)
 		}
 		if err = s.verify(ctx, w, inputs); err != nil {
-			return Record{}, err
+			return s.replayAfterRead(ctx, w, p.TokenID(), kind, keyHash, hash, err)
 		}
 		command.Inputs = &inputs
 	}
@@ -201,4 +201,18 @@ func (r contextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.r.Read(p)
+}
+
+// Another request can commit the same key between the first replay lookup and the
+// immutable-input read. Resolve that committed receipt once, with current authority,
+// before returning a stale-target/input error. This never repeats a mutation or read.
+func (s *Service) replayAfterRead(ctx context.Context, w domain.WorkspaceID, token string, kind domain.OperationKind, key, hash string, original error) (Record, error) {
+	prior, err := s.repo.ReplayOperation(ctx, w, token, kind, key, hash)
+	if err != nil {
+		return Record{}, err
+	}
+	if prior != nil {
+		return *prior, nil
+	}
+	return Record{}, original
 }

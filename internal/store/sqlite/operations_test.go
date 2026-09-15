@@ -239,7 +239,7 @@ func (p *cancelProbe) Observe(_ context.Context, r provider.RemoteReference) (pr
 	if p.execution.Terminal() {
 		activity, release = domain.RemoteActivityInactive, domain.ReleaseEvidenceNotObservable
 	}
-	return provider.Observation{Remote: r, Execution: p.execution, RemoteActivity: activity, ReleaseEvidence: release, ObservedAt: p.clock.Now()}, nil
+	return provider.Observation{Remote: r, Execution: p.execution, RemoteActivity: activity, ReleaseEvidence: release, ObservedAt: p.clock.Now(), RawState: string(p.execution)}, nil
 }
 func installCancelProbe(t testing.TB, f *dispatchFixture, supported bool, outcome provider.CancellationOutcome) *cancelProbe {
 	t.Helper()
