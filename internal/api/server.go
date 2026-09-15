@@ -24,12 +24,14 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/buildinfo"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
 type Config struct {
-	Jobs           *admission.Service // nil disables durable job routes; never use a memory fallback.
-	HTTPSInputs    *objects.Ingestor  // nil disables HTTPS ingestion; operator composition supplies the guarded client.
-	LocalImports   *objects.Importer  // nil disables local import; configured by the operator composition root.
+	Operations     *operations.Service // nil disables durable controls; never use an in-memory fallback.
+	Jobs           *admission.Service  // nil disables durable job routes; never use a memory fallback.
+	HTTPSInputs    *objects.Ingestor   // nil disables HTTPS ingestion; operator composition supplies the guarded client.
+	LocalImports   *objects.Importer   // nil disables local import; configured by the operator composition root.
 	Listen         string
 	MaxJSONBytes   int64
 	MaxUploadBytes int64
@@ -197,10 +199,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			features = append(features, "job_admission", "job_validation", "job_status")
 			admissionStatus = "implemented-offline"
 		}
+		if h.config.Operations != nil {
+			features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", "operation_status")
+		}
 		respond(w, 200, map[string]any{"api_version": "compute-connector/v1alpha1", "runtime_version": buildinfo.Current().Version, "implementation_status": "implemented-offline", "features": features, "job_admission": admissionStatus})
 		return
 	}
-	if len(segments) < 4 || segments[0] != "v1" || segments[1] != "workspaces" || (segments[3] != "objects" && segments[3] != "jobs") {
+	if len(segments) < 4 || segments[0] != "v1" || segments[1] != "workspaces" || (segments[3] != "objects" && segments[3] != "jobs" && segments[3] != "operations") {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "route not implemented")
 		return
 	}
@@ -211,6 +216,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if workspace != principal.WorkspaceID() {
 		mapError(w, r, auth.ErrForbidden)
+		return
+	}
+	if segments[3] == "operations" || segments[3] == "jobs" && len(segments) == 6 {
+		h.controls(w, r, principal, workspace, segments)
 		return
 	}
 	if segments[3] == "jobs" {

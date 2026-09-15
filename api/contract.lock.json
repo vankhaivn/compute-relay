@@ -3,13 +3,33 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "2c8ca1e304ad2ece77de2efc3f99206ef097863b5d3e5df7e7cc63e5688d41cf",
-      "bytes": 3929
+      "sha256": "3c50a9c04d4368a838ed20e87e2547139a9bf9ed268a0d56d3621ea9fd3c2847",
+      "bytes": 4672
     },
     {
       "path": "api/examples/bundle-manifest.valid.json",
       "sha256": "78ce2360abc5c8d5978edfde1ccf5785ad7a7159f9c912b5f5424c44668bb934",
       "bytes": 233
+    },
+    {
+      "path": "api/examples/control-operation.prevented.valid.json",
+      "sha256": "0f6bf2955e3f75a6beec3133a0f9a2a0246ba9bf19ff2e6bcb8f30823eaf525d",
+      "bytes": 507
+    },
+    {
+      "path": "api/examples/control-operation.retry.valid.json",
+      "sha256": "fbe47ba5176caeec3cb56d17f5b96c0e13130bc9649c300f3e2b39a5bf04e061",
+      "bytes": 548
+    },
+    {
+      "path": "api/examples/control-request.retry.valid.json",
+      "sha256": "7a00d50938933d5d60e3781f2f320c5dc10b4e88e1406d7e4a1cc3c658ca56df",
+      "bytes": 95
+    },
+    {
+      "path": "api/examples/control-request.valid.json",
+      "sha256": "e02cc9cac4047d9e44191fe39d42f20e54d7fa892bf414af828226f8c19d0e24",
+      "bytes": 35
     },
     {
       "path": "api/examples/error.submission-unknown.valid.json",
@@ -25,6 +45,26 @@
       "path": "api/examples/invalid/bundle-manifest.traversal.json",
       "sha256": "b8a1084c63d153c324086ffb0391ccf9a8fa77a49cdf7e72b1814a98bb70968c",
       "bytes": 236
+    },
+    {
+      "path": "api/examples/invalid/control-operation.false-termination.json",
+      "sha256": "a5e6c71b661e2e5334e10693a64229bd25b5de67898f72140c3aea1ecf2f7127",
+      "bytes": 506
+    },
+    {
+      "path": "api/examples/invalid/control-operation.retry-without-attempt.json",
+      "sha256": "aa12d29fe610067a31974ab5b0abf9ab42f596cb0b79b6b4ffc0b5bed3ed2e9d",
+      "bytes": 515
+    },
+    {
+      "path": "api/examples/invalid/control-request.implicit-attempt.json",
+      "sha256": "cc42074b5bc3c921109209b7273e112717648b8114b15bbcf2d34385ab8e88da",
+      "bytes": 45
+    },
+    {
+      "path": "api/examples/invalid/control-request.unknown-field.json",
+      "sha256": "2fb5e10869f5ec0d80ca45b78a3ab6985dbbb577b85790dafe81ca27df2506f8",
+      "bytes": 52
     },
     {
       "path": "api/examples/invalid/error.bare-retryable.json",
@@ -218,8 +258,8 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "95fb173172b544ad44dd9f80c0dae17e03d9dd4af648e9fbc8108b8a89a7cdb1",
-      "bytes": 25652
+      "sha256": "d6719cb5a5385011eefbd1ea5e4c735fc10c30ba5e0742dd6b7cb7743ee13cb6",
+      "bytes": 34314
     },
     {
       "path": "api/schemas/bundle-manifest.v1.schema.json",
@@ -228,8 +268,18 @@
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",
-      "sha256": "8d4019e31f93ed2f8ab22af2316247cf0ce589da7f7b60ca4abb430f0a8b4c39",
-      "bytes": 8666
+      "sha256": "eb7fcdf73e650044cfe75e4f50973b922f380d6a309ca9ea97c9f6dc4afb90b3",
+      "bytes": 8895
+    },
+    {
+      "path": "api/schemas/control-operation.v1alpha1.schema.json",
+      "sha256": "6c8ac701f3f9f4b2e0d6386b71835e8780a96dbc743ade9a970e587f0aca3262",
+      "bytes": 7073
+    },
+    {
+      "path": "api/schemas/control-request.v1alpha1.schema.json",
+      "sha256": "6ee21d82981e433597a119ff2fe2c957e037b2cb316f1b97638551aa1da19cee",
+      "bytes": 1020
     },
     {
       "path": "api/schemas/error.v1alpha1.schema.json",

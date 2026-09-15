@@ -35,6 +35,7 @@ const (
 	Collectible Phase = "collectible"
 	Attention   Phase = "attention"
 	Failed      Phase = "failed"
+	Prevented   Phase = "prevented"
 )
 
 // Journal is INTERNAL recovery evidence, not a public status response. Request URLs
@@ -60,12 +61,15 @@ func (j Journal) Valid() bool {
 		return false
 	}
 	switch j.Phase {
-	case Local, Staging, Ready, Submitting, Submitted, Rejected, Collectible, Attention, Failed:
+	case Local, Staging, Ready, Submitting, Submitted, Rejected, Collectible, Attention, Failed, Prevented:
 	default:
 		return false
 	}
+	if j.Phase == Prevented && j.SubmitStarted {
+		return false
+	}
 	if j.Plan == nil {
-		return (j.Phase == Local || j.Phase == Failed) && j.PreparationID == "" && !j.SubmitStarted && j.Prepared == nil && j.Remote == nil && j.Observation == nil && (j.Problem == nil || j.Problem.Validate() == nil)
+		return (j.Phase == Local || j.Phase == Failed || j.Phase == Prevented) && j.PreparationID == "" && !j.SubmitStarted && j.Prepared == nil && j.Remote == nil && j.Observation == nil && (j.Problem == nil || j.Problem.Validate() == nil)
 	}
 	if j.Plan.Job.Validate() != nil || j.Plan.Job.Inputs == nil || j.Plan.Job.Inputs.Validate(j.Plan.Job.Identity.WorkspaceID) != nil || !j.PreparationID.Valid() {
 		return false
@@ -85,7 +89,7 @@ func (j Journal) Valid() bool {
 	if (j.Phase == Submitting || j.Phase == Rejected) && (j.Remote != nil || j.Observation != nil) {
 		return false
 	}
-	if j.Prepared != nil && !j.Prepared.Private && j.Phase != Attention {
+	if j.Prepared != nil && !j.Prepared.Private && j.Phase != Attention && j.Phase != Prevented {
 		return false
 	}
 	if j.Phase == Collectible && (j.Observation == nil || !j.Observation.Execution.Terminal()) {
@@ -118,6 +122,7 @@ type Work struct {
 	Handle         Handle
 	Job            admission.Record
 	Journal        Journal
+	Cancellation   *CancellationControl
 }
 
 // Repository commits journal, resource/submission intent, state and events together.
@@ -142,12 +147,14 @@ func (systemClock) Now() time.Time { return time.Now().UTC() }
 type Kind string
 
 const (
-	BeginPreparation Kind = "begin_preparation"
-	PreparationSeen  Kind = "preparation_seen"
-	BeginSubmission  Kind = "begin_submission"
-	SubmissionSeen   Kind = "submission_seen"
-	ObservationSeen  Kind = "observation_seen"
-	Fault            Kind = "fault"
+	BeginPreparation      Kind = "begin_preparation"
+	PreparationSeen       Kind = "preparation_seen"
+	BeginSubmission       Kind = "begin_submission"
+	SubmissionSeen        Kind = "submission_seen"
+	ObservationSeen       Kind = "observation_seen"
+	Fault                 Kind = "fault"
+	PreventDispatch       Kind = "prevent_dispatch"
+	RequestReconciliation Kind = "request_reconciliation"
 )
 
 type Action struct {

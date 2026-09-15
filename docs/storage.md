@@ -1,9 +1,10 @@
 # Durable metadata and database-only recovery
 
-> **Task:** M3-01, implemented offline; PR #11 in review.
+> **Task:** M3-01, implemented offline; PR #11 merged.
 >
 > **Scope:** SQLite workspace/token/object repositories, migrations, process ownership and
-> backup/restore. This is not a complete durable job runtime or a production `serve` mode.
+> backup/restore, with links to subsequent persistence components. This is not a complete
+> durable job runtime or a production `serve` mode.
 
 ## Implemented boundary
 
@@ -18,9 +19,11 @@ before committing metadata; SQL does not span an upload, HTTPS request or provid
 `auth.Service`; newly generated secrets are returned only after the SQLite insert succeeds.
 No application-facing administrative API or nondurable production fallback is introduced.
 
-Job/attempt admission, idempotency, event/state transactions and scheduler/submission-intent
-records belong to later M3 tasks. Existing developer upload/import/ingest fixtures remain
-explicitly nondurable unless a caller deliberately composes these new repositories.
+Subsequent migrations now supply [durable admission](admission.md), [fenced scheduling](scheduler.md),
+[preparation/submission journals](dispatch.md) and [durable controls](operations.md). M3-01
+through M3-04 are merged; M3-05 is in review in PR #15. These are explicit composition APIs,
+not a production server. Existing developer upload/import/ingest fixtures remain explicitly
+nondurable unless a caller deliberately composes the SQLite repositories.
 
 ## State layout and process ownership
 
@@ -76,10 +79,16 @@ time budgets rather than silently enlarging it.
 
 ## Migration rules
 
-The embedded `migrations/0001_identity.sql` and `0002_workspace_objects.sql` are immutable
-once released/applied. SQL bytes, version and name are checked against `schema_migrations`;
-DDL, ledger insertion and `user_version` changes share one transaction. Never fix an applied
-migration in place. Add a new version and regression test.
+Embedded migration versions 1 through 6 are present on the M3-05 branch. The original
+`0001_identity.sql` and `0002_workspace_objects.sql` are followed by admission (3), scheduling
+(4), dispatch journals (5) and `0006_operations.sql` (6). Migration 6 preserves prior
+installation/dispatch history and adds operation records, immutable receipts, control
+uniqueness, collection tickets and operation-linked events. Artifact publication and
+retention/cleanup remain later gates.
+
+Applied migration bytes are immutable. SQL bytes, version and name are checked against
+`schema_migrations`; DDL, ledger insertion and `user_version` changes share one transaction.
+Never fix an applied migration in place. Add a new version and regression test.
 
 Open rejects a newer version, a foreign application ID, missing/gapped/tampered migration
 history, invalid installation identity or failed integrity/foreign-key check. It does not
@@ -121,12 +130,12 @@ The resulting installation ID is unchanged, and supported older schemas upgrade 
    `runtime.db` and assume committed WAL data came with it.
 2. Obtain a verified database-only snapshot through `Store.Backup`. For a whole-installation
    checkpoint, quiesce writes/retention and separately retain all referenced immutable blob
-   bytes. This PR does not automate or verify a combined database/blob backup.
+   bytes. This API does not automate or verify a combined database/blob backup.
 3. Stop the original runtime before activating a restored copy. Restoring local metadata
    does not stop remote compute and must not cause a new dispatch.
 4. Restore into a new private directory with the matching binary/schema support. Open it,
    inspect installation identity/readiness, and verify referenced blob availability before
-   exposing future job operations. Keep the old directory intact until verification ends.
+   exposing job operations. Keep the old directory intact until verification ends.
 5. Review workspace access and revoke/rotate tokens as needed: restoring a snapshot from
    before revocation can restore that old grant. Keep backups private and out of ordinary
    support bundles, user artifacts and source control.
@@ -134,6 +143,8 @@ The resulting installation ID is unchanged, and supported older schemas upgrade 
 The receipt detects accidental corruption, not a maliciously rewritten snapshot plus
 receipt. Never run original/restored copies concurrently against the same provider identity.
 Windows files are flushed; directory-sync and sudden-power-loss guarantees remain unclaimed.
+An older snapshot also lacks later operation receipts and execution observations; a missing
+receipt in a restored database is not evidence that remote work never started.
 
 ## Developer checks and evidence
 
@@ -159,13 +170,14 @@ is not represented as testing modernc or a CGo-free production binary.
 
 The existing offline CI checks the actual pinned modernc driver with Go 1.27.1, full-repo
 contracts/vet/tests and Linux race checks, plus native Linux/macOS/Windows tests and
-CGo-free builds. Its trigger now includes SQL migration assets. No provider credentials,
-Kaggle API calls, GPU allocation or deployment participate.
+CGo-free builds. Its trigger includes SQL migration assets. No provider credentials,
+Kaggle API calls, GPU allocation or deployment participate. See the corresponding admission,
+scheduler, dispatch and operations guides for subsequent task-specific evidence and limits.
 
 ## Dependency review
 
-The driver is the only new direct dependency; its tagged source declares BSD-3-Clause and
-requires the exact libc version pinned above. See the primary-source references in
+M3-01 introduced the driver as a direct dependency; its tagged source declares BSD-3-Clause
+and requires the exact libc version pinned above. See the primary-source references in
 [ADR-0008](decisions/0008-sqlite-durability-and-backup.md). Transitive module identities are
 locked in `go.mod`/`go.sum`; keep original distribution notices when building release SBOMs.
 The final release-artifact license inventory remains M6 rather than a claim that every

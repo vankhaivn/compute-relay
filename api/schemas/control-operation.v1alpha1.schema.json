@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay durable control receipt v1alpha1",
+  "description": "The actual HTTP control view, separate from the generic domain operation. A replayed POST preserves the original receipt; GET returns the current durable revision. Cancellation acceptance is not remote termination. Collection acceptance is not verified artifact publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "workspace_id",
+    "job_id",
+    "attempt_id",
+    "kind",
+    "status",
+    "revision",
+    "created_at",
+    "updated_at",
+    "effect",
+    "remote_termination_confirmed",
+    "replay",
+    "problem",
+    "links"
+  ],
+  "properties": {
+    "operation_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
+    },
+    "workspace_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+    },
+    "job_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+    },
+    "attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "kind": {
+      "enum": [
+        "cancel",
+        "retry_compute",
+        "reconcile",
+        "collect"
+      ]
+    },
+    "status": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/operation_status"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "updated_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "effect": {
+      "enum": [
+        "pending",
+        "dispatch_prevented",
+        "cancellation_requested",
+        "cancellation_confirmed",
+        "too_late",
+        "observation_refreshed",
+        "collection_requested",
+        "results_available",
+        "new_attempt_created",
+        "manual_required",
+        "failed"
+      ]
+    },
+    "remote_termination_confirmed": {
+      "type": "boolean"
+    },
+    "replay": {
+      "type": "boolean"
+    },
+    "problem": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/public_problem"
+        }
+      ]
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "self",
+        "job"
+      ],
+      "properties": {
+        "self": {
+          "type": "string",
+          "format": "uri-reference",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^/v1/workspaces/"
+        },
+        "job": {
+          "type": "string",
+          "format": "uri-reference",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^/v1/workspaces/"
+        }
+      }
+    },
+    "new_attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": {
+          "const": "accepted"
+        },
+        "effect": {
+          "const": "pending"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "collect"
+        },
+        "status": {
+          "const": "accepted"
+        },
+        "effect": {
+          "const": "collection_requested"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "cancel"
+        },
+        "status": {
+          "const": "running"
+        },
+        "effect": {
+          "const": "cancellation_requested"
+        }
+      }
+    },
+    {
+      "properties": {
+        "status": {
+          "const": "failed"
+        },
+        "effect": {
+          "const": "failed"
+        }
+      }
+    },
+    {
+      "properties": {
+        "status": {
+          "const": "manual_required"
+        },
+        "effect": {
+          "const": "manual_required"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "reconcile"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "observation_refreshed"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "collect"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "results_available"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "retry_compute"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "new_attempt_created"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "cancel"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "dispatch_prevented"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "cancel"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "cancellation_confirmed"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "cancel"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "too_late"
+        }
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "effect": {
+            "const": "cancellation_confirmed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "remote_termination_confirmed": {
+            "const": true
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "remote_termination_confirmed": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "effect": {
+            "const": "new_attempt_created"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "new_attempt_id"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "new_attempt_id"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "problem": {
+            "$ref": "#/$defs/public_problem"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "accepted",
+              "running",
+              "succeeded"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "problem": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "public_problem": {
+      "allOf": [
+        {
+          "$ref": "operation.v1alpha1.schema.json#/$defs/problem"
+        },
+        {
+          "propertyNames": {
+            "enum": [
+              "code",
+              "message",
+              "stage",
+              "safe_operation_retry",
+              "compute_may_have_started",
+              "recommended_action"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

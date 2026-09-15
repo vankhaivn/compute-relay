@@ -1,10 +1,11 @@
 # API contracts
 
 > **Tasks:** M2-03 contracts; M2-05 through M2-08 auth/object input handlers;
-> M3-02 durable job admission, validation and cached status.
+> M3-02 durable job admission, validation and cached status; M3-05 durable controls.
 >
-> **Status:** contracts and ten handler operations are implemented offline. Production
-> composition, scheduling, provider dispatch and control operations remain planned.
+> **Status:** contracts and fifteen composable handler operations are implemented offline.
+> Scheduling and one-shot dispatch are separate offline components. Production composition,
+> artifact collection and live-provider integration remain separate gates.
 
 ## Contract versions
 
@@ -25,12 +26,14 @@ later requires an explicit compatibility decision rather than a silent rename.
 | Path | Purpose |
 |---|---|
 | [`openapi.json`](openapi.json) | Provider-neutral `/v1` HTTP contract with per-operation implementation status. |
-| [`schemas/common.v1alpha1.schema.json`](schemas/common.v1alpha1.schema.json) | Shared typed IDs, digests, state/error/capability enums, and safe relative paths. |
+| [`schemas/common.v1alpha1.schema.json`](schemas/common.v1alpha1.schema.json) | Shared typed IDs, digests, state/error/capability/event enums, and safe relative paths. |
 | [`schemas/job-spec.v1alpha1.schema.json`](schemas/job-spec.v1alpha1.schema.json) | Immutable Python/shell batch job request. |
 | [`schemas/result-manifest.v1alpha1.schema.json`](schemas/result-manifest.v1alpha1.schema.json) | Generic remote runner result manifest. |
 | [`schemas/runtime-config.v1alpha1.schema.json`](schemas/runtime-config.v1alpha1.schema.json) | Normalized non-secret runtime configuration. TOML decoding is a later task. |
 | [`schemas/job-status.v1alpha1.schema.json`](schemas/job-status.v1alpha1.schema.json) | Truthful independent attempt-state dimensions. |
-| [`schemas/operation.v1alpha1.schema.json`](schemas/operation.v1alpha1.schema.json) | Durable cancel/retry/reconcile/collect/cleanup operation representation. |
+| [`schemas/operation.v1alpha1.schema.json`](schemas/operation.v1alpha1.schema.json) | Generic domain operation, including the reserved cleanup kind; not the HTTP control receipt. |
+| [`schemas/control-request.v1alpha1.schema.json`](schemas/control-request.v1alpha1.schema.json) | Explicit attempt target and optional non-secret reason; the retry definition requires a nonblank reason. |
+| [`schemas/control-operation.v1alpha1.schema.json`](schemas/control-operation.v1alpha1.schema.json) | Actual HTTP control receipt/current view: effect, replay, termination evidence, optional new attempt, safe problem and links. |
 | [`schemas/error.v1alpha1.schema.json`](schemas/error.v1alpha1.schema.json) | Stable error envelope without a dangerous generic `retryable` flag. |
 | [`schemas/job-admission.v1alpha1.schema.json`](schemas/job-admission.v1alpha1.schema.json) | Durable asynchronous admission response. |
 | [`schemas/job-validation.v1alpha1.schema.json`](schemas/job-validation.v1alpha1.schema.json) | No-compute validation response and verification requirements. |
@@ -45,7 +48,8 @@ later requires an explicit compatibility decision rather than a silent rename.
 ## Strictness and limits
 
 Object schemas reject unknown fields unless a field is explicitly an open map, such as
-bounded labels or diagnostic details. Schemas validate:
+bounded labels or diagnostic details. Public control problems exclude arbitrary details.
+Schemas validate:
 
 - provider-neutral opaque IDs and lowercase SHA-256 values;
 - command vector, item count, string length, byte, duration, and retention bounds;
@@ -81,9 +85,15 @@ decoder. Its structural schema does not replace runtime port/query/host policy, 
 validation, connected-peer verification or TLS/redirect checks. An input that passes a
 schema can still be rejected as an unsafe destination before a network connection.
 
+Control requests require `attempt_id`; they never resolve an implicit active attempt. The
+runtime rejects duplicate keys, invalid UTF-8, nulls, unknown fields, bodies over 4,096 bytes
+and reasons over 512 UTF-8 bytes. JSON Schema's character ceiling is not a substitute for
+the byte limit. Retry requires a nonblank reason. Record validation additionally checks
+identities, time ordering and source/new-attempt separation against durable context.
+
 ## OpenAPI status
 
-The following ten operations have offline component and HTTP integration evidence:
+The following ten base operations have offline component and HTTP integration evidence:
 
 ```text
 GET  /healthz
@@ -123,7 +133,7 @@ See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for HTTP/owners
 [`../docs/admission.md`](../docs/admission.md) for canonicalization, replay and frozen inputs.
 SQLite repositories exist; production CLI/configuration composition remains separate.
 
-These five operations remain `planned`:
+M3-05 adds five `implemented-offline` control operations, bringing the total to fifteen:
 
 ```text
 POST /v1/workspaces/{workspace_id}/jobs/{job_id}/cancel
@@ -133,15 +143,29 @@ POST /v1/workspaces/{workspace_id}/jobs/{job_id}/collect
 GET  /v1/workspaces/{workspace_id}/operations/{operation_id}
 ```
 
+Control POSTs require `operate` scope and exactly one `Idempotency-Key` with the same ASCII
+bounds as job admission. GET requires `read`. The operation service must be composed
+explicitly; `/v1/info` advertises the five control features only when it is supplied.
+All successful POSTs return 202, `Location` and the strict control-operation view. A replay
+returns the original immutable receipt with `replay=true`; GET returns the current durable
+revision with `replay=false`. The control replay field is distinct from job admission's
+`idempotency_replay` field. No HTTP control calls a provider; retry verifies local frozen
+bytes, and the separately composed worker performs any permitted provider action.
+
+Cancellation acknowledgement is not terminal evidence. Retry names both the source attempt
+and a distinct new attempt. Reconcile never repeats submission. Collect accepts a durable
+transfer-only ticket after terminal execution evidence; M3-06 still owns its consumer and
+artifact verification/publication. See [`../docs/operations.md`](../docs/operations.md).
+
 The root status remains `planned` because a production runtime is not composed yet.
 Artifact transfer, listings, logs, events, attempts, profiles and quota retain their own
 implementation gates. Receipt links reserve these contract locations; they do not claim
 that the corresponding collection routes exist.
 
 `GET` operations are observational. Compute creation requires an explicit `POST`, and job
-creation/compute retry expose an `Idempotency-Key` requirement. Provider names, notebook
-slugs, credential material, and provider filesystem paths do not appear in the normal
-contract. `INVALID_REQUEST` and `REQUEST_LIMIT_EXCEEDED` distinguish local request
+creation plus every control POST expose an `Idempotency-Key` requirement. Provider names,
+notebook slugs, credential material, and provider filesystem paths do not appear in the
+normal contract. `INVALID_REQUEST` and `REQUEST_LIMIT_EXCEEDED` distinguish local request
 validation/backpressure from provider failures. Import source changes use `INPUT_CHANGED`;
 unsafe local paths use `INVALID_INPUT_PATH` without exposing absolute host paths.
 
@@ -168,9 +192,12 @@ PowerShell and CMD wrappers accept the same task names.
 7. verifies `contract.lock.json` is current.
 
 Tests additionally validate serialized object/error/import/bundle/HTTPS-input types and
-actual admission/validation/status HTTP responses against their contracts. No fixture URL
-is fetched by schema validation. `contract-lock` is the explicit update step after reviewing
-an intentional JSON change. CI never contacts Kaggle or allocates compute.
+actual admission/validation/status/control HTTP responses against their contracts. Control
+serializer tests check 880 state/effect/identity-presence/termination combinations against
+the record validator, including rejection of false termination and invalid new-attempt
+claims. No fixture URL is fetched by schema validation. `contract-lock` is the explicit
+update step after reviewing an intentional JSON change. CI never contacts Kaggle or
+allocates compute.
 
 ## Change policy
 

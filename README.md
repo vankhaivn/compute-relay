@@ -1,8 +1,9 @@
 # Compute Relay
 
 > **Project status:** portable-core components, SQLite metadata, durable admission,
-> scheduling and one-shot dispatch/recovery are implemented offline. Durable control
-> operations, artifact collection, production `serve` and live Kaggle remain separate gates.
+> scheduling, one-shot dispatch/recovery and explicit durable controls are implemented
+> offline. Artifact collection, production `serve` and live Kaggle remain separate gates.
+> M3-05 is in review in PR #15; M3-06 has not started.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -53,9 +54,11 @@ The repository currently establishes:
 - durable job/attempt admission, immutable profile resolution and object pins, original
   receipt replay, state/event transactions and authenticated create/validate/status handlers;
 - transactional FIFO/round-robin scheduling, shared-account capacity, fenced local leases,
-  bounded local workers and explicit quota uncertainty policy; and
+  bounded local workers and explicit quota uncertainty policy;
 - immutable input preparation, private-staging and submission intent ledgers, exact provider
-  binding snapshots, one-shot mutations and read-only same-attempt recovery.
+  binding snapshots, one-shot mutations and read-only same-attempt recovery; and
+- durable attempt-scoped cancel/retry/reconcile/collect records, immutable receipts,
+  current operation status, one-shot cancellation and authenticated control HTTP contracts.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -64,6 +67,12 @@ remote submission: the orchestration component must verify inputs and commit eac
 before its one allowed provider mutation. The supplied bound provider is a nonexecuting fake.
 Terminal provider observation opens collection, not job success; status exposes cached
 structured recovery conditions without polling or replaying compute.
+
+Control requests explicitly name an attempt and require an idempotency key. POST replay
+returns the original receipt; GET returns current operation state. Cancellation intent is
+not termination evidence, and compute retry preserves the original frozen inputs and binding.
+Collect currently accepts a durable transfer-only ticket: the M3-06 collector/verifier is
+not implemented, and no accepted ticket implies available artifacts.
 
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include blob bytes or
@@ -86,6 +95,7 @@ live Kaggle support.
 | [`docs/admission.md`](docs/admission.md) | Durable job acceptance, canonical request identity, replay, frozen references and pending preparation. |
 | [`docs/scheduler.md`](docs/scheduler.md) | Durable fairness, account/worker reservations, fenced leases, quota policy and the local-only phase boundary. |
 | [`docs/dispatch.md`](docs/dispatch.md) | Input freeze, private staging, one-shot intents, reconciliation and the collection handoff. |
+| [`docs/operations.md`](docs/operations.md) | Explicit attempt controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only tickets. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -124,8 +134,8 @@ with a lost response and same-attempt reconciliation after database reopen. Its 
 fixture stops at collection, with no result-success claim or actual workload execution.
 
 These checks are finite, clean up temporary files and never call Kaggle. None is a
-production runtime. See the auth/object, storage, admission, scheduler and dispatch guides
-for their distinct evidence limits and local-versus-CI verification disclosures.
+production runtime. See the auth/object, storage, admission, scheduler, dispatch and operations
+guides for their distinct evidence limits and local-versus-CI verification disclosures.
 
 ## Current execution boundary
 

@@ -79,5 +79,24 @@ Semantic Versioning once a public compatibility surface exists.
   process-kill/commit-loss/rollback tests and a real-blob, nonexecuting fake dispatch smoke.
 - ADR-0011 documenting conservative recovery and the separate collection/control-operation
   gates; no production server or live provider capability is claimed.
+- M3-05 migration 6 with attempt-scoped durable operation records, immutable idempotency
+  receipts, per-attempt cancellation/retry uniqueness and operation-linked events.
+- Dispatch-preventing or one-shot capability-verified cancellation, conservative unresolved
+  outcomes, frozen-input explicit new attempts and observation-only reconciliation.
+- Transfer-only collection tickets after terminal execution evidence; the actual collector,
+  result verifier and artifact publication remain M3-06.
+- Authenticated cancel/retry/reconcile/collect and current-operation HTTP handlers, strict
+  request/receipt schemas, fixture/lock updates and actual-response contract tests.
+- Concurrent retry, cancellation/completion, staging, revocation, event rollback and
+  lost-acknowledgement tests; serializer/record truth-table checks cover 880 combinations.
+- Operations guidance and ADR-0012 documenting immutable receipt versus current-state
+  reads, cancellation evidence, original-input retry and the collection handoff.
+
+### Changed
+
+- Synchronized living README, roadmap, plan, architecture, API and persistence guidance
+  with merged M3-01 through M3-04 and M3-05's in-review boundary. Preserved the approved
+  proposal, historical ADR decisions and dated provider evidence without upgrading live
+  support or claiming a production runtime.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

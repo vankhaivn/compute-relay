@@ -29,16 +29,17 @@ owner-approved proposal update.
 | [`scope-and-requirements.md`](scope-and-requirements.md) | M-0 baseline | Stable requirement IDs mapped to components, acceptance evidence, and milestones. |
 | [`architecture.md`](architecture.md) | Active baseline | Provider-neutral layers, responsibilities, entities, and invariants. |
 | [`domain-model.md`](domain-model.md) | M2-02 implemented offline | Typed IDs, entities, capability evidence, structured errors, independent state dimensions, and transition invariants. |
-| [`../api/README.md`](../api/README.md) | Contracts and ten handlers implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock, operation status and validation workflow. |
+| [`../api/README.md`](../api/README.md) | Contracts and fifteen composable handlers implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock, operation status and validation workflow; production server remains separate. |
 | [`providers/contract.md`](providers/contract.md) | M2-04 implemented offline | Provider contracts, deterministic fake, infrastructure ports and local smoke. |
 | [`auth-and-objects.md`](auth-and-objects.md) | M2-05/M2-06 implemented offline; merged | Workspace authorization, HTTP guards, streaming upload, atomic blobs and recovery boundaries. |
 | [`packaging-and-import.md`](packaging-and-import.md) | M2-07 implemented offline; merged | Explicit bundle commands, strict archive validation, rooted snapshots and opt-in local import. |
 | [`https-ingestion.md`](https-ingestion.md) | M2-08 implemented offline; merged | Public HTTPS snapshots, DNS/peer/TLS and redirect defenses, bounded transfers and no source refresh. |
 | [`../runner/README.md`](../runner/README.md) | M2-09 implemented offline; merged | Finite Linux runner, frozen-input manifest, setup/process/log/output bounds, CPU fixtures and provider-evidence limitations. |
-| [`storage.md`](storage.md) | M3-01 implemented offline; merged | SQLite repositories, ordered migrations, process lock, database-only backup/restore and evidence limits. |
+| [`storage.md`](storage.md) | M3-01 implemented offline; merged | SQLite repositories, ordered migrations, process lock, database-only backup/restore and evidence limits; links to later persistence components. |
 | [`admission.md`](admission.md) | M3-02 implemented offline; merged | Atomic job/attempt/idempotency, frozen references, pending preparation, state/event CAS and admission HTTP. |
 | [`scheduler.md`](scheduler.md) | M3-03 implemented offline; merged | Durable FIFO/round-robin fairness, account capacity, fenced local claims, quota policy and the no-remote-side-effect boundary. |
-| [`dispatch.md`](dispatch.md) | M3-04 implemented offline; in review | Input freeze, private staging, one-shot mutation intents, fenced reconciliation and cached recovery conditions. |
+| [`dispatch.md`](dispatch.md) | M3-04 implemented offline; merged | Input freeze, private staging, one-shot mutation intents, fenced reconciliation and cached recovery conditions. |
+| [`operations.md`](operations.md) | M3-05 implemented offline; PR #15 in review | Attempt-scoped controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only collection tickets. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
@@ -52,9 +53,10 @@ owner-approved proposal update.
 | [`development/commit-convention.md`](development/commit-convention.md) | Active policy | Commit subject and history rules. |
 | [`development/repository-workflow.md`](development/repository-workflow.md) | Active policy | Branch, PR, validation, and direct-main rules. |
 
-Operations, testing, provider support, troubleshooting, and security design documents should
+Additional testing, provider support, troubleshooting and security design documents should
 be added when implementation makes them concrete. Do not create empty documents merely to
-mirror a proposed tree.
+mirror a proposed tree. The operations guide does not imply artifact collection, cleanup or
+production runtime composition is complete.
 
 ## Status vocabulary
 
@@ -83,10 +85,11 @@ level and capability support must not be collapsed into one optimistic checkbox.
 | Admission/idempotency/profile snapshots | admission, ADR-0009, architecture, `api/`, plan, migration/CAS/HTTP tests |
 | Scheduling/capacity/leases/quota | scheduler, ADR-0010, architecture, event schema, plan, migration/fencing/crash tests |
 | Preparation/submission/reconciliation | dispatch, ADR-0011, provider contracts, architecture, event schema, plan, intent/crash/status tests |
+| Explicit controls/receipt semantics | operations, ADR-0012, admission, dispatch, architecture, `api/`, plan, migration/race/receipt/HTTP tests |
 | Bundle/import safety | packaging-and-import, ADR-0005, `api/`, ignore example, plan, tests |
 | HTTPS/SSRF policy | https-ingestion, ADR-0006, `api/`, plan, transport/service/API tests |
 | Remote runner/execution contract | runner/README, ADR-0007, runner schemas/assets lock, public result schema, architecture, plan, CPU/contract tests |
-| Persistence/recovery | storage, admission, scheduler, dispatch, ADR-0008/0009/0010/0011, architecture, domain model, risks, plan, migrations/tests |
+| Persistence/recovery | storage, admission, scheduler, dispatch, operations, ADR-0008/0009/0010/0011/0012, architecture, domain model, risks, plan, migrations/tests |
 | Provider client/version/capability | interface review, feasibility, provider docs, compatibility, risk register |
 | Live probe | feasibility gate, sanitized evidence, capability matrix, compatibility date |
 | Host support claim | compatibility matrix, installation, CI evidence |

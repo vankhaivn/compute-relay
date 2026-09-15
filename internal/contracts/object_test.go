@@ -43,15 +43,13 @@ func TestObjectAndHTTPErrorWireShapesMatchSchemas(t *testing.T) {
 	}
 }
 
-func TestImplementationStatusKeepsControlOperationsPlanned(t *testing.T) {
-	for _, id := range []string{"getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob"} {
+func TestImplementationStatusTracksOfflineHandlers(t *testing.T) {
+	for _, id := range []string{"getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob", "retryJob", "cancelJob", "reconcileJob", "collectJob", "getOperation"} {
 		if operationStatus(id) != "implemented-offline" {
 			t.Fatal(id)
 		}
 	}
-	for _, id := range []string{"retryJob", "cancelJob", "reconcileJob", "collectJob", "getOperation", "unknown"} {
-		if operationStatus(id) != "planned" {
-			t.Fatal("unimplemented operation upgraded", id)
-		}
+	if operationStatus("unknown") != "planned" {
+		t.Fatal("unknown operation upgraded")
 	}
 }

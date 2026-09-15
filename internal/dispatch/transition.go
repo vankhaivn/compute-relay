@@ -27,6 +27,30 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 	next := state
 	var event domain.EventType
 	switch a.Kind {
+	case PreventDispatch:
+		if old.SubmitStarted || state.Orchestration.Terminal() || state.Execution != domain.ExecutionNotSubmitted || (state.RemoteActivity != domain.RemoteActivityNotStarted && state.RemoteActivity != domain.RemoteActivityInactive) {
+			return Journal{}, state, "", ErrConflict
+		}
+		j.Phase = Prevented
+		next.Orchestration = domain.OrchestrationCancelled
+		next.Cancellation = domain.CancellationPrevented
+		next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+		event = domain.EventCancellationRequested
+	case RequestReconciliation:
+		if !old.SubmitStarted || state.Execution.Terminal() || state.Orchestration.Terminal() || (old.Phase != Attention && old.Phase != Submitting && old.Phase != Submitted) || old.Problem != nil && (old.Problem.Code == domain.CodeRemoteIdentityMismatch || old.Problem.Code == domain.CodePrivateStagingUnavailable) {
+			return Journal{}, state, "", ErrConflict
+		}
+		j.Phase = Submitting
+		if j.Remote != nil {
+			j.Phase = Submitted
+		}
+		j.Failures = 0
+		j.Problem = nil
+		next.Orchestration = domain.OrchestrationReconciling
+		if cancellationPending(state) {
+			next.Orchestration = domain.OrchestrationCancelling
+		}
+		event = domain.EventReconciliationRequested
 	case BeginPreparation:
 		if old.Phase != Local || old.Plan != nil || !scheduler.LocalOnly(state) || a.Plan == nil || a.Plan.Job.Inputs == nil || a.Plan.Job.Validate() != nil || !a.PreparationID.Valid() {
 			return Journal{}, state, "", ErrConflict
@@ -65,7 +89,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			event = domain.EventPreparationObserved
 		}
 	case BeginSubmission:
-		if old.Phase != Ready || old.SubmitStarted || old.Prepared == nil || !old.Prepared.Ready || !old.Prepared.Private {
+		if old.Phase != Ready || old.SubmitStarted || old.Prepared == nil || !old.Prepared.Ready || !old.Prepared.Private || !scheduler.LocalOnly(state) || state.Cancellation != domain.CancellationNotRequested {
 			return Journal{}, state, "", ErrConflict
 		}
 		j.SubmitStarted = true
@@ -88,6 +112,9 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			j.Problem = nil
 			j.Failures = 0
 			next.Orchestration = domain.OrchestrationSubmitted
+			if cancellationPending(state) {
+				next.Orchestration = domain.OrchestrationCancelling
+			}
 			event = domain.EventSubmissionAccepted
 			// Accepted does not imply the provider has started or even reported queued.
 		case provider.SubmissionRejected:
@@ -104,6 +131,11 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			next.Execution = domain.ExecutionNotSubmitted
 			next.RemoteActivity = domain.RemoteActivityInactive
 			next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+			if state.Cancellation != domain.CancellationNotRequested {
+				// Explicit non-acceptance, not a not-found lookup, proves prevention.
+				next.Orchestration = domain.OrchestrationCancelled
+				next.Cancellation = domain.CancellationPrevented
+			}
 			event = domain.EventSubmissionRejected
 		case provider.SubmissionUnknown:
 			j.Problem = problem(domain.CodeProviderSubmissionUnknown, true)
@@ -145,6 +177,12 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		} else {
 			next.Orchestration = domain.OrchestrationSubmitted
 		}
+		if !obs.Execution.Terminal() && cancellationPending(state) {
+			next.Orchestration = domain.OrchestrationCancelling
+		}
+		if !obs.Execution.Terminal() && state.Cancellation == domain.CancellationManual {
+			next.Orchestration = domain.OrchestrationNeedsAttention
+		}
 		if err := domain.ValidateAttemptStateTransition(state, next); err != nil {
 			return Journal{}, state, "", ErrStaleObservation
 		}
@@ -160,11 +198,14 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			if j.Failures == MaxFailures {
 				j.Phase = Attention
 				next.Orchestration = domain.OrchestrationNeedsAttention
+				if cancellationPending(state) {
+					next.Cancellation = domain.CancellationManual
+				}
 			}
 		}
 		event = domain.EventExecutionObserved
 	case Fault:
-		if old.Phase == Rejected || old.Phase == Failed || old.Phase == Collectible || old.Phase == Attention {
+		if old.Phase == Rejected || old.Phase == Failed || old.Phase == Collectible || old.Phase == Attention || old.Phase == Prevented {
 			return Journal{}, state, "", ErrConflict
 		}
 		j.Failures++
@@ -197,6 +238,9 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			if permanent || j.Failures == MaxFailures {
 				j.Phase = Attention
 				next.Orchestration = domain.OrchestrationNeedsAttention
+				if cancellationPending(state) {
+					next.Cancellation = domain.CancellationManual
+				}
 			}
 		}
 		event = domain.EventReconciliationDeferred

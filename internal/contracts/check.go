@@ -233,10 +233,11 @@ func validateOpenAPI(root, relative string) error {
 }
 
 // Handler-level evidence does not imply production CLI composition or provider dispatch.
-// Control operations remain planned until their separate acceptance gates pass.
+// Durable controls have offline evidence; accepted collection still stops at its ticket.
 func operationStatus(id string) string {
 	switch id {
-	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob":
+	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob",
+		"cancelJob", "retryJob", "reconcileJob", "collectJob", "getOperation":
 		return "implemented-offline"
 	default:
 		return "planned"

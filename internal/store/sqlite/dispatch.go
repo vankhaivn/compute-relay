@@ -98,7 +98,7 @@ func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.T
 	if err != nil {
 		return work, err
 	}
-	if (j.Plan != nil && !barrier) || j.Plan == nil && barrier && j.Phase != dispatch.Failed {
+	if (j.Plan != nil && !barrier) || j.Plan == nil && barrier && j.Phase != dispatch.Failed && j.Phase != dispatch.Prevented {
 		return work, ErrCorrupt
 	}
 	record, err := readJobRecord(ctx, tx, c.WorkspaceID, c.JobID)
@@ -124,8 +124,12 @@ func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.T
 		if err = checkDispatchLedger(ctx, tx, work); err != nil {
 			return dispatch.Work{}, err
 		}
-	} else if j.Phase != dispatch.Failed && !scheduler.LocalOnly(a.State) {
+	} else if j.Phase != dispatch.Failed && j.Phase != dispatch.Prevented && !scheduler.LocalOnly(a.State) {
 		return dispatch.Work{}, scheduler.ErrPhaseGate
+	}
+	work.Cancellation, err = pendingCancellation(ctx, tx, work)
+	if err != nil {
+		return dispatch.Work{}, err
 	}
 	return work, nil
 }
@@ -277,6 +281,11 @@ func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now 
 }
 
 func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action, now time.Time) (dispatch.Work, error) {
+	// HTTP controls use their authenticated operation transaction; an ordinary worker
+	// cannot bypass its operation identity/event journal through the dispatch port.
+	if action.Kind == dispatch.PreventDispatch || action.Kind == dispatch.RequestReconciliation {
+		return dispatch.Work{}, dispatch.ErrInvalid
+	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return dispatch.Work{}, err
@@ -351,6 +360,13 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 		work.Journal = next
 		work.Handle.Version = next.Version
 		work.Handle.Claim.AttemptRevision = updated.Revision
+		if err = finishObservedOperations(ctx, tx, &work, action.Kind, now); err != nil {
+			return err
+		}
+		work.Cancellation, err = pendingCancellation(ctx, tx, work)
+		if err != nil {
+			return err
+		}
 		result = work
 		return nil
 	})
