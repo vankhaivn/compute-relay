@@ -1,6 +1,6 @@
 # Verified artifact collection and recovery
 
-> **Task:** M3-06, implemented offline; PR #16 in review until owner merge.
+> **Task:** M3-06, implemented offline; PR #16 merged.
 >
 > **Scope:** an explicitly composed transfer service, SQLite publication and authenticated
 > internal result reads. No production `serve`, artifact HTTP routes or live provider claim.
@@ -138,10 +138,20 @@ stream from the dedicated result store, never a provider URL. Token revocation a
 workspace/attempt/ID reads are rejected. Public artifact download/listing routes and CLI
 composition remain separate work; the existing fifteen HTTP handlers are unchanged.
 
-Do not delete pins or completed blobs to repair a failed collection. Retention/cleanup is
-M3-07 and has not started. Database-only backups do not include either input or result blob
-roots. Retain matching bytes and recovery evidence; a restored database does not stop remote
-compute. Arbitrary downgrade from schema 7 is unsupported.
+## Retention integration
+
+Do not delete pins or completed blobs to repair a failed collection. [M3-07 retention](retention.md)
+now supplies explicit pin-aware expiry and local byte sweep. Pending operations, held leases,
+incomplete/invalid collections and unpublished recovery files remain protected. The complete
+verified artifact set expires together; metadata/publication identity survives, and one
+`result.expired` event records expiry without changing execution outcome or original receipts.
+Current internal reads return `retention.ErrExpired` rather than reporting no publication.
+
+Database-only backups do not include either input or result blob root. Retain matching bytes,
+recovery evidence and each root's `.retention-id` when backing up or moving a whole store.
+Root replacement is not authorized by a matching path. A restored database does not stop
+remote compute or recover deleted bytes. Arbitrary schema downgrade is unsupported. Remote
+cleanup previews remain separate from collection and never apply deletion.
 
 ## Verification
 
@@ -173,6 +183,8 @@ a two-second bounded fuzz run executed 43,491 inputs. That harness supplies only
 and an error sentinel and is not shipped. It is **decoder-only** evidence, not local schema,
 modernc, full-engine or production-runtime execution. PR #16 records exact final-head CI
 results separately. No dependency downgrade, replacement driver or CI workflow was added.
+M3-07 retention/expiry evidence is recorded separately in PR #17 and the retention guide.
 
 See [ADR-0013](decisions/0013-verified-collection-and-publication.md),
-[durable controls](operations.md), [dispatch](dispatch.md) and [storage](storage.md).
+[durable controls](operations.md), [dispatch](dispatch.md), [storage](storage.md) and
+[retention](retention.md).
