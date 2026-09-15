@@ -76,10 +76,13 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 				return err
 			}
 		}
+		// Clear defaults before copying referenced rows into any table.
 		for _, name := range tables {
 			if _, err := tx.Exec("DELETE FROM " + quote(name)); err != nil {
 				return err
 			}
+		}
+		for _, name := range tables {
 			if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT * FROM fixture_source." + quote(name)); err != nil {
 				return err
 			}
