@@ -2,8 +2,8 @@
 
 > **Status:** acceptance-based roadmap active; synchronized 2026-09-15.
 >
-> **Current milestone:** M-3 — durable orchestration; M3-01 through M3-05 merged,
-> M3-06 in review in PR #16. M-1 live acceptance remains blocked.
+> **Current milestone:** M-3 — durable orchestration; M3-01 through M3-06 merged,
+> M3-07 in review in PR #17. M-1 live acceptance remains blocked.
 >
 > Dates and sprint estimates are intentionally not assigned without an execution context.
 
@@ -18,14 +18,15 @@ proof of the first real compute path.
 | M-0 — Evidence and scope | `complete` | PR #1 merged the traceability, evidence, ADR, risk, compatibility and dependency-aware plan set. |
 | M-1 — Thin real-provider proof | `blocked` for live acceptance | M1-01 offline harness merged in PR #3; authorized private bounded GPU path with identity-safe verified outputs is still required. |
 | M-2 — Portable core | `complete` offline | M2-01 through M2-09 merged through PR #10; provider-neutral API/domain/objects/auth/fake-provider and finite runner evidence, not a live-provider claim. |
-| M-3 — Durable orchestration | `in-progress` | M3-01 through M3-05 merged in PRs #11–#15; M3-06 verified collection in review in PR #16. Retention/cleanup and the final fault-matrix gate remain. |
+| M-3 — Durable orchestration | `in-progress` | M3-01 through M3-06 merged in PRs #11–#16; M3-07 pin-aware retention, local sweep and remote dry runs in review in PR #17. The M3-08 fault-matrix acceptance gate remains. |
 | M-4 — Integrated Kaggle batch | `not-started` | Evidence-matching Kaggle adapter inside the durable core. |
 | M-5 — Usable developer product | `not-started` | CLI, doctor, install, examples, and three thin clients. |
 | M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
 
 Detailed task dependencies and authorization boundaries are in
-[`implementation-plan.md`](implementation-plan.md). PR #16 stops for owner merge;
-M3-07 has not started, and production `serve` is not available.
+[`implementation-plan.md`](implementation-plan.md). PR #17 stops for owner merge;
+M3-08 has not started, and production `serve` is not available. Remote cleanup apply and
+staging preview are not supplied by M3-07's execution-only dry-run component.
 
 ## M-0 — Evidence and scope
 
@@ -115,8 +116,10 @@ artifact-only retries survive local failures.
 No automatic compute rerun or provider fallback exists. [M3-05 controls](operations.md) add
 immutable receipts, explicit attempt targets, one-shot cancellation and transfer-only tickets.
 [M3-06 collection](collection.md) verifies pinned manifests and blobs before atomic artifact
-publication. An accepted ticket still does not imply available results. M3 remains incomplete
-until retention/cleanup and the final fault-matrix gate pass.
+publication. An accepted ticket still does not imply available results. [M3-07 retention](retention.md)
+adds conservative pins, bound-store local byte removal and exact-ledger remote dry runs.
+Metadata and unresolved recovery material remain retained; a preview never applies remote
+deletion. M3 remains incomplete until M3-07 merges and the M3-08 fault-matrix gate passes.
 
 ## M-4 — Integrated Kaggle batch
 
