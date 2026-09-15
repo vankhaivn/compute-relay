@@ -210,6 +210,7 @@ const (
 	EventCancellationObserved     EventType = "cancellation.observed"
 	EventReconciliationRequested  EventType = "reconciliation.requested"
 	EventCollectionRequested      EventType = "collection.requested"
+	EventResultExpired            EventType = "result.expired"
 )
 
 func (eventType EventType) Valid() bool {
@@ -220,7 +221,7 @@ func (eventType EventType) Valid() bool {
 		EventArtifactVerified, EventJobCompleted, EventSchedulerClaimed, EventSchedulerDeferred, EventSchedulerReleased,
 		EventPreparationIntended, EventPreparationObserved, EventSubmissionRejected, EventReconciliationDeferred,
 		EventOperationAccepted, EventOperationCompleted, EventAttemptRetried, EventCancellationInvoked,
-		EventCancellationObserved, EventReconciliationRequested, EventCollectionRequested:
+		EventCancellationObserved, EventReconciliationRequested, EventCollectionRequested, EventResultExpired:
 		return true
 	default:
 		return false

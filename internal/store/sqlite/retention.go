@@ -390,6 +390,9 @@ func expireResult(ctx context.Context, tx *sql.Tx, item retentionItem, now time.
 	if _, err := tx.ExecContext(ctx, `UPDATE retention_inventory SET expired_at=? WHERE kind='result' AND workspace_id=? AND object_id IN(SELECT object_id FROM artifacts WHERE workspace_id=? AND job_id=? AND attempt_id=?) AND expired_at IS NULL`, stamp, string(m.WorkspaceID), string(m.WorkspaceID), string(job), string(attempt)); err != nil {
 		return 0, dbError(err)
 	}
+	if err := controlEvent(ctx, tx, m.WorkspaceID, job, attempt, "", domain.EventResultExpired, now); err != nil {
+		return 0, err
+	}
 	if err := retentionAudit(ctx, tx, m.WorkspaceID, "attempt", string(attempt), "expire", now); err != nil {
 		return 0, err
 	}
