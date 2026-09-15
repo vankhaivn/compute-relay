@@ -1,8 +1,8 @@
 # Architecture baseline
 
 > **Status:** approved baseline with offline portable-core, SQLite, durable admission,
-> scheduling and one-shot preparation/submission recovery. Durable control operations,
-> artifact collection, production composition and live provider evidence remain later gates.
+> scheduling, one-shot preparation/submission recovery and attempt-scoped durable controls.
+> Artifact collection, production composition and live provider evidence remain later gates.
 
 ## System intent
 
@@ -129,9 +129,37 @@ repeating either mutation. A not-found lookup cannot rearm the gate.
 Recovery retains possible-activity capacity and can continue while new dispatch is paused.
 Repeated unresolved outcomes become needs_attention with a sanitized cached status problem.
 A terminal observation opens collection, never automatic job success. Resource records stay
-pinned for later cleanup policy. No provider cancellation, compute retry, artifact collection
-or production server wiring is supplied here. See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md)
-and [`dispatch.md`](dispatch.md) for recovery trade-offs, exact tests and adapter obligations.
+pinned for later cleanup policy. M3-04 itself did not add cancellation or compute-retry
+controls; M3-05 adds those below. Artifact collection and production server wiring remain
+separate. See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md) and
+[`dispatch.md`](dispatch.md) for recovery trade-offs, exact tests and adapter obligations.
+
+## Implemented durable controls
+
+M3-05 adds `internal/operations`, SQLite migration 6 and five optional HTTP handlers. Every
+control targets an explicit attempt and requires current workspace authority. Matching
+idempotency replay returns an immutable acceptance receipt; current operation reads return
+the latest revision. Operation, attempt, event, idempotency and any retry queue insertion
+share the appropriate atomic transaction. HTTP handlers contain no provider calls.
+
+Retry verifies the original frozen local bytes outside SQL and rechecks authority, source
+eligibility and snapshot identity inside the commit. It creates a distinct attempt/nonce
+without changing the immutable job, binding, input pins or historical attempt. Unresolved
+remote activity and successful execution with missing artifacts cannot trigger compute retry.
+
+Cancellation prevents new dispatch atomically where possible, including a terminal
+`prevented` journal phase that cannot reopen submission. Otherwise it commits one exact-bound,
+capability-verified cancellation intent before the adapter call. Ambiguous acknowledgement
+is never automatically repeated; cancellation intent does not release possible remote
+capacity or prove termination. Completion and cancellation observations remain separate
+from immutable operation outcomes. Reconcile only observes existing identity.
+
+Collect creates a durable transfer-only ticket after matching terminal execution evidence.
+The M3-06 ticket consumer, artifact verification and atomic publication are not implemented
+here. A `202` receipt is not result availability, remote termination or hardware release.
+The strict public control view excludes reasons, provider references and arbitrary internal
+problem details. See [ADR-0012](decisions/0012-attempt-scoped-durable-controls.md),
+[`operations.md`](operations.md) and [API contracts](../api/README.md).
 
 ## Control plane and workload boundary
 
@@ -161,7 +189,7 @@ See [ADR-0007](decisions/0007-finite-remote-runner.md) and the
 - **Provider resource:** connector-owned remote identity tracked for recovery and cleanup.
 - **Object:** immutable local input or code bundle.
 - **Artifact:** verified output associated with one attempt.
-- **Operation:** durable cancel, retry, reconcile, collect, or cleanup action.
+- **Operation:** durable cancel, retry, reconcile or collect action with immutable receipt and current status; cleanup remains a later implementation gate.
 - **Event:** sequenced state or operational evidence.
 
 ## Non-negotiable invariants
@@ -198,6 +226,7 @@ M3-02 reuses the already pinned JSON Schema validator for closed, embedded runti
 M3-03 adds no dependency and makes no provider call while selecting or inspecting work.
 M3-04 adds no dependency and uses only explicitly registered adapters for provider calls;
 the supplied bound adapter is a nonexecuting fixture, not a live Kaggle implementation.
+M3-05 adds no dependency and preserves that provider-neutral, explicit-composition boundary.
 The M2-09 runner and its unit tests use the Python standard library; the optional GPU
 probe relies on the separately verified remote environment's PyTorch installation.
 

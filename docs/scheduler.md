@@ -1,9 +1,9 @@
 # Durable scheduling and local preparation ownership
 
-> **Task:** M3-03; implemented offline, PR #13 in review.
+> **Task:** M3-03; implemented offline, PR #13 merged.
 >
 > A claim grants bounded local preparation ownership, not permission to submit compute.
-> Provider staging, frozen-input completion and write-ahead submission intent remain M3-04.
+> M3-04 now supplies separate staging, frozen-input and write-ahead submission components.
 > No production `serve` command starts this scheduler implicitly.
 
 ## Components
@@ -14,8 +14,10 @@ queue order, fairness cursor, account policy, quota snapshots and fenced leases.
 adds these records without modifying migrations 1–3 or accepted job/attempt identities.
 
 An attempt insert enqueues in the same admission transaction. An idempotency replay does
-not insert an attempt or queue entry. Existing admission limits remain 100 outstanding jobs
-per workspace and 1,000 globally by default; the scheduler does not accept unbounded work.
+not insert an attempt or queue entry. M3-05's explicit compute retry atomically creates one
+new attempt and queue entry; it does not reset the source attempt or its dispatch barrier.
+Existing admission limits remain 100 outstanding jobs per workspace and 1,000 globally by
+default; the scheduler does not accept unbounded work.
 
 ## Selection and capacity
 
@@ -79,9 +81,11 @@ claim cancellation or inputs readiness. Reclaim/release can add ownership events
 changing the state revision when the state itself did not change.
 
 A monotonic dispatch barrier prevents an attempt that left the safe local phase from being
-reclaimed automatically, even after an accidental reset to queued. This barrier is not the
-future remote submission-intent ledger. The legacy unfenced `CommitAttempt` rejects any
-attempt with scheduler lease history; M3-04 must supply fenced orchestration mutations.
+reclaimed automatically, even after an accidental reset to queued. This barrier is distinct
+from the M3-04 remote submission-intent ledger. The legacy unfenced `CommitAttempt` rejects
+any attempt with scheduler lease history; M3-04 supplies fenced orchestration mutations.
+M3-05 controls preserve those fences and never use cancellation or retry to rearm an
+ambiguous submission.
 
 Stored clock watermarks reject backwards time rather than resurrecting old ownership.
 Production callers use the scheduler service's serialized clock/repository boundary;
@@ -99,9 +103,10 @@ stops new claims and waits for local callbacks; a callback that ignores cancella
 therefore delay shutdown. The pool does not advertise an impossible forced Go-goroutine
 kill. Stopping it does not cancel remote compute.
 
-The current pool defers after either local success or failure. It never guesses that
+The local-only pool defers after either local success or failure. It never guesses that
 bundle/input/provider-readiness gates are complete. Actual preparation and provider intent
-coordination remain a separate task, not optimistic placeholder callbacks in this one.
+coordination are explicitly composed through [M3-04 dispatch](dispatch.md), not optimistic
+placeholder callbacks in `RunLocal`.
 
 ## Quota policy
 
@@ -145,10 +150,11 @@ This does not verify the production modernc driver, full domain/auth/schema inte
 or the real schema-3 upgrade. The command and real upgrade test are covered separately by
 the existing pinned-driver/native offline CI; they are not claimed as locally executed.
 
-The final PR records exact CI runs and source-identity checks. No harness, test database,
+PR #13 records exact CI runs and source-identity checks. No harness, test database,
 generated token, alternate driver or replacement directive is shipped. Actions remain
 offline quality/build/unit/component/contract tests, with no runtime deployment.
 
 See [ADR-0010](decisions/0010-fair-scheduling-and-fenced-local-claims.md),
-[admission](admission.md) and [storage](storage.md). After owner merge, M3-04 is the next
-separately authorized task; scheduler completion does not complete durable orchestration.
+[admission](admission.md), [storage](storage.md), [dispatch](dispatch.md) and
+[operations](operations.md). M3-04 is merged and M3-05 is in review in PR #15;
+collection, retention/cleanup and complete orchestration remain separate gates.

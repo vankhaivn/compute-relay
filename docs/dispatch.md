@@ -1,6 +1,7 @@
 # Durable preparation, dispatch and recovery
 
-> **Task:** M3-04, implemented offline; PR #14 in review.
+> **Task:** M3-04, implemented offline; PR #14 merged. M3-05 control integration is
+> described in [operations](operations.md) and is in review in PR #15.
 >
 > This is an explicitly composed orchestration component, not a production `serve`
 > command or live Kaggle adapter. No workload command runs on the control-plane host.
@@ -29,7 +30,8 @@ transaction as state and sequenced events. No transaction spans network or file 
 `GET` job status returns the cached structured `problem` when present. It never polls a
 provider or retries an execution. The response excludes arbitrary diagnostic details,
 internal causes, source URLs and credential references. Existing workspace authorization
-and the existing job-status schema still apply; no new HTTP route is introduced.
+and the existing job-status schema still apply. M3-04 introduced no new HTTP route;
+M3-05 separately adds explicit controls and current-operation reads.
 
 ## Inputs and immutable resolution
 
@@ -69,6 +71,7 @@ checks only its fixture binding. No credential value is stored in the journal or
 | `rejected` / `failed` | No automatic new mutation. |
 | `attention` | Automatic recovery stopped; retain unresolved evidence for operator inspection. |
 | `collectible` | Hand off to later artifact verification; do not infer job success. |
+| `prevented` | M3-05 cancelled before submission intent; do not reopen dispatch or infer remote termination. |
 
 Only the invocation receiving a successful **new** begin-intent commit may perform that
 mutation. A crash immediately after commit but before the actual provider call therefore
@@ -117,6 +120,21 @@ Callbacks must cooperate with cancellation. The fixed worker pool does not spawn
 workers for callbacks that ignore cancellation, and does not claim shutdown completed before
 they return. Stopping this engine does not call provider cancellation or cleanup.
 
+## Explicit control integration
+
+M3-05 stores cancellation intent separately from termination evidence. Before submission
+intent it can commit `prevented` with state/events and retain any existing staging ledger.
+After submission may have started, only a new committed cancellation intent authorizes one
+capability-verified call against the exact frozen binding. Lost acknowledgement or restart
+does not repeat cancellation, clear remote capacity or use cleanup instead.
+
+Explicit reconcile requests only observation of the recorded identity; permanent
+identity/privacy failures cannot be rearmed into new staging/submission. Compute retry
+creates a distinct attempt with the same verified frozen inputs and binding, never resets
+the existing journal. Collection acceptance creates a durable transfer-only ticket and
+still stops before the M3-06 verifier/consumer. See [operations](operations.md) for HTTP,
+idempotency receipts, completion races and recovery guidance.
+
 ## Verification
 
 With the pinned repository toolchain:
@@ -147,15 +165,18 @@ production modernc, full auth/domain/archive/schema integration, the real schema
 or local execution of `cmd/dispatchsmoke`. Exact Go 1.27.1/modernc integration, the smoke
 component and native tests/build are checked by the existing offline CI. PR #14 records
 exact commands, source identities and final-head check results; no workflow was added.
+M3-05's additional control/receipt/race/HTTP evidence is recorded separately in PR #15 and
+the operations guide; the historical M3-04 local harness is not relabeled as that evidence.
 
 ## Remaining boundaries
 
-The ledger is pinned recovery evidence, not a cleanup authorization. Cancellation, explicit
-compute retry/reconcile controls and durable operation records remain M3-05; collection is
-M3-06 and retention/cleanup is M3-07. Production CLI/configuration composition and real Kaggle
-integration remain their separate gates. Do not manually reset journal phases, delete intent
-rows or clear the scheduler barrier to resume an uncertain attempt.
+The ledger is pinned recovery evidence, not a cleanup authorization. Durable cancellation,
+explicit compute retry/reconcile and collection tickets now have M3-05 offline components.
+Artifact verification/collection remains M3-06 and retention/cleanup M3-07. Production
+CLI/configuration composition and real Kaggle integration retain their separate gates.
+Do not manually reset journal phases, delete intent rows or clear the scheduler barrier to
+resume an uncertain attempt. Stop after PR #15 for owner merge; do not begin M3-06 here.
 
 See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md),
-[the scheduler guide](scheduler.md), [storage](storage.md) and
+[the scheduler guide](scheduler.md), [storage](storage.md), [operations](operations.md) and
 [the approved recovery requirements](proposal.md#13-persistence-idempotency-and-crash-recovery).

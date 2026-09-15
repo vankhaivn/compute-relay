@@ -1,6 +1,6 @@
 # Durable local job admission
 
-> **Task:** M3-02; implemented offline, PR #12 in review.
+> **Task:** M3-02; implemented offline, PR #12 merged.
 >
 > **Scope:** local acceptance and cached status, not dispatch, GPU allocation or a
 > production `serve` command. M3-01 supplies the SQLite/workspace/token/object foundation.
@@ -88,11 +88,12 @@ or the remote environment has been verified. Preparation must inspect/revalidate
 bytes before dispatch. SQL guards reject changes to referenced object metadata.
 
 Direct HTTPS sources remain in the immutable canonical request and are explicitly pending;
-admission performs syntax/policy checks only, not DNS or downloading. Future preparation
-must freeze the first permitted snapshot once and use it for all attempts. Until that path
-is composed, callers may use the existing explicit ingestion endpoint and submit its object
-ID. Neither validation nor `202` claims `inputs.ready`. Source URLs, commands, nonce and
-credential references are not exposed in the current status response or ordinary errors.
+admission performs syntax/policy checks only, not DNS or downloading. M3-04 preparation
+freezes the first permitted committed snapshot and reuses its pins rather than refreshing
+an already frozen URL. It is explicitly composed, not invoked by admission. Callers may
+also use the existing ingestion endpoint and submit its object ID. Neither validation nor
+`202` claims `inputs.ready`. Source URLs, commands, nonce and credential references are not
+exposed in the current status response or ordinary errors. See [dispatch](dispatch.md).
 
 Validation reports `before_dispatch` checks and GPU `verify_after_start` requirements. It
 is not a provider capability/eligibility result. Default bounds are 100 outstanding jobs per
@@ -104,13 +105,23 @@ This prevents unbounded acceptance; it is not M3-03 scheduling or account-capaci
 The existing `ports.Store` now has a SQLite implementation. `CommitAttempt` validates the
 transition, compares the stored revision/identity, and commits the updated state with the
 next per-job event sequence. A stale revision, duplicate event or failed insert rolls back
-both sides. Operation-linked events await durable operations in M3-05.
+both sides. M3-05 persists operation-linked events through dedicated durable-control
+transactions; the legacy CAS is not a way to bypass scheduler fences or operation authority.
 
 Tests cover concurrent replay, workspace isolation, missing/foreign objects, profile
 remapping, revocation, limits, failure at each insert, database-full rollback, real process
 kill before/after commit and HTTP response-writer failure. A lost response never turns into
 a second locally accepted job or attempt. Migration 3 appends to M3-01; earlier migration
 bytes/checksums remain unchanged. Older binaries must reject the newer schema.
+
+## Explicit controls after admission
+
+M3-05 adds separately composed [attempt-scoped controls](operations.md). Every control names
+the source attempt and has its own durable idempotency receipt. Compute retry verifies the
+original frozen bytes and atomically creates a new attempt/nonce/queue entry while preserving
+the job and prior attempt history. It never re-admits a changed specification, remaps a
+profile, refetches a URL or repeats unresolved compute. POST receipt replay is distinct from
+GET current state, and both require current authorization.
 
 ## Developer verification
 
@@ -138,5 +149,7 @@ Go 1.27.1 offline CI; PR #12 records final-head results. No harness or replaceme
 is shipped.
 
 See [ADR-0009](decisions/0009-durable-idempotent-admission.md), [storage](storage.md) and
-[API contracts](../api/README.md). Scheduler, input-preparation orchestration, submission
-intents, control operations and production CLI composition retain their own task gates.
+[API contracts](../api/README.md). [Scheduling](scheduler.md), [input preparation and one-shot
+dispatch](dispatch.md), and [durable controls](operations.md) now have their own offline
+components. Artifact collection, retention/cleanup and production CLI composition remain
+separate task gates.
