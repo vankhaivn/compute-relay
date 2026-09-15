@@ -130,6 +130,28 @@
         "examples/invalid/object-ingest.bad-digest.json",
         "examples/invalid/object-ingest.null.json"
       ]
+    },
+    {
+      "schema": "schemas/control-request.v1alpha1.schema.json",
+      "valid": [
+        "examples/control-request.valid.json",
+        "examples/control-request.retry.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/control-request.implicit-attempt.json",
+        "examples/invalid/control-request.unknown-field.json"
+      ]
+    },
+    {
+      "schema": "schemas/control-operation.v1alpha1.schema.json",
+      "valid": [
+        "examples/control-operation.prevented.valid.json",
+        "examples/control-operation.retry.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/control-operation.false-termination.json",
+        "examples/invalid/control-operation.retry-without-attempt.json"
+      ]
     }
   ]
 }

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay control request v1alpha1",
+  "description": "Attempt-scoped request. The runtime additionally rejects duplicate JSON keys, invalid UTF-8, bodies over 4096 bytes, and reasons over 512 UTF-8 bytes. Reason is non-secret audit metadata, not provider instructions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["attempt_id"],
+  "properties": {
+    "attempt_id": {"$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"},
+    "reason": {
+      "type": "string",
+      "maxLength": 512,
+      "not": {"pattern": "[\u0000-\u001f\u007f-\u009f]"}
+    }
+  },
+  "$defs": {
+    "retry": {
+      "allOf": [
+        {"$ref": "#"},
+        {
+          "required": ["reason"],
+          "properties": {
+            "reason": {
+              "minLength": 1,
+              "pattern": "[^\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

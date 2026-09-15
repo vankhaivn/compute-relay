@@ -1,0 +1,19 @@
+{
+  "operation_id": "op_cancel",
+  "workspace_id": "example",
+  "job_id": "job_example",
+  "attempt_id": "att_original",
+  "kind": "cancel",
+  "status": "succeeded",
+  "revision": 2,
+  "created_at": "2026-09-15T00:00:00Z",
+  "updated_at": "2026-09-15T00:00:00Z",
+  "effect": "dispatch_prevented",
+  "remote_termination_confirmed": true,
+  "replay": false,
+  "problem": null,
+  "links": {
+    "self": "/v1/workspaces/example/operations/op_cancel",
+    "job": "/v1/workspaces/example/jobs/job_example"
+  }
+}

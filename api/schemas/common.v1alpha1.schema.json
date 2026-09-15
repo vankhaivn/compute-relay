@@ -346,7 +346,14 @@
         "preparation.intent_recorded",
         "preparation.observed",
         "submission.rejected",
-        "reconciliation.deferred"
+        "reconciliation.deferred",
+        "operation.accepted",
+        "operation.completed",
+        "attempt.retried",
+        "cancellation.intent_recorded",
+        "cancellation.observed",
+        "reconciliation.requested",
+        "collection.requested"
       ]
     },
     "capability_name": {

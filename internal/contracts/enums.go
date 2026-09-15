@@ -121,6 +121,9 @@ func domainEnums() map[string][]string {
 			domain.EventArtifactVerified, domain.EventJobCompleted,
 			domain.EventSchedulerClaimed, domain.EventSchedulerDeferred, domain.EventSchedulerReleased,
 			domain.EventPreparationIntended, domain.EventPreparationObserved, domain.EventSubmissionRejected, domain.EventReconciliationDeferred,
+			domain.EventOperationAccepted, domain.EventOperationCompleted, domain.EventAttemptRetried,
+			domain.EventCancellationInvoked, domain.EventCancellationObserved,
+			domain.EventReconciliationRequested, domain.EventCollectionRequested,
 		),
 		"capability_name": stringsOf(
 			domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
