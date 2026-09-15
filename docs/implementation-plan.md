@@ -1,6 +1,6 @@
 # Dependency-aware implementation plan
 
-> **Status:** active; M-0, M1-01, M2 and M3-01 through M3-05 merged. M3-06 in review.
+> **Status:** active; M-0, M1-01, M2 and M3-01 through M3-06 merged. M3-07 in review.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-15.
 >
@@ -24,8 +24,9 @@ PR #12 merged [durable idempotent admission](admission.md) for M3-02.
 PR #13 merged [fair scheduling and fenced local ownership](scheduler.md) for M3-03.
 PR #14 merged [durable preparation and one-shot dispatch recovery](dispatch.md) for M3-04.
 PR #15 merged [durable attempt-scoped controls](operations.md) for M3-05.
-PR #16 implements [verified artifact collection and recovery](collection.md) for M3-06
-and remains `in-review` until owner merge. M3-07 has not started.
+PR #16 merged [verified artifact collection and recovery](collection.md) for M3-06.
+PR #17 implements [retention, local sweep and remote cleanup preview](retention.md) for
+M3-07 and remains `in-review` until owner merge. M3-08 has not started.
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
 real-loopback tests, atomic blob publication and an explicit ownership-commit seam.
@@ -44,15 +45,20 @@ operation records and immutable receipts, one-shot cancellation, frozen-input co
 observation-only reconcile, transfer-only collection tickets and five optional HTTP handlers.
 M3-06 consumes those tickets with strict result/identity verification, bounded streaming,
 immutable result pins, fenced leases, atomic publication and authenticated internal reads.
-Recovery reuses the same pin and verified blobs without rerunning compute. Artifact HTTP
-routes, retention and production `serve` remain separate work. Test fixtures are not runtime
-fallbacks and do not establish live Kaggle behavior.
+Recovery reuses the same pin and verified blobs without rerunning compute. M3-07 adds named
+retention holds, irreversible expiry with sequenced events, exact bound-store local deletion,
+expired-input admission/retry guards and authenticated ledger-based remote dry runs.
+Metadata is retained; remote apply and staging preview are not supplied. Artifact HTTP routes,
+production `serve` and the M3-08 fault-matrix audit remain separate work. Test fixtures are
+not runtime fallbacks and do not establish live Kaggle behavior.
 
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one task/PR, report its evidence, and stop for owner merge
-before beginning another task. PR #16 implements only M3-06, not complete orchestration.
+before beginning another task. PR #17 implements only M3-07, not complete orchestration.
+Commit and push reviewable checkpoints during implementation; the disposable local runtime
+must not be the only copy of ongoing work.
 
 ## Status vocabulary
 
@@ -113,7 +119,7 @@ go decision and M3 has the durable semantics the adapter must use.
 | M0-03 | research / `complete` | Review the current stable official Kaggle CLI/client surfaces, versions, identity, outputs, logs, quota, timeout, staging, and cancellation gaps. | PRD-04, DAT-04, PRV-02/03, OPS-02/04, VER-03 | M0-01 | No / No | Dated primary-source review at an exact release/tag; no live claims. |
 | M0-04 | research / `complete` | Populate K-01…K-16, risk responses, compatibility target matrix, and live checklist. | PRD-04, PRV-02/03, OPS-02/04, SEC-03, VER-03, DX-01 | M0-03 | No / No | Every gate has evidence level, fallback, and M-1 acceptance procedure. |
 | M0-05 | ADR / `complete` | Record official-client boundary, attempt-scoped provider identity, and Go/SQLite baseline. | PRD-03/05, DUR-01/03/04, PRV-01/02, SEC-01 | M0-03 | No / No | ADR-0001…0003 accepted with alternatives, consequences, and verification. |
-| M0-06 | planning / `complete` | Replace the template with this dependency-aware backlog and explicit live/offline boundaries. | All | M0-02–M0-05 | No / No | Every implementation task states dependencies, external effects, and acceptance evidence. |
+| M0-06 | planning / `complete` | Replace the template with this dependency-aware backlog and explicit live/offline boundaries. | All | M0-02–M0-06 | No / No | Every implementation task states dependencies, external effects, and acceptance evidence. |
 | M0-07 | review / `complete` | Review and merge the M-0 documentation set; close M-0 without upgrading any live capability. | VER-01/03 | M0-02–M0-06 | No / No | PR checks pass, reviewer findings resolved, documents merged on `main`. |
 
 ### M-0 exit decision
@@ -166,8 +172,8 @@ live tasks remain `blocked-environment`.
 | M3-03 | implementation / `complete` | Implement bounded FIFO/round-robin scheduler, account capacity, transactional dispatch claims, and backpressure. | OPS-01/02/03 | M2-04, M3-01/M3-02 | No / No | Merged PR #13: transactional FIFO/round-robin cursor, shared-account/worker reservations, generation/fence leases, conservative dispatch barrier, pause/disable/backpressure, quota precision/exhaustion latch, restart/concurrency/rollback/disk-full/process-kill tests and finite metadata-only smoke. See scheduler.md and ADR-0010. Claim ownership does not authorize provider mutations. |
 | M3-04 | implementation / `complete` | Persist preparation resources and submission intent before side effects; implement accepted/rejected/unknown and reconciliation. | DUR-03, PRV-02, VER-02 | M3-01/M3-03 | No / No | Merged PR #14: immutable URL-role freeze and byte verification; exact provider binding; staging/submission ownership journals and one-shot gates; fenced restart reconciliation; cached safe status conditions; lost-response/commit-ack, real process-kill, disk-full, stale-owner and twenty-way gate tests; real-blob fake-provider smoke. See dispatch.md and ADR-0011. Terminal observation opens collection only. |
 | M3-05 | implementation / `complete` | Implement durable cancel/retry/reconcile/collect operations with race-safe transition rules. | DOM-02/03, API-03, OPS-04 | M3-02/M3-04 | No / No | Merged PR #15: migration 6; explicit attempt targets, immutable receipts/current status, one-shot cancellation/manual-required, cancellation/completion and staging races, frozen-input concurrent retry, revocation and event rollback, transfer-only collection tickets, authenticated HTTP and actual-response/schema checks. See operations.md and ADR-0012. Collection consumer is supplied by M3-06. |
-| M3-06 | implementation / `in-review` | Implement attempt-scoped artifact collection, verification, atomic publication, and collection-only recovery. | JOB-05, PRV-02, VER-02 | M2-06, M3-04/M3-05 | No / No | PR #16: migration 7; immutable result pins, fenced collection leases, strict manifest/frozen requirement checks, bounded pagination/transfers, independently rehashed blobs, atomic publication/state/events and scoped internal reads. Tests cover wrong identity/digest/missing output, partial/late-error transfer, stale/concurrent owners, cancellation race, SQL disk-full, schema-6 upgrade, lost acknowledgements and real process kill without another compute submission. See collection.md and ADR-0013 for directory and composition limits. |
-| M3-07 | implementation / `proposed` | Implement ownership ledger, retention pins, local sweep, and remote cleanup dry-run plan. | OPS-05, DUR-01, VER-02 | M3-01/M3-04/M3-06 | No / No | Active/unknown resources survive; already-absent owned cleanup is idempotent; prefix alone cannot authorize deletion. |
+| M3-06 | implementation / `complete` | Implement attempt-scoped artifact collection, verification, atomic publication, and collection-only recovery. | JOB-05, PRV-02, VER-02 | M2-06, M3-04/M3-05 | No / No | Merged PR #16: migration 7; immutable result pins, fenced collection leases, strict manifest/frozen requirement checks, bounded pagination/transfers, independently rehashed blobs, atomic publication/state/events and scoped internal reads. Tests cover wrong identity/digest/missing output, partial/late-error transfer, stale/concurrent owners, cancellation race, SQL disk-full, schema-6 upgrade, lost acknowledgements and real process kill without another compute submission. See collection.md and ADR-0013 for directory and composition limits. |
+| M3-07 | implementation / `in-review` | Implement ownership ledger, retention pins, local sweep, and remote cleanup dry-run plan. | OPS-05, DUR-01, VER-02 | M3-01/M3-04/M3-06 | No / No | PR #17: migrations 8/9; complete reference/pin checks, named holds, immutable expiry/audit, atomic result.expired event, expired-input preflight/commit guards, exact bound-root deletion and acknowledgement recovery. Authenticated exact-ledger dry runs recheck pins/binding/authority and keep owned absence idempotent. Tests cover upgrade, wrong bytes/root/identity, rollback/disk-full, lost acknowledgements and hold/revocation races. See retention.md and ADR-0014. Metadata is preserved; remote apply and staging preview are not supplied. |
 | M3-08 | test/documentation / `proposed` | Execute the proposal fault matrix and document recovery/operational state semantics. | VER-02, all DUR/DOM/OPS | M3-01–M3-07 | No / No | Required 25 failure scenarios mapped to tests and passing offline evidence. |
 
 ## M-4 — Integrated Kaggle batch
@@ -222,15 +228,16 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M3-06 review
+## Next work after M3-07 review
 
-Stop after reporting PR #16 and wait for owner merge. Do not begin M3-07 in this task.
-M3-06 supplies verified result collection/publication and collection-only recovery; it never
-resets an ambiguous submission or retries compute to recover outputs. The first durable
-result pin remains fixed across later collection tickets and restart. Resource ledgers,
-result pins and completed blobs remain retained until ownership-safe M3-07 retention/cleanup
-exists. Artifact HTTP routes and production `serve` remain separate composition work.
-No live Kaggle capability is implied by these offline components.
+Stop after reporting PR #17 and wait for owner merge. Do not begin M3-08 in this task.
+M3-07 supplies pin-aware retention, exact local byte sweep and remote cleanup dry-run plans;
+it never resets an ambiguous submission, treats cleanup as cancellation or applies remote
+deletion. Unresolved resources and collection recovery material remain pinned. Metadata,
+receipts and ownership history survive byte expiry, and replacement blob roots cannot
+inherit old deletion authority. M3-08 still owns the complete fault-matrix acceptance audit.
+Artifact HTTP routes, production `serve`, remote apply and live provider integration remain
+separate gates. No live Kaggle capability is implied by these offline components.
 
 M1-02 remains an operator-run, explicitly authorized read-only probe. Provider mutation,
 GPU allocation, cleanup and the full Kaggle adapter retain their separate evidence gates.
