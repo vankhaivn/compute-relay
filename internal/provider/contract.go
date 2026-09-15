@@ -66,6 +66,9 @@ type ResolvedJob struct {
 	SpecificationSHA256 domain.SHA256Digest
 	Required            []domain.CapabilityName
 	WallSeconds         int64
+	// Inputs is mandatory for durable orchestration, optional only for older isolated
+	// provider contract fixtures. The adapter's scoped BlobStore supplies these bytes.
+	Inputs *InputSnapshot `json:",omitempty"`
 }
 type Plan struct {
 	Job              ResolvedJob
@@ -77,6 +80,9 @@ type Prepared struct {
 	PlanSHA256    domain.SHA256Digest
 	Resource      string
 	Ready         bool
+	// Private is an adapter assertion supported by its verified private-staging path.
+	// Unknown/false cannot authorize compute dispatch. Fake true is offline evidence only.
+	Private bool
 }
 type Descriptor struct {
 	Type         string

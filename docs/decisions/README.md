@@ -18,6 +18,7 @@ defaults.
 | [`0008-sqlite-durability-and-backup.md`](0008-sqlite-durability-and-backup.md) | accepted | Pin SQLite/libc, protect installation identity with OS locking and ordered migrations, and separate database-only backup/restore from complete runtime recovery. |
 | [`0009-durable-idempotent-admission.md`](0009-durable-idempotent-admission.md) | accepted | Atomically persist canonical request identity, original receipt, job/attempt, frozen resolution and references; replay without remapping or executing compute. |
 | [`0010-fair-scheduling-and-fenced-local-claims.md`](0010-fair-scheduling-and-fenced-local-claims.md) | accepted | Persist FIFO/round-robin fairness and fenced local ownership; keep remote capacity evidence independent from lease expiry and submission intent. |
+| [`0011-one-shot-mutations-and-recovery.md`](0011-one-shot-mutations-and-recovery.md) | accepted | Freeze inputs, commit staging/submission identities before one-shot mutations, and recover uncertainty through fenced observation rather than replay. |
 
 ## Naming
 

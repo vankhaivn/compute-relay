@@ -342,7 +342,11 @@
         "job.completed",
         "scheduler.claimed",
         "scheduler.deferred",
-        "scheduler.released"
+        "scheduler.released",
+        "preparation.intent_recorded",
+        "preparation.observed",
+        "submission.rejected",
+        "reconciliation.deferred"
       ]
     },
     "capability_name": {

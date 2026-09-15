@@ -73,5 +73,11 @@ Semantic Versioning once a public compatibility surface exists.
   events and migration/restart/concurrency/disk-full/process-kill tests.
 - Finite metadata-only scheduler smoke and ADR-0010 distinguishing local claims from remote
   preparation/submission intent; no provider execution is enabled by a claim.
+- M3-04 immutable input preparation, frozen provider/account snapshots, private staging
+  observation and SQLite resource/submission-intent journals with one-shot mutation gates.
+- Fenced same-attempt reconciliation, safe cached status conditions, quota-rejection latch,
+  process-kill/commit-loss/rollback tests and a real-blob, nonexecuting fake dispatch smoke.
+- ADR-0011 documenting conservative recovery and the separate collection/control-operation
+  gates; no production server or live provider capability is claimed.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
