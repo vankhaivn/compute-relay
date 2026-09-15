@@ -209,16 +209,8 @@ func TestCollectionSchemaSixUpgradePreservesDispatchAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := f.journal(t, id)
-	// Remove only the still-empty new tables to construct the previous schema;
-	// migrations 1..6, accepted rows and their checksums are unchanged.
-	for _, query := range []string{"DROP TABLE artifacts", "DROP TABLE collection_publications", "DROP TABLE collection_snapshots", "DROP TABLE collection_leases", "DELETE FROM schema_migrations WHERE version=7", "PRAGMA user_version=6"} {
-		if _, err = f.s.db.Exec(query); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err = inspectSchema(ctx, f.s.db, migrations[:6], false); err != nil {
-		t.Fatal("invalid schema-six fixture", err)
-	}
+	// Build actual released schema 6 rather than assuming which later tables exist.
+	f.root = copyFixtureAtSchema(t, f.s, 6)
 	f.restart(t)
 	if f.journal(t, id).Version != before.Version || *f.journal(t, id).Remote != *before.Remote {
 		t.Fatal("upgrade changed dispatch identity")
