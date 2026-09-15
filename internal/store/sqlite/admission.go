@@ -141,7 +141,7 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 	var total int64
 	load := func(role string, id domain.ObjectID, max int64) error {
 		var m domain.ObjectMetadata
-		err := tx.QueryRowContext(ctx, "SELECT workspace_id,object_id,bytes,sha256 FROM objects WHERE workspace_id=? AND object_id=?", string(w), string(id)).Scan(&m.WorkspaceID, &m.ID, &m.Bytes, &m.SHA256)
+		err := tx.QueryRowContext(ctx, retainedInputQuery, string(w), string(id)).Scan(&m.WorkspaceID, &m.ID, &m.Bytes, &m.SHA256)
 		if errors.Is(err, sql.ErrNoRows) {
 			return admission.ErrInputs
 		}

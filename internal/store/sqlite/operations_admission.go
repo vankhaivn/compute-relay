@@ -107,7 +107,7 @@ func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed 
 	}
 	for _, ref := range r.Objects {
 		var m domain.ObjectMetadata
-		err = tx.QueryRowContext(ctx, "SELECT workspace_id,object_id,bytes,sha256 FROM objects WHERE workspace_id=? AND object_id=?", string(w), string(ref.Object.ID)).Scan(&m.WorkspaceID, &m.ID, &m.Bytes, &m.SHA256)
+		err = tx.QueryRowContext(ctx, retainedInputQuery, string(w), string(ref.Object.ID)).Scan(&m.WorkspaceID, &m.ID, &m.Bytes, &m.SHA256)
 		if errors.Is(err, sql.ErrNoRows) {
 			return result, operations.ErrInputs
 		}
