@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
 var _ collection.ResultRepository = (*Store)(nil)
@@ -34,6 +35,9 @@ func (s *Store) ReadCollection(ctx context.Context, w domain.WorkspaceID, token 
 		}
 		if err != nil {
 			return err
+		}
+		if a.State.Result == domain.ResultExpired {
+			return retention.ErrExpired
 		}
 		if a.State.Result != domain.ResultAvailable {
 			return collection.ErrNotFound

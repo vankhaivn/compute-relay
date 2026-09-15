@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,9 +9,10 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
 
-// copyFixtureAtSchema builds the actual released schema in a NEW test root, then
-// copies compatible fixture rows. It never downgrades a production database or
-// pretends a current schema became old by deleting migration ledger entries.
+// copyFixtureAtSchema builds a NEW, unpublished test database from the actual
+// released migrations. Compatible synthetic rows are copied without triggers or
+// insertion-order constraints, then ALL foreign keys and integrity are verified.
+// No production database or production connection changes its enforcement policy.
 func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 	t.Helper()
 	if version < 1 || version >= len(migrations) {
@@ -61,50 +61,62 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		t.Fatal(err)
 	}
 	rows.Close()
-	if _, err := db.Exec("ATTACH DATABASE ? AS fixture_source", filepath.Join(source.root.Path, databaseName)); err != nil {
+	conn, err := db.Conn(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	quote := func(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
-	err = withTx(ctx, db, func(tx *sql.Tx) error {
-		if _, err := tx.Exec("PRAGMA defer_foreign_keys=ON"); err != nil {
-			return err
-		}
-		// No enqueue or state side effects while copying already committed fixtures.
-		// Restore the exact released triggers before commit and verify foreign keys.
-		for _, tr := range triggers {
-			if _, err := tx.Exec("DROP TRIGGER " + quote(tr.name)); err != nil {
-				return err
-			}
-		}
-		// Clear defaults before copying referenced rows into any table.
-		for _, name := range tables {
-			if _, err := tx.Exec("DELETE FROM " + quote(name)); err != nil {
-				return err
-			}
-		}
-		for _, name := range tables {
-			if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT * FROM fixture_source." + quote(name)); err != nil {
-				return err
-			}
-		}
-		for _, tr := range triggers {
-			if _, err := tx.Exec(tr.sql); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal("copy released fixture", err)
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE ? AS fixture_source", filepath.Join(source.root.Path, databaseName)); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := db.Exec("DETACH DATABASE fixture_source"); err != nil {
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	quote := func(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
+	for _, tr := range triggers {
+		if _, err := tx.Exec("DROP TRIGGER " + quote(tr.name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range tables {
+		if _, err := tx.Exec("DELETE FROM " + quote(name)); err != nil {
+			t.Fatal("clear fixture table", name, err)
+		}
+		if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT * FROM fixture_source." + quote(name)); err != nil {
+			t.Fatal("copy fixture table", name, err)
+		}
+	}
+	for _, tr := range triggers {
+		if _, err := tx.Exec(tr.sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal("fixture copy commit", err)
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	var enabled bool
+	if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&enabled); err != nil || !enabled {
+		t.Fatal("fixture foreign-key enforcement not restored", err)
+	}
+	if _, err := conn.ExecContext(ctx, "DETACH DATABASE fixture_source"); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := recordInstallation(ctx, db, path); err != nil {
 		t.Fatal(err)
 	}
 	if err := integrity(ctx, db); err != nil {
-		t.Fatal(err)
+		t.Fatal("released fixture integrity/foreign keys", err)
 	}
 	if _, err := inspectSchema(ctx, db, migrations[:version], false); err != nil {
 		t.Fatal(err)
