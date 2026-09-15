@@ -1,8 +1,9 @@
 # Architecture baseline
 
 > **Status:** approved baseline with offline portable-core, SQLite, durable admission,
-> scheduling, one-shot dispatch/recovery, durable controls and verified artifact collection.
-> Production composition, artifact HTTP routes, retention and live evidence remain gates.
+> scheduling, one-shot dispatch/recovery, durable controls, verified collection and pin-aware
+> retention/local sweep/remote cleanup previews. Production composition, artifact HTTP,
+> remote cleanup apply and live evidence remain separate gates.
 
 ## System intent
 
@@ -20,7 +21,7 @@ HTTP API / authentication / workspace boundary
           |
           v
 Application services
-admission | objects | jobs | operations | collection
+admission | objects | jobs | operations | collection | retention
           |
           v
 Domain and orchestration
@@ -128,11 +129,12 @@ repeating either mutation. A not-found lookup cannot rearm the gate.
 
 Recovery retains possible-activity capacity and can continue while new dispatch is paused.
 Repeated unresolved outcomes become needs_attention with a sanitized cached status problem.
-A terminal observation opens collection, never automatic job success. Resource records stay
-pinned for later cleanup policy. M3-04 itself did not add cancellation or compute-retry
-controls; M3-05 adds those below. M3-06 adds the separately composed collector; production
-server wiring remains separate. See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md)
-and [`dispatch.md`](dispatch.md) for recovery trade-offs, exact tests and adapter obligations.
+A terminal observation opens collection, never automatic job success. Resource records remain
+ownership evidence; M3-07 only previews remote cleanup under its pin-aware policy. M3-04 itself
+did not add cancellation or compute-retry controls; M3-05 adds those below. M3-06 adds the
+separately composed collector; production server wiring remains separate. See
+[ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md) and [`dispatch.md`](dispatch.md)
+for recovery trade-offs, exact tests and adapter obligations.
 
 ## Implemented durable controls
 
@@ -191,6 +193,30 @@ directories cannot prove presence with manifest v1 and fail closed; see
 [ADR-0013](decisions/0013-verified-collection-and-publication.md) and
 [`collection.md`](collection.md) for limits, recovery and exact test evidence.
 
+## Implemented retention and cleanup preview
+
+M3-07 adds `internal/retention` and additive migrations 8/9. Eligibility is assessed over all
+references with manual, active, ambiguous, held-worker, pending-operation and recovery pins.
+A metadata transaction commits irreversible expiry, audit and the rotating scan cursor.
+Whole-result expiry updates only result availability, preserving execution and business
+outcome, and appends one sequenced `result.expired` event atomically. Input/artifact metadata,
+original receipts, publications and ownership history remain retained indefinitely.
+
+The finite local sweeper binds separate persistent input/result blob-root identities before
+using deletion tickets. It validates exact workspace/object metadata and actual bytes, then
+quarantines and removes only committed tombstone targets. A replaced/swapped store cannot
+inherit old authority. SQL acknowledgement follows filesystem removal; lost acknowledgements
+recover through the tombstone, not another compute attempt. New admission/retry checks exact
+unexpired input inventory before reading bytes and again in the commit; replay stays first.
+
+Remote preview requires current workspace operate authority, an exact ledger entry and the
+original verified provider/account binding. Terminal/publication/pin evidence and authority
+are rechecked after the read-only provider call before storing its outcome. The wrapper forces
+dry-run; no apply method is supplied. Staging records remain pinned with an explicit preview
+limitation rather than being passed to the execution cleanup port. See
+[ADR-0014](decisions/0014-retention-tombstones-and-cleanup-preview.md) and
+[`retention.md`](retention.md) for windows, limits, backup identities and fault evidence.
+
 ## Control plane and workload boundary
 
 The local control plane handles credentials, state, transfers, orchestration, and provider calls. It never executes an uploaded business command locally as part of validation or dispatch.
@@ -217,10 +243,10 @@ See [ADR-0007](decisions/0007-finite-remote-runner.md) and the
 - **Attempt:** one explicit compute execution; compute retries create new attempts.
 - **Submission intent:** durable proof that a remote side effect may occur or may already have occurred.
 - **Provider resource:** connector-owned remote identity tracked for recovery and cleanup.
-- **Object:** immutable local input or code bundle.
+- **Object:** immutable local input or code bundle, with metadata surviving byte expiry.
 - **Artifact:** verified output associated with one attempt and an atomic publication.
-- **Operation:** durable cancel, retry, reconcile or collect action with immutable receipt and current status; cleanup remains a later implementation gate.
-- **Event:** sequenced state or operational evidence.
+- **Operation:** durable cancel, retry, reconcile or collect action with immutable receipt and current status; remote cleanup previews are separate observations, not apply operations.
+- **Event:** sequenced state or operational evidence, including irreversible result expiry.
 
 ## Non-negotiable invariants
 
@@ -234,6 +260,7 @@ See [ADR-0007](decisions/0007-finite-remote-runner.md) and the
 - Never report cancellation as confirmed without terminal evidence.
 - Apply workspace authorization to every referenced object, attempt, artifact, event, and operation.
 - Keep cleanup ownership-ledger based and separate from cancellation.
+- Commit expiry before local deletion, preserve recovery pins, and never treat a dry run as remote deletion.
 - Keep the reference workflow independent of maintainer-operated infrastructure.
 
 ## Initial technology boundaries
@@ -256,7 +283,7 @@ M3-02 reuses the already pinned JSON Schema validator for closed, embedded runti
 M3-03 adds no dependency and makes no provider call while selecting or inspecting work.
 M3-04 adds no dependency and uses only explicitly registered adapters for provider calls;
 the supplied bound adapter is a nonexecuting fixture, not a live Kaggle implementation.
-M3-05 and M3-06 add no dependency and preserve explicit provider-neutral composition.
+M3-05 through M3-07 add no dependency and preserve explicit provider-neutral composition.
 The M2-09 runner and its unit tests use the Python standard library; the optional GPU
 probe relies on the separately verified remote environment's PyTorch installation.
 

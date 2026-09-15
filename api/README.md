@@ -1,11 +1,12 @@
 # API contracts
 
 > **Tasks:** M2-03 contracts; M2-05 through M2-08 auth/object input handlers;
-> M3-02 durable job admission, validation and cached status; M3-05 durable controls.
+> M3-02 durable job admission, validation and cached status; M3-05 durable controls;
+> M3-07 expiry events and input-retention guards.
 >
 > **Status:** contracts and fifteen composable handler operations are implemented offline.
-> Scheduling, one-shot dispatch and M3-06 verified collection are separate offline components.
-> Production composition, artifact HTTP routes and live-provider integration remain gates.
+> Scheduling, dispatch, verified collection and retention are separate offline components.
+> Production composition, artifact/cleanup HTTP routes and live integration remain gates.
 
 ## Contract versions
 
@@ -97,6 +98,13 @@ It rejects duplicate keys, unpaired Unicode, path collisions, missing required o
 incorrect bytes. A schema-valid manifest alone is not proof of verified artifacts. See
 [`../docs/collection.md`](../docs/collection.md), including its empty-directory limitation.
 
+M3-07 adds `result.expired` to the shared event enum and the checked Go domain inventory.
+The expiry event, attempt result state and tombstones commit atomically; this is not a new
+event HTTP route. New admission/validation and explicit retry reject expired input inventory
+using existing input errors, even while physical bytes await sweep. Original job/control
+receipt replay remains unchanged and current-authority checked. See
+[`../docs/retention.md`](../docs/retention.md).
+
 ## OpenAPI status
 
 The following ten base operations have offline component and HTTP integration evidence:
@@ -171,7 +179,10 @@ The root status remains `planned` because a production runtime is not composed y
 Artifact HTTP transfer/listings, logs, events, attempts, profiles and quota retain their own
 implementation gates. Receipt links reserve these contract locations; they do not claim
 that the corresponding collection routes exist. M3-06 adds authenticated internal result
-reads, not new public routes or a change to the fifteen-handler inventory.
+reads, not new public routes or a change to the fifteen-handler inventory. M3-07 likewise
+adds no cleanup/hold HTTP route. Expired results remain historical publications and return
+`retention.ErrExpired` through internal reads; existing job status can show `result=expired`
+without changing successful execution/orchestration or a historical operation receipt.
 
 `GET` operations are observational. Compute creation requires an explicit `POST`, and job
 creation plus every control POST expose an `Idempotency-Key` requirement. Provider names,

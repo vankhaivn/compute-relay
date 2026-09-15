@@ -20,11 +20,11 @@ before committing metadata; SQL does not span an upload, HTTPS request or provid
 No application-facing administrative API or nondurable production fallback is introduced.
 
 Subsequent migrations supply [durable admission](admission.md), [fenced scheduling](scheduler.md),
-[preparation/submission journals](dispatch.md), [durable controls](operations.md) and
-[verified result publication](collection.md). M3-01 through M3-05 are merged; M3-06 is in
-review in PR #16. These are explicit composition APIs, not a production server. Existing
-developer upload/import/ingest fixtures remain explicitly nondurable unless a caller
-deliberately composes the SQLite repositories.
+[preparation/submission journals](dispatch.md), [durable controls](operations.md),
+[verified result publication](collection.md) and [retention](retention.md). M3-01 through
+M3-06 are merged; M3-07 is in review in PR #17. These are explicit composition APIs, not a
+production server. Existing developer upload/import/ingest fixtures remain explicitly
+nondurable unless a caller deliberately composes the SQLite repositories.
 
 ## State layout and process ownership
 
@@ -80,14 +80,19 @@ time budgets rather than silently enlarging it.
 
 ## Migration rules
 
-Embedded migration versions 1 through 7 are present on the M3-06 branch. The original
+Embedded migration versions 1 through 9 are present on the M3-07 branch. The original
 `0001_identity.sql` and `0002_workspace_objects.sql` are followed by admission (3), scheduling
 (4), dispatch journals (5), operations (6) and `0007_collection.sql` (7). Migration 6 adds
 operation records, immutable receipts, control uniqueness, collection tickets and linked
 events. Migration 7 preserves those records and adds fenced collection leases, immutable
 per-attempt result snapshots, atomic publications and scoped artifact metadata. Publication,
 result/attempt state, events and operation outcome commit together after verified blob I/O.
-Retention/cleanup remains M3-07 and has not started.
+
+M3-07 adds inventory, named holds, irreversible tombstones, audit, a rotating expiry cursor
+and remote preview records in migration 8, then persistent input/result store bindings in
+migration 9. Existing bytes receive a conservative new inventory observation time. Upgrade
+does not expire or delete them and makes no provider call. The earlier migration 1–7 bytes
+remain unchanged.
 
 Applied migration bytes are immutable. SQL bytes, version and name are checked against
 `schema_migrations`; DDL, ledger insertion and `user_version` changes share one transaction.
@@ -100,6 +105,19 @@ must define and verify a pre-change backup procedure; arbitrary downgrade is not
 
 Do not remove `.installation`, `.compute-relay-state` or a `runtime.db.restore` blocker to
 make a damaged directory open. Preserve evidence and recover into a new directory.
+
+## Retention and metadata history
+
+Expiry and byte deletion are separate operations. A bounded expiry transaction checks all
+pins/references and commits tombstones plus audit. Result expiry preserves execution outcome
+and appends one `result.expired` job event with the state change. A subsequent explicitly
+composed sweeper removes only exact committed targets from their bound blob stores.
+
+Job/attempt/operation/event history, input/artifact metadata, receipts, publications and
+provider-resource ledgers are retained indefinitely in this component. There is no metadata
+pruner. Expired bytes cannot become new admission/retry inputs, but original receipt replay
+remains available under current authorization. Read [retention](retention.md) for windows,
+manual/worker/recovery pins, exact byte checks and local-versus-remote cleanup boundaries.
 
 ## Backup and restore API
 
@@ -133,13 +151,14 @@ The resulting installation ID is unchanged, and supported older schemas upgrade 
    `runtime.db` and assume committed WAL data came with it.
 2. Obtain a verified database-only snapshot through `Store.Backup`. For a whole-installation
    checkpoint, quiesce writes/retention and separately retain all referenced immutable input
-   and result blob bytes, including pinned pre-publication collection files. This API does
-   not automate or verify a combined database/blob backup.
+   and result blob bytes, including pinned pre-publication collection files and each root's
+   `.retention-id`. This API does not automate or verify a combined database/blob backup.
 3. Stop the original runtime before activating a restored copy. Restoring local metadata
    does not stop remote compute and must not cause a new dispatch.
 4. Restore into a new private directory with the matching binary/schema support. Open it,
-   inspect installation identity/readiness, and verify referenced blob availability before
-   exposing job operations. Keep the old directory intact until verification ends.
+   inspect installation identity/readiness, and verify referenced blob availability and
+   bound input/result store identities before exposing job operations or retention. Keep
+   the old directory intact until verification ends.
 5. Review workspace access and revoke/rotate tokens as needed: restoring a snapshot from
    before revocation can restore that old grant. Keep backups private and out of ordinary
    support bundles, user artifacts and source control.
@@ -147,13 +166,18 @@ The resulting installation ID is unchanged, and supported older schemas upgrade 
 The receipt detects accidental corruption, not a maliciously rewritten snapshot plus
 receipt. Never run original/restored copies concurrently against the same provider identity.
 Windows files are flushed; directory-sync and sudden-power-loss guarantees remain unclaimed.
-An older snapshot also lacks later operation receipts and execution observations; a missing
-receipt in a restored database is not evidence that remote work never started.
+An older snapshot also lacks later operation receipts, execution observations and expiry
+facts; a missing receipt is not evidence that remote work never started, and restored
+metadata does not bring back deleted bytes.
 
 Collection uses a dedicated result blob root. Complete files can precede SQLite publication
 and remain recovery material, not visible artifact metadata. Do not delete its pins or files
 to reset a failed operation. [Collection recovery](collection.md) distinguishes accepted
 interruption from committed failure and never obtains results through another compute run.
+
+Retention binds both blob-store identities in SQLite. A replacement/swapped root is rejected;
+there is no automatic rebind. Preserve `.retention-id` with a whole-store move or backup, and
+never remove it or rewrite root bindings to force old tombstones onto unrelated bytes.
 
 ## Developer checks and evidence
 
@@ -181,8 +205,8 @@ The existing offline CI checks the actual pinned modernc driver with Go 1.27.1, 
 contracts/vet/tests and Linux race checks, plus native Linux/macOS/Windows tests and
 CGo-free builds. Its trigger includes SQL migration assets. No provider credentials,
 Kaggle API calls, GPU allocation or deployment participate. See the corresponding admission,
-scheduler, dispatch, operations and collection guides for task-specific evidence and limits;
-historical M3-01 local evidence is not relabeled as M3-06 verification.
+scheduler, dispatch, operations, collection and retention guides for task-specific evidence
+and limits; historical M3-01 local evidence is not relabeled as M3-06 or M3-07 verification.
 
 ## Dependency review
 

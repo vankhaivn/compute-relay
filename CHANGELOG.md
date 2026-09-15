@@ -100,14 +100,30 @@ Semantic Versioning once a public compatibility surface exists.
   actual disk-full rollback, lost acknowledgements and process kill after durable pin.
 - Collection guidance and ADR-0013 documenting publication/recovery, dedicated result storage,
   cooperative shutdown, empty-required-directory limitations and separate HTTP/CLI gates.
+- M3-07 additive migrations 8/9: inventory, named holds, irreversible expiry/audit, rotating
+  scans, latest remote previews and separate persistent input/result blob-store bindings.
+- Pin-aware finite local sweep with exact byte/metadata verification, quarantine rename,
+  already-absent recovery and independent deletion acknowledgement; metadata is preserved.
+- Atomic `result.expired` state/event/tombstone transactions and expired-input checks before
+  admission/retry reads and at commit, while original idempotency receipts remain replayable.
+- Authenticated exact-ledger remote cleanup dry runs with frozen binding and current pin/
+  authority rechecks. No remote apply; staging preview remains explicitly unavailable.
+- Retention tests for shared/recovery/worker/manual pins, root swap/replacement, upgrade,
+  exact deletion/quarantine reopen, lost acknowledgements, event/audit rollback, actual
+  SQLite disk-full, receipt preservation and preview hold/revocation races.
+- Retention guidance and ADR-0014 separating metadata expiry, local byte removal and remote
+  preview, with conservative defaults, backup identity and metadata-pruning limitations.
 
 ### Changed
 
 - Synchronized living README, roadmap, plan, architecture, API and persistence guidance
-  with merged M3-01 through M3-05 and M3-06's in-review boundary. Preserved the approved
+  with merged M3-01 through M3-06 and M3-07's in-review boundary. Preserved the approved
   proposal, historical ADR decisions and dated provider evidence without upgrading live
-  support or claiming a production runtime. Updated ADR-0012's status after owner merge.
+  support or claiming a production runtime. ADR-0012/0013 statuses reflect owner merges.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
+- Extended the shared event enum and contract lock for `result.expired`; no cleanup or
+  event HTTP route is introduced. Contributor guidance records pushed feature-branch
+  checkpoints rather than relying on disposable local runtime state.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

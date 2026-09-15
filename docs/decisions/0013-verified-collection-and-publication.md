@@ -1,6 +1,6 @@
 # ADR-0013: Immutable result pins and fenced artifact publication
 
-- Status: proposed; implementation in PR #16, pending owner review/merge
+- Status: accepted; PR #16 merged on 2026-09-15
 - Date: 2026-09-15
 - Task: M3-06
 - Requirements: JOB-05, PRV-02, VER-02; preserves DUR-01/03 and DOM-02/03

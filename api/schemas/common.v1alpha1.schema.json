@@ -353,7 +353,8 @@
         "cancellation.intent_recorded",
         "cancellation.observed",
         "reconciliation.requested",
-        "collection.requested"
+        "collection.requested",
+        "result.expired"
       ]
     },
     "capability_name": {

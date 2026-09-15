@@ -1,9 +1,10 @@
 # Compute Relay
 
 > **Project status:** portable-core components, SQLite metadata, durable admission,
-> scheduling, one-shot dispatch/recovery, durable controls and verified artifact collection
-> are implemented offline. Production `serve`, artifact HTTP routes, retention/cleanup and
-> live Kaggle remain separate gates. M3-05 is merged; M3-06 is in review in PR #16.
+> scheduling, one-shot dispatch/recovery, durable controls, verified collection and
+> pin-aware local retention/remote cleanup previews are implemented offline. M3-06 is
+> merged; M3-07 is in review in PR #17. Production `serve`, artifact HTTP routes, remote
+> cleanup apply and live Kaggle remain separate gates.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -58,9 +59,11 @@ The repository currently establishes:
 - immutable input preparation, private-staging and submission intent ledgers, exact provider
   binding snapshots, one-shot mutations and read-only same-attempt recovery;
 - durable attempt-scoped cancel/retry/reconcile/collect records, immutable receipts,
-  current operation status, one-shot cancellation and authenticated control HTTP contracts; and
+  current operation status, one-shot cancellation and authenticated control HTTP contracts;
 - a bounded transfer-only collector, immutable per-attempt result snapshots, verified local
-  blobs, atomic artifact/state/event publication and authenticated internal result reads.
+  blobs, atomic artifact/state/event publication and authenticated internal result reads; and
+- named retention holds, irreversible expiry/audit, exact bound-store local byte deletion,
+  expired-input admission/retry guards and authenticated exact-ledger remote dry-run previews.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -78,10 +81,18 @@ it, verifies the manifest and every selected blob, and publishes the complete me
 atomically. Restart and explicit collection retry reuse the original result pin, never
 another compute execution. No accepted ticket alone implies available artifacts.
 
+M3-07 retains active, ambiguous, held and recovery-required references regardless of age.
+Default eligibility windows are 24 hours for unreferenced inputs and seven days for safely
+completed references/results. Expiry commits before byte deletion; `result.expired` is a
+sequenced event that does not rewrite execution outcome or original receipts. Input and
+result roots have separate persistent identities. Metadata/ownership history stays retained;
+remote previews never apply deletion, and staging preview remains explicitly unavailable.
+
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
-blob bytes or prove full runtime recovery. Production `serve` and complete orchestration
-remain pending; M3-07 retention/cleanup has not started.
+blob bytes or prove full runtime recovery. Production `serve` and the M3-08 fault-matrix
+acceptance audit remain pending. These explicitly composed components are not a complete
+production orchestration service.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -102,6 +113,7 @@ live Kaggle support.
 | [`docs/dispatch.md`](docs/dispatch.md) | Input freeze, private staging, one-shot intents, reconciliation and the collection handoff. |
 | [`docs/operations.md`](docs/operations.md) | Explicit attempt controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only tickets. |
 | [`docs/collection.md`](docs/collection.md) | Pinned result verification, bounded transfers, atomic publication, scoped reads, recovery and directory limitations. |
+| [`docs/retention.md`](docs/retention.md) | Pin-aware expiry, exact bound-store byte sweep, metadata preservation, remote dry runs and recovery limits. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -127,6 +139,7 @@ go run ./cmd/admissionsmoke
 go run ./cmd/schedulersmoke
 go run ./cmd/dispatchsmoke
 go test -run=TestCollection ./internal/store/sqlite
+go test -run='TestRetention|TestCleanupPreview|TestDelete' ./internal/store/sqlite ./internal/blobfs ./internal/retention
 ```
 
 The upload check exercises loopback HTTP, synthetic workspace tokens, streamed upload,
@@ -140,11 +153,14 @@ The dispatch check additionally verifies real bundle/input bytes, one simulated 
 with a lost response and same-attempt reconciliation after database reopen. Its terminal
 fixture stops at collection, with no result-success claim or actual workload execution.
 The collection component tests separately verify actual result blobs, complete publication,
-pagination and recovery against a synthetic provider. They never execute the fixture command.
+pagination and recovery against a synthetic provider. Retention tests exercise temporary
+byte expiry/deletion, root identity and synthetic remote previews. They never execute the
+fixture command or apply remote cleanup.
 
 These checks are finite, clean up temporary files and never call Kaggle. None is a
-production runtime. See the auth/object, storage, admission, scheduler, dispatch, operations
-and collection guides for their distinct evidence limits and local-versus-CI disclosures.
+production runtime. See the auth/object, storage, admission, scheduler, dispatch, operations,
+collection and retention guides for their distinct evidence limits and local-versus-CI
+verification disclosures.
 
 ## Current execution boundary
 

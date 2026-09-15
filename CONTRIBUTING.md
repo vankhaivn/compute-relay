@@ -1,6 +1,10 @@
 # Contributing to Compute Relay
 
-Thank you for improving Compute Relay. The project is in an early, evidence-driven stage: repository policy and product direction exist, but the runtime has not yet been implemented or live-verified.
+Thank you for improving Compute Relay. The project is in an early, evidence-driven stage:
+provider-neutral core, durable orchestration components, verified collection and pin-aware
+retention have offline implementations and tests. Production runtime composition and live
+provider acceptance remain separate gates. See the [implementation plan](docs/implementation-plan.md)
+for merged tasks and the current review boundary.
 
 ## Start here
 
@@ -58,6 +62,11 @@ Keep a pull request focused. Its description should state:
 - known limitations or unverified assumptions.
 
 Direct pushes to `main` are reserved for tasks where the owner explicitly authorizes that workflow.
+
+For a long-running task, commit and push reviewable checkpoints on its feature branch so
+work is not stored only in a disposable runtime. Record unresolved checks in the draft PR;
+a pushed checkpoint is not a completion claim. Preserve existing history and keep code and
+documentation changes in separate scoped commits. Stop at the requested owner-merge boundary.
 
 ## Commit convention
 

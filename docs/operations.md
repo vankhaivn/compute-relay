@@ -3,8 +3,9 @@
 > **Task:** M3-05, implemented offline; PR #15 merged.
 >
 > **Scope:** explicit cancellation, compute retry, reconciliation, collection tickets and
-> durable operation status. M3-06 adds the separately composed [collector](collection.md).
-> Production `serve`, artifact HTTP routes, live Kaggle and cleanup remain separate gates.
+> durable operation status. M3-06 adds the separately composed [collector](collection.md),
+> and M3-07 adds [retention and cleanup previews](retention.md). Production `serve`, artifact
+> HTTP routes, live Kaggle and remote cleanup apply remain separate gates.
 
 ## HTTP and composition boundary
 
@@ -116,6 +117,11 @@ execution. A successful execution whose artifacts are missing must use collect, 
 retry. The original bundle and input bytes must still be present and match the frozen pins;
 missing, changed or expired inputs are not silently refetched from URLs.
 
+M3-07 checks exact unexpired input inventory before local byte reads and again inside the
+retry transaction. Bytes still awaiting physical sweep are not reusable after their tombstone.
+A pre-expiry proof cannot bypass the commit check. Original control receipt replay remains
+before these mutable checks, so expiry does not reinterpret a previously accepted request.
+
 A successful retry atomically records a new attempt ID, nonce, queue entry and history event.
 The job specification, provider/profile revision, input pins and source attempt history are
 unchanged. New work still passes the scheduler and one-shot dispatch gates. The operation
@@ -138,6 +144,13 @@ be reclaimed after lease expiry; a committed failed ticket requires a new explic
 request/key for the same attempt. Replaying the old key still returns its original receipt.
 Neither recovery path refreshes an already pinned result. See [collection](collection.md)
 for limits, scoped result reads, directory semantics and failure evidence.
+
+M3-07 expiry preserves publications and historical operation receipts while recording
+`result.expired` with the attempt's changed availability. An old succeeded collect operation
+is historical evidence, not a claim that its bytes are still retained; inspect current job
+result state. Pending operations, held callbacks and unresolved collection work remain pins.
+Remote cleanup preview is a separate operate-authorized read-only service, not a fifth
+control mutation or a remote apply command. See [retention](retention.md).
 
 ## Error handling and operator recovery
 
@@ -178,8 +191,9 @@ formatting and Python Draft 2020-12 fixture/truth-table checks were run; no full
 1.27.1/modernc or local operation smoke result is claimed. PR #15 records exact-head offline
 CI results for quality/race tests and native Linux/macOS/Windows tests/CGo-free builds.
 CI is not an operator runtime and uses no Kaggle credentials, GPU or live-provider probes.
+M3-07's expiry, stale-proof and preserved-receipt tests are recorded separately in PR #17.
 
 See [ADR-0012](decisions/0012-attempt-scoped-durable-controls.md), [API contracts](../api/README.md),
-[dispatch](dispatch.md), [collection](collection.md) and the
-[implementation plan](implementation-plan.md). M3-05 is merged; finish M3-06 in PR #16 and
-stop for owner merge. Retention/cleanup and production composition remain separate work.
+[dispatch](dispatch.md), [collection](collection.md), [retention](retention.md) and the
+[implementation plan](implementation-plan.md). M3-05/M3-06 are merged; finish M3-07 in PR #17
+and stop for owner merge. M3-08, remote apply and production composition remain separate work.

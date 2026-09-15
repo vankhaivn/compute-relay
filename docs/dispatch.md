@@ -1,7 +1,8 @@
 # Durable preparation, dispatch and recovery
 
 > **Task:** M3-04, implemented offline; PR #14 merged. M3-05 controls are merged in PR #15.
-> M3-06 [verified collection](collection.md) is in review in PR #16.
+> M3-06 [verified collection](collection.md) is merged in PR #16; M3-07
+> [retention and cleanup previews](retention.md) are in review in PR #17.
 >
 > This is an explicitly composed orchestration component, not a production `serve`
 > command or live Kaggle adapter. No workload command runs on the control-plane host.
@@ -136,6 +137,13 @@ the existing journal. Collection acceptance creates a durable transfer-only tick
 not start a verifier inside the request. See [operations](operations.md) for HTTP, receipt
 and completion-race semantics, and [collection](collection.md) for the consumer and recovery.
 
+M3-07 retention assesses all historical/shared references and the journal's recovery needs.
+Active, unknown, incomplete or held work remains pinned even after ordinary retention windows
+or nominal lease expiry. The local sweeper cannot clear an intent or repair a dispatch
+journal. Remote cleanup preview checks exact ownership and terminal/publication evidence;
+it never applies deletion or substitutes for cancellation. Staging preview is unavailable
+through the execution-only cleanup port. See [retention](retention.md).
+
 ## Verification
 
 With the pinned repository toolchain:
@@ -173,15 +181,15 @@ collection guide; the original dispatch smoke still ends at its collection hando
 
 ## Remaining boundaries
 
-The ledger is pinned recovery evidence, not a cleanup authorization. Durable cancellation,
-explicit compute retry/reconcile and collection tickets have M3-05 offline components.
-M3-06 adds verified artifact collection/publication; retention/cleanup remains M3-07.
-Production CLI/configuration, artifact HTTP routes and real Kaggle integration retain their
-separate gates. Do not manually reset journal phases, delete intent rows or clear the
-scheduler barrier to resume an uncertain attempt. Stop after PR #16 for owner merge;
-do not begin M3-07 here.
+The ledger is recovery/ownership evidence, not an unconditional cleanup authorization.
+Durable cancellation, explicit compute retry/reconcile and collection tickets have M3-05
+offline components. M3-06 adds verified collection/publication; M3-07 supplies conservative
+retention, exact local byte deletion and remote dry-run previews only. Production CLI/config,
+artifact HTTP, remote apply and live Kaggle integration retain their separate gates.
+Do not manually reset journal phases, delete intent rows or clear the scheduler barrier to
+resume an uncertain attempt. Stop after PR #17 for owner merge; do not begin M3-08 here.
 
 See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md),
 [the scheduler guide](scheduler.md), [storage](storage.md), [operations](operations.md),
-[collection](collection.md) and
+[collection](collection.md), [retention](retention.md) and
 [the approved recovery requirements](proposal.md#13-persistence-idempotency-and-crash-recovery).

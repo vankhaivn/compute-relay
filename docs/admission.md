@@ -33,7 +33,7 @@ Strict parsing and request hash
   -> recheck current token, expiry, revocation, workspace and scope
   -> replay matching workspace + job.create + key, or reject changed request
   -> resolve current allowed profile revision for a NEW job
-  -> check/pin owned bundle and object-input metadata
+  -> check/pin owned, unexpired bundle and object-input metadata
   -> apply outstanding-job limits
   -> insert job + attempt 1 + random nonce + object references
   -> append job.accepted at sequence 1
@@ -49,8 +49,9 @@ make future provider submission exactly-once.
 
 The idempotency primary key includes workspace and operation. Only a key digest is stored;
 keys are not credentials and must not contain secrets. Records have no independent expiry
-or deletion API; future retention must keep them at least as long as job metadata. Restoring
-an older database also restores its older admission history, not receipts written later.
+or deletion API. M3-07 preserves receipts and job metadata when bytes expire; it does not
+prune that history. Restoring an older database restores only its older admission history,
+not receipts written later.
 
 ## Canonical request identity
 
@@ -87,6 +88,12 @@ digests. This is metadata admission, not proof that bundle framing, every refere
 or the remote environment has been verified. Preparation must inspect/revalidate those
 bytes before dispatch. SQL guards reject changes to referenced object metadata.
 
+M3-07 additionally requires exact unexpired input inventory during validation and new-job
+admission. A tombstone makes the original input unavailable even while bytes await physical
+sweep. The check and reference insert occur in the transaction; insertion guards prevent a
+stale caller from attaching expired data. Historical job/control receipts still replay before
+these mutable input checks. See [retention](retention.md) for pin and expiry semantics.
+
 Direct HTTPS sources remain in the immutable canonical request and are explicitly pending;
 admission performs syntax/policy checks only, not DNS or downloading. M3-04 preparation
 freezes the first permitted committed snapshot and reuses its pins rather than refreshing
@@ -121,7 +128,8 @@ the source attempt and has its own durable idempotency receipt. Compute retry ve
 original frozen bytes and atomically creates a new attempt/nonce/queue entry while preserving
 the job and prior attempt history. It never re-admits a changed specification, remaps a
 profile, refetches a URL or repeats unresolved compute. POST receipt replay is distinct from
-GET current state, and both require current authorization.
+GET current state, and both require current authorization. M3-07 rejects expired retry inputs
+before byte reads and rechecks inside the commit; pre-expiry proof alone is insufficient.
 
 ## Developer verification
 
@@ -146,10 +154,11 @@ evidence. The standalone standard-library canonicalizer also passed race tests a
 fuzz executions. An earlier broad 25-repeat run exceeded the local budget and is not claimed
 as passing. Full integration and native builds are checked separately by the existing
 Go 1.27.1 offline CI; PR #12 records final-head results. No harness or replacement directive
-is shipped.
+is shipped. M3-07's expired-input and receipt-preservation tests are recorded separately in
+PR #17 and the retention guide.
 
 See [ADR-0009](decisions/0009-durable-idempotent-admission.md), [storage](storage.md) and
 [API contracts](../api/README.md). [Scheduling](scheduler.md), [input preparation and one-shot
-dispatch](dispatch.md), and [durable controls](operations.md) now have their own offline
-components. Artifact collection, retention/cleanup and production CLI composition remain
-separate task gates.
+dispatch](dispatch.md), [durable controls](operations.md), [verified collection](collection.md)
+and [retention](retention.md) have separate offline components. Production CLI composition,
+artifact HTTP, remote apply and live-provider acceptance retain their own task gates.
