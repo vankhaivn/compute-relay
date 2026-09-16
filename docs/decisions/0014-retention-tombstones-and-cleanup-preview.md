@@ -1,6 +1,6 @@
 # ADR-0014: Retention tombstones, bound stores and cleanup previews
 
-- Status: proposed; implementation in PR #17, pending owner review/merge
+- Status: accepted; PR #17 merged on 2026-09-15
 - Date: 2026-09-15
 - Task: M3-07
 - Requirements: OPS-05, DUR-01, VER-02; preserves DUR-02/03 and DOM-02/03
