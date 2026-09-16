@@ -1,6 +1,6 @@
 # ADR-0020: Explicit fixed GPU acceptance with durable restart evidence
 
-- Status: proposed; harness implemented offline in PR #24, pending owner review/merge
+- Status: accepted; PR #24 merged on 2026-09-16
 - Date: 2026-09-16
 - Task: M4-06 harness and integration; live acceptance remains blocked-environment
 - Requirements: PRD-04, VER-03; preserves DUR-03, existing publication and authority boundaries

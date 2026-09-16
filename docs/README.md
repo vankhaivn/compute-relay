@@ -29,7 +29,8 @@ owner-approved proposal update.
 | [`scope-and-requirements.md`](scope-and-requirements.md) | M-0 requirements baseline | Stable requirement IDs and minimum acceptance evidence; the fault matrix links the implemented offline evidence without changing requirements. |
 | [`architecture.md`](architecture.md) | Active baseline | Provider-neutral layers, responsibilities, entities, and invariants. |
 | [`domain-model.md`](domain-model.md) | M2-02 implemented offline | Typed IDs, entities, capability evidence, structured errors, independent state dimensions, and transition invariants. |
-| [`../api/README.md`](../api/README.md) | Contracts and fifteen composable handlers implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock, operation status and validation workflow; production server remains separate. |
+| [`../api/README.md`](../api/README.md) | Contracts and fifteen composable handlers implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock and operation status. M5-01a composes local services without workers; enabled routes and complete production behavior remain distinct. |
+| [`local-runtime.md`](local-runtime.md) | M5-01a local operator/HTTP slice; PR #25 in review | Explicit state identity, private token delivery, workspace controls, local validation, literal-loopback serving and joined shutdown; no automatic profiles or provider workers. |
 | [`providers/contract.md`](providers/contract.md) | M2-04 implemented offline | Provider contracts, deterministic fake, infrastructure ports and local smoke. |
 | [`auth-and-objects.md`](auth-and-objects.md) | M2-05/M2-06 implemented offline; merged | Workspace authorization, HTTP guards, streaming upload, atomic blobs and recovery boundaries. |
 | [`packaging-and-import.md`](packaging-and-import.md) | M2-07 implemented offline; merged | Explicit bundle commands, strict archive validation, rooted snapshots and opt-in local import. |
@@ -49,12 +50,12 @@ owner-approved proposal update.
 | [`providers/kaggle-execution.md`](providers/kaggle-execution.md) | M4-03 offline execution; PR #21 merged | Locked source, per-attempt submission authority, exact-version/ID/source observation, raw-state truthfulness, SDK upsert and recovery/verification limits. |
 | [`providers/kaggle-operations.md`](providers/kaggle-operations.md) | M4-04 offline operational mappings; PR #22 merged | Reservation-aware quota/freshness, bounded identity-bound log snapshots, capability evidence, manual cancellation and frozen timeout layers. |
 | [`providers/kaggle-artifacts.md`](providers/kaggle-artifacts.md) | M4-05 offline artifact retrieval; PR #23 merged | Complete version-scoped listing, manifest-bound output selection, bounded file streaming and M3 immutable-pin/verified-publication recovery. |
-| [`providers/kaggle-acceptance.md`](providers/kaggle-acceptance.md) | M4-06 harness; PR #24 in review; live not run | Fixed GPU/restart operator commands, separate authorization, original executable/state, verified results and explicit offline/live limits. |
+| [`providers/kaggle-acceptance.md`](providers/kaggle-acceptance.md) | M4-06 harness; PR #24 merged; live not run | Fixed GPU/restart operator commands, separate authorization, original executable/state, verified results and explicit offline/live limits. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
-| [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
+| [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, delivery slices, live/offline boundaries and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
 | [`compatibility.md`](compatibility.md) | M-0 target matrix | Toolchain/provider/host targets and rules for support claims/live evidence. |
-| [`decisions/`](decisions/README.md) | Active ADR system | Material decisions, including accepted ADR-0019 and proposed ADR-0020 for finite explicit GPU/restart acceptance. |
+| [`decisions/`](decisions/README.md) | Active ADR system | Material decisions, including accepted ADR-0020 and proposed ADR-0021 for local operator and HTTP lifecycle. |
 | [`research/`](research/README.md) | Active evidence system | Primary-source and live-test evidence rules. |
 | [`research/kaggle-interface-review.md`](research/kaggle-interface-review.md) | Upstream review complete | Pinned official client surfaces, gaps, transport gate, and M-1 probe sequence. |
 | [`research/kaggle-feasibility.md`](research/kaggle-feasibility.md) | Upstream review complete; live blocked | K-01 through K-16 evidence ledger and go/no-go rule. |
@@ -65,16 +66,16 @@ owner-approved proposal update.
 
 Additional testing, provider support, troubleshooting and security design documents should
 be added when implementation makes them concrete. Do not create empty documents merely to
-mirror a proposed tree. Offline qualification, provider components and the acceptance harness
-do not imply public artifact HTTP, remote cleanup apply, an overall-job deadline service or
-production runtime composition is complete. The plan owns the current stop/next-task boundary;
-historical component/ADR evidence must not be relabeled as a newer task's test run.
+mirror a proposed tree. The admission-only local server does not imply complete production
+worker composition, public artifact/log routes, remote cleanup or an overall-job deadline service.
+The plan owns the current stop/next-task boundary. Historical component/ADR statements describe
+their task's implementation; read the current local guide for executable composition status.
+Historical evidence must not be relabeled as a newer task's test run.
 
-M3's offline gate and M4-01 through M4-05 are merged. PR #24 supplies executable scoped
-composition for a fixed GPU experiment, with offline durable tests and separate local child-
-process tests. No actual live GPU/result/restart report is recorded. In-review means branch
-implementation exists, not that every check or live acceptance gate passed; the PR conversation
-records exact-head CI and the guide records the not-run live ledger. M4 remains live-blocked.
+M3's offline gate and M4's components/harness are merged through PR #24. No actual live GPU/result/
+restart report is recorded. M5-01a in PR #25 adds local lifecycle without closing parent M5-01.
+In-review means branch implementation exists, not that every check or live acceptance gate passed;
+the PR conversation records exact-head CI. M4 remains live-blocked, and M5-02 has not started.
 
 ## Status vocabulary
 
@@ -108,6 +109,11 @@ A future operator-run passed-live report remains scoped to the fixed experiment 
 full M1 acceptance false, timeout enforcement unverified and remote execution count unobservable.
 The report and process records are not hostile-host or hardware attestation.
 
+Local server readiness means its configured local dependencies are available, not that a profile,
+provider or worker exists. New workspaces have no allowed profiles. Local schema validation is
+not admission, and issuing an application token is not granting provider credentials. Token-file
+failure or stdout failure does not roll back previously committed metadata.
+
 ## Required update paths
 
 | Change | Documents to review |
@@ -116,6 +122,7 @@ The report and process records are not hostile-host or hardware attestation.
 | Public API/job contract | requirement matrix, architecture, domain model, `api/`, compatibility, plan |
 | Domain state/error semantics | domain model, architecture, requirement matrix, `api/schemas/common*`, plan, tests |
 | Authentication/object lifecycle | auth-and-objects, storage, ADR-0004/0008, architecture, `api/`, plan, tests |
+| Local operator/HTTP lifecycle | local-runtime, ADR-0021, plan, main/operatorcli/runtimehost, private token/state tests and real HTTP/child-process shutdown evidence |
 | Admission/idempotency/profile snapshots | admission, ADR-0009, architecture, `api/`, plan, migration/CAS/HTTP tests |
 | Scheduling/capacity/leases/quota | scheduler, ADR-0010, architecture, event schema, plan, migration/fencing/crash tests |
 | Preparation/submission/reconciliation | dispatch, ADR-0011, provider contracts, architecture, event schema, plan, intent/crash/status tests |

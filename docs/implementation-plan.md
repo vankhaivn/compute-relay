@@ -1,7 +1,7 @@
 # Dependency-aware implementation plan
 
-> **Status:** active; M-0, M1-01, M2 and M3 are merged at their offline gates.
-> M4-01 through M4-05 offline components are merged; M4-06 harness is in review in PR #24.
+> **Status:** active; M-0, M1-01, M2, M3 and M4's offline components/harness are merged.
+> M5-01 is in progress; its local operator/HTTP slice M5-01a is in review in PR #25.
 > M4-06 live acceptance and the full M1/live batch gate remain blocked on separate evidence.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-16.
@@ -39,11 +39,14 @@ PR #21 merged M4-03 [one-shot execution and exact-version observation](providers
 at `ac547e9` on 2026-09-16. PR #22 merged M4-04
 [operational capabilities, quota and log snapshots](providers/kaggle-operations.md) at `fbf02b4`.
 PR #23 merged M4-05 [artifact retrieval and publication integration](providers/kaggle-artifacts.md)
-at `4b5517c` on 2026-09-16. PR #24 implements the M4-06
-[fixed GPU/restart acceptance harness](providers/kaggle-acceptance.md), in review until owner merge.
+at `4b5517c` on 2026-09-16. PR #24 merged the M4-06
+[fixed GPU/restart acceptance harness](providers/kaggle-acceptance.md) at `9fbd7d4` on 2026-09-16.
 No live account/GPU acceptance has been run; harness delivery is not a live M4 completion claim.
-Proposal section 23.6 permits offline work and the opt-in procedure without waiving M1-08 go.
-See ADR-0015 through ADR-0020. M5 has not started. The retained
+Following the owner's continuation request, PR #25 implements M5-01a
+[local administration and admission-only HTTP lifecycle](local-runtime.md), in review until merge.
+This is a delivery slice of M5-01, not completion of its application/provider workflow.
+Proposal section 23.6 permits offline work without waiving live go/no-go evidence.
+See ADR-0015 through ADR-0021. M5-02 has not started. The retained
 `checkpoint/m4-02-offline-staging` branch is obsolete and is not part of the active implementation.
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
@@ -132,14 +135,23 @@ outcomes; separate actual child processes test nonce freshness and local CLI sta
 Fixture reports remain passed-offline. Even a future scoped passed-live experiment keeps full M1
 acceptance false and does not prove timeout enforcement, remote execution count or cleanup.
 
+M5-01a composes existing durable local services in the main executable. New installation and
+fail-closed reopen bind SQLite and separate input/result identities. Local workspace/token
+administration requires exclusive access and delivers secrets only to new private files, with
+bounded expiry and explicit compensation uncertainty. Local schema validation performs no
+admission. Literal-loopback HTTP retains existing auth/Host/Origin/body/receipt rules and joins
+handlers before closing stores. New workspaces have no profiles; serve advertises admission-only
+mode and starts no provider/scheduler/collector/sweeper. Tests seed profiles only in fixtures and
+exercise real HTTP/SQLite/blob and main-entry child-process lifecycle. Later slices remain needed.
+
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one task/PR, report its evidence, and stop for owner merge
-before beginning another task. PR #24 delivers the acceptance harness and offline integration,
-not a completed live experiment or production multi-job runtime. Artifact HTTP/CLI, production
-`serve`, remote cleanup and full live acceptance remain separate. Commit and push reviewable
-checkpoints during implementation; the disposable runtime must not be the only copy of work.
+before beginning another task. PR #25 delivers M5-01a, not the complete M5-01 CLI/runtime or a
+live experiment. General profile/provider registration, worker lifecycle, public artifact/log
+routes and remote cleanup remain separate. Commit and push reviewable checkpoints during
+implementation; the disposable runtime must not be the only copy of work.
 
 ## Status vocabulary
 
@@ -189,9 +201,9 @@ M1 thin live-provider proof   M2 portable offline core
 ```
 
 M2 may begin after M-0 while credentials are unavailable. Integrated M4 batch activation
-requires M1 go and M3's durable semantics. The owner's requested M4 offline preparation and
-opt-in acceptance harness under proposal section 23.6 do not remove that dependency or grant
-live mutation authority in this session. ADR-0015 through ADR-0020 record the distinction;
+requires M1 go and M3's durable semantics. The owner's continuation permits useful offline
+harness and local-product work under proposal section 23.6, not live mutation authority or
+waiver of provider evidence. ADR-0015 through ADR-0021 record the distinct boundaries;
 actual live acceptance rows remain blocked until authorized evidence is recorded.
 
 ## M-0 — Evidence and scope
@@ -269,18 +281,32 @@ live tasks remain `blocked-environment`.
 | M4-03 | offline component / `complete`; live acceptance / `blocked` | Implement attempt-scoped submit, observation, raw-state mapping, and ambiguity reconciliation. | PRV-02, DUR-03, DOM-02/03 | M1-08, M3-04, M4-02 | Offline No / No; live verification Yes / Finite GPU | Merged PR #21: locked remote source and stable intent-derived slug; per-attempt Executor under M3 authority; bounded one-shot private SDK save, exact ID/version/source/account reads and raw-field status mapping. Unit/real-process/SQLite fault tests preserve original intent and confirmed state across lost acknowledgements, restart/remap and stale/replaced observations; actual pinned SDK uses mocked HTTP. See providers/kaggle-execution.md and ADR-0017 for upsert, same-version identity, mount/upgrade and composition limits. No blind resubmit or live acceptance. |
 | M4-04 | offline component / `complete`; live acceptance / `blocked` | Implement logs, quota, timeout, capability, and cancellation/manual-required mappings. | PRV-03, OPS-02/03/04 | M1-08, M3-05, M4-03 | Offline No / No; live verification Yes / bounded where needed | Merged PR #22: explicit account Monitor, exact raw-duration/reservation mapping with lower-bound seconds and freshness, version/identity/snapshot-bound log pagination, capability evidence and manual cancellation without guessed session IDs. Real SQLite tests preserve quota exhaustion and original receipts through restart/completion; actual SDK uses mocked HTTP. See providers/kaggle-operations.md and ADR-0018. Live SSE, provider timeout enforcement and full runtime registration remain unverified/separate. |
 | M4-05 | offline component / `complete`; live acceptance / `blocked` | Implement paginated output retrieval and manifest-bound artifact collection. | JOB-05, PRV-02, VER-02 | M3-06, M4-03 | Offline No / No; live verification Yes / existing completed run | Merged PR #23: complete version-scoped listing, original-attempt manifest/declaration selection, bounded explicit-file download and signed storage without account headers; independent stream/hash/final-status checks and M3 immutable-pin publication. Tests cover SDK pagination/late failures, scoped verified reads, 16 MiB partial/wrong/late transfer recovery, restart and lost pin/publication acknowledgements without new compute. See providers/kaggle-artifacts.md and ADR-0019. No ZIP, arbitrary listing URLs, range resume, new public routes or live K-07 claim. |
-| M4-06 | harness/integration / `in-review`; live acceptance / `blocked` | Run sanitized end-to-end private GPU acceptance through the durable runtime, including restart recovery. | PRD-04, VER-03 | M4-01–M4-05 | Harness/CI No / No; operator acceptance Yes / Explicit finite GPU | PR #24: scoped real-component adapter and fixed CUDA arithmetic example; explicit local/submit/read-only modes, same-executable records, new-process resume, current-authority journal inspection and verified six-file publication. Synthetic durable tests, actual child-process local CLI tests and GPU-mock negatives are offline only. See providers/kaggle-acceptance.md and ADR-0020. No live run recorded; an authorized report and remaining proposal live-checklist evidence are required before live completion. |
+| M4-06 | harness/integration / `complete`; live acceptance / `blocked` | Run sanitized end-to-end private GPU acceptance through the durable runtime, including restart recovery. | PRD-04, VER-03 | M4-01–M4-05 | Harness/CI No / No; operator acceptance Yes / Explicit finite GPU | Merged PR #24: scoped real-component adapter and fixed CUDA arithmetic example; explicit local/submit/read-only modes, same-executable records, new-process resume, current-authority journal inspection and verified six-file publication. Synthetic durable tests, actual child-process local CLI tests and GPU-mock negatives are offline only. See providers/kaggle-acceptance.md and ADR-0020. No live run recorded; an authorized report and remaining proposal live-checklist evidence are required before live completion. |
 
 ## M-5 — Usable developer product
 
 | ID | Type / status | Intended behavior and components | Requirements | Dependencies | External credentials / compute | Acceptance evidence |
 |---|---|---|---|---|---|---|
-| M5-01 | implementation / `proposed` | Build unified runtime/CLI commands for init, serve, workspace/token, validate, submit/status/logs/artifacts, explicit operations, and cleanup. | API-01/03, DX-01 | M3 complete, M4 interfaces stable | No for offline commands; provider commands vary | CLI tests use same application services/API and never create compute from read-only commands. |
+| M5-01 | implementation / `in-progress` | Build unified runtime/CLI commands for init, serve, workspace/token, validate, submit/status/logs/artifacts, explicit operations, and cleanup. | API-01/03, DX-01 | M3 complete, M4 interfaces stable | No for offline commands; provider commands vary | PR #25 supplies M5-01a local init/state/workspace/token/schema and admission-only loopback serving. CLI tests use the existing services, real SQLite/HTTP and main-entry child processes, with no provider workers. Parent acceptance still requires application submit/status/log/artifact/operation/cleanup commands and general profile/provider/worker composition; read-only commands must never create compute. See the delivery slices below. |
 | M5-02 | implementation / `proposed` | Finalize strict TOML config, example config, precedence, path resolution, validation, and safe defaults. | PRD-08, JOB-03, SEC-01, DX-01 | M4-01/M5-01 | No / No | Examples validate; unknown/contradictory keys fail; effective config excludes secret values. |
 | M5-03 | implementation / `proposed` | Implement doctor modes separating local, read-only provider, and explicitly compute-consuming checks. | VER-03, DX-01 | M4-01/M5-02 | Optional credentials; GPU only explicit | Default doctor consumes no GPU; explicit smoke flag shows budget and evidence tier. |
 | M5-04 | example/live / `proposed` | Ship real GPU smoke and small pinned open-access LLM batch examples outside core. | DX-02, VER-03 | M4-06, verified environment/model card | Yes / Explicit finite GPU for live acceptance | Actual GPU use, bounded prompts/output, model revision/license, manifests, and verified artifacts. |
 | M5-05 | implementation / `proposed` | Ship thin Node.js, Python, and Go HTTP clients for one common job/artifact model. | PRD-02/03, DX-02 | M5-01/M5-04 | No in CI; live example optional | All clients handle idempotency, attention/unknown, polling, errors, and digest-checked downloads. |
 | M5-06 | packaging/docs / `proposed` | Provide direct-install/build path, optional container, cross-platform dev wrappers, and first-run guide. | PRD-05/08, DX-01 | M5-01–M5-05 | No / No | Clean-environment procedures; Docker optional; no privileged/socket mount or paid service. |
+
+### M5-01 delivery slices
+
+These are review-sized subdivisions of the original M5-01 outcome, not relaxed replacement
+acceptance criteria or a waiver of live authorization. See [ADR-0021](decisions/0021-local-runtime-lifecycle.md).
+
+| Slice | Status | Boundary |
+|---|---|---|
+| M5-01a — Local operator and HTTP lifecycle | `in-review`, PR #25 | Explicit state identity, private token delivery, workspace controls, schema-only validation and authenticated loopback serving. No automatic profile or provider worker; readiness is local only. |
+| Remaining M5-01 application/profile integration | `proposed` | Configure real immutable profiles and expose application submit/status/explicit-operation clients through the common services/API. Do not use test-only SQL/profile seeding as operator instructions. |
+| Remaining M5-01 result/worker integration | `proposed` | Add authorized artifact/log and cleanup surfaces and general worker lifecycle, preserving exact identity, no automatic compute retry and explicit unsupported/live gates. |
+
+Stop after PR #25; the remaining slices require their own review and evidence before parent
+M5-01 can be complete. M5-02 strict TOML and later product/release acceptance remain separate.
 
 ## M-6 — Release hardening
 
@@ -312,21 +338,22 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M4-06 harness review
+## Next work after M5-01a review
 
-Stop after reporting PR #24 for owner review/merge. Do not begin M5 in this task. Harness
-acceptance and live provider acceptance are distinct: no live GPU/result/restart report has
-been recorded here, and M4 is not marked complete merely because the harness merges.
+Stop after reporting PR #25 for owner review/merge. M5-01a's executable local server does not
+close parent M5-01: new workspaces have no profiles and provider workers are not started.
+The next reviewed slice can address the remaining application/profile integration while
+retaining local/external authority and the original acceptance boundaries. Do not begin another
+slice or M5-02 in this PR, and do not claim a complete production compute runtime.
 
-An operator can use the explicit procedure with separately authorized credentials, private
-staging and a finite GPU budget. Preserve the original executable and all state, then resume
-in a new process without mutation permission. Missing records or uncertain submissions must
-not be reset; collection failure uses an explicit transfer retry, never another execution.
+M4-06's harness is merged, but no live GPU/result/restart report has been recorded. An operator
+can use its explicit procedure with separately authorized credentials, private staging and a
+finite GPU budget. Preserve the original executable and state; do not reset uncertain submissions.
 Even a scoped passed-live experiment does not close the full M1 timeout/cancellation/fault/
 cleanup checklist or establish remote execution count/hardware release by inference.
 
 M1-02 through M1-07 and the M1-08 go decision retain their authorization and evidence gates.
-Production multi-job Provider/runtime registration, public log/quota/artifact routes, durable
-configuration, `serve` and remote cleanup remain separate work. No remote exactly-once guarantee,
-same-version session attestation, immutable dataset mount or transparent cross-binary recovery
-is implied by offline tests, process markers or local retained-result verification.
+General provider workers, public log/quota/artifact routes, durable configuration and remote
+cleanup remain separate. No remote exactly-once guarantee, same-version session attestation,
+immutable dataset mount or transparent cross-binary recovery is implied by local serving,
+offline tests, process markers or retained-result verification.

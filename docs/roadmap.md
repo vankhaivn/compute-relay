@@ -2,9 +2,9 @@
 
 > **Status:** acceptance-based roadmap active; synchronized 2026-09-16.
 >
-> **Current work:** M3's offline gate and M4-01 through M4-05 are merged through PR #23.
-> M4-06's fixed GPU/restart harness is in review in PR #24. No live experiment is recorded;
-> M4-06/M1 live acceptance and general production activation remain gated.
+> **Current work:** M3's offline gate and M4's components/harness are merged through PR #24.
+> M5-01a local administration and admission-only HTTP are in review in PR #25;
+> parent M5-01 remains in progress. No live M4-06/M1 experiment is recorded.
 >
 > Dates and sprint estimates are intentionally not assigned without an execution context.
 
@@ -20,16 +20,16 @@ proof of the first real compute path.
 | M-1 — Thin real-provider proof | `blocked` for live acceptance | M1-01 offline harness merged in PR #3; authorized private bounded GPU path with identity-safe verified outputs is still required. |
 | M-2 — Portable core | `complete` offline | M2-01 through M2-09 merged through PR #10; provider-neutral API/domain/objects/auth/fake-provider and finite runner evidence, not a live-provider claim. |
 | M-3 — Durable orchestration | `complete` offline | PRs #11–#18 merged the components, executable 25-scenario qualification and recovery documentation. This closes the implemented offline gate, not production or live acceptance. |
-| M-4 — Integrated Kaggle batch | Harness `in-review`; live acceptance `blocked` | M4-01 through M4-05 merged in PRs #19–#23. PR #24 composes a finite fixed-job GPU/restart operator harness. No real live result is recorded; general production registration and remaining M1 evidence are not complete. |
-| M-5 — Usable developer product | `not-started` | CLI, doctor, install, examples, and three thin clients. |
+| M-4 — Integrated Kaggle batch | Offline components/harness merged; live acceptance `blocked` | PRs #19–#24 supply the component ports and finite fixed-job GPU/restart harness. No real live result is recorded; general production registration and remaining M1 evidence are not complete. |
+| M-5 — Usable developer product | `in-progress` | PR #25 supplies M5-01a local init/admin/schema/HTTP lifecycle only. Parent M5-01 still needs application/profile/provider/worker and result surfaces; config, doctor, examples, clients and packaging retain their gates. |
 | M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
 
-Detailed task dependencies and authorization boundaries are in
-[`implementation-plan.md`](implementation-plan.md). PR #24 stops for owner review/merge;
-M5 has not started. Proposal section 23.6 permits offline preparation and a separately opt-in
-operator procedure, not a live-success declaration from CI. Production `serve`, general artifact
-HTTP/CLI, remote cleanup apply and staging cleanup remain separate gates. Local timeouts and
-process exits do not cancel remote compute or grant another submission permit.
+Detailed task dependencies, delivery slices and authorization boundaries are in
+[`implementation-plan.md`](implementation-plan.md). Stop at PR #25 for owner review/merge.
+M5-01a is not the whole M5-01 runtime/CLI. Proposal section 23.6 permits offline work, not a
+live-success declaration from CI. The local server starts no provider worker or automatic
+profile; public result routes, general worker composition and remote cleanup remain separate.
+Local timeouts/process exits do not cancel remote compute or grant another submission permit.
 
 ## M-0 — Evidence and scope
 
@@ -187,19 +187,19 @@ Real SQLite/blob/collection tests recover partial or late-failed transfers and l
 using the original durable pin, without another compute submission. In-memory catalog cursors
 are not durable pins; complete temporary bytes are not published artifacts.
 
-M4-06's [acceptance harness](providers/kaggle-acceptance.md) composes real components for a fixed
+M4-06's merged [acceptance harness](providers/kaggle-acceptance.md) composes real components for a fixed
 64-by-64 CUDA calculation and verified result set. Explicit mode permissions, original executable/
 state, write-ahead process records and a separate read-only resume protect the original attempt.
 Offline tests use a synthetic remote backend; actual child-process tests cover local CLI reopen
 and nonce generation, not live GPU execution. Wrong/missing GPU, arithmetic, identity or restart
-evidence fails qualification. No real live acceptance report is recorded in PR #24.
+evidence fails qualification. No real live acceptance report was recorded in PR #24.
 
 The harness may enable a later operator-authorized experiment, but a merged harness is not a
 passed experiment. Even a scoped passed-live report keeps full M1 acceptance false and does not
 prove provider timeout enforcement, execution count, same-version session identity or cleanup.
 A separate remaining-checklist/go decision is still necessary before unrestricted activation.
 
-Unsupported or unknown capabilities remain visible. ADR-0015 through ADR-0019 and proposed
+Unsupported or unknown capabilities remain visible. Accepted ADR-0015 through
 [ADR-0020](decisions/0020-explicit-durable-gpu-acceptance.md) do not replace the M1-08 go decision
 or turn source/fixture evidence into live compatibility. No real credential, provider resource
 or GPU was used during these offline implementation PRs. The approved exit criteria are unchanged.
@@ -217,6 +217,18 @@ without provider-specific application code.
 - bounded GPU smoke test and small pinned open-access LLM batch example;
 - thin Node.js, Python, and Go HTTP clients using one contract; and
 - first-run documentation from install through verified artifacts.
+
+M5-01a's [local operator/HTTP lifecycle](local-runtime.md) in PR #25 is a first reviewable
+slice, not completion of parent M5-01. It binds original local state, provides explicit workspace
+and private-file token administration, validates schemas and serves existing durable HTTP
+services on literal loopback. Shutdown joins handlers before releasing store locks. Tests use
+real local stores/HTTP/main-entry child processes, not a live provider.
+
+New workspaces have no profiles and the server reports admission-only mode with dispatch disabled.
+Application submit/status/operation clients, profile/provider setup, result routes and worker
+lifecycle remain necessary. Strict TOML/doctor, examples, thin language clients and first-run
+release evidence keep their original gates. [ADR-0021](decisions/0021-local-runtime-lifecycle.md)
+records this subdivision without weakening the approved M5 outcome.
 
 ## M-6 — Release hardening
 

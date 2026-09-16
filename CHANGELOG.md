@@ -27,8 +27,8 @@ Semantic Versioning once a public compatibility surface exists.
 - Go module, pre-release executable, cross-platform developer commands, and offline CI
   foundation.
 - Provider-neutral Go domain model with typed opaque identities, capability/evidence
-  semantics, stable structured errors, explicit entities, independent attempt-state
-  dimensions, and monotonic transition tests.
+  semantics, stable structured errors, explicit entities, independent state dimensions,
+  and monotonic transition tests.
 - Strict Draft 2020-12 JSON Schemas, OpenAPI 3.1 skeleton, positive/negative fixtures,
   domain-enum drift checks, and a reviewable contract-content lock.
 - Provider-neutral execution and infrastructure ports, explicit instance registry, optional
@@ -194,15 +194,25 @@ Semantic Versioning once a public compatibility surface exists.
   freshness. Synthetic tensor/record/CLI negatives cannot claim actual live GPU acceptance.
 - Acceptance guide and ADR-0020 documenting operator authorization, report semantics, retained
   resources, original-binary recovery and the explicit not-run/blocked live M4-06/M1 ledger.
+- M5-01a explicit local init/state/workspace/token/validate/serve commands in the main executable,
+  with original installation/input/result identities and fail-closed missing/corrupt/swapped reopen.
+- Durable local workspace controls and application tokens delivered once to a new private file,
+  bounded expiry, protected-path checks and explicit revocation compensation after delivery errors.
+- Literal-loopback admission-only HTTP composition using existing durable services, assigned-port
+  Host checks, explicit no-worker mode and joined handler shutdown before store/lock release.
+- Pure parser/lifecycle, real SQLite/blob/HTTP and actual main-entry child-process tests covering
+  authority, byte/receipt persistence, startup/forced-close errors and interrupt/death recovery.
+- Local runtime guide and ADR-0021 separating the first M5-01 delivery slice from remaining
+  application/profile/provider/result work and preserving unverified live acceptance.
 
 ### Changed
 
 - Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
   request, preserving existing history and all other format rules. Added 16 regression checks
   to the existing convention workflow; synchronized the canonical policy and commit template.
-- Synchronized living documentation for merged M4-01 through M4-05 and M4-06's PR #24 harness
-  review gate, without declaring live acceptance or importing the obsolete staging checkpoint.
-  ADR-0015 through ADR-0019 record owner acceptance; historical decision/evidence text is retained.
+- Synchronized living documentation for merged M4 components/harness and M5-01a's PR #25 review
+  gate, without declaring live acceptance or completion of parent M5-01. ADR-0020 records owner
+  acceptance after PR #24; historical decision/evidence text and original dependencies remain.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -231,5 +241,8 @@ Semantic Versioning once a public compatibility surface exists.
 - Added the explicit formatting-only `style` subject category with five additional regressions
   (21 total), preserving the 80-character ceiling and all other syntax checks. This avoids rewriting
   a pushed formatting checkpoint; the canonical policy is synchronized in a separate docs commit.
+- Main CLI routing propagates interrupt/SIGTERM context and no longer echoes unknown commands.
+  Existing version and bundle interfaces remain, with bundle cancellation using the parent context.
+  M5-01a changes no dependency, workflow, schema, migration or existing durable state-machine code.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
