@@ -31,13 +31,11 @@ func TestFaultCatalogRejectsMissingOrUntraceableEvidence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(ref.File)), []byte("package fixture\nimport \"testing\"\nfunc TestProof(t *testing.T) {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	var proposal strings.Builder
 	cases := make([]faultCase, 25)
 	for i := range cases {
 		cases[i] = faultCase{Number: i + 1, Scenario: fmt.Sprintf("Case %d.", i+1), Tests: []faultTest{ref}}
-		fmt.Fprintln(&proposal, cases[i].Scenario)
 	}
-	if err := os.WriteFile(filepath.Join(root, "docs", "proposal.md"), []byte(proposal.String()), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "docs", "proposal.md"), []byte(proposalList()), 0600); err != nil {
 		t.Fatal(err)
 	}
 	encode := func(cases []faultCase) []byte {
@@ -51,7 +49,7 @@ func TestFaultCatalogRejectsMissingOrUntraceableEvidence(t *testing.T) {
 	if _, err := checkFaultCatalog(root, good); err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"count", "number", "scenario", "duplicate-scenario", "empty", "missing-function", "missing-file", "traversal", "duplicate-reference", "unknown-field", "trailing"} {
+	for _, mode := range []string{"count", "number", "scenario", "substring", "reordered", "duplicate-scenario", "empty", "missing-function", "missing-file", "traversal", "duplicate-reference", "unknown-field", "trailing"} {
 		t.Run(mode, func(t *testing.T) {
 			var copy struct{ Cases []faultCase }
 			if err := json.Unmarshal(good, &copy); err != nil {
@@ -65,6 +63,10 @@ func TestFaultCatalogRejectsMissingOrUntraceableEvidence(t *testing.T) {
 				c[0].Number = 2
 			case "scenario":
 				c[0].Scenario = "Not in the approved proposal"
+			case "substring":
+				c[0].Scenario = "Case 1"
+			case "reordered":
+				c[0].Scenario, c[1].Scenario = c[1].Scenario, c[0].Scenario
 			case "duplicate-scenario":
 				c[1].Scenario = c[0].Scenario
 			case "empty":

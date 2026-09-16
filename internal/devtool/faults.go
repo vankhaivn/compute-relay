@@ -66,10 +66,14 @@ func checkFaultCatalog(root string, raw []byte) ([]faultCase, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read approved proposal: %w", err)
 	}
+	expected, err := proposalFaultScenarios(proposal)
+	if err != nil {
+		return nil, err
+	}
 	functions := map[string]map[string]bool{}
 	scenarios := map[string]bool{}
 	for i, c := range catalog.Cases {
-		if c.Number != i+1 || c.Scenario == "" || scenarios[c.Scenario] || !bytes.Contains(proposal, []byte(c.Scenario)) || len(c.Tests) == 0 || len(c.Tests) > 8 {
+		if c.Number != i+1 || c.Scenario == "" || scenarios[c.Scenario] || c.Scenario != expected[i] || len(c.Tests) == 0 || len(c.Tests) > 8 {
 			return nil, fmt.Errorf("invalid or untraceable fault case %d", i+1)
 		}
 		scenarios[c.Scenario] = true
