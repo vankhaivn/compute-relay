@@ -1,6 +1,6 @@
 # Kaggle one-shot execution and exact-version observation
 
-> **Task:** M4-03, offline component implementation in PR #21; in review until owner merge.
+> **Task:** M4-03, implemented offline; PR #21 merged.
 > **Requirements:** PRV-02, DUR-03, DOM-02/03.
 > **Evidence:** actual pinned SDK with mocked HTTP, real SQLite/blob/dispatch integration
 > with synthetic helper results, and isolated process tests. No live credentials or GPU.
@@ -19,9 +19,11 @@ work is local, deterministic source construction; it does not resolve a credenti
 provider. The supplied `Stager` retains the M4-01 configuration and M4-02 verification rules.
 
 The component implements the existing Submit, Observe and ReconcileSubmission method shapes,
-not the entire `provider.Provider` interface. Production registration, capability/log/quota/
-cancellation mapping, output retrieval and installed runtime composition remain separate.
-Tests wrap it in a **test-only** fake capability surface; no production fallback is introduced.
+not the entire `provider.Provider` interface. M4-04 separately adds
+[operational mappings](kaggle-operations.md): bounded log/quota reads, capability evidence,
+manual cancellation and frozen timeout reporting. Production registration, output retrieval
+and installed runtime composition remain separate. Tests wrap execution in a **test-only**
+fake capability surface; no production fallback is introduced.
 
 **Only the invocation that just received a successful NEW M3 `BeginSubmission` commit may
 call `Submit`.** The operator enablement flag is not that permit. The atomic in-process latch
@@ -162,7 +164,8 @@ These labels/policies require live verification before a support claim.
 For a new GPU save, the helper requires an explicitly false raw pay-to-scale flag in quota data.
 True/missing/unknown stops before saving. This is a conservative free-only eligibility check,
 not numeric quota scheduling, an atomic reservation or a guarantee that an account setting cannot
-change afterward. Numerical quota precision/freshness and full optional capabilities are M4-04.
+change afterward. M4-04's separate [Monitor](kaggle-operations.md) supplies reservation-aware
+numeric quota and freshness while retaining those point-in-time limits; it grants no save permit.
 
 Source is bounded to 2 MiB, encoded manifest/module payload to 1 MiB, helper request/metadata
 responses to 3 MiB, token to 8 KiB and each captured stdout/stderr stream to 16 KiB. The execution
@@ -189,6 +192,11 @@ No independent durable source-blob/archive is introduced before submission in th
 Preserve the original binary/configuration when planning recovery of in-flight work. Transparent
 cross-version recovery is not claimed. Retain intent/remote evidence and use the original
 compatible implementation to inspect it; never erase a journal or generate a replacement slug.
+
+M4-04 preserves the execution helper, bootstrap and original runner bytes. Its optional reads
+and manual-control mapping cannot clear an intent, change source identity or make a missing
+resource safe to resubmit. Bounded provider log snapshots are not the runner's verified payload
+artifacts; manual cancellation still needs later terminal execution evidence.
 
 ## Verification and evidence tiers
 
@@ -223,6 +231,8 @@ unit roots passed locally against a byte-for-byte Git-blob-verified bootstrap; i
 checks verified fixture alignment. This is narrow local evidence, not full local modernc,
 SDK, generated kernel execution or end-to-end smoke. Full Go 1.27.1/native/race, locked Python
 3.11.16/Kaggle 2.2.4/SDK 0.1.35 and runner-suite outcomes belong to exact-head CI in PR #21.
+M4-04's quota/log/capability/control tests are separately recorded in PR #22 and the operational
+guide, not relabeled as historical M4-03 evidence.
 
 ## Reviewed primary sources
 
@@ -235,7 +245,7 @@ Reviewed 2026-09-16 at existing pins; source/fixture findings are not live compa
 - [SDK default-value decoding](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kaggle_object.py) and [transport](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kaggle_http_client.py).
 
 See [ADR-0017](../decisions/0017-one-shot-kaggle-execution.md), [staging](kaggle-staging.md),
-[dispatch](../dispatch.md), [recovery](../recovery.md), and the
-[implementation plan](../implementation-plan.md). Stop after PR #21 for owner review/merge.
-M4-04/05, full Provider/runtime composition, live provider acceptance and remote cleanup are
-not started or declared complete by this task.
+[operational mappings](kaggle-operations.md), [dispatch](../dispatch.md) and [recovery](../recovery.md).
+The [implementation plan](../implementation-plan.md) owns the current owner-review/next-task gate.
+M4-05 output retrieval, full Provider/runtime composition, live provider acceptance and remote
+cleanup remain separate tasks.
