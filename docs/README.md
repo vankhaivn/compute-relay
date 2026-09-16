@@ -44,30 +44,34 @@ owner-approved proposal update.
 | [`retention.md`](retention.md) | M3-07 implemented offline; merged | Named holds, atomic expiry/events, bound-store local sweep, metadata preservation and exact-ledger remote dry runs. |
 | [`fault-matrix.md`](fault-matrix.md) | M3-08 offline qualification; PR #18 merged | The 25 numbered proposal scenarios, 34 nominated root tests, fresh executable evidence, requirement mapping and explicit limitations. |
 | [`recovery.md`](recovery.md) | M3-08 operational semantics; PR #18 merged | Read independent state dimensions and choose receipt/reconcile/collect/retry/cancel/retention actions without fabricated commands or outcomes. |
-| [`providers/kaggle-preflight.md`](providers/kaggle-preflight.md) | M4-01 offline/read-only foundation; PR #19 in review | Explicit credential references, local checks, opt-in account/quota reads, bounded SDK transport and process lifetime, operator commands and unchanged live/batch gates. |
+| [`providers/kaggle-preflight.md`](providers/kaggle-preflight.md) | M4-01 offline/read-only foundation; PR #19 merged | Explicit credential references, local checks, opt-in account/quota reads, bounded SDK transport and process lifetime, operator commands and unchanged live/batch gates. |
+| [`providers/kaggle-staging.md`](providers/kaggle-staging.md) | M4-02 offline staging; PR #20 in review | One-shot private creation, separately verified readiness and bytes, explicit source completion, M3 ownership/recovery integration and no automatic re-creation. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
 | [`compatibility.md`](compatibility.md) | M-0 target matrix | Toolchain/provider/host targets and rules for support claims/live evidence. |
-| [`decisions/`](decisions/README.md) | Active ADR system | Material architecture and policy decisions, including proposed ADR-0015 for the read-only preflight boundary. |
+| [`decisions/`](decisions/README.md) | Active ADR system | Material architecture and policy decisions, including accepted ADR-0015 and proposed ADR-0016 for private staging/readiness. |
 | [`research/`](research/README.md) | Active evidence system | Primary-source and live-test evidence rules. |
 | [`research/kaggle-interface-review.md`](research/kaggle-interface-review.md) | Upstream review complete | Pinned official client surfaces, gaps, transport gate, and M-1 probe sequence. |
 | [`research/kaggle-feasibility.md`](research/kaggle-feasibility.md) | Upstream review complete; live blocked | K-01 through K-16 evidence ledger and go/no-go rule. |
-| [`providers/`](providers/README.md) | Provider documentation | Adapter-specific capability and compatibility documentation; preflight does not establish a dispatch-capable adapter. |
+| [`providers/`](providers/README.md) | Provider documentation | Adapter-specific capability and compatibility documentation; preflight/staging components do not establish a dispatch-capable adapter. |
 | [`development/go-toolchain.md`](development/go-toolchain.md) | Active through M3-08 | Go module, developer/fault qualification commands, CI, build metadata, and dependency baseline. |
 | [`development/commit-convention.md`](development/commit-convention.md) | Active policy | Commit subject and history rules. |
 | [`development/repository-workflow.md`](development/repository-workflow.md) | Active policy | Branch, PR, validation, and direct-main rules. |
 
 Additional testing, provider support, troubleshooting and security design documents should
 be added when implementation makes them concrete. Do not create empty documents merely to
-mirror a proposed tree. The offline matrix and preflight do not imply artifact HTTP, remote
-cleanup apply, an overall-job deadline service or production runtime composition is complete.
-The implementation plan owns the current stop/next-task boundary; historical evidence in
-component guides and accepted ADRs must not be relabeled as a newer task's test run.
+mirror a proposed tree. The offline matrix, preflight and staging do not imply artifact HTTP,
+remote cleanup apply, an overall-job deadline service or production runtime composition is
+complete. The implementation plan owns the current stop/next-task boundary; historical evidence
+in component guides and accepted ADRs must not be relabeled as a newer task's test run.
 
-M3's implemented offline gate closed with PR #18's merge on 2026-09-16. M4-01 preparation is
-limited to a non-dispatching local/read-only service. Its real-SDK tests use mocked transport;
-M1 live acceptance, M1-08 go and integrated batch activation remain separate requirements.
+M3's implemented offline gate closed with PR #18's merge on 2026-09-16. M4-01's non-dispatching
+local/read-only service is merged in PR #19. M4-02 in PR #20 adds the preparation-only Stager,
+real-SDK fixtures and separate real SQLite/dispatch integration tests. SDK transport and remote
+outcomes remain synthetic; M1 live acceptance, M1-08 go and integrated batch activation remain
+separate requirements. In-review means branch implementation exists, not that every PR check
+has passed; the PR conversation records exact-head checks and unresolved review blockers.
 
 ## Status vocabulary
 
@@ -87,7 +91,8 @@ level and capability support must not be collapsed into one optimistic checkbox.
 fault command's `25/25 passed-offline` means the nominated tests ran and passed on the
 reported toolchain/platform; it is not 100-percent coverage or live-provider readiness.
 Likewise, successful authentication/account checking is a dated read, not an execution permit;
-preflight always keeps `batch_ready=false`.
+preflight always keeps `batch_ready=false`. Staging readiness is separately verified and does
+not replace the one-shot submission gate or the runner's input identity checks.
 
 ## Required update paths
 
@@ -105,6 +110,7 @@ preflight always keeps `batch_ready=false`.
 | Retention/expiry/cleanup preview | retention, ADR-0014, storage, collection, admission, operations, architecture, common event schema, plan, pin/expiry/root/delete/preview tests |
 | Fault qualification/evidence | fault-matrix, recovery, devtool catalog/checker/tests, requirement links, developer commands, plan, exact-head CI |
 | Credential/preflight boundary | providers/kaggle-preflight, ADR-0015, plan, real pinned-SDK transport tests, environment/process isolation and explicit authorization checks |
+| Private staging/readiness | providers/kaggle-staging, ADR-0016, plan, source-completion/process tests, real pinned-SDK fixtures and M3 ownership/restart tests |
 | Bundle/import safety | packaging-and-import, ADR-0005, `api/`, ignore example, plan, tests |
 | HTTPS/SSRF policy | https-ingestion, ADR-0006, `api/`, plan, transport/service/API tests |
 | Remote runner/execution contract | runner/README, ADR-0007, runner schemas/assets lock, public result schema, architecture, plan, CPU/contract tests |
