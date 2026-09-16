@@ -55,13 +55,13 @@ func (r *executionJournalRepository) CommitDispatch(ctx context.Context, h dispa
 }
 
 type executionJournalFixture struct {
-	f                        *stagingJournalFixture
-	repo                     *executionJournalRepository
-	executor                 *Executor
-	saves, reads             int
+	f                         *stagingJournalFixture
+	repo                      *executionJournalRepository
+	executor                  *Executor
+	saves, reads              int
 	exists, loseSave, swapped bool
-	raw                      string
-	source                   domain.SHA256Digest
+	raw                       string
+	source                    domain.SHA256Digest
 }
 
 func newExecutionJournalFixture(t *testing.T) *executionJournalFixture {
