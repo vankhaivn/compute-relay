@@ -39,7 +39,7 @@ owner-approved proposal update.
 | [`admission.md`](admission.md) | M3-02 implemented offline; merged | Atomic job/attempt/idempotency, frozen references, pending preparation, state/event CAS and admission HTTP. |
 | [`scheduler.md`](scheduler.md) | M3-03 implemented offline; merged | Durable FIFO/round-robin fairness, account capacity, fenced local claims, quota policy and the no-remote-side-effect boundary. |
 | [`dispatch.md`](dispatch.md) | M3-04 implemented offline; merged | Input freeze, private staging, one-shot mutation intents, fenced reconciliation and cached recovery conditions. |
-| [`operations.md`](operations.md) | M3-05 implemented offline; merged | Attempt-scoped controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only collection tickets. |
+| [`operations.md`](operations.md) | M3-05 implemented offline; merged | Attempt-scoped controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only tickets. |
 | [`collection.md`](collection.md) | M3-06 implemented offline; merged | Immutable result pins, bounded transfers, manifest/byte verification, atomic publication, scoped internal reads and collection-only recovery. |
 | [`retention.md`](retention.md) | M3-07 implemented offline; merged | Named holds, atomic expiry/events, bound-store local sweep, metadata preservation and exact-ledger remote dry runs. |
 | [`fault-matrix.md`](fault-matrix.md) | M3-08 offline qualification; PR #18 merged | The 25 numbered proposal scenarios, 34 nominated root tests, fresh executable evidence, requirement mapping and explicit limitations. |
@@ -47,12 +47,13 @@ owner-approved proposal update.
 | [`providers/kaggle-preflight.md`](providers/kaggle-preflight.md) | M4-01 offline/read-only foundation; PR #19 merged | Explicit credential references, local checks, opt-in account/quota reads, bounded SDK transport and process lifetime, operator commands and unchanged live/batch gates. |
 | [`providers/kaggle-staging.md`](providers/kaggle-staging.md) | M4-02 offline staging; PR #20 merged | One-shot private creation, separately verified readiness and bytes, explicit source completion, M3 ownership/recovery integration and no automatic re-creation. |
 | [`providers/kaggle-execution.md`](providers/kaggle-execution.md) | M4-03 offline execution; PR #21 merged | Locked source, per-attempt submission authority, exact-version/ID/source observation, raw-state truthfulness, SDK upsert and recovery/verification limits. |
-| [`providers/kaggle-operations.md`](providers/kaggle-operations.md) | M4-04 offline operational mappings; PR #22 in review | Reservation-aware quota/freshness, bounded identity-bound log snapshots, capability evidence, manual cancellation and frozen timeout layers. |
+| [`providers/kaggle-operations.md`](providers/kaggle-operations.md) | M4-04 offline operational mappings; PR #22 merged | Reservation-aware quota/freshness, bounded identity-bound log snapshots, capability evidence, manual cancellation and frozen timeout layers. |
+| [`providers/kaggle-artifacts.md`](providers/kaggle-artifacts.md) | M4-05 offline artifact retrieval; PR #23 in review | Complete version-scoped listing, manifest-bound output selection, bounded file streaming and M3 immutable-pin/verified-publication recovery. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
 | [`compatibility.md`](compatibility.md) | M-0 target matrix | Toolchain/provider/host targets and rules for support claims/live evidence. |
-| [`decisions/`](decisions/README.md) | Active ADR system | Material architecture and policy decisions, including accepted ADR-0017 and proposed ADR-0018 for conservative operational evidence. |
+| [`decisions/`](decisions/README.md) | Active ADR system | Material architecture and policy decisions, including accepted ADR-0018 and proposed ADR-0019 for version-scoped artifacts and immutable publication. |
 | [`research/`](research/README.md) | Active evidence system | Primary-source and live-test evidence rules. |
 | [`research/kaggle-interface-review.md`](research/kaggle-interface-review.md) | Upstream review complete | Pinned official client surfaces, gaps, transport gate, and M-1 probe sequence. |
 | [`research/kaggle-feasibility.md`](research/kaggle-feasibility.md) | Upstream review complete; live blocked | K-01 through K-16 evidence ledger and go/no-go rule. |
@@ -68,9 +69,9 @@ HTTP, remote cleanup apply, an overall-job deadline service or production runtim
 is complete. The implementation plan owns the current stop/next-task boundary; historical
 evidence in component guides and accepted ADRs must not be relabeled as a newer task's test run.
 
-M3's implemented offline gate closed with PR #18's merge on 2026-09-16. M4-01 through M4-03
-are merged in PRs #19–#21. M4-04 in PR #22 adds operational reads and honest manual/timeout
-mappings without changing durable submission authority. SDK transport and helper outcomes
+M3's implemented offline gate closed with PR #18's merge on 2026-09-16. M4-01 through M4-04
+are merged in PRs #19–#22. M4-05 in PR #23 adds read-only artifact retrieval and publication
+integration without changing durable submission authority. SDK transport and helper outcomes
 remain synthetic in their respective test tiers; M1 live acceptance, M1-08 go and complete
 integrated batch activation remain separate requirements. In-review means branch implementation
 exists, not that every PR check has passed; the PR conversation records exact-head checks and
@@ -99,6 +100,8 @@ submission gate. Kernel terminal observation is neither verified artifact availa
 hardware-release evidence. Latest raw observations and confirmed attempt state remain distinct.
 Quota is an account observation, not a reservation; provider logs are snapshots, not verified
 artifacts or a live-stream guarantee. Manual-required cancellation does not establish termination.
+Candidate artifact metadata, verified temporary bytes and committed result publication are
+separate stages; a completed stream with a failed final check is not a published artifact.
 
 ## Required update paths
 
@@ -119,6 +122,7 @@ artifacts or a live-stream guarantee. Manual-required cancellation does not esta
 | Private staging/readiness | providers/kaggle-staging, ADR-0016, plan, source-completion/process tests, real pinned-SDK fixtures and M3 ownership/restart tests |
 | Kaggle execution/observation | providers/kaggle-execution, ADR-0017, plan, locked source/manifest tests, raw-field SDK fixtures, real process and M3 intent/restart/observation tests |
 | Kaggle operational evidence | providers/kaggle-operations, ADR-0018, plan, quota duration/freshness, log identity/cursors, manual controls, real SDK/process/SQLite tests |
+| Kaggle artifact retrieval | providers/kaggle-artifacts, ADR-0019, collection, plan, selection/cursor/byte tests, pinned SDK/process and M3 publication/recovery tests |
 | Bundle/import safety | packaging-and-import, ADR-0005, `api/`, ignore example, plan, tests |
 | HTTPS/SSRF policy | https-ingestion, ADR-0006, `api/`, plan, transport/service/API tests |
 | Remote runner/execution contract | runner/README, ADR-0007, runner schemas/assets lock, public result schema, architecture, plan, CPU/contract tests |
