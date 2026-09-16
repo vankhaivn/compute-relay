@@ -103,7 +103,7 @@ func (h *Host) issueToken(ctx context.Context, id domain.WorkspaceID, scopes []a
 	if err != nil {
 		return receipt, ErrRequest
 	}
-	first := strings.Split(filepath.ToSlash(relative), "/")[0]
+	first := strings.ToLower(strings.Split(filepath.ToSlash(relative), "/")[0])
 	if first == "state" || first == "inputs" || first == "results" || relative == "." {
 		return receipt, ErrRequest
 	}

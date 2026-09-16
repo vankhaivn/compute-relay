@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
 
 func TestLocalWorkspaceAndTokenAuthorityPersistAcrossReopen(t *testing.T) {
@@ -27,7 +28,7 @@ func TestLocalWorkspaceAndTokenAuthorityPersistAcrossReopen(t *testing.T) {
 	if _, err := h.CreateWorkspace(ctx, "app"); err == nil {
 		t.Fatal("create overwrote workspace")
 	}
-	tokenPath := filepath.Join(t.TempDir(), "token")
+	tokenPath := privateTokenPath(t)
 	receipt, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read, auth.Write}, time.Hour, tokenPath)
 	if err != nil || receipt.Delivery != "written-once" {
 		t.Fatal(receipt, err)
@@ -93,7 +94,7 @@ func TestLocalTokenDeliveryFailureRevokesAndClearsOwnedBuffer(t *testing.T) {
 	}
 	var retained []byte
 	var token string
-	out := filepath.Join(t.TempDir(), "token")
+	out := privateTokenPath(t)
 	receipt, err := h.issueToken(ctx, "app", []auth.Scope{auth.Read}, time.Hour, out, func(_ string, raw []byte) error {
 		retained = raw
 		token = strings.TrimSuffix(string(raw), "\n")
@@ -123,7 +124,7 @@ func TestLocalTokenRejectsProtectedDestinationsAndInvalidAuthority(t *testing.T)
 	}
 	defer h.Close()
 	h.CreateWorkspace(ctx, "app")
-	for _, name := range []string{"state/secret", "inputs/secret", "results/secret"} {
+	for _, name := range []string{"state/secret", "inputs/secret", "results/secret", "STATE/secret"} {
 		dst := filepath.Join(path, filepath.FromSlash(name))
 		if _, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read}, time.Hour, dst); err == nil {
 			t.Fatal("credential entered store root")
@@ -133,14 +134,23 @@ func TestLocalTokenRejectsProtectedDestinationsAndInvalidAuthority(t *testing.T)
 		}
 	}
 	for _, scopes := range [][]auth.Scope{nil, {auth.Read, auth.Read}, {"admin"}} {
-		if _, err := h.IssueToken(ctx, "app", scopes, time.Hour, filepath.Join(t.TempDir(), "token")); err == nil {
+		if _, err := h.IssueToken(ctx, "app", scopes, time.Hour, privateTokenPath(t)); err == nil {
 			t.Fatal("invalid scope accepted")
 		}
 	}
-	if _, err := h.IssueToken(ctx, "missing", []auth.Scope{auth.Read}, time.Hour, filepath.Join(t.TempDir(), "token")); err == nil {
+	if _, err := h.IssueToken(ctx, "missing", []auth.Scope{auth.Read}, time.Hour, privateTokenPath(t)); err == nil {
 		t.Fatal("missing workspace token")
 	}
 	if _, err := h.EnableWorkspace(ctx, "missing", true); err == nil {
 		t.Fatal("enable created workspace")
 	}
+}
+
+func privateTokenPath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "secrets")
+	if _, err := statefs.PrivateDir(path, true); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(path, "token")
 }
