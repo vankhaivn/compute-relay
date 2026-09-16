@@ -21,17 +21,20 @@ repository-wide race run. POSIX, PowerShell and CMD wrappers accept `fault-test`
 No new workflow, provider credential, remote compute or deployment is required.
 
 The versioned [catalog](../internal/devtool/fault-matrix.json) is the machine-readable mapping
-from the approved [proposal section 23.2](proposal.md#232-required-failure-scenarios) to exact
+from the approved [proposal section 23.2](proposal.md#232-required-fault-scenarios) to exact
 source-file/test-function identities. It contains 25 numbered cases and 34 distinct root
 tests; some roots contribute to several cases. The count is not a coverage percentage and
 subtests are not miscounted as independent root tests.
 
-The checker verifies all scenario text against the proposal and all function references
-against parsed source. It then executes those named tests using fresh `go test -json
--count=1` output. Each required package must start and finish, and each nominated root must
-run and pass. A missing or skipped root, a skipped descendant, test/build failure, incomplete
-package, malformed stream or exceeded budget prevents qualification. A green package with
-no matching test is insufficient. There is no saved-log import or cached-result fallback.
+The checker parses the numbered list in the exact proposal section and compares complete
+scenario text in order. Substrings elsewhere, swapped scenarios, missing/extra cases,
+renumbering or duplicate sections cannot qualify; LF/CRLF checkouts are equivalent. It checks
+all function references against parsed source, then executes those named tests using fresh
+`go test -json -count=1` output. Each required package must start and finish, and each
+nominated root must run and pass. A missing or skipped root, a skipped descendant, test/build
+failure, incomplete package, malformed stream or exceeded budget prevents qualification.
+A green package with no matching test is insufficient. There is no saved-log import or
+cached-result fallback.
 
 Successful output includes FM01 through FM25, exact source/test references, actual compiler
 and platform, and `25/25 passed-offline`. Inspect the PR's final-head evidence comment for the
@@ -100,9 +103,11 @@ checker; documentation is committed separately. Checkpoints are pushed rather th
 in a disposable Linux runtime. Never equate a draft checkpoint with a completed gate.
 
 Local engineering used Go 1.23.2. Exact checker code passed vet, race/negative tests, actual
-Go event-protocol fixtures and bounded fuzz in an unshipped standard-library harness. That
-is checker-only evidence: it did not run the full catalog against local SQLite/modernc or
-the pinned Go 1.27.1 repository. Full-stack/native/race evidence comes from offline CI.
+Go event-protocol fixtures and bounded fuzz in an unshipped standard-library harness. The
+continuation separately ran the exact numbered-section parser and its table tests with
+`go test -race -count=10 ./...` in a temporary standard-library module. These are checker/parser-only
+evidence: neither run qualified the full catalog against local SQLite/modernc or the pinned
+Go 1.27.1 repository. Full-stack/native/race evidence comes from offline CI.
 
 After owner merge and passing qualification, M3's implemented **offline** orchestration gate
 can be recorded complete. This does not authorize M4 or prove a complete installed runtime.
