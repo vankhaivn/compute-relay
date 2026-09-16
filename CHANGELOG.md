@@ -136,12 +136,23 @@ Semantic Versioning once a public compatibility surface exists.
   interrupt/SIGTERM handling and sanitized dated reports that always keep batch readiness false.
 - Configuration, credential lifetime, process isolation, deadline, redaction and real pinned-SDK
   fixture tests; preflight guide and ADR-0015 disclose the private transport seam and live gates.
+- M4-02 preparation-only Stager using frozen provider plans, intent-derived resource names,
+  exact marker/catalog identities and pre-credential byte/hash/EOF/Close checks.
+- Bounded one-shot private dataset creation through the pinned SDK, with separate private/
+  processing/catalog and marker-first/all-payload verification before readiness.
+- Read-only staging recovery with no reupload/create/version/delete fallback; the existing
+  M3 journal pins discovered resource IDs and retains ambiguous or public-resource evidence.
+- Real SQLite/admission/blob integration tests for ownership-before-helper, failed/lost
+  acknowledgements, reopen/profile remapping and resource-replacement rejection; separate
+  SDK HTTP fixtures and isolated leaf-process framing/stream/deadline tests.
+- Staging guide and ADR-0016 documenting component authority, signed-storage restrictions,
+  transient upload-ticket limits and unchanged live/production batch gates.
 
 ### Changed
 
-- Synchronized living README, roadmap, plan and documentation/ADR indexes with merged M3
-  and M4-01's in-review offline/read-only foundation. Preserved the approved proposal and
-  dated provider evidence. No M1 live acceptance or integrated batch activation is claimed.
+- Updated README and the implementation plan for merged M4-01 and active M4-02 PR #20,
+  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015
+  records owner acceptance through PR #19; its historical decision text is preserved.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -154,5 +165,7 @@ Semantic Versioning once a public compatibility surface exists.
   pins, lockfiles, runner assets, public contracts and database migrations are unchanged.
 - Corrected the process-isolation test to compare cwd/home filesystem identity rather than
   textual path spelling, preserving the isolation requirement across canonical path aliases.
+- Fixed safely closable sanitized staging redirects and rejected local input Close failures
+  before credential lookup. M4-02 changes no dependency, workflow or migration.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
