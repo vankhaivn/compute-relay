@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
@@ -22,10 +24,11 @@ func randomNonce() (string, error) {
 }
 
 // Reject duplicate/unknown/case-alias/missing fields in small internally generated
-// records. Exact round-tripping also rejects lossy type conversion. It is integrity
-// checking inside the trusted operator boundary, not a signed evidence format.
+// records. Round-tripping checks field presence and decoded shape, not a general
+// canonical JSON or arbitrary numeric-precision contract. Typed callers enforce
+// numeric ranges and GPU arithmetic. This is not a signed evidence format.
 func decodeRecord(raw []byte, target any) error {
-	if len(raw) == 0 || len(raw) > 16384 {
+	if len(raw) == 0 || len(raw) > 16384 || !utf8.Valid(raw) {
 		return ErrState
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
@@ -39,24 +42,27 @@ func decodeRecord(raw []byte, target any) error {
 		if err != nil {
 			return ErrState
 		}
+		if text, ok := token.(string); ok && strings.ContainsRune(text, utf8.RuneError) {
+			return ErrState // Includes invalid surrogate escapes; no replacement text.
+		}
 		switch token {
 		case json.Delim('{'):
 			seen := map[string]bool{}
 			for d.More() {
 				token, err := d.Token()
 				key, ok := token.(string)
-				if err != nil || !ok || seen[key] {
+				if err != nil || !ok || seen[key] || strings.ContainsRune(key, utf8.RuneError) {
 					return ErrState
 				}
 				seen[key] = true
-				if err := walk(depth+1); err != nil {
+				if err := walk(depth + 1); err != nil {
 					return err
 				}
 			}
 			_, err = d.Token()
 		case json.Delim('['):
 			for d.More() {
-				if err := walk(depth+1); err != nil {
+				if err := walk(depth + 1); err != nil {
 					return err
 				}
 			}
@@ -98,13 +104,15 @@ func readRecord(path string, target any) error {
 	if err != nil {
 		return ErrState
 	}
-	defer f.Close()
-	after, err := f.Stat()
-	if err != nil || !os.SameFile(before, after) {
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(before, opened) {
+		_ = f.Close()
 		return ErrState
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, 16385))
-	if err != nil {
+	raw, readErr := io.ReadAll(io.LimitReader(f, 16385))
+	after, statErr := f.Stat()
+	closeErr := f.Close()
+	if readErr != nil || statErr != nil || closeErr != nil || !os.SameFile(opened, after) || int64(len(raw)) != opened.Size() || opened.Size() != after.Size() || !opened.ModTime().Equal(after.ModTime()) {
 		return ErrState
 	}
 	return decodeRecord(raw, target)
