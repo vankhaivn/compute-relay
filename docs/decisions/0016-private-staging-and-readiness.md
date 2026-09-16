@@ -1,6 +1,6 @@
 # ADR-0016: One-shot private staging and separately verified readiness
 
-- Status: proposed; offline implementation in PR #20, pending owner review/merge
+- Status: accepted; PR #20 merged on 2026-09-16
 - Date: 2026-09-16
 - Task: M4-02
 - Requirements: DAT-04, OPS-05, SEC-03; preserves DUR-03
