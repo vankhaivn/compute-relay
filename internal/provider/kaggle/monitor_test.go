@@ -132,7 +132,10 @@ func TestMonitorChecksLocalBeforeCredentialsAndSanitizesFailures(t *testing.T) {
 			}
 			if fault == "local" {
 				m.local = func(context.Context, Config, Mode, []byte) (Report, error) { return Report{}, ErrProcess }
-				m.credentials = monitorCredentialFunc(func(context.Context, ports.CredentialRef, func([]byte) error) error { t.Fatal("secret lookup before local pins"); return nil })
+				m.credentials = monitorCredentialFunc(func(context.Context, ports.CredentialRef, func([]byte) error) error {
+					t.Fatal("secret lookup before local pins")
+					return nil
+				})
 			} else if fault == "missing" || fault == "bad-token" || fault == "callback-twice" {
 				m.credentials = monitorCredentialFunc(func(ctx context.Context, ref ports.CredentialRef, use func([]byte) error) error {
 					if fault == "missing" {
