@@ -172,15 +172,26 @@ Semantic Versioning once a public compatibility surface exists.
   missing fields, log identity races, pagination and persistent quota/control receipt semantics.
 - Operational guide and ADR-0018 documenting delayed snapshots, non-reservation quota, unsupported
   batch cancellation and unverified provider timeout/live support separately from implementation.
+- M4-05 read-only ArtifactReader with complete version-scoped listing, manifest-first original
+  attempt/output selection and snapshot-bound pagination without following listing URLs.
+- Explicit file/version SDK downloads with bounded credential-free signed storage, independent
+  byte checks and final identity/terminal/process acknowledgement before successful transfer.
+- M3 collection integration preserving immutable pins, original receipts and atomic publication;
+  tests cover scoped reads, 16 MiB partial/late/wrong bytes, same-pin restart and lost pin or
+  publication acknowledgements without another compute attempt or submission.
+- Artifact protocol/process and real pinned-SDK HTTP fixtures for path/cursor/budget rejection,
+  full pagination, final status loss after complete bytes and selected failed-payload evidence.
+- Artifact guide and ADR-0019 separating candidate metadata, verified local bytes and published
+  results, with temporary-sink, repeated-read, range-resume and live/runtime limitations.
 
 ### Changed
 
 - Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
   request, preserving existing history and all other format rules. Added 16 regression checks
   to the existing convention workflow; synchronized the canonical policy and commit template.
-- Synchronized living documentation for merged M4-01 through M4-03 and M4-04's PR #22 review gate,
-  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015/0016/0017
-  record owner acceptance; their historical decision text and earlier evidence are preserved.
+- Synchronized living documentation for merged M4-01 through M4-04 and M4-05's PR #23 review gate,
+  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015 through
+  ADR-0018 record owner acceptance; their historical decision text and earlier evidence are preserved.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -200,5 +211,8 @@ Semantic Versioning once a public compatibility surface exists.
   runner asset/lock bytes and existing durable state-machine implementations remain unchanged.
 - M4-04 likewise preserves dependency/workflow/public-contract/migration and original execution/
   runner sources. New optional ports reuse the existing identity, quota and durable-control rules.
+- M4-05 retains those dependency/workflow/contract/migration/source boundaries and reuses M3
+  collection logic unchanged. Unknown SDK status decoding now fails artifact qualification
+  explicitly; a default enum cannot authorize collection before or after transfer.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

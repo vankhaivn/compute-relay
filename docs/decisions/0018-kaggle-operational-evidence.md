@@ -1,6 +1,6 @@
 # ADR-0018: Conservative quota, versioned log snapshots and manual cancellation
 
-- Status: proposed; implemented offline in PR #22, pending owner review/merge
+- Status: accepted; PR #22 merged on 2026-09-16
 - Date: 2026-09-16
 - Task: M4-04
 - Requirements: PRV-03, OPS-02/03/04; preserves DUR-03

@@ -1,6 +1,6 @@
 # Kaggle operational capabilities, quota and log snapshots
 
-> **Task:** M4-04, offline implementation in PR #22; in review until owner merge.
+> **Task:** M4-04, implemented offline; PR #22 merged.
 > **Requirements:** PRV-03, OPS-02/03/04; preserves original attempt identity and DUR-03.
 > **Evidence:** actual pinned SDK with mocked HTTP, real SQLite/dispatch integration with
 > synthetic helper results, isolated process tests and local protocol tests. No live account.
@@ -9,7 +9,9 @@ M4-03 execution is merged in PR #21. This task adds numeric GPU-quota interpreta
 bounded version-scoped provider logs, capability descriptions, frozen timeout reporting and
 an explicit manual-required cancellation path. It does not enable a complete production
 Provider, public log/quota endpoints, live SSE, output-artifact retrieval or remote mutations.
-M1 live acceptance and M1-08 go remain separate under proposal section 23.6.
+M1 live acceptance and M1-08 go remain separate under proposal section 23.6. M4-05's separate
+[artifact reader](kaggle-artifacts.md) adds selected output transfer and publication integration;
+it does not turn these provider log snapshots into verified retained artifacts automatically.
 
 ## Explicit composition
 
@@ -221,7 +223,9 @@ unchanged; full existing Go/race/fault suites continue to run.
 Local Python 3.13.5 ran the five pure protocol/watchdog roots; local Go 1.23.2 checked formatting.
 A newer pinned-Go callback-format difference was corrected without changing assertions. These
 are narrow local results, not full local SDK/Go 1.27.1/modernc integration. Exact-head native,
-race and locked Python 3.11.16/Kaggle 2.2.4/SDK 0.1.35 CI evidence is recorded in PR #22.
+race and locked Python 3.11.16/Kaggle 2.2.4/SDK 0.1.35 CI evidence is recorded in merged PR #22.
+M4-05 artifact-selection, transfer and publication evidence is recorded separately in PR #23
+and the artifact guide; the historical M4-04 checks are not relabeled as artifact verification.
 
 ## Sources and next gate
 
@@ -234,7 +238,8 @@ Primary sources reviewed on 2026-09-16 at unchanged pins:
 
 These are source/fixture findings, not live account support. See
 [ADR-0018](../decisions/0018-kaggle-operational-evidence.md),
-[execution](kaggle-execution.md), [scheduler](../scheduler.md), [controls](../operations.md)
-and the [implementation plan](../implementation-plan.md). Stop after PR #22 for owner review/merge.
-M4-05 artifact retrieval, full Provider/runtime registration, public log/quota routes, production
-`serve`, remote cleanup and live acceptance remain separate tasks.
+[execution](kaggle-execution.md), [artifacts](kaggle-artifacts.md),
+[scheduler](../scheduler.md) and [controls](../operations.md). The
+[implementation plan](../implementation-plan.md) owns the current owner-review/next-task gate.
+Full Provider/runtime registration, public log/quota/artifact routes, production `serve`,
+remote cleanup and live acceptance remain separate tasks.
