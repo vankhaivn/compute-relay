@@ -1,8 +1,8 @@
 # Dependency-aware implementation plan
 
 > **Status:** active; M-0, M1-01, M2 and M3 are merged at their offline gates.
-> M4-01 through M4-04 offline components are merged; M4-05 is in review in PR #23.
-> M1/live batch acceptance remains blocked on separate evidence.
+> M4-01 through M4-05 offline components are merged; M4-06 harness is in review in PR #24.
+> M4-06 live acceptance and the full M1/live batch gate remain blocked on separate evidence.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-16.
 >
@@ -37,12 +37,14 @@ at `52b1655` on 2026-09-16. PR #20 merged M4-02's
 [private staging and readiness](providers/kaggle-staging.md) at `91fa6be` on 2026-09-16.
 PR #21 merged M4-03 [one-shot execution and exact-version observation](providers/kaggle-execution.md)
 at `ac547e9` on 2026-09-16. PR #22 merged M4-04
-[operational capabilities, quota and log snapshots](providers/kaggle-operations.md) at `fbf02b4`
-on 2026-09-16. PR #23 implements M4-05 [artifact retrieval and publication integration](providers/kaggle-artifacts.md)
-and remains in review until owner merge. Proposal section 23.6 permits offline work without
-waiving M1-08 go for integrated batch activation. No live-provider work or M4-06 has started.
-See ADR-0015 through ADR-0019. The retained `checkpoint/m4-02-offline-staging` branch is obsolete,
-not an integration prerequisite; its conflicting package is not part of the active implementation.
+[operational capabilities, quota and log snapshots](providers/kaggle-operations.md) at `fbf02b4`.
+PR #23 merged M4-05 [artifact retrieval and publication integration](providers/kaggle-artifacts.md)
+at `4b5517c` on 2026-09-16. PR #24 implements the M4-06
+[fixed GPU/restart acceptance harness](providers/kaggle-acceptance.md), in review until owner merge.
+No live account/GPU acceptance has been run; harness delivery is not a live M4 completion claim.
+Proposal section 23.6 permits offline work and the opt-in procedure without waiving M1-08 go.
+See ADR-0015 through ADR-0020. M5 has not started. The retained
+`checkpoint/m4-02-offline-staging` branch is obsolete and is not part of the active implementation.
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
 real-loopback tests, atomic blob publication and an explicit ownership-commit seam.
@@ -120,14 +122,24 @@ without another compute submission. SDK tests separately exercise real pinned ty
 HTTP, including status loss after complete bytes. No archive extraction, arbitrary listing URL,
 partial-byte resume, full Provider registration or new public artifact route is introduced.
 
+M4-06's harness composes those real ports for one fixed admitted job through existing M3 services.
+Local prepare/status are separate from explicitly authorized private staging/GPU submit and
+read-only resume/collection. It pins the actual executable and immutable challenge/workload,
+records the submitting process after the durable intent but before the permit, and requires a
+separate resume process plus verified published CUDA arithmetic/hardware evidence. The new
+operate-authorized journal inspection returns no mutation permit. Tests use synthetic remote/GPU
+outcomes; separate actual child processes test nonce freshness and local CLI state reopen only.
+Fixture reports remain passed-offline. Even a future scoped passed-live experiment keeps full M1
+acceptance false and does not prove timeout enforcement, remote execution count or cleanup.
+
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one task/PR, report its evidence, and stop for owner merge
-before beginning another task. PR #23 implements M4-05's offline artifact boundary, not
-complete integrated Kaggle batch. Artifact HTTP/CLI, production `serve`, remote cleanup and
-live Kaggle remain separate. Commit and push reviewable checkpoints during implementation;
-the disposable local runtime must not be the only copy of ongoing work.
+before beginning another task. PR #24 delivers the acceptance harness and offline integration,
+not a completed live experiment or production multi-job runtime. Artifact HTTP/CLI, production
+`serve`, remote cleanup and full live acceptance remain separate. Commit and push reviewable
+checkpoints during implementation; the disposable runtime must not be the only copy of work.
 
 ## Status vocabulary
 
@@ -177,9 +189,10 @@ M1 thin live-provider proof   M2 portable offline core
 ```
 
 M2 may begin after M-0 while credentials are unavailable. Integrated M4 batch activation
-requires M1 go and M3's durable semantics. The owner's requested M4 offline preparation
-under proposal section 23.6 does not remove that dependency or grant live mutation authority.
-ADR-0015 through ADR-0019 record the distinction; live acceptance rows remain blocked.
+requires M1 go and M3's durable semantics. The owner's requested M4 offline preparation and
+opt-in acceptance harness under proposal section 23.6 do not remove that dependency or grant
+live mutation authority in this session. ADR-0015 through ADR-0020 record the distinction;
+actual live acceptance rows remain blocked until authorized evidence is recorded.
 
 ## M-0 — Evidence and scope
 
@@ -255,8 +268,8 @@ live tasks remain `blocked-environment`.
 | M4-02 | offline implementation / `complete`; live acceptance / `blocked` | Implement private attempt staging/readiness and resource-ledger recording. | DAT-04, OPS-05, SEC-03 | M1-08, M3-04/M3-07, M4-01 | Offline No / No; live verification Yes / provider storage | Merged PR #20: stable attempt/preparation naming, exact marker/input identity, pre-credential byte/EOF/Close checks, bounded no-retry private SDK creation, paginated marker-first/all-file verification and read-only recovery. Real SQLite integration tests cover ownership-before-helper, lost acknowledgements, reopen/remap and pinned resource replacement rejection. Explicit source-completion trailer prevents pipe errors from authorizing dataset creation. See providers/kaggle-staging.md and ADR-0016; no production Provider or live K-03/K-04 claim. |
 | M4-03 | offline component / `complete`; live acceptance / `blocked` | Implement attempt-scoped submit, observation, raw-state mapping, and ambiguity reconciliation. | PRV-02, DUR-03, DOM-02/03 | M1-08, M3-04, M4-02 | Offline No / No; live verification Yes / Finite GPU | Merged PR #21: locked remote source and stable intent-derived slug; per-attempt Executor under M3 authority; bounded one-shot private SDK save, exact ID/version/source/account reads and raw-field status mapping. Unit/real-process/SQLite fault tests preserve original intent and confirmed state across lost acknowledgements, restart/remap and stale/replaced observations; actual pinned SDK uses mocked HTTP. See providers/kaggle-execution.md and ADR-0017 for upsert, same-version identity, mount/upgrade and composition limits. No blind resubmit or live acceptance. |
 | M4-04 | offline component / `complete`; live acceptance / `blocked` | Implement logs, quota, timeout, capability, and cancellation/manual-required mappings. | PRV-03, OPS-02/03/04 | M1-08, M3-05, M4-03 | Offline No / No; live verification Yes / bounded where needed | Merged PR #22: explicit account Monitor, exact raw-duration/reservation mapping with lower-bound seconds and freshness, version/identity/snapshot-bound log pagination, capability evidence and manual cancellation without guessed session IDs. Real SQLite tests preserve quota exhaustion and original receipts through restart/completion; actual SDK uses mocked HTTP. See providers/kaggle-operations.md and ADR-0018. Live SSE, provider timeout enforcement and full runtime registration remain unverified/separate. |
-| M4-05 | offline component / `in-review`; live acceptance / `blocked` | Implement paginated output retrieval and manifest-bound artifact collection. | JOB-05, PRV-02, VER-02 | M3-06, M4-03 | Offline No / No; live verification Yes / existing completed run | PR #23: complete version-scoped listing, original-attempt manifest/declaration selection, bounded explicit-file download and signed storage without account headers; independent stream/hash/final-status checks and M3 immutable-pin publication. Tests cover SDK pagination/late failures, scoped verified reads, 16 MiB partial/wrong/late transfer recovery, restart and lost pin/publication acknowledgements without new compute. See providers/kaggle-artifacts.md and ADR-0019. No ZIP, arbitrary listing URLs, range resume, new public routes or live K-07 claim. |
-| M4-06 | integration / `proposed` | Run sanitized end-to-end private GPU acceptance through the durable runtime, including restart recovery. | PRD-04, VER-03 | M4-01–M4-05 | Yes / Explicit finite GPU | Proposal live checklist passes; gaps remain explicitly unobservable/unsupported. |
+| M4-05 | offline component / `complete`; live acceptance / `blocked` | Implement paginated output retrieval and manifest-bound artifact collection. | JOB-05, PRV-02, VER-02 | M3-06, M4-03 | Offline No / No; live verification Yes / existing completed run | Merged PR #23: complete version-scoped listing, original-attempt manifest/declaration selection, bounded explicit-file download and signed storage without account headers; independent stream/hash/final-status checks and M3 immutable-pin publication. Tests cover SDK pagination/late failures, scoped verified reads, 16 MiB partial/wrong/late transfer recovery, restart and lost pin/publication acknowledgements without new compute. See providers/kaggle-artifacts.md and ADR-0019. No ZIP, arbitrary listing URLs, range resume, new public routes or live K-07 claim. |
+| M4-06 | harness/integration / `in-review`; live acceptance / `blocked` | Run sanitized end-to-end private GPU acceptance through the durable runtime, including restart recovery. | PRD-04, VER-03 | M4-01–M4-05 | Harness/CI No / No; operator acceptance Yes / Explicit finite GPU | PR #24: scoped real-component adapter and fixed CUDA arithmetic example; explicit local/submit/read-only modes, same-executable records, new-process resume, current-authority journal inspection and verified six-file publication. Synthetic durable tests, actual child-process local CLI tests and GPU-mock negatives are offline only. See providers/kaggle-acceptance.md and ADR-0020. No live run recorded; an authorized report and remaining proposal live-checklist evidence are required before live completion. |
 
 ## M-5 — Usable developer product
 
@@ -299,18 +312,21 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M4-05 review
+## Next work after M4-06 harness review
 
-Stop after reporting PR #23 for owner review/merge. Do not begin M4-06 in this task.
-M4-05 supplies read-only output retrieval and M3 publication integration. Candidate metadata,
-verified bytes and committed artifacts are separate stages; a complete temporary stream or
-provider terminal state alone cannot publish results. Recovery reuses the original durable pin
-and verified cache. A failed transfer needs an explicit collection retry, never another compute
-submission. Original receipts, account binding and release evidence remain unchanged.
+Stop after reporting PR #24 for owner review/merge. Do not begin M5 in this task. Harness
+acceptance and live provider acceptance are distinct: no live GPU/result/restart report has
+been recorded here, and M4 is not marked complete merely because the harness merges.
 
-M1-02 read-only evidence and M1-03–M1-07/M1-08 retain their own authorization requirements.
-Provider mutation, GPU allocation, remote cleanup apply and live compatibility require explicit
-authorization and evidence. Full Provider/runtime registration, M4-06 end-to-end acceptance,
-public log/quota and artifact routes, durable configuration and production `serve` remain
-separate work. No remote exactly-once guarantee, same-version session attestation, immutable
-dataset mount or transparent cross-binary recovery is implied by offline tests.
+An operator can use the explicit procedure with separately authorized credentials, private
+staging and a finite GPU budget. Preserve the original executable and all state, then resume
+in a new process without mutation permission. Missing records or uncertain submissions must
+not be reset; collection failure uses an explicit transfer retry, never another execution.
+Even a scoped passed-live experiment does not close the full M1 timeout/cancellation/fault/
+cleanup checklist or establish remote execution count/hardware release by inference.
+
+M1-02 through M1-07 and the M1-08 go decision retain their authorization and evidence gates.
+Production multi-job Provider/runtime registration, public log/quota/artifact routes, durable
+configuration, `serve` and remote cleanup remain separate work. No remote exactly-once guarantee,
+same-version session attestation, immutable dataset mount or transparent cross-binary recovery
+is implied by offline tests, process markers or local retained-result verification.
