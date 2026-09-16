@@ -183,15 +183,26 @@ Semantic Versioning once a public compatibility surface exists.
   full pagination, final status loss after complete bytes and selected failed-payload evidence.
 - Artifact guide and ADR-0019 separating candidate metadata, verified local bytes and published
   results, with temporary-sink, repeated-read, range-resume and live/runtime limitations.
+- M4-06 finite acceptance adapter and CLI composing the real component ports for one original
+  fixed GPU job, with separate local, authorized submit and read-only resume/collect modes.
+- Two-file CUDA matrix example with immutable challenge/input identity, exact arithmetic and
+  bounded result/hardware evidence; no CPU fallback, package installation or remote internet.
+- Original executable/state binding, create-only submission/resume process records and a new
+  current-operate-authorized journal inspection API returning no mutation permit.
+- Real durable acceptance fixtures for lost responses, one-attempt restart, explicit late-transfer
+  recovery and marker failures; actual child processes separately test local CLI reopen and nonce
+  freshness. Synthetic tensor/record/CLI negatives cannot claim actual live GPU acceptance.
+- Acceptance guide and ADR-0020 documenting operator authorization, report semantics, retained
+  resources, original-binary recovery and the explicit not-run/blocked live M4-06/M1 ledger.
 
 ### Changed
 
 - Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
   request, preserving existing history and all other format rules. Added 16 regression checks
   to the existing convention workflow; synchronized the canonical policy and commit template.
-- Synchronized living documentation for merged M4-01 through M4-04 and M4-05's PR #23 review gate,
-  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015 through
-  ADR-0018 record owner acceptance; their historical decision text and earlier evidence are preserved.
+- Synchronized living documentation for merged M4-01 through M4-05 and M4-06's PR #24 harness
+  review gate, without declaring live acceptance or importing the obsolete staging checkpoint.
+  ADR-0015 through ADR-0019 record owner acceptance; historical decision/evidence text is retained.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -214,5 +225,11 @@ Semantic Versioning once a public compatibility surface exists.
 - M4-05 retains those dependency/workflow/contract/migration/source boundaries and reuses M3
   collection logic unchanged. Unknown SDK status decoding now fails artifact qualification
   explicitly; a default enum cannot authorize collection before or after transfer.
+- M4-06 adds no dependency, migration, workflow or public HTTP/schema change. Existing M3 mutation
+  state machines and original provider helper/runner sources remain intact; journal inspection
+  is additive and cannot grant a new dispatch permit.
+- Added the explicit formatting-only `style` subject category with five additional regressions
+  (21 total), preserving the 80-character ceiling and all other syntax checks. This avoids rewriting
+  a pushed formatting checkpoint; the canonical policy is synchronized in a separate docs commit.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
