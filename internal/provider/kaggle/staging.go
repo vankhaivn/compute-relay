@@ -144,12 +144,16 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	return result.observation(p, frozen, operation)
 }
 
-func verifyStagingInput(ctx context.Context, blobs StagingBlobs, m domain.ObjectMetadata) error {
+func verifyStagingInput(ctx context.Context, blobs StagingBlobs, m domain.ObjectMetadata) (result error) {
 	r, err := blobs.Open(ctx, m.WorkspaceID, m.ID)
 	if err != nil {
 		return ErrStagingInput
 	}
-	defer r.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			result = ErrStagingInput
+		}
+	}()
 	h := sha256.New()
 	n, err := io.CopyBuffer(h, io.LimitReader(stagingContextReader{ctx, r}, m.Bytes+1), make([]byte, 65536))
 	if err != nil || n != m.Bytes || hex.EncodeToString(h.Sum(nil)) != string(m.SHA256) {
