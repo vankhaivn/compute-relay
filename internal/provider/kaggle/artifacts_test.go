@@ -149,7 +149,9 @@ func TestArtifactCatalogRejectsMalformedConflictingAndOversizedEvidence(t *testi
 			case "trailing":
 				raw = append(raw, []byte(` {}`)...)
 			}
-			a.run = func(context.Context, Config, string, []byte, artifactRequest, io.Writer) ([]byte, error) { return raw, nil }
+			a.run = func(context.Context, Config, string, []byte, artifactRequest, io.Writer) ([]byte, error) {
+				return raw, nil
+			}
 			if page, err := a.ListArtifacts(context.Background(), ref, provider.PageRequest{Limit: 100}); err == nil || len(page.Artifacts) != 0 || len(a.catalog) != 0 {
 				t.Fatal("invalid catalog exposed", fault, err)
 			}
