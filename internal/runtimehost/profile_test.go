@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
@@ -44,8 +45,8 @@ func TestProfileRevisionsAndWorkspaceGrantsPersistWithoutEnablingDispatch(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = h.Close() })
-	for _, w := range []string{"app", "other"} {
-		if _, err := h.CreateWorkspace(ctx, workspaceID(w)); err != nil {
+	for _, w := range []domain.WorkspaceID{"app", "other"} {
+		if _, err := h.CreateWorkspace(ctx, w); err != nil {
 			t.Fatal(err)
 		}
 	}
