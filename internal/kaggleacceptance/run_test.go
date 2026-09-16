@@ -51,7 +51,9 @@ type acceptanceFixture struct {
 func newAcceptanceFixture(t *testing.T, mode fake.SubmitMode) *acceptanceFixture {
 	t.Helper()
 	scenario := fake.DefaultScenario()
-	scenario.Mode, scenario.GPU = mode, domain.CapabilitySupportUnknown
+	// This is explicit synthetic success, not actual hardware support. The real
+	// acceptance adapter remains GPU-unknown and requires runner verification.
+	scenario.Mode, scenario.GPU = mode, domain.CapabilitySupportSupported
 	scenario.States = []domain.ExecutionState{domain.ExecutionSucceeded}
 	backend, err := fake.NewBackend(scenario)
 	if err != nil {
