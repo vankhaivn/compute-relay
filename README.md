@@ -1,8 +1,8 @@
 # Compute Relay
 
 > **Project status:** portable-core components and M3 durable orchestration are complete
-> at their implemented offline gates; M4-01 through M4-03 are merged in PRs #19–#21.
-> M4-04 operational capabilities, quota and log snapshots are in review in PR #22.
+> at their implemented offline gates; M4-01 through M4-04 are merged in PRs #19–#22.
+> M4-05 version-scoped artifact retrieval and publication integration are in review in PR #23.
 > M1 live acceptance, production batch registration, `serve`, artifact HTTP and remote
 > cleanup apply remain separate work. Offline components are not live Kaggle/GPU readiness.
 
@@ -71,9 +71,11 @@ The repository currently establishes:
 - private attempt staging with stable intent naming, frozen input markers, no-retry SDK
   creation, separately verified readiness and real SQLite recovery-integration tests;
 - locked remote source packaging and a per-attempt execution component with one-shot SDK
-  submission, exact-version/source/ID observation and read-only recovery under M3 authority; and
+  submission, exact-version/source/ID observation and read-only recovery under M3 authority;
 - conservative account GPU quota, bounded reference/snapshot-bound provider logs, explicit
-  capability evidence, manual-only cancellation and frozen timeout-layer reporting.
+  capability evidence, manual-only cancellation and frozen timeout-layer reporting; and
+- complete version-scoped output listing, manifest-bound selected file transfers and M3
+  immutable-pin/verified-publication integration without another compute execution.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -127,7 +129,7 @@ reconciliation, not another save. Exact numeric kernel ID, version, source, acco
 metadata are verified around status reads. Missing/new status stays unknown; cancellation
 acknowledgement and local time do not prove termination or hardware release. The guide and
 ADR-0017 disclose SDK upsert races, same-version rerun limits and source reconstruction across
-binary/configuration changes. Full Provider/output integration remains separate.
+binary/configuration changes. Full Provider registration remains separate.
 
 M4-04's [operational mappings](docs/providers/kaggle-operations.md) parse original quota
 fields before SDK defaults or precision loss, subtract used and reserved durations, and mark
@@ -136,7 +138,15 @@ reset time is not guessed. Logs are bounded version-scoped snapshots with identi
 snapshot-bound cursors, not live streaming or verified artifacts. Cancellation remains manual
 because a kernel ID is not a verified session target. Existing quota exhaustion, remote activity
 and immutable operation receipts survive restart and later completion. Provider timeout
- enforcement and live-account capabilities are not inferred from offline tests.
+enforcement and live-account capabilities are not inferred from offline tests.
+
+M4-05's [artifact reader](docs/providers/kaggle-artifacts.md) reads every bounded output page,
+checks the original attempt manifest, and selects only declared outputs and fixed control files.
+It ignores listing URLs and uses explicit file/version SDK requests, never a ZIP or local
+archive extraction. Independent byte hashes, final identity/status checks and successful helper
+exit precede M3 publication. A late failure invalidates even complete temporary bytes. Durable
+collection retries reuse the original pin and verified cache without resubmitting compute;
+candidate catalogs, verified bytes and atomic result publication remain distinct evidence stages.
 
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
@@ -170,6 +180,7 @@ live Kaggle support.
 | [`docs/providers/kaggle-staging.md`](docs/providers/kaggle-staging.md) | Private staging authority, frozen marker/catalog, byte-verified readiness, one-shot recovery and evidence limits. |
 | [`docs/providers/kaggle-execution.md`](docs/providers/kaggle-execution.md) | One-shot submission authority, locked source, exact-version observations, uncertainty, SDK races and recovery/verification limits. |
 | [`docs/providers/kaggle-operations.md`](docs/providers/kaggle-operations.md) | Reservation-aware quota, identity-bound log snapshots, capability evidence, manual cancellation and timeout-layer limits. |
+| [`docs/providers/kaggle-artifacts.md`](docs/providers/kaggle-artifacts.md) | Complete versioned listing, selected file streaming, final identity checks and durable pin/publication recovery. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -201,6 +212,7 @@ go run ./cmd/kagglepreflight --help
 go test -run=TestStaging ./internal/provider/kaggle
 go test -run='TestExecution|TestExecutor' ./internal/provider/kaggle
 go test -run='TestMonitor|TestLogSnapshots|TestOperational' ./internal/provider/kaggle
+go test -run='TestArtifact' ./internal/provider/kaggle
 go test ./runner
 ```
 
@@ -225,6 +237,9 @@ real locked SDK with mocked HTTP; bootstrap wiring uses inert fixture modules. N
 workload or generated kernel script is executed on the local host by these tests. Operational
 tests add raw quota/log fixtures and actual SQLite exhaustion/manual-control recovery; they
 make no authenticated provider call and do not claim live streaming or cancellation support.
+Artifact tests add complete pagination, pinned byte transfer and real collection/SQLite/blob
+publication and recovery, including errors after all bytes. Their actual SDK transport and
+integration-helper results are synthetic in separate tiers, not a live end-to-end run.
 
 `fault-test` runs the nominated fault regressions uncached and is also included in
 `go run ./cmd/devtool check`. Repository-wide race tests remain a separate
