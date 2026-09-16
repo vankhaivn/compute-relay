@@ -46,14 +46,14 @@ type AcceptanceAdapter struct {
 }
 
 var (
-	_                     provider.Provider            = (*AcceptanceAdapter)(nil)
-	_                     provider.BindingVerifier     = (*AcceptanceAdapter)(nil)
-	_                     provider.PreparationObserver = (*AcceptanceAdapter)(nil)
-	_                     provider.QuotaReader         = (*AcceptanceAdapter)(nil)
-	_                     provider.LogReader           = (*AcceptanceAdapter)(nil)
-	_                     provider.Canceller           = (*AcceptanceAdapter)(nil)
-	ErrAcceptanceScope                                  = errors.New("acceptance target differs from the original admitted attempt")
-	ErrAcceptanceCleanup                                = errors.New("acceptance cleanup is unavailable; preserve owned resources and recovery evidence")
+	_                    provider.Provider            = (*AcceptanceAdapter)(nil)
+	_                    provider.BindingVerifier     = (*AcceptanceAdapter)(nil)
+	_                    provider.PreparationObserver = (*AcceptanceAdapter)(nil)
+	_                    provider.QuotaReader         = (*AcceptanceAdapter)(nil)
+	_                    provider.LogReader           = (*AcceptanceAdapter)(nil)
+	_                    provider.Canceller           = (*AcceptanceAdapter)(nil)
+	ErrAcceptanceScope                                = errors.New("acceptance target differs from the original admitted attempt")
+	ErrAcceptanceCleanup                              = errors.New("acceptance cleanup is unavailable; preserve owned resources and recovery evidence")
 )
 
 func NewAcceptanceAdapter(c Config, scope AcceptanceScope, resolver ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock, load AcceptanceLoader, shape string, allowMutations bool) (*AcceptanceAdapter, error) {
