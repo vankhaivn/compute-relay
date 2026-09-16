@@ -3,6 +3,7 @@ package kaggle
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -54,13 +55,13 @@ func (r *executionJournalRepository) CommitDispatch(ctx context.Context, h dispa
 }
 
 type executionJournalFixture struct {
-	f                       *stagingJournalFixture
-	repo                    *executionJournalRepository
-	executor                *Executor
-	saves, reads            int
+	f                        *stagingJournalFixture
+	repo                     *executionJournalRepository
+	executor                 *Executor
+	saves, reads             int
 	exists, loseSave, swapped bool
-	raw                     string
-	source                  domain.SHA256Digest
+	raw                      string
+	source                   domain.SHA256Digest
 }
 
 func newExecutionJournalFixture(t *testing.T) *executionJournalFixture {
@@ -191,6 +192,23 @@ func (x *executionJournalFixture) counts(t *testing.T, intents int) {
 	})
 }
 
+func (x *executionJournalFixture) assertRunningEvidence(t *testing.T) {
+	t.Helper()
+	x.f.inspect(t, func(db *sql.DB) {
+		var raw string
+		if err := db.QueryRow("SELECT state FROM attempts WHERE workspace_id=? AND job_id=? AND attempt_id=?", "workspace", string(x.f.receipt.JobID), string(x.f.receipt.AttemptID)).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var attempt domain.Attempt
+		if err := json.Unmarshal([]byte(raw), &attempt.State); err != nil {
+			t.Fatal(err)
+		}
+		if attempt.State.Execution != domain.ExecutionRunning || attempt.State.RemoteActivity != domain.RemoteActivityActive || attempt.State.ReleaseEvidence != domain.ReleaseEvidenceNotObservable || attempt.State.Orchestration.Terminal() {
+			t.Fatal("unknown poll erased confirmed attempt evidence", attempt.State)
+		}
+	})
+}
+
 func TestExecutionM3LostSaveAndOutcomeAcknowledgementsRecoverSameAttempt(t *testing.T) {
 	for _, fault := range []string{"save", "outcome"} {
 		t.Run(fault, func(t *testing.T) {
@@ -219,11 +237,16 @@ func TestExecutionM3LostSaveAndOutcomeAcknowledgementsRecoverSameAttempt(t *test
 			if running.Phase != dispatch.Submitted || running.Observation == nil || running.Observation.Execution != domain.ExecutionRunning || running.Plan.Digest() != before.Plan.Digest() || x.saves != 1 {
 				t.Fatal("lost original running attempt")
 			}
+			x.assertRunningEvidence(t)
 			x.raw = "UNKNOWN"
 			x.step(t, false)
-			if x.f.journal(t).Observation.Execution != domain.ExecutionRunning {
-				t.Fatal("unknown poll erased confirmed execution")
+			unknown := x.f.journal(t)
+			if unknown.Observation == nil || unknown.Observation.Execution != domain.ExecutionUnknown || unknown.Remote == nil || *unknown.Remote != *running.Remote || unknown.Problem == nil || !unknown.Problem.ComputeMayHaveStarted || unknown.Problem.SafeOperationRetry {
+				t.Fatal("latest unknown observation or ambiguity was concealed")
 			}
+			// Raw observations stay truthful while the independent attempt state
+			// retains stronger previously confirmed execution/activity evidence.
+			x.assertRunningEvidence(t)
 			x.raw = "COMPLETE"
 			x.step(t, false)
 			terminal := x.f.journal(t)
