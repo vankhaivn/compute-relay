@@ -20,16 +20,16 @@ var ErrPermission = errors.New("explicit mode-specific acceptance authorization 
 var ErrEvidence = errors.New("GPU, publication or restart evidence did not qualify")
 
 type Options struct {
-	Mode string
-	Root string
-	Config kaggle.Config
-	MachineShape string
-	ProgramSHA256 domain.SHA256Digest
+	Mode                string
+	Root                string
+	Config              kaggle.Config
+	MachineShape        string
+	ProgramSHA256       domain.SHA256Digest
 	AllowPrivateStaging bool
-	AllowGPU bool
-	AllowReadOnly bool
-	CollectionKey string
-	MaxWait time.Duration
+	AllowGPU            bool
+	AllowReadOnly       bool
+	CollectionKey       string
+	MaxWait             time.Duration
 }
 
 func (o Options) valid() bool {
@@ -53,58 +53,58 @@ func (o Options) valid() bool {
 }
 
 type record struct {
-	Protocol int `json:"protocol"`
-	Config kaggle.Config `json:"config"`
-	MachineShape string `json:"machine_shape"`
-	ProgramSHA256 domain.SHA256Digest `json:"program_sha256"`
-	Challenge string `json:"challenge"`
-	BundleSHA256 domain.SHA256Digest `json:"bundle_sha256"`
-	InputSHA256 domain.SHA256Digest `json:"input_sha256"`
+	Protocol            int                 `json:"protocol"`
+	Config              kaggle.Config       `json:"config"`
+	MachineShape        string              `json:"machine_shape"`
+	ProgramSHA256       domain.SHA256Digest `json:"program_sha256"`
+	Challenge           string              `json:"challenge"`
+	BundleSHA256        domain.SHA256Digest `json:"bundle_sha256"`
+	InputSHA256         domain.SHA256Digest `json:"input_sha256"`
 	SpecificationSHA256 domain.SHA256Digest `json:"specification_sha256"`
-	Receipt admission.Receipt `json:"receipt"`
-	Fixture bool `json:"fixture"`
+	Receipt             admission.Receipt   `json:"receipt"`
+	Fixture             bool                `json:"fixture"`
 }
 
 type submissionMark struct {
-	Protocol int `json:"protocol"`
-	ProcessNonce string `json:"process_nonce"`
-	PlanSHA256 domain.SHA256Digest `json:"plan_sha256"`
-	IntentID domain.SubmissionIntentID `json:"intent_id"`
-	RecordedAt time.Time `json:"recorded_at"`
+	Protocol     int                       `json:"protocol"`
+	ProcessNonce string                    `json:"process_nonce"`
+	PlanSHA256   domain.SHA256Digest        `json:"plan_sha256"`
+	IntentID     domain.SubmissionIntentID `json:"intent_id"`
+	RecordedAt   time.Time                 `json:"recorded_at"`
 }
 
 type ArtifactEvidence struct {
-	Path string `json:"path"`
-	Bytes int64 `json:"bytes"`
+	Path   string              `json:"path"`
+	Bytes  int64               `json:"bytes"`
 	SHA256 domain.SHA256Digest `json:"sha256"`
 }
 
 type Report struct {
-	Protocol int `json:"protocol"`
-	Scope string `json:"scope"`
-	Status string `json:"status"`
-	Evidence string `json:"evidence"`
-	CheckedAt time.Time `json:"checked_at"`
-	JobID domain.JobID `json:"job_id"`
-	AttemptID domain.AttemptID `json:"attempt_id"`
-	AttemptNumber uint64 `json:"attempt_number"`
-	Execution domain.ExecutionState `json:"execution"`
-	Result domain.ResultState `json:"result"`
-	Orchestration domain.OrchestrationState `json:"orchestration"`
-	ReleaseEvidence domain.ReleaseEvidence `json:"release_evidence"`
-	GPUVerified bool `json:"gpu_verified"`
-	RestartVerified bool `json:"restart_verified"`
-	RemoteExecutionCount string `json:"remote_execution_count"`
-	ProviderTimeoutEnforcement string `json:"provider_timeout_enforcement"`
-	Cancellation string `json:"cancellation"`
-	FullM1Acceptance bool `json:"full_m1_acceptance"`
-	Artifacts []ArtifactEvidence `json:"artifacts"`
-	ProblemCode domain.ErrorCode `json:"problem_code"`
+	Protocol                   int                       `json:"protocol"`
+	Scope                      string                    `json:"scope"`
+	Status                     string                    `json:"status"`
+	Evidence                   string                    `json:"evidence"`
+	CheckedAt                  time.Time                 `json:"checked_at"`
+	JobID                      domain.JobID              `json:"job_id"`
+	AttemptID                  domain.AttemptID          `json:"attempt_id"`
+	AttemptNumber              uint64                    `json:"attempt_number"`
+	Execution                  domain.ExecutionState     `json:"execution"`
+	Result                     domain.ResultState        `json:"result"`
+	Orchestration              domain.OrchestrationState `json:"orchestration"`
+	ReleaseEvidence            domain.ReleaseEvidence    `json:"release_evidence"`
+	GPUVerified                bool                      `json:"gpu_verified"`
+	RestartVerified            bool                      `json:"restart_verified"`
+	RemoteExecutionCount       string                    `json:"remote_execution_count"`
+	ProviderTimeoutEnforcement string                    `json:"provider_timeout_enforcement"`
+	Cancellation               string                    `json:"cancellation"`
+	FullM1Acceptance           bool                      `json:"full_m1_acceptance"`
+	Artifacts                  []ArtifactEvidence        `json:"artifacts"`
+	ProblemCode                domain.ErrorCode          `json:"problem_code"`
 }
 
 func baseReport(r record) Report {
-	return Report{Protocol:1, Scope:"m4-06-fixed-gpu-smoke", Status:"prepared-local", Evidence:"not-tested", CheckedAt:time.Now().UTC(), JobID:r.Receipt.JobID, AttemptID:r.Receipt.AttemptID, RemoteExecutionCount:"not-observable", ProviderTimeoutEnforcement:"unverified", Cancellation:"manual-required", Artifacts:[]ArtifactEvidence{}}
+	return Report{Protocol: 1, Scope: "m4-06-fixed-gpu-smoke", Status: "prepared-local", Evidence: "not-tested", CheckedAt: time.Now().UTC(), JobID: r.Receipt.JobID, AttemptID: r.Receipt.AttemptID, RemoteExecutionCount: "not-observable", ProviderTimeoutEnforcement: "unverified", Cancellation: "manual-required", Artifacts: []ArtifactEvidence{}}
 }
 func (r record) binding() provider.BindingSnapshot {
-	return provider.BindingSnapshot{Binding:domain.ProviderBinding{Profile:ProfileName, ProviderInstanceID:domain.ProviderInstanceID(r.Config.InstanceID), ConfigurationRevision:r.Config.Revision}, AccountScope:r.Config.AccountName, CredentialRef:string(r.Config.CredentialRef)}
+	return provider.BindingSnapshot{Binding: domain.ProviderBinding{Profile: ProfileName, ProviderInstanceID: domain.ProviderInstanceID(r.Config.InstanceID), ConfigurationRevision: r.Config.Revision}, AccountScope: r.Config.AccountName, CredentialRef: string(r.Config.CredentialRef)}
 }

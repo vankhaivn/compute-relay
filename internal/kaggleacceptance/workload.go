@@ -17,7 +17,7 @@ const jobSpecification = `{"api_version":"compute-connector/v1alpha1","name":"bo
 
 func inputBytes(challenge string) ([]byte, error) {
 	return json.Marshal(struct {
-		Schema int `json:"schema"`
+		Schema    int    `json:"schema"`
 		Challenge string `json:"challenge"`
 	}{1, challenge})
 }
@@ -28,10 +28,10 @@ func bundleBytes() ([]byte, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	manifest := packaging.Manifest{Version:packaging.Version, Files:[]packaging.File{}}
+	manifest := packaging.Manifest{Version: packaging.Version, Files: []packaging.File{}}
 	for _, name := range names {
 		data := []byte(sources[name])
-		manifest.Files = append(manifest.Files, packaging.File{Path:name, Bytes:int64(len(data)), SHA256:string(provider.Digest(data))})
+		manifest.Files = append(manifest.Files, packaging.File{Path: name, Bytes: int64(len(data)), SHA256: string(provider.Digest(data))})
 	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
@@ -42,7 +42,7 @@ func bundleBytes() ([]byte, error) {
 	gz.Header.OS = 255
 	tarball := tar.NewWriter(gz)
 	write := func(name string, content []byte) error {
-		if err := tarball.WriteHeader(&tar.Header{Name:name, Size:int64(len(content)), Mode:0644, Typeflag:tar.TypeReg, ModTime:time.Unix(0,0).UTC(), Format:tar.FormatUSTAR}); err != nil {
+		if err := tarball.WriteHeader(&tar.Header{Name: name, Size: int64(len(content)), Mode: 0644, Typeflag: tar.TypeReg, ModTime: time.Unix(0, 0).UTC(), Format: tar.FormatUSTAR}); err != nil {
 			return err
 		}
 		_, err := tarball.Write(content)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
@@ -30,31 +29,31 @@ type AcceptanceLoader func(context.Context) (provider.Plan, provider.Prepared, e
 // acceptance harness. Capabilities describe the experimental component path, not
 // passed-live evidence. M3 alone owns new mutation permits and durable recovery.
 type AcceptanceAdapter struct {
-	config Config
-	scope AcceptanceScope
-	policy ExecutionPolicy
-	allow bool
-	load AcceptanceLoader
-	clock ports.Clock
-	preflight *Preflight
-	stager *Stager
-	monitor *Monitor
-	mu sync.Mutex
-	executor *Executor
-	artifacts *ArtifactReader
-	makeExecutor func(*Stager, ExecutionPolicy, provider.Plan, provider.Prepared, bool) (*Executor, error)
+	config        Config
+	scope         AcceptanceScope
+	policy        ExecutionPolicy
+	allow         bool
+	load          AcceptanceLoader
+	clock         ports.Clock
+	preflight     *Preflight
+	stager        *Stager
+	monitor       *Monitor
+	mu            sync.Mutex
+	executor      *Executor
+	artifacts     *ArtifactReader
+	makeExecutor  func(*Stager, ExecutionPolicy, provider.Plan, provider.Prepared, bool) (*Executor, error)
 	makeArtifacts func(*Executor, ArtifactPolicy) (*ArtifactReader, error)
 }
 
 var (
-	_ provider.Provider = (*AcceptanceAdapter)(nil)
-	_ provider.BindingVerifier = (*AcceptanceAdapter)(nil)
-	_ provider.PreparationObserver = (*AcceptanceAdapter)(nil)
-	_ provider.QuotaReader = (*AcceptanceAdapter)(nil)
-	_ provider.LogReader = (*AcceptanceAdapter)(nil)
-	_ provider.Canceller = (*AcceptanceAdapter)(nil)
-	ErrAcceptanceScope = errors.New("acceptance target differs from the original admitted attempt")
-	ErrAcceptanceCleanup = errors.New("acceptance cleanup is unavailable; preserve owned resources and recovery evidence")
+	_                     provider.Provider            = (*AcceptanceAdapter)(nil)
+	_                     provider.BindingVerifier     = (*AcceptanceAdapter)(nil)
+	_                     provider.PreparationObserver = (*AcceptanceAdapter)(nil)
+	_                     provider.QuotaReader         = (*AcceptanceAdapter)(nil)
+	_                     provider.LogReader           = (*AcceptanceAdapter)(nil)
+	_                     provider.Canceller           = (*AcceptanceAdapter)(nil)
+	ErrAcceptanceScope                                  = errors.New("acceptance target differs from the original admitted attempt")
+	ErrAcceptanceCleanup                                = errors.New("acceptance cleanup is unavailable; preserve owned resources and recovery evidence")
 )
 
 func NewAcceptanceAdapter(c Config, scope AcceptanceScope, resolver ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock, load AcceptanceLoader, shape string, allowMutations bool) (*AcceptanceAdapter, error) {
@@ -79,7 +78,7 @@ func NewAcceptanceAdapter(c Config, scope AcceptanceScope, resolver ports.Creden
 	if err != nil {
 		return nil, err
 	}
-	return &AcceptanceAdapter{config:c, scope:scope, policy:policy, allow:allowMutations, load:load, clock:clock, preflight:preflight, stager:stage, monitor:monitor, makeExecutor:NewExecutor, makeArtifacts:NewArtifactReader}, nil
+	return &AcceptanceAdapter{config: c, scope: scope, policy: policy, allow: allowMutations, load: load, clock: clock, preflight: preflight, stager: stage, monitor: monitor, makeExecutor: NewExecutor, makeArtifacts: NewArtifactReader}, nil
 }
 
 func (p *AcceptanceAdapter) matches(id provider.Identity) bool {
@@ -119,7 +118,7 @@ func (p *AcceptanceAdapter) Check(ctx context.Context) (provider.DiagnosticRepor
 		return provider.DiagnosticReport{}, err
 	}
 	// Account verification is not GPU/result/restart qualification.
-	return provider.DiagnosticReport{Evidence:domain.EvidenceImplementedOffline, CheckedAt:p.clock.Now().UTC(), Ready:false, Problems:[]domain.Problem{provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, "account checked; complete GPU and restart acceptance is still required")}}, nil
+	return provider.DiagnosticReport{Evidence: domain.EvidenceImplementedOffline, CheckedAt: p.clock.Now().UTC(), Ready: false, Problems: []domain.Problem{provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, "account checked; complete GPU and restart acceptance is still required")}}, nil
 }
 func (p *AcceptanceAdapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
 	if err := ctx.Err(); err != nil {
@@ -139,7 +138,7 @@ func (p *AcceptanceAdapter) Validate(ctx context.Context, job provider.ResolvedJ
 	if !gpu {
 		return provider.Plan{}, ErrAcceptanceScope
 	}
-	return provider.Plan{Job:job.Clone(), VerifyAfterStart:[]domain.CapabilityName{domain.CapabilityGPU}}, nil
+	return provider.Plan{Job: job.Clone(), VerifyAfterStart: []domain.CapabilityName{domain.CapabilityGPU}}, nil
 }
 func (p *AcceptanceAdapter) validPlan(ctx context.Context, plan provider.Plan) error {
 	expected, err := p.Validate(ctx, plan.Job)
@@ -272,7 +271,3 @@ func (p *AcceptanceAdapter) Cancel(ctx context.Context, ref provider.RemoteRefer
 func (p *AcceptanceAdapter) Cleanup(context.Context, provider.CleanupRequest) (provider.CleanupOutcome, error) {
 	return provider.CleanupOutcome{}, ErrAcceptanceCleanup
 }
-
-// Keep the same cooperative control-call limit as the component path. The harness
-// applies its own finite lifetime without pretending local exit cancels remote work.
-var _ = time.Minute
