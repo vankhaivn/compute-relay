@@ -129,7 +129,7 @@ func runWith(parent context.Context, o Options, d dependencies) (report Report, 
 			report.Status = "quota-blocked"
 			return report, nil
 		}
-		if err := s.store.RecordQuota(ctx, s.record.Config.AccountName, quota); err != nil {
+		if err := s.store.RecordQuota(ctx, s.record.Config.AccountName, "gpu", quota, d.clock.Now()); err != nil {
 			return report, err
 		}
 	}
