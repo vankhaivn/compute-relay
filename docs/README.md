@@ -46,12 +46,13 @@ owner-approved proposal update.
 | [`recovery.md`](recovery.md) | M3-08 operational semantics; PR #18 merged | Read independent state dimensions and choose receipt/reconcile/collect/retry/cancel/retention actions without fabricated commands or outcomes. |
 | [`providers/kaggle-preflight.md`](providers/kaggle-preflight.md) | M4-01 offline/read-only foundation; PR #19 merged | Explicit credential references, local checks, opt-in account/quota reads, bounded SDK transport and process lifetime, operator commands and unchanged live/batch gates. |
 | [`providers/kaggle-staging.md`](providers/kaggle-staging.md) | M4-02 offline staging; PR #20 merged | One-shot private creation, separately verified readiness and bytes, explicit source completion, M3 ownership/recovery integration and no automatic re-creation. |
-| [`providers/kaggle-execution.md`](providers/kaggle-execution.md) | M4-03 offline execution; PR #21 in review | Locked source, per-attempt submission authority, exact-version/ID/source observation, raw-state truthfulness, SDK upsert and recovery/verification limits. |
+| [`providers/kaggle-execution.md`](providers/kaggle-execution.md) | M4-03 offline execution; PR #21 merged | Locked source, per-attempt submission authority, exact-version/ID/source observation, raw-state truthfulness, SDK upsert and recovery/verification limits. |
+| [`providers/kaggle-operations.md`](providers/kaggle-operations.md) | M4-04 offline operational mappings; PR #22 in review | Reservation-aware quota/freshness, bounded identity-bound log snapshots, capability evidence, manual cancellation and frozen timeout layers. |
 | [`roadmap.md`](roadmap.md) | Active | Acceptance-based M-0 through M-6 outcomes and current milestone status. |
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, live/offline boundaries, and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
 | [`compatibility.md`](compatibility.md) | M-0 target matrix | Toolchain/provider/host targets and rules for support claims/live evidence. |
-| [`decisions/`](decisions/README.md) | Active ADR system | Material architecture and policy decisions, including accepted ADR-0016 and proposed ADR-0017 for one-shot execution and exact-source observation. |
+| [`decisions/`](decisions/README.md) | Active ADR system | Material architecture and policy decisions, including accepted ADR-0017 and proposed ADR-0018 for conservative operational evidence. |
 | [`research/`](research/README.md) | Active evidence system | Primary-source and live-test evidence rules. |
 | [`research/kaggle-interface-review.md`](research/kaggle-interface-review.md) | Upstream review complete | Pinned official client surfaces, gaps, transport gate, and M-1 probe sequence. |
 | [`research/kaggle-feasibility.md`](research/kaggle-feasibility.md) | Upstream review complete; live blocked | K-01 through K-16 evidence ledger and go/no-go rule. |
@@ -67,12 +68,13 @@ HTTP, remote cleanup apply, an overall-job deadline service or production runtim
 is complete. The implementation plan owns the current stop/next-task boundary; historical
 evidence in component guides and accepted ADRs must not be relabeled as a newer task's test run.
 
-M3's implemented offline gate closed with PR #18's merge on 2026-09-16. M4-01/M4-02 are merged
-in PRs #19/#20. M4-03 in PR #21 adds per-attempt execution under the same durable intent gates.
-SDK transport and helper outcomes remain synthetic in their respective test tiers; M1 live
-acceptance, M1-08 go and complete integrated batch activation remain separate requirements.
-In-review means branch implementation exists, not that every PR check has passed; the PR
-conversation records exact-head checks and any unresolved review blockers.
+M3's implemented offline gate closed with PR #18's merge on 2026-09-16. M4-01 through M4-03
+are merged in PRs #19–#21. M4-04 in PR #22 adds operational reads and honest manual/timeout
+mappings without changing durable submission authority. SDK transport and helper outcomes
+remain synthetic in their respective test tiers; M1 live acceptance, M1-08 go and complete
+integrated batch activation remain separate requirements. In-review means branch implementation
+exists, not that every PR check has passed; the PR conversation records exact-head checks and
+any unresolved review blockers.
 
 ## Status vocabulary
 
@@ -95,6 +97,8 @@ Likewise, successful authentication/account checking is a dated read, not an exe
 preflight always keeps `batch_ready=false`. Staging readiness does not replace the new durable
 submission gate. Kernel terminal observation is neither verified artifact availability nor
 hardware-release evidence. Latest raw observations and confirmed attempt state remain distinct.
+Quota is an account observation, not a reservation; provider logs are snapshots, not verified
+artifacts or a live-stream guarantee. Manual-required cancellation does not establish termination.
 
 ## Required update paths
 
@@ -114,6 +118,7 @@ hardware-release evidence. Latest raw observations and confirmed attempt state r
 | Credential/preflight boundary | providers/kaggle-preflight, ADR-0015, plan, real pinned-SDK transport tests, environment/process isolation and explicit authorization checks |
 | Private staging/readiness | providers/kaggle-staging, ADR-0016, plan, source-completion/process tests, real pinned-SDK fixtures and M3 ownership/restart tests |
 | Kaggle execution/observation | providers/kaggle-execution, ADR-0017, plan, locked source/manifest tests, raw-field SDK fixtures, real process and M3 intent/restart/observation tests |
+| Kaggle operational evidence | providers/kaggle-operations, ADR-0018, plan, quota duration/freshness, log identity/cursors, manual controls, real SDK/process/SQLite tests |
 | Bundle/import safety | packaging-and-import, ADR-0005, `api/`, ignore example, plan, tests |
 | HTTPS/SSRF policy | https-ingestion, ADR-0006, `api/`, plan, transport/service/API tests |
 | Remote runner/execution contract | runner/README, ADR-0007, runner schemas/assets lock, public result schema, architecture, plan, CPU/contract tests |
