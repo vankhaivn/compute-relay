@@ -28,21 +28,24 @@ defaults.
 | [`0018-kaggle-operational-evidence.md`](0018-kaggle-operational-evidence.md) | accepted; PR #22 merged | Preserve missing quota, subtract reservations conservatively, bind bounded log snapshots to original identity, and require manual cancellation when a verified session target is absent. |
 | [`0019-version-scoped-kaggle-artifacts.md`](0019-version-scoped-kaggle-artifacts.md) | accepted; PR #23 merged | Read complete versioned listings and selected files, require successful final byte/identity acknowledgement, and reuse M3 immutable pins and atomic publication without new compute. |
 | [`0020-explicit-durable-gpu-acceptance.md`](0020-explicit-durable-gpu-acceptance.md) | accepted; PR #24 merged | Scope a finite GPU experiment to original binary/state, separate submit and read-only resume processes, and keep offline harness results distinct from actual live acceptance. |
-| [`0021-local-runtime-lifecycle.md`](0021-local-runtime-lifecycle.md) | proposed; PR #25 in review | Bind local installation/store identities, deliver tokens to private files and join loopback HTTP handlers before releasing storage, without enabling provider workers or closing parent M5-01. |
+| [`0021-local-runtime-lifecycle.md`](0021-local-runtime-lifecycle.md) | accepted; PR #25 merged | Bind local installation/store identities, deliver tokens to private files and join loopback HTTP handlers before releasing storage, without enabling provider workers or closing parent M5-01. |
+| [`0022-immutable-profiles-and-application-client.md`](0022-immutable-profiles-and-application-client.md) | proposed; PR #26 in review | Reuse immutable admission profiles with separate workspace grants and private-token, non-retrying application HTTP commands; preserve original receipts and keep provider activation separate. |
 
 M3-08's merged [fault qualification](../fault-matrix.md) and [recovery guidance](../recovery.md)
 do not change earlier architectural decisions. The M4-01 through M4-05 component guides retain
 their own evidence tiers. M4-06's merged [acceptance harness](../providers/kaggle-acceptance.md)
 composes those ports into one explicitly authorized experiment; it does not turn fixtures into
-live evidence. The live ledger remains not run. M5-01a's [local runtime](../local-runtime.md)
-serves existing local application services but starts no provider workers or default profiles.
-This is a first M5-01 slice, not complete general compute-runtime registration.
+live evidence. The live ledger remains not run. M5-01a's merged [local runtime](../local-runtime.md)
+serves existing local services without workers or default profiles. M5-01b's
+[application/profile commands](../application-cli.md) configure admission and call those services,
+not a complete provider runtime. Profile policy, current authority, original receipts and remote
+execution remain distinct; no client response can waive a live-provider gate.
 
 Historical task-specific stop instructions inside an ADR describe that decision's scope;
 the [implementation plan](../implementation-plan.md) owns the current review/next-task boundary.
 Accepted outcomes and dated evidence are not silently rewritten to look like results from a
-later task. Proposed ADR-0021 remains subject to owner review and PR #25's checks. Neither local
-readiness nor accepting the harness decision closes the live M4-06/M1 checklist.
+later task. Proposed ADR-0022 remains subject to owner review and PR #26's checks. Neither local
+readiness, a configured admission profile nor accepting the harness decision closes M4-06/M1 live.
 
 ## Naming
 
