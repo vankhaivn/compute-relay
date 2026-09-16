@@ -1,10 +1,10 @@
 # Compute Relay
 
 > **Project status:** portable-core components and M3 durable orchestration are complete
-> at their implemented offline gates; M4-01 through M4-04 are merged in PRs #19–#22.
-> M4-05 version-scoped artifact retrieval and publication integration are in review in PR #23.
-> M1 live acceptance, production batch registration, `serve`, artifact HTTP and remote
-> cleanup apply remain separate work. Offline components are not live Kaggle/GPU readiness.
+> at their implemented offline gates; M4-01 through M4-05 are merged in PRs #19–#23.
+> M4-06's fixed GPU/restart acceptance harness is in review in PR #24.
+> **No live M4-06/M1 acceptance run is recorded.** Production multi-job registration,
+> `serve`, public artifact routes and remote cleanup remain separate work.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -73,17 +73,20 @@ The repository currently establishes:
 - locked remote source packaging and a per-attempt execution component with one-shot SDK
   submission, exact-version/source/ID observation and read-only recovery under M3 authority;
 - conservative account GPU quota, bounded reference/snapshot-bound provider logs, explicit
-  capability evidence, manual-only cancellation and frozen timeout-layer reporting; and
+  capability evidence, manual-only cancellation and frozen timeout-layer reporting;
 - complete version-scoped output listing, manifest-bound selected file transfers and M3
-  immutable-pin/verified-publication integration without another compute execution.
+  immutable-pin/verified-publication integration without another compute execution; and
+- a finite one-job acceptance adapter/CLI, fixed CUDA arithmetic example, original-binary
+  state binding and separate-process resume with honest offline-versus-live report semantics.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
 composition is explicit and migration starts paused. A scheduler claim alone never permits
 remote submission: the orchestration component must verify inputs and commit each intent
-before its one allowed provider mutation. The supplied bound provider is a nonexecuting fake.
-Terminal provider observation opens collection, not job success; status exposes cached
-structured recovery conditions without polling or replaying compute.
+before its one allowed provider mutation. General developer smokes use a nonexecuting fake;
+the separate experimental acceptance adapter requires explicit operator authorization.
+Terminal provider observation opens collection, not job success; cached status does not poll
+or replay compute.
 
 Control requests explicitly name an attempt and require an idempotency key. POST replay
 returns the original receipt; GET returns current operation state. Cancellation intent is
@@ -129,7 +132,7 @@ reconciliation, not another save. Exact numeric kernel ID, version, source, acco
 metadata are verified around status reads. Missing/new status stays unknown; cancellation
 acknowledgement and local time do not prove termination or hardware release. The guide and
 ADR-0017 disclose SDK upsert races, same-version rerun limits and source reconstruction across
-binary/configuration changes. Full Provider registration remains separate.
+binary/configuration changes. General production registration remains separate.
 
 M4-04's [operational mappings](docs/providers/kaggle-operations.md) parse original quota
 fields before SDK defaults or precision loss, subtract used and reserved durations, and mark
@@ -148,11 +151,19 @@ exit precede M3 publication. A late failure invalidates even complete temporary 
 collection retries reuse the original pin and verified cache without resubmitting compute;
 candidate catalogs, verified bytes and atomic result publication remain distinct evidence stages.
 
+M4-06's [acceptance harness](docs/providers/kaggle-acceptance.md) composes the real ports for
+one fixed 120-second GPU experiment. Local prepare/status do not construct a provider; staging/GPU
+submit and read-only resume/collect require separate explicit flags. The original executable,
+challenge, plan and attempt are retained. The submitting process exits at its durable boundary;
+a new process must resume and verify published CUDA arithmetic/hardware evidence. Fixture runs
+can report only passed-offline. No actual live result is recorded by this implementation PR,
+and even a future scoped pass does not claim full M1, provider timeout or remote exactly-once.
+
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
 blob bytes or prove full runtime recovery. M3's offline gate closed with PR #18's owner merge.
-These components and the separate preflight utility are not a complete production
-orchestration service; production `serve` and live-provider acceptance remain separate gates.
+The scoped acceptance adapter is not a production multi-job runtime. Production `serve`, public
+routes, general configuration/registration and complete live acceptance remain separate gates.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -181,6 +192,7 @@ live Kaggle support.
 | [`docs/providers/kaggle-execution.md`](docs/providers/kaggle-execution.md) | One-shot submission authority, locked source, exact-version observations, uncertainty, SDK races and recovery/verification limits. |
 | [`docs/providers/kaggle-operations.md`](docs/providers/kaggle-operations.md) | Reservation-aware quota, identity-bound log snapshots, capability evidence, manual cancellation and timeout-layer limits. |
 | [`docs/providers/kaggle-artifacts.md`](docs/providers/kaggle-artifacts.md) | Complete versioned listing, selected file streaming, final identity checks and durable pin/publication recovery. |
+| [`docs/providers/kaggle-acceptance.md`](docs/providers/kaggle-acceptance.md) | Fixed GPU/restart operator commands, explicit authorization, original binary/state, offline evidence and not-run live ledger. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -213,6 +225,7 @@ go test -run=TestStaging ./internal/provider/kaggle
 go test -run='TestExecution|TestExecutor' ./internal/provider/kaggle
 go test -run='TestMonitor|TestLogSnapshots|TestOperational' ./internal/provider/kaggle
 go test -run='TestArtifact' ./internal/provider/kaggle
+go test ./internal/kaggleacceptance ./cmd/kaggleacceptance
 go test ./runner
 ```
 
@@ -241,6 +254,12 @@ Artifact tests add complete pagination, pinned byte transfer and real collection
 publication and recovery, including errors after all bytes. Their actual SDK transport and
 integration-helper results are synthetic in separate tiers, not a live end-to-end run.
 
+Acceptance tests join durable services with a synthetic backend and injected process identities.
+Separate child processes exercise the actual local prepare/status CLI and nonce generation;
+they do not run the live GPU workflow. Python tensor fixtures test arithmetic wiring without
+importing torch. Missing GPU, wrong results or incomplete restart records cannot become live
+qualification. The operator-only acceptance commands are documented separately, not part of CI.
+
 `fault-test` runs the nominated fault regressions uncached and is also included in
 `go run ./cmd/devtool check`. Repository-wide race tests remain a separate
 `go run ./cmd/devtool test-race` command. The matrix documents actual process-kill and SQL
@@ -248,9 +267,8 @@ faults separately from injected provider observations, local deadlines and dry-r
 No admitted workload or official live provider CLI is invoked by qualification.
 
 These checks and preflight help are finite and never call Kaggle. None is a production
-runtime. Read the preflight guide before explicitly enabling its authenticated network mode.
-See the component and fault-matrix guides for their distinct evidence limits and
-local-versus-CI verification disclosures.
+runtime. Read the preflight/acceptance guides before explicitly enabling authenticated network
+or GPU modes. Component guides distinguish local, fixture, pinned CI and live evidence.
 
 ## Current execution boundary
 
@@ -267,9 +285,10 @@ side effect:
 - identity-safe test-resource cleanup.
 
 Credentials must not be pasted into chat, committed, passed to remote jobs, or captured in
-fixtures. The owner's request for offline M4 implementation does not waive M1-08 or authorize
-live side effects in this session. Follow the implementation plan's owner-review and provider-
-evidence gates; preflight or staging success alone never grants compute permission.
+fixtures. An implementation request does not waive M1-08 or authorize provider side effects
+in CI. The acceptance command requires explicit private-staging/GPU opt-in and a separate
+read-only resume; neither a green harness test nor preflight/staging readiness grants a new
+compute permit. Stop for owner review at PR #24; live acceptance and M5 remain separate work.
 
 ## Contributing
 

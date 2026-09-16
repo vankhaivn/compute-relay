@@ -41,6 +41,13 @@ expect 0 'feat(api)!: require explicit attempt identity'
 expect 0 "Merge branch 'fixture'"
 expect 0 'Revert "feat: add staging"'
 
+# Formatting has its own conventional type; no other syntax rule is bypassed.
+expect 0 'style(acceptance): format the resumed model and adapter foundation'
+expect 0 'style: normalize whitespace'
+expect 1 'styles: normalize whitespace'
+expect 1 'style: Normalize whitespace'
+expect 1 'style: normalize whitespace.'
+
 # Changing the length ceiling must not relax the other existing syntax rules.
 expect 1 ''
 expect 1 'unknown(repo): add staging'

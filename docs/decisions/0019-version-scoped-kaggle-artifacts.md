@@ -1,6 +1,6 @@
 # ADR-0019: Version-scoped artifact reads and immutable local publication
 
-- Status: proposed; implemented offline in PR #23, pending owner review/merge
+- Status: accepted; PR #23 merged on 2026-09-16
 - Date: 2026-09-16
 - Task: M4-05
 - Requirements: JOB-05, PRV-02, VER-02
