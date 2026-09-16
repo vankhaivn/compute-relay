@@ -26,7 +26,7 @@ type Request struct {
 	TTL       time.Duration
 }
 
-const Usage = `Local runtime commands (M5-01a, no provider workers):
+const Usage = `Local runtime commands (M5-01, no provider workers):
   compute-relay init --root DIR
   compute-relay state --root DIR
   compute-relay serve --root DIR [--listen 127.0.0.1:7331]
@@ -38,7 +38,7 @@ const Usage = `Local runtime commands (M5-01a, no provider workers):
 Stop serve before local administration. Secrets are never printed; token output
 requires a new file in an existing private directory. No profiles or workers are
 configured automatically. Validation is local schema validation, not admission.
-`
+` + "\n" + ProfileUsage
 
 type Action func(context.Context, Request, io.Writer) error
 
@@ -69,9 +69,12 @@ func Parse(args []string) (Request, error) {
 		return r, ErrArguments
 	}
 	for _, v := range args {
-		if len(v) > 4096 {
+		if len(v) > 4096 || strings.ContainsRune(v, 0) {
 			return r, ErrArguments
 		}
+	}
+	if args[0] == "profile" {
+		return parseProfile(args)
 	}
 	r.Command = args[0]
 	rest := args[1:]
