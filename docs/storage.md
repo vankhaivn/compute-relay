@@ -22,9 +22,10 @@ No application-facing administrative API or nondurable production fallback is in
 Subsequent migrations supply [durable admission](admission.md), [fenced scheduling](scheduler.md),
 [preparation/submission journals](dispatch.md), [durable controls](operations.md),
 [verified result publication](collection.md) and [retention](retention.md). M3-01 through
-M3-06 are merged; M3-07 is in review in PR #17. These are explicit composition APIs, not a
-production server. Existing developer upload/import/ingest fixtures remain explicitly
-nondurable unless a caller deliberately composes the SQLite repositories.
+M3-07 are merged. M3-08 [fault qualification](fault-matrix.md) and [recovery guidance](recovery.md)
+remain in review in PR #18. These are explicit composition APIs, not a production server.
+Existing developer upload/import/ingest fixtures remain explicitly nondurable unless a
+caller deliberately composes the SQLite repositories.
 
 ## State layout and process ownership
 
@@ -80,7 +81,7 @@ time budgets rather than silently enlarging it.
 
 ## Migration rules
 
-Embedded migration versions 1 through 9 are present on the M3-07 branch. The original
+Embedded migration versions 1 through 9 are present in the merged M3-07 baseline. The original
 `0001_identity.sql` and `0002_workspace_objects.sql` are followed by admission (3), scheduling
 (4), dispatch journals (5), operations (6) and `0007_collection.sql` (7). Migration 6 adds
 operation records, immutable receipts, control uniqueness, collection tickets and linked
@@ -91,8 +92,8 @@ result/attempt state, events and operation outcome commit together after verifie
 M3-07 adds inventory, named holds, irreversible tombstones, audit, a rotating expiry cursor
 and remote preview records in migration 8, then persistent input/result store bindings in
 migration 9. Existing bytes receive a conservative new inventory observation time. Upgrade
-does not expire or delete them and makes no provider call. The earlier migration 1–7 bytes
-remain unchanged.
+does not expire or delete them and makes no provider call. M3-08 changes no migration bytes;
+it qualifies the existing durable behavior through tests and recovery documentation.
 
 Applied migration bytes are immutable. SQL bytes, version and name are checked against
 `schema_migrations`; DDL, ledger insertion and `user_version` changes share one transaction.
@@ -206,7 +207,13 @@ contracts/vet/tests and Linux race checks, plus native Linux/macOS/Windows tests
 CGo-free builds. Its trigger includes SQL migration assets. No provider credentials,
 Kaggle API calls, GPU allocation or deployment participate. See the corresponding admission,
 scheduler, dispatch, operations, collection and retention guides for task-specific evidence
-and limits; historical M3-01 local evidence is not relabeled as M3-06 or M3-07 verification.
+and limits; historical M3-01 local evidence is not relabeled as a later task's verification.
+
+M3-08 adds `go run ./cmd/devtool fault-test` to the existing `check` command. Its
+[fault matrix](fault-matrix.md) distinguishes actual state-lock/process-kill/SQLITE_FULL
+checks from synthetic provider faults and injected byte-write failures. See
+[recovery semantics](recovery.md) for boundary-specific safe actions and the
+[implementation plan](implementation-plan.md) for the current owner-review gate.
 
 ## Dependency review
 

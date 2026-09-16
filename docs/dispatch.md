@@ -1,8 +1,8 @@
 # Durable preparation, dispatch and recovery
 
 > **Task:** M3-04, implemented offline; PR #14 merged. M3-05 controls are merged in PR #15.
-> M3-06 [verified collection](collection.md) is merged in PR #16; M3-07
-> [retention and cleanup previews](retention.md) are in review in PR #17.
+> M3-06 [verified collection](collection.md) and M3-07 [retention](retention.md) are merged
+> in PRs #16/#17. M3-08 [fault qualification](fault-matrix.md) is in review in PR #18.
 >
 > This is an explicitly composed orchestration component, not a production `serve`
 > command or live Kaggle adapter. No workload command runs on the control-plane host.
@@ -179,6 +179,12 @@ the operations guide; the historical M3-04 local harness is not relabeled as tha
 M3-06's real-blob collection, publication and recovery tests are recorded in PR #16 and the
 collection guide; the original dispatch smoke still ends at its collection handoff.
 
+M3-08 [qualification](fault-matrix.md) adds targeted regressions for unknown/modified state,
+stale polls, active restart, a local observation deadline, frozen-account recovery, quota
+rejection and a nonzero helper-process exit after synthetic acceptance. The fresh named-test
+checker is part of `devtool check`. These tests preserve one-shot gates; they do not implement
+an overall-job deadline service or establish official-CLI/live-provider compatibility.
+
 ## Remaining boundaries
 
 The ledger is recovery/ownership evidence, not an unconditional cleanup authorization.
@@ -187,7 +193,8 @@ offline components. M3-06 adds verified collection/publication; M3-07 supplies c
 retention, exact local byte deletion and remote dry-run previews only. Production CLI/config,
 artifact HTTP, remote apply and live Kaggle integration retain their separate gates.
 Do not manually reset journal phases, delete intent rows or clear the scheduler barrier to
-resume an uncertain attempt. Stop after PR #17 for owner merge; do not begin M3-08 here.
+resume an uncertain attempt. Use [recovery semantics](recovery.md) for the safe boundary-specific
+actions and the [implementation plan](implementation-plan.md) for the current review gate.
 
 See [ADR-0011](decisions/0011-one-shot-mutations-and-recovery.md),
 [the scheduler guide](scheduler.md), [storage](storage.md), [operations](operations.md),

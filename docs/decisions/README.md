@@ -21,7 +21,13 @@ defaults.
 | [`0011-one-shot-mutations-and-recovery.md`](0011-one-shot-mutations-and-recovery.md) | accepted | Freeze inputs, commit staging/submission identities before one-shot mutations, and recover uncertainty through fenced observation rather than replay. |
 | [`0012-attempt-scoped-durable-controls.md`](0012-attempt-scoped-durable-controls.md) | accepted; PR #15 merged | Separate immutable receipts from current operation status, require explicit attempts and preserve one-shot cancellation, frozen-input retry and transfer-only collection. |
 | [`0013-verified-collection-and-publication.md`](0013-verified-collection-and-publication.md) | accepted; PR #16 merged | Pin one result snapshot per attempt, independently verify streamed/cached bytes and atomically publish artifacts with fenced collection-only recovery. |
-| [`0014-retention-tombstones-and-cleanup-preview.md`](0014-retention-tombstones-and-cleanup-preview.md) | proposed; PR #17 in review | Preserve recovery pins and metadata, commit expiry before exact bound-store deletion, and keep remote cleanup strictly ledger-based and dry-run-only. |
+| [`0014-retention-tombstones-and-cleanup-preview.md`](0014-retention-tombstones-and-cleanup-preview.md) | accepted; PR #17 merged | Preserve recovery pins and metadata, commit expiry before exact bound-store deletion, and keep remote cleanup strictly ledger-based and dry-run-only. |
+
+M3-08 adds [fault qualification](../fault-matrix.md) and [recovery guidance](../recovery.md)
+without changing these architectural decisions. Historical task-specific stop instructions
+inside an ADR describe that decision's scope; the [implementation plan](../implementation-plan.md)
+owns the current review/next-task boundary. Accepted outcomes and dated evidence are not
+silently rewritten to look like results from a later task.
 
 ## Naming
 

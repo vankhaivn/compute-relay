@@ -1,6 +1,6 @@
 # Retention, local byte sweep and remote cleanup preview
 
-> **Task:** M3-07; implementation in PR #17, in review until owner merge.
+> **Task:** M3-07, implemented offline; PR #17 merged.
 >
 > **Scope:** durable retention decisions, named holds, exact local byte deletion and
 > ownership-ledger-based remote dry runs. No remote apply, production cleanup command,
@@ -194,13 +194,18 @@ and contradictory provider responses.
 
 M3-07 quarantine tests use explicit rename/reopen and fault injection, not a claim of a new
 process-kill experiment at every deletion boundary. Earlier process-kill suites remain part
-of the repository checks. The final PR records the exact tested head and CI runs. Native
+of the repository checks. PR #17 records the exact tested head and CI runs. Native
 Linux/macOS/Windows tests and CGo-free builds use the pinned Go 1.27.1/modernc stack in CI.
 Local Go 1.23.2 formatting and Python schema/hash checks are reported separately; no full
 local modernc integration or retention smoke executable is claimed. No dependency, workflow,
 provider adapter or runner asset was changed for this task.
 
+M3-08's [fault matrix](fault-matrix.md) nominates repeated exact-owned absence as FM24 and
+runs it through fresh named-test qualification. That remains **dry-run** evidence; neither
+the matrix nor a passing preview implements remote apply or staging cleanup. The complete
+retention suite still runs through the repository checks beyond that one nominated root.
+
 See [ADR-0014](decisions/0014-retention-tombstones-and-cleanup-preview.md),
-[storage](storage.md), [collection](collection.md), [operations](operations.md) and the
-[implementation plan](implementation-plan.md). Stop after PR #17 for owner review/merge;
-M3-08 and production runtime composition are not started here.
+[storage](storage.md), [collection](collection.md), [operations](operations.md) and
+[recovery semantics](recovery.md). The [implementation plan](implementation-plan.md) records
+the current owner-review and next-task gate; production runtime composition remains separate.

@@ -1,0 +1,303 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "number": 1,
+      "scenario": "Client loses the admission response and repeats its idempotency key.",
+      "tests": [
+        {
+          "file": "internal/api/jobs_test.go",
+          "name": "TestLostHTTPReceiptReplaysCommittedIDs"
+        },
+        {
+          "file": "internal/store/sqlite/admission_test.go",
+          "name": "TestAdmissionReplaySurvivesRemapDisableAndRestart"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "scenario": "Same key is reused with a different specification.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/admission_test.go",
+          "name": "TestAdmissionConcurrentKeysAndConflicts"
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "scenario": "Runtime crashes immediately before/after writing submission intent.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/dispatch_crash_test.go",
+          "name": "TestDispatchProcessKillAtMutationIntentBoundaries"
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "scenario": "Provider accepts a submission but the response is lost.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/dispatch_test.go",
+          "name": "TestDispatchLostSubmitResponseRestartAndTerminalCollectionGate"
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "scenario": "An ambiguous resource cannot be rediscovered conclusively.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/dispatch_test.go",
+          "name": "TestDispatchUnknownNotFoundStopsAndKeepsAccountCapacity"
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "scenario": "Provider state is unknown or changes format.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_test.go",
+          "name": "TestFaultMatrixUnknownAndModifiedObservations"
+        }
+      ]
+    },
+    {
+      "number": 7,
+      "scenario": "A stale poll arrives after a terminal observation.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_test.go",
+          "name": "TestFaultMatrixStalePollCannotRewriteTerminal"
+        }
+      ]
+    },
+    {
+      "number": 8,
+      "scenario": "Runtime restarts while a remote attempt is active.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_test.go",
+          "name": "TestFaultMatrixRestartKeepsActiveAttempt"
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "scenario": "Output collection fails halfway through a large file.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_transfer_test.go",
+          "name": "TestFaultMatrixLargeTransferFailureRecoversWithoutCompute"
+        }
+      ]
+    },
+    {
+      "number": 10,
+      "scenario": "A required output is missing or has the wrong digest.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/collection_test.go",
+          "name": "TestCollectionBadTransfersRequireExplicitRecovery"
+        }
+      ]
+    },
+    {
+      "number": 11,
+      "scenario": "Output pagination contains more than one page.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/collection_test.go",
+          "name": "TestCollectionPublicationReceiptAndScopedReads"
+        }
+      ]
+    },
+    {
+      "number": 12,
+      "scenario": "A cancellation request races with completion.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/collection_test.go",
+          "name": "TestCollectionCancellationRaceKeepsTerminalEvidence"
+        },
+        {
+          "file": "internal/store/sqlite/operations_test.go",
+          "name": "TestControlsUnsupportedAcceptedAndConfirmedCancellation"
+        }
+      ]
+    },
+    {
+      "number": 13,
+      "scenario": "Cancellation is unsupported or lacks a usable session identity.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/operations_test.go",
+          "name": "TestControlsUnsupportedAcceptedAndConfirmedCancellation"
+        },
+        {
+          "file": "internal/store/sqlite/fault_matrix_policy_test.go",
+          "name": "TestFaultMatrixCancellationWithoutRemoteIdentityStaysUnresolved"
+        }
+      ]
+    },
+    {
+      "number": 14,
+      "scenario": "Local deadline expires while remote activity is unknown.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_test.go",
+          "name": "TestFaultMatrixLocalDeadlineKeepsUnknownExecution"
+        },
+        {
+          "file": "internal/store/sqlite/scheduler_test.go",
+          "name": "TestSchedulerAmbiguousCapacitySurvivesExpiryAndRestart"
+        }
+      ]
+    },
+    {
+      "number": 15,
+      "scenario": "Quota is missing, stale, exhausted, or consumed by external activity.",
+      "tests": [
+        {
+          "file": "internal/scheduler/select_test.go",
+          "name": "TestQuotaDecisionsPreserveUnknownAndPrecision"
+        },
+        {
+          "file": "internal/store/sqlite/scheduler_test.go",
+          "name": "TestSchedulerQuotaLatchAndStrictPolicy"
+        },
+        {
+          "file": "internal/store/sqlite/fault_matrix_policy_test.go",
+          "name": "TestFaultMatrixQuotaConsumedAfterPositiveObservation"
+        }
+      ]
+    },
+    {
+      "number": 16,
+      "scenario": "Input staging succeeds but readiness is delayed.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/dispatch_test.go",
+          "name": "TestDispatchStagingLossAndDelayedReadinessNeverRepeatPrepare"
+        }
+      ]
+    },
+    {
+      "number": 17,
+      "scenario": "A URL redirects into a private network destination.",
+      "tests": [
+        {
+          "file": "internal/httpsinput/client_test.go",
+          "name": "TestEveryRedirectRevalidatesDNSAndPolicy"
+        }
+      ]
+    },
+    {
+      "number": 18,
+      "scenario": "A bundle contains traversal, links, duplicates, or excessive expanded size.",
+      "tests": [
+        {
+          "file": "internal/packaging/archive_test.go",
+          "name": "TestArchiveMaliciousPathCorpus"
+        },
+        {
+          "file": "internal/packaging/archive_test.go",
+          "name": "TestArchiveCollisionAndTypeCorpus"
+        },
+        {
+          "file": "internal/packaging/archive_test.go",
+          "name": "TestArchiveBoundsAndManifestValidation"
+        }
+      ]
+    },
+    {
+      "number": 19,
+      "scenario": "A workspace references another workspace's object/artifact.",
+      "tests": [
+        {
+          "file": "internal/api/jobs_test.go",
+          "name": "TestDurableAdmissionHTTPContractAndAuthorization"
+        },
+        {
+          "file": "internal/store/sqlite/collection_test.go",
+          "name": "TestCollectionPublicationReceiptAndScopedReads"
+        }
+      ]
+    },
+    {
+      "number": 20,
+      "scenario": "The state directory is opened by a second runtime process.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/store_test.go",
+          "name": "TestProcessKillPreservesCommittedWALAndRollsBackIncompleteTransaction"
+        }
+      ]
+    },
+    {
+      "number": 21,
+      "scenario": "Disk runs out during upload, collection, or database commit.",
+      "tests": [
+        {
+          "file": "internal/blobfs/store_test.go",
+          "name": "TestIncompleteInvalidAndFaultedWritesAreNeverVisible"
+        },
+        {
+          "file": "internal/store/sqlite/collection_fault_test.go",
+          "name": "TestCollectionPublicationRollbackAndDiskFull"
+        },
+        {
+          "file": "internal/store/sqlite/store_test.go",
+          "name": "TestSQLiteDiskFullRollsBackWithoutReplay"
+        }
+      ]
+    },
+    {
+      "number": 22,
+      "scenario": "Provider credentials rotate or the configured account changes.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_test.go",
+          "name": "TestFaultMatrixCredentialRotationKeepsFrozenAccount"
+        },
+        {
+          "file": "internal/store/sqlite/dispatch_test.go",
+          "name": "TestDispatchFrozenProfileDoesNotFollowRemap"
+        }
+      ]
+    },
+    {
+      "number": 23,
+      "scenario": "A managed remote resource is manually modified outside the runtime.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_test.go",
+          "name": "TestFaultMatrixUnknownAndModifiedObservations"
+        }
+      ]
+    },
+    {
+      "number": 24,
+      "scenario": "Cleanup is retried after the remote resource is already absent.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/retention_cleanup_test.go",
+          "name": "TestCleanupPreviewUsesLedgerAndNeverApplies"
+        }
+      ]
+    },
+    {
+      "number": 25,
+      "scenario": "A CLI exits nonzero after a possible remote side effect.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/fault_matrix_test.go",
+          "name": "TestFaultMatrixNonzeroCLIAfterAcceptanceDoesNotResubmit"
+        }
+      ]
+    }
+  ]
+}

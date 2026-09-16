@@ -193,7 +193,13 @@ CI results for quality/race tests and native Linux/macOS/Windows tests/CGo-free 
 CI is not an operator runtime and uses no Kaggle credentials, GPU or live-provider probes.
 M3-07's expiry, stale-proof and preserved-receipt tests are recorded separately in PR #17.
 
+M3-08's [fault matrix](fault-matrix.md) qualifies cancellation/completion races, missing remote
+identity, explicit transfer recovery and preserved uncertainty with fresh named-test evidence.
+[Recovery semantics](recovery.md) explains how to choose among receipt replay, reconcile,
+collect, explicit compute retry and cancellation without interpreting an operation's success
+as proof of remote termination or currently retained bytes.
+
 See [ADR-0012](decisions/0012-attempt-scoped-durable-controls.md), [API contracts](../api/README.md),
-[dispatch](dispatch.md), [collection](collection.md), [retention](retention.md) and the
-[implementation plan](implementation-plan.md). M3-05/M3-06 are merged; finish M3-07 in PR #17
-and stop for owner merge. M3-08, remote apply and production composition remain separate work.
+[dispatch](dispatch.md), [collection](collection.md) and [retention](retention.md). The
+[implementation plan](implementation-plan.md) owns the current owner-review/next-task gate.
+Remote apply, artifact HTTP/CLI and production composition remain separate work.
