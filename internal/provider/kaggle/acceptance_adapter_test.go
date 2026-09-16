@@ -21,7 +21,7 @@ func acceptanceAdapterFixture(t *testing.T, allow bool) (*AcceptanceAdapter, *pr
 	t.Helper()
 	fixture := newExecutionFixture(t)
 	plan := fixture.plan.Clone()
-	plan.Job.Specification = []byte(strings.ReplaceAll(strings.ReplaceAll(executionSpec, `"cpu"`, `"gpu"`), `"remote_wall_seconds":10`, `"remote_wall_seconds":120`))
+	plan.Job.Specification = []byte(strings.ReplaceAll(strings.ReplaceAll(executionSpec, `"accelerator":"cpu"`, `"accelerator":"gpu","minimum_gpu_count":1`), `"remote_wall_seconds":10`, `"remote_wall_seconds":120`))
 	plan.Job.SpecificationSHA256 = provider.Digest(plan.Job.Specification)
 	plan.Job.WallSeconds = 120
 	plan.Job.Required = []domain.CapabilityName{domain.CapabilityBatchExecution, domain.CapabilityGPU, domain.CapabilityPython}
