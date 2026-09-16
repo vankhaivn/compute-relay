@@ -98,7 +98,7 @@ func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy Executi
 		"manifest_version": "compute-relay/runner/v1", "job_id": plan.Job.Identity.JobID,
 		"attempt_id": plan.Job.Identity.AttemptID, "attempt_nonce": plan.Job.Identity.Nonce,
 		"input_manifest_sha256": plan.Job.Identity.InputManifestSHA256,
-		"bundle": map[string]any{"path": "code.bin", "bytes": plan.Job.Inputs.Bundle.Bytes, "sha256": plan.Job.Inputs.Bundle.SHA256},
+		"bundle":                map[string]any{"path": "code.bin", "bytes": plan.Job.Inputs.Bundle.Bytes, "sha256": plan.Job.Inputs.Bundle.SHA256},
 	}
 	for _, key := range []string{"execution", "outputs", "resources", "network", "timeouts"} {
 		manifest[key] = fields[key]
@@ -120,7 +120,7 @@ func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy Executi
 		"identity": plan.Job.Identity, "plan_sha256": plan.Digest(),
 		"preparation_id": prepared.PreparationID, "dataset_id": ref.DatasetID,
 		"dataset_slug": stage.request.Slug, "marker_sha256": ref.Marker,
-		"manifest": manifest, "modules": modules,
+		"manifest": manifest, "modules": modules, "remote_policy": map[string]any{"gpu": gpu, "machine_shape": policy.MachineShape},
 	})
 	if err != nil || len(payload) > 1<<20 {
 		return none, ErrConfig
