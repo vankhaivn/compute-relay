@@ -15,7 +15,9 @@ The implementation is `internal/provider/kaggle/staging*.go` with an embedded `s
 PR #20 on `feat/m4-02-private-staging` is the active integration branch. The earlier exported
 `checkpoint/m4-02-offline-staging` package is obsolete and must not be merged or cherry-picked.
 It has a different marker/type model and content-dependent resource naming. Its archived
-verification results are not evidence for this implementation.
+verification results are not evidence for this implementation. The owner requested removal
+of that redundant branch; the PR conversation records whether the deletion has actually
+succeeded. No duplicate implementation is added to compensate for unavailable deletion tools.
 
 ## Composition and durable authority
 
@@ -86,7 +88,20 @@ For each bounded file, the helper requests one official upload ticket and perfor
 storage PUT. It verifies actual stream consumption, hash and bounded response EOF before the
 single private dataset-create call. It never retries an upload or creation internally. A
 false successful receipt, short/trailing stream, upload error or lost acknowledgement cannot
-be converted into another create attempt. The final source EOF is checked before creation.
+be converted into another create attempt.
+
+**Pipe EOF is not source acknowledgement.** Go's stdin-copy goroutine closes the child pipe
+on a source read failure as well as normal EOF. Even after the helper receives every declared
+payload byte, the original source can still fail its final EOF probe or Close. The Go producer
+therefore appends the fixed `stagingUploadComplete` trailer only after all payload sources
+finish successfully. The helper consumes that exact trailer and final EOF before returning
+from upload to `CreateDataset`. Missing/truncated/changed/trailing acknowledgement forbids
+creation. This internal framing does not change the dataset marker or public API.
+
+The trailer protects the cooperative Go/helper boundary; it is not cryptographic authorization
+or proof against malicious same-process code. It neither replaces the M3 write-ahead intent
+nor prevents a previously authorized external request from completing after a local timeout.
+See the official [os/exec stdin-copy contract](https://pkg.go.dev/os/exec#Cmd).
 
 Creation uses private visibility explicitly. The create receipt alone yields no readiness
 claim: metadata, processing state and bytes must be observed separately. A discovered public
@@ -154,6 +169,7 @@ is not made hard-real-time by cancellation. Secret clearing is not a host-memory
 | Before the preparation transaction commits | No helper may run; normal local preparation can be attempted later. |
 | Commit succeeds but its acknowledgement is lost | Reload the journal and observe only, even when no dataset was ever created. |
 | Upload or create response is lost | Preserve the intent; observe the original identity, never upload/create automatically again. |
+| Final source Read/Close fails after the last payload byte | No completion trailer; helper cannot create a dataset. Observe the original intent without restarting upload. |
 | Pending/ready observation commits but acknowledgement is lost | Reload the same journal/reference; do not replace the resource or duplicate compute. |
 | Dataset becomes public, changes version/identity or has wrong bytes | Preserve recovery evidence and fail closed; do not update, adopt or submit it. |
 
@@ -188,10 +204,18 @@ reports, Close/EOF faults, process isolation, real SQLite ledger/reopen and lost
 Earlier M3 kill/fencing/disk-full suites remain supporting evidence; this PR does not claim a
 new real provider-process kill or live network test.
 
+Completion regressions add real Go/Python pipe execution, final payload EOF/Close faults and
+SDK fixtures proving that all uploaded payload bytes without a complete source trailer still
+make zero dataset-create calls. The normal framed path creates once; observe remains read-only.
+
 Final-head workflow outcomes, exact commits and any unresolved checks are recorded in PR #20.
-Local formatting checks on Go 1.23.2 do not substitute for full Go 1.27.1/modernc integration or
-native builds. Historical results from the obsolete checkpoint are not relabeled as current
-staging results. No dependency, public contract, migration, runner asset or workflow is changed.
+Local Go 1.23.2 ran the exact protocol constructor and real-pipe regression with race detection
+and three repetitions, plus vet, in an isolated standard-library harness. Six Python protocol/
+watchdog tests passed locally; seven SDK tests were explicitly skipped because the SDK was not
+installed. Those local results do not qualify full Go 1.27.1/modernc integration, native builds
+or actual SDK behavior; the pinned CI tier supplies that evidence. Historical results from the
+obsolete checkpoint are not relabeled as current staging results. No dependency, public contract,
+migration, runner asset or workflow is changed.
 
 M4-02 is an offline staging component, not a production Kaggle batch adapter or a shipped
 live-mutation command. No M1 live gate is closed, no staging/live support is asserted from a
