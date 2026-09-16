@@ -43,7 +43,7 @@ assert sys.flags.isolated
 assert not any(k in os.environ for k in ('KAGGLE_API_TOKEN','PYTHONPATH','HTTPS_PROXY'))
 assert sys.stdin.buffer.read()==b'SYNTHETIC_STDIN'
 assert 'SYNTHETIC_STDIN' not in str(sys.argv)
-assert os.getcwd()==os.environ['HOME']
+assert os.path.samefile(os.getcwd(),os.environ['HOME'])
 print('` + report + `')
 `
 	if r, err := runHelper(context.Background(), c, ReadOnly, []byte("SYNTHETIC_STDIN"), source); err != nil || r != verified() {
