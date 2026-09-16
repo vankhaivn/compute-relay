@@ -3,8 +3,8 @@
 > **Status:** acceptance-based roadmap active; synchronized 2026-09-16.
 >
 > **Current work:** M3's implemented offline gate is complete through merged PR #18.
-> M4-01 through M4-03 are merged in PRs #19–#21. M4-04 operational mappings are in
-> review in PR #22. M1 live acceptance and integrated batch activation remain gated.
+> M4-01 through M4-04 are merged in PRs #19–#22. M4-05 artifact retrieval is in
+> review in PR #23. M1 live acceptance and integrated batch activation remain gated.
 >
 > Dates and sprint estimates are intentionally not assigned without an execution context.
 
@@ -20,13 +20,13 @@ proof of the first real compute path.
 | M-1 — Thin real-provider proof | `blocked` for live acceptance | M1-01 offline harness merged in PR #3; authorized private bounded GPU path with identity-safe verified outputs is still required. |
 | M-2 — Portable core | `complete` offline | M2-01 through M2-09 merged through PR #10; provider-neutral API/domain/objects/auth/fake-provider and finite runner evidence, not a live-provider claim. |
 | M-3 — Durable orchestration | `complete` offline | PRs #11–#18 merged the components, executable 25-scenario qualification and recovery documentation. This closes the implemented offline gate, not production or live acceptance. |
-| M-4 — Integrated Kaggle batch | Offline components `in-review`; integrated batch `blocked` | M4-01 through M4-03 merged in PRs #19–#21. PR #22 adds reservation-aware quota, bounded provider log snapshots, capability/timeout evidence and manual-required cancellation. Output retrieval, full Provider registration and M1 live go remain required. |
+| M-4 — Integrated Kaggle batch | Offline components `in-review`; integrated batch `blocked` | M4-01 through M4-04 merged in PRs #19–#22. PR #23 adds complete version-scoped artifact listing/transfer and immutable M3 publication/recovery. Full Provider registration, end-to-end acceptance and M1 live go remain required. |
 | M-5 — Usable developer product | `not-started` | CLI, doctor, install, examples, and three thin clients. |
 | M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
 
 Detailed task dependencies and authorization boundaries are in
-[`implementation-plan.md`](implementation-plan.md). PR #22 stops for owner review/merge;
-M4-05 has not started. The owner requested M4 after merging M3; proposal section 23.6 permits
+[`implementation-plan.md`](implementation-plan.md). PR #23 stops for owner review/merge;
+M4-06 has not started. The owner requested M4 after merging M3; proposal section 23.6 permits
 useful offline preparation without claiming live evidence. Production `serve`, artifact HTTP/CLI,
 remote cleanup apply and staging cleanup remain separate gates. Neither preflight, staging
 readiness nor a quota/log observation grants a new compute submission permit.
@@ -171,19 +171,29 @@ attempt evidence separately from the latest raw observation. The SDK's upsert ra
 same-version rerun, dataset mount and cross-binary recovery limitations are explicit; terminal
 observation is not verified output publication.
 
-M4-04's [operational mappings](providers/kaggle-operations.md) use explicit raw quota durations
+M4-04's merged [operational mappings](providers/kaggle-operations.md) use explicit raw quota durations
 and reservations to produce conservative whole-second remaining allowance. Missing data and
 unknown reset times stay absent. Provider logs are bounded, version-scoped snapshots with exact
 identity and snapshot-bound cursors, not live SSE or payload artifacts. Cancellation is manual
 without a verified session ID, and provider timeout enforcement remains unknown. Tests preserve
 existing durable exhaustion, active execution evidence and original receipts through restart
-and later completion. M4-05 retrieval and full runtime integration remain separate work.
+and later completion. Full runtime integration remains separate work.
+
+M4-05's [artifact retrieval](providers/kaggle-artifacts.md) reads complete versioned listings,
+checks the original manifest and selects only declared outputs and fixed control files. Explicit
+SDK file/version downloads ignore listing URLs and do not extract ZIPs. Independent byte checks
+and successful final identity/status/process acknowledgement precede M3 atomic publication.
+Real SQLite/blob/collection tests recover partial or late-failed transfers and lost acknowledgements
+using the original durable pin, without another compute submission. In-memory catalog cursors
+are not durable pins; complete temporary bytes are not published artifacts. Range resume, public
+artifact routes, full Provider registration and M4-06/live acceptance remain separate.
 
 Unsupported or unknown capabilities remain visible. Work under
 [ADR-0015](decisions/0015-read-only-kaggle-preflight.md),
 [ADR-0016](decisions/0016-private-staging-and-readiness.md),
-[ADR-0017](decisions/0017-one-shot-kaggle-execution.md) and
-[ADR-0018](decisions/0018-kaggle-operational-evidence.md) does not replace the M1-08 provider go
+[ADR-0017](decisions/0017-one-shot-kaggle-execution.md),
+[ADR-0018](decisions/0018-kaggle-operational-evidence.md) and
+[ADR-0019](decisions/0019-version-scoped-kaggle-artifacts.md) does not replace the M1-08 provider go
 decision or turn source/fixture evidence into live compatibility. No live credential or
 provider resource was used for these offline implementation PRs.
 
