@@ -118,6 +118,25 @@ Failure conditions appear through existing cached job status. Identity mismatche
 the domain's `observation` failure stage; artifact failures use `results`. No provider
 message, internal cause or credential is copied into the public condition.
 
+## Kaggle artifact-port integration
+
+M4-05's [ArtifactReader](providers/kaggle-artifacts.md) supplies version-scoped candidate
+listing and selected-file transfers for the original Executor reference. It reads every
+bounded provider page, verifies the original manifest/declarations and ignores listing URLs.
+Explicit file/version SDK requests select declared outputs and fixed control files only;
+code, input, scratch and provider archives are not downloaded or extracted.
+
+Candidate payload digests still require independent verification. The reader's in-memory
+catalog cursor is not this collector's durable pin; reconstruction rejects stale cursors,
+while an already committed M3 snapshot is reused without replacing its manifest or file set.
+Each missing file is checked against the original pinned length/hash and remote identity.
+
+Temporary bytes can precede the helper's final status/identity checks and process exit.
+Failure after all bytes remains a failed provider call; the existing M3 pipe withholds
+successful blob EOF and publishes nothing. No special-case bypass, migration or collector
+state-machine change is introduced. Full production Provider registration and artifact
+HTTP/CLI remain separate from this tested composition.
+
 ## Defaults and operational limits
 
 Defaults are two workers (configurable 1–16), a ten-minute invocation deadline, a lease
@@ -185,6 +204,13 @@ modernc, full-engine or production-runtime execution. PR #16 records exact final
 results separately. No dependency downgrade, replacement driver or CI workflow was added.
 M3-07 retention/expiry evidence is recorded separately in PR #17 and the retention guide.
 
+M4-05's separate tests compose the concrete artifact reader with this engine and real
+SQLite/private blobs. They independently check committed lease/pin before helper entry,
+scoped verified reads, original receipt replay, profile remapping, 16 MiB partial/late/wrong
+transfers and lost pin/publication acknowledgements across restart. SDK HTTP fixtures are a
+different tier; no live provider or new process-kill experiment is claimed. See PR #23 and
+[the artifact guide](providers/kaggle-artifacts.md) for exact-head evidence and local limits.
+
 See [ADR-0013](decisions/0013-verified-collection-and-publication.md),
-[durable controls](operations.md), [dispatch](dispatch.md), [storage](storage.md) and
-[retention](retention.md).
+[durable controls](operations.md), [dispatch](dispatch.md), [storage](storage.md),
+[retention](retention.md) and [Kaggle artifacts](providers/kaggle-artifacts.md).
