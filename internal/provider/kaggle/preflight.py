@@ -47,7 +47,6 @@ def harden_session(client):
     session.max_redirects = 0
     session.cookies.clear()
     session.mount("https://", requests.adapters.HTTPAdapter(max_retries=0))
-    original_send = session.send
     count = 0
 
     def send(request, **kwargs):
@@ -56,8 +55,11 @@ def harden_session(client):
             raise ValueError("unexpected preflight request")
         count += 1
         # Explicit trust settings; never forward proxy/cert/redirect overrides.
-        response = original_send(request, timeout=(5, 10), allow_redirects=False,
-                                 stream=True, proxies={}, verify=True, cert=None)
+        # Invoke the requests adapter directly: Session.send can pre-read a
+        # redirect body even with allow_redirects=False. The adapter neither
+        # follows redirects nor consumes a response before this byte guard.
+        response = session.get_adapter(request.url).send(
+            request, timeout=(5, 10), stream=True, proxies={}, verify=True, cert=None)
         try:
             if not 200 <= response.status_code < 300:
                 response.raise_for_status()
@@ -72,6 +74,19 @@ def harden_session(client):
                 if len(chunk) > MAX_RESPONSE - len(data):
                     raise ValueError("oversized response")
                 data.extend(chunk)
+            def unique(items):
+                result = {}
+                for key, value in items:
+                    if key in result:
+                        raise ValueError("duplicate response field")
+                    result[key] = value
+                return result
+            def invalid_constant(_):
+                raise ValueError("invalid JSON constant")
+            parsed = json.loads(data.decode("utf-8"), object_pairs_hook=unique,
+                                parse_constant=invalid_constant)
+            if not isinstance(parsed, dict):
+                raise ValueError("expected response object")
             # Requests' own Response cache is populated only after bounded EOF.
             # The SDK reads it through its ordinary response parser after return.
             response._content = bytes(data)
