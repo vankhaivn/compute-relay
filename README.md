@@ -1,10 +1,10 @@
 # Compute Relay
 
 > **Project status:** portable-core components and M3 durable orchestration are complete
-> at their implemented offline gates; M4-01 preflight is merged in PR #19. M4-02 private
-> staging/readiness is implemented offline on PR #20 with its review gate pending.
+> at their implemented offline gates; M4-01 preflight and M4-02 staging are merged in
+> PRs #19/#20. M4-03 one-shot execution/observation is in review in PR #21.
 > M1 live acceptance, production batch registration, `serve`, artifact HTTP and remote
-> cleanup apply remain separate work. Offline staging is not live Kaggle or GPU readiness.
+> cleanup apply remain separate work. Offline components are not live Kaggle/GPU readiness.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -67,9 +67,11 @@ The repository currently establishes:
 - an executable 25-scenario fault catalog with fresh named-test qualification, linked
   evidence boundaries and a recovery/state-semantics guide;
 - explicit environment-reference resolution and a bounded local/read-only Kaggle preflight,
-  with server-account checking, a fixed isolated SDK helper and an opt-in operator command; and
+  with server-account checking, a fixed isolated SDK helper and an opt-in operator command;
 - private attempt staging with stable intent naming, frozen input markers, no-retry SDK
-  creation, separately verified readiness and real SQLite recovery-integration tests.
+  creation, separately verified readiness and real SQLite recovery-integration tests; and
+- locked remote source packaging and a per-attempt execution component with one-shot SDK
+  submission, exact-version/source/ID observation and read-only recovery under M3 authority.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -116,6 +118,15 @@ compose real admission/blobs/SQLite with the Stager through a test-only provider
 separate tests use the real pinned SDK with mocked transport. No production batch Provider,
 mutation CLI, remote cleanup or live-provider evidence is supplied by this task.
 
+M4-03's [execution component](docs/providers/kaggle-execution.md) packages the unchanged locked
+runner as inert source, rechecks original staging, and permits one private save only after
+new durable submission authority. Lost/ambiguous acknowledgement leads to original-identity
+reconciliation, not another save. Exact numeric kernel ID, version, source, account and private
+metadata are verified around status reads. Missing/new status stays unknown; cancellation
+acknowledgement and local time do not prove termination or hardware release. The guide and
+ADR-0017 disclose SDK upsert races, same-version rerun limits and source reconstruction across
+binary/configuration changes. Full Provider/capability/output integration remains separate.
+
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
 blob bytes or prove full runtime recovery. M3's offline gate closed with PR #18's owner merge.
@@ -146,6 +157,7 @@ live Kaggle support.
 | [`docs/recovery.md`](docs/recovery.md) | Operational state interpretation and safe recovery by durable boundary, without invented runtime commands. |
 | [`docs/providers/kaggle-preflight.md`](docs/providers/kaggle-preflight.md) | Explicit local/read-only commands, credential scope, pinned SDK transport, bounded reports and the unchanged live gate. |
 | [`docs/providers/kaggle-staging.md`](docs/providers/kaggle-staging.md) | Private staging authority, frozen marker/catalog, byte-verified readiness, one-shot recovery and evidence limits. |
+| [`docs/providers/kaggle-execution.md`](docs/providers/kaggle-execution.md) | One-shot submission authority, locked source, exact-version observations, uncertainty, SDK races and recovery/verification limits. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -175,6 +187,8 @@ go test -run='TestRetention|TestCleanupPreview|TestDelete' ./internal/store/sqli
 go run ./cmd/devtool fault-test
 go run ./cmd/kagglepreflight --help
 go test -run=TestStaging ./internal/provider/kaggle
+go test -run='TestExecution|TestExecutor' ./internal/provider/kaggle
+go test ./runner
 ```
 
 The upload check exercises loopback HTTP, synthetic workspace tokens, streamed upload,
@@ -192,6 +206,10 @@ pagination and recovery against a synthetic provider. Retention tests exercise t
 byte expiry/deletion, root identity and synthetic remote previews. They never execute the
 fixture command or apply remote cleanup. Staging tests verify preparation/ownership integration
 and isolated helper framing without creating a real dataset or invoking a workload.
+Execution tests prove original intent/source preservation, exact observations and restart
+without another submission using synthetic helper outcomes. SDK tests separately use the
+real locked SDK with mocked HTTP; bootstrap wiring uses inert fixture modules. No admitted
+workload or generated kernel script is executed on the local host by these tests.
 
 `fault-test` runs the nominated fault regressions uncached and is also included in
 `go run ./cmd/devtool check`. Repository-wide race tests remain a separate

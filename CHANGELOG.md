@@ -147,15 +147,28 @@ Semantic Versioning once a public compatibility surface exists.
   SDK HTTP fixtures and isolated leaf-process framing/stream/deadline tests.
 - Staging guide and ADR-0016 documenting component authority, signed-storage restrictions,
   transient upload-ticket limits and unchanged live/production batch gates.
+- M4-03 per-attempt Executor with locked remote source, stable intent-derived kernel names,
+  original ready/private staging rechecks and one SDK save under NEW M3 submission authority.
+- Exact numeric kernel ID/version/source/account/privacy observation and read-only recovery;
+  raw-field status checks avoid fabricated SDK defaults and retain unknown cancellation/release.
+- A remote-only marker-gated bootstrap for the unchanged finite runner, plus explicit Go asset
+  embedding/digest checks excluding bytecode caches and unrelated files.
+- Execution tests for concurrent calls, ambiguous save responses, real helper framing/deadlines,
+  actual pinned-SDK mocked HTTP, bootstrap wiring and generated runner-manifest validation.
+- Real SQLite/blob/dispatch intent-before-helper, lost acknowledgement, restart/remapping and
+  stale/replacement observation tests. Latest raw UNKNOWN and stronger confirmed attempt state
+  are tested separately without changing the existing M3 merge semantics.
+- Execution guide and ADR-0017 documenting upsert/CAS, same-version identity, dataset mount,
+  free-only quota, cross-binary source recovery and separate full-Provider/live acceptance limits.
 
 ### Changed
 
 - Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
   request, preserving existing history and all other format rules. Added 16 regression checks
   to the existing convention workflow; synchronized the canonical policy and commit template.
-- Updated README and the implementation plan for merged M4-01 and active M4-02 PR #20,
-  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015
-  records owner acceptance through PR #19; its historical decision text is preserved.
+- Synchronized living documentation for merged M4-01/M4-02 and M4-03's PR #21 review gate,
+  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015/0016
+  record owner acceptance; their historical decision text and earlier evidence are preserved.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -171,5 +184,7 @@ Semantic Versioning once a public compatibility surface exists.
 - Fixed safely closable sanitized staging redirects and rejected local input Close failures
   before credential lookup. M4-02 staging changes no dependency or migration; the separately
   approved convention adjustment adds only a validator regression step to its existing workflow.
+- M4-03 adds no dependency, workflow, public contract or migration changes; original Python
+  runner asset/lock bytes and existing durable state-machine implementations remain unchanged.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

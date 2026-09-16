@@ -23,17 +23,19 @@ defaults.
 | [`0013-verified-collection-and-publication.md`](0013-verified-collection-and-publication.md) | accepted; PR #16 merged | Pin one result snapshot per attempt, independently verify streamed/cached bytes and atomically publish artifacts with fenced collection-only recovery. |
 | [`0014-retention-tombstones-and-cleanup-preview.md`](0014-retention-tombstones-and-cleanup-preview.md) | accepted; PR #17 merged | Preserve recovery pins and metadata, commit expiry before exact bound-store deletion, and keep remote cleanup strictly ledger-based and dry-run-only. |
 | [`0015-read-only-kaggle-preflight.md`](0015-read-only-kaggle-preflight.md) | accepted; PR #19 merged | Separate local checks from explicit credential-scoped SDK reads, bound the private transport seam, verify the server account and retain the M1/batch activation gate. |
-| [`0016-private-staging-and-readiness.md`](0016-private-staging-and-readiness.md) | proposed; PR #20 in review | Bind one-shot private staging to the prewritten attempt/operation, verify readiness and exact bytes separately, and recover through observation under the existing M3 ownership journal. |
+| [`0016-private-staging-and-readiness.md`](0016-private-staging-and-readiness.md) | accepted; PR #20 merged | Bind one-shot private staging to the prewritten attempt/operation, verify readiness and exact bytes separately, and recover through observation under the existing M3 ownership journal. |
+| [`0017-one-shot-kaggle-execution.md`](0017-one-shot-kaggle-execution.md) | proposed; PR #21 in review | Package locked remote source, allow one save under durable intent, verify exact version/ID/source around observations and preserve uncertainty without remote exactly-once claims. |
 
 M3-08's merged [fault qualification](../fault-matrix.md) and [recovery guidance](../recovery.md)
-do not change the earlier architectural decisions. M4-01's preflight and M4-02's
-[preparation-only staging](../providers/kaggle-staging.md) do not establish M1 live behavior
-or register a production batch Provider. The staging guide records the explicit source-completion
-trailer required before dataset creation; pipe EOF alone is not source acknowledgement.
+do not change the earlier architectural decisions. M4-01's preflight, M4-02's
+[private staging](../providers/kaggle-staging.md) and M4-03's
+[execution component](../providers/kaggle-execution.md) do not establish M1 live behavior or
+register a complete production batch Provider. Source completion, exact identities and
+write-ahead authority remain separate from provider guarantees and future output verification.
 Historical task-specific stop instructions inside an ADR describe that decision's scope;
 the [implementation plan](../implementation-plan.md) owns the current review/next-task boundary.
 Accepted outcomes and dated evidence are not silently rewritten to look like results from a
-later task. Proposed ADR-0016 remains subject to owner review and PR #20's checks.
+later task. Proposed ADR-0017 remains subject to owner review and PR #21's checks.
 
 ## Naming
 

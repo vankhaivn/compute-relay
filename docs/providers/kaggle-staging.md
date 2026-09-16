@@ -1,6 +1,6 @@
 # Private attempt staging and separately verified readiness
 
-> **Task:** M4-02, offline implementation in PR #20; owner-review gate pending.
+> **Task:** M4-02, implemented offline; PR #20 merged.
 > **Requirements:** DAT-04, OPS-05, SEC-03; preserves DUR-03 and frozen input identity.
 > **Evidence:** real pinned-SDK fixtures and local durable-component tests, not live Kaggle.
 
@@ -11,13 +11,12 @@ while implementing or testing this PR.
 
 ## One active implementation
 
-The implementation is `internal/provider/kaggle/staging*.go` with an embedded `staging.py`.
-PR #20 on `feat/m4-02-private-staging` is the active integration branch. The earlier exported
-`checkpoint/m4-02-offline-staging` package is obsolete and must not be merged or cherry-picked.
-It has a different marker/type model and content-dependent resource naming. Its archived
-verification results are not evidence for this implementation. The owner requested removal
-of that redundant branch; the PR conversation records whether the deletion has actually
-succeeded. No duplicate implementation is added to compensate for unavailable deletion tools.
+The implementation is `internal/provider/kaggle/staging*.go` with an embedded `staging.py`,
+merged through PR #20. The earlier exported `checkpoint/m4-02-offline-staging` package is
+obsolete and must not be merged or cherry-picked. It has a different marker/type model and
+content-dependent resource naming. Its archived verification results are not evidence for this
+implementation. The owner subsequently allowed that branch to remain when deletion was unavailable;
+it is retained, not an integration prerequisite or merge blocker. No duplicate package is added.
 
 ## Composition and durable authority
 
@@ -135,8 +134,10 @@ version and marker digest. Once M3 has recorded that reference, replacement at t
 cannot retarget the original intent.
 
 Verification is a point-in-time observation, not an immutable provider lock or GPU permit.
-The execution path must continue to bind the correct dataset version and verify runner input
-identity; those M4-03 duties are not waived by staging readiness.
+The [M4-03 execution component](kaggle-execution.md) rechecks the complete original staging
+reference before a newly authorized save and binds the marker/input identities into remote
+source. Dataset attachment and remote marker/byte checks do not establish an atomic immutable
+provider mount; the execution guide discloses that limit separately from readiness.
 
 ## Transport and process boundary
 
@@ -208,18 +209,20 @@ Completion regressions add real Go/Python pipe execution, final payload EOF/Clos
 SDK fixtures proving that all uploaded payload bytes without a complete source trailer still
 make zero dataset-create calls. The normal framed path creates once; observe remains read-only.
 
-Final-head workflow outcomes, exact commits and any unresolved checks are recorded in PR #20.
+Final-head workflow outcomes and exact commits are recorded in merged PR #20.
 Local Go 1.23.2 ran the exact protocol constructor and real-pipe regression with race detection
 and three repetitions, plus vet, in an isolated standard-library harness. Six Python protocol/
 watchdog tests passed locally; seven SDK tests were explicitly skipped because the SDK was not
 installed. Those local results do not qualify full Go 1.27.1/modernc integration, native builds
 or actual SDK behavior; the pinned CI tier supplies that evidence. Historical results from the
-obsolete checkpoint are not relabeled as current staging results. No dependency, public contract,
-migration, runner asset or workflow is changed.
+obsolete checkpoint are not relabeled as current staging results. Staging changed no dependency,
+public contract, migration, original runner asset or workflow. PR #20's separately owner-approved
+commit-convention adjustment added a validator regression step to its existing workflow.
 
 M4-02 is an offline staging component, not a production Kaggle batch adapter or a shipped
-live-mutation command. No M1 live gate is closed, no staging/live support is asserted from a
-fake test, and M4-03 has not started. Stop at PR #20 for owner review/merge.
+live-mutation command. No M1 live gate is closed or live support asserted from fixture tests.
+M4-03 execution evidence is recorded separately in PR #21 and the execution guide; the
+[implementation plan](../implementation-plan.md) owns the current owner-review/next-task gate.
 
 ## Primary-source boundary
 
@@ -230,5 +233,5 @@ Version-pinned source references, reviewed for this implementation on 2026-09-16
 - [CLI v2.2.4 dataset metadata](https://github.com/Kaggle/kaggle-cli/blob/v2.2.4/docs/datasets_metadata.md): supported metadata/license labels; not upload-rights advice or live readiness evidence.
 
 See [ADR-0016](../decisions/0016-private-staging-and-readiness.md),
-[preflight](kaggle-preflight.md), [dispatch](../dispatch.md), [retention](../retention.md)
-and the [implementation plan](../implementation-plan.md).
+[preflight](kaggle-preflight.md), [execution](kaggle-execution.md), [dispatch](../dispatch.md),
+[retention](../retention.md) and the [implementation plan](../implementation-plan.md).
