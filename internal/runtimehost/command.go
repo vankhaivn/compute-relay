@@ -28,6 +28,9 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if r.Command == "profile" {
+		return profileCommand(ctx, r, out)
+	}
 	if r.Command == "validate" {
 		return validateFile(ctx, r.File, out)
 	}
