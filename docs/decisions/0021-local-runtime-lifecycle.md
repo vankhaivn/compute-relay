@@ -1,6 +1,6 @@
 # ADR-0021: Explicit local administration and joined HTTP lifecycle
 
-- Status: proposed; M5-01a implemented in PR #25, pending owner review/merge
+- Status: accepted; M5-01a merged in PR #25
 - Date: 2026-09-16
 - Requirements: API-01/03, DX-01; preserves SEC-02 and durable ownership
 - Extends: ADR-0004/0008/0009/0012 without replacing their contracts
