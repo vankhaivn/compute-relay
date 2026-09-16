@@ -1,6 +1,7 @@
 # Dependency-aware implementation plan
 
-> **Status:** active; M-0, M1-01, M2 and M3-01 through M3-07 merged. M3-08 in review.
+> **Status:** active; M-0, M1-01, M2 and M3 are merged at their offline gates.
+> M4-01's offline/read-only foundation is in review; M1 live acceptance remains blocked.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-16.
 >
@@ -26,9 +27,15 @@ PR #14 merged [durable preparation and one-shot dispatch recovery](dispatch.md) 
 PR #15 merged [durable attempt-scoped controls](operations.md) for M3-05.
 PR #16 merged [verified artifact collection and recovery](collection.md) for M3-06.
 PR #17 merged [retention, local sweep and remote cleanup preview](retention.md) for M3-07.
-PR #18 supplies [executable fault qualification](fault-matrix.md) and
-[recovery/state semantics](recovery.md) for M3-08. It remains `in-review` until owner merge;
-M3's offline gate is not marked complete before that merge. M4 has not started.
+PR #18 merged [executable fault qualification](fault-matrix.md) and
+[recovery/state semantics](recovery.md) for M3-08 at `cc44f50` on 2026-09-16, closing M3's
+implemented offline gate. It did not close M1 or establish a production runtime.
+
+Following the owner's request to continue M4, PR #19 implements only M4-01's
+[local/read-only preflight foundation](providers/kaggle-preflight.md). It remains `in-review`
+until owner merge. Proposal section 23.6 permits this bounded non-dispatching preparation
+while credentials are unavailable; M1-08 go remains required for integrated batch activation.
+M4-02 and live-provider work have not started. See [ADR-0015](decisions/0015-read-only-kaggle-preflight.md).
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
 real-loopback tests, atomic blob publication and an explicit ownership-commit seam.
@@ -61,12 +68,20 @@ state, remote uncertainty, result availability and expiry distinct. Local-deadli
 cleanup and synthetic CLI/account evidence limits are explicit in the matrix; none is
 relabeled as a production deadline service, remote apply or live-provider test.
 
+M4-01 preparation supplies explicit environment-reference resolution, immutable non-secret
+preflight configuration, local version checks and an opt-in read-only operator utility.
+A fixed isolated helper checks server account identity before quota-data availability through
+two bounded official-SDK requests. It is not a Provider or dispatch registration and always
+reports `batch_ready=false`. Numeric quota mapping, durable provider configuration and unified
+TOML/serve composition are not supplied by this foundation. Offline SDK fixtures do not
+qualify K-01/K-12 live behavior or waive M1's private execution/result requirements.
+
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one task/PR, report its evidence, and stop for owner merge
-before beginning another task. PR #18 qualifies the implemented offline M3 boundary, not a
-production runtime. Artifact HTTP/CLI, production `serve` and live Kaggle remain separate.
+before beginning another task. PR #19 implements the bounded M4-01 foundation, not integrated
+Kaggle batch. Artifact HTTP/CLI, production `serve` and live Kaggle remain separate.
 Commit and push reviewable checkpoints during implementation; the disposable local runtime
 must not be the only copy of ongoing work.
 
@@ -117,8 +132,10 @@ M1 thin live-provider proof   M2 portable offline core
               M6 release hardening
 ```
 
-M2 may begin after M-0 while credentials are unavailable. M4 cannot begin until M1 has a
-go decision and M3 has the durable semantics the adapter must use.
+M2 may begin after M-0 while credentials are unavailable. Integrated M4 batch activation
+requires M1 go and M3's durable semantics. The owner's requested M4-01 offline/read-only
+preparation under proposal section 23.6 does not remove that dependency or grant a dispatch
+permit. ADR-0015 records the distinction; the live acceptance rows remain blocked.
 
 ## M-0 — Evidence and scope
 
@@ -184,13 +201,13 @@ live tasks remain `blocked-environment`.
 | M3-05 | implementation / `complete` | Implement durable cancel/retry/reconcile/collect operations with race-safe transition rules. | DOM-02/03, API-03, OPS-04 | M3-02/M3-04 | No / No | Merged PR #15: migration 6; explicit attempt targets, immutable receipts/current status, one-shot cancellation/manual-required, cancellation/completion and staging races, frozen-input concurrent retry, revocation and event rollback, transfer-only collection tickets, authenticated HTTP and actual-response/schema checks. See operations.md and ADR-0012. Collection consumer is supplied by M3-06. |
 | M3-06 | implementation / `complete` | Implement attempt-scoped artifact collection, verification, atomic publication, and collection-only recovery. | JOB-05, PRV-02, VER-02 | M2-06, M3-04/M3-05 | No / No | Merged PR #16: migration 7; immutable result pins, fenced collection leases, strict manifest/frozen requirement checks, bounded pagination/transfers, independently rehashed blobs, atomic publication/state/events and scoped internal reads. Tests cover wrong identity/digest/missing output, partial/late-error transfer, stale/concurrent owners, cancellation race, SQL disk-full, schema-6 upgrade, lost acknowledgements and real process kill without another compute submission. See collection.md and ADR-0013 for directory and composition limits. |
 | M3-07 | implementation / `complete` | Implement ownership ledger, retention pins, local sweep, and remote cleanup dry-run plan. | OPS-05, DUR-01, VER-02 | M3-01/M3-04/M3-06 | No / No | Merged PR #17: migrations 8/9; complete reference/pin checks, named holds, immutable expiry/audit, atomic result.expired event, expired-input preflight/commit guards, exact bound-root deletion and acknowledgement recovery. Authenticated exact-ledger dry runs recheck pins/binding/authority and keep owned absence idempotent. Tests cover upgrade, wrong bytes/root/identity, rollback/disk-full, lost acknowledgements and hold/revocation races. See retention.md and ADR-0014. Metadata is preserved; remote apply and staging preview are not supplied. |
-| M3-08 | test/documentation / `in-review` | Execute the proposal fault matrix and document recovery/operational state semantics. | VER-02, all DUR/DOM/OPS | M3-01–M3-07 | No / No | PR #18: exact 25-scenario/34-test catalog, fresh uncached named-test qualification in devtool check, missing/skipped/incomplete evidence rejection, observation/identity/deadline/account/CLI/16 MiB transfer/quota/cancellation regressions, recovery guide and requirement links. See fault-matrix.md for exact executed evidence and limits: local invocation deadline, cleanup dry-run and synthetic provider/helper effects are not production/live qualification. Final-head CI is recorded in the PR. |
+| M3-08 | test/documentation / `complete` | Execute the proposal fault matrix and document recovery/operational state semantics. | VER-02, all DUR/DOM/OPS | M3-01–M3-07 | No / No | Merged PR #18: exact 25-scenario/34-test catalog, fresh uncached named-test qualification in devtool check, missing/skipped/incomplete evidence rejection, observation/identity/deadline/account/CLI/16 MiB transfer/quota/cancellation regressions, recovery guide and requirement links. See fault-matrix.md for exact executed evidence and limits: local invocation deadline, cleanup dry-run and synthetic provider/helper effects are not production/live qualification. Final-head CI is recorded in the PR. |
 
 ## M-4 — Integrated Kaggle batch
 
 | ID | Type / status | Intended behavior and components | Requirements | Dependencies | External credentials / compute | Acceptance evidence |
 |---|---|---|---|---|---|---|
-| M4-01 | implementation / `proposed` | Implement Kaggle instance configuration, credential resolver integration, version checks, and read-only preflight. | PRD-04/08, SEC-01, PRV-03 | M1-08 go, M2-04/M2-05, M3-01 | Live verification Yes / No GPU | Config/negative tests plus K-01/K-12 fixture/live mapping. |
+| M4-01 | offline foundation / `in-review`; live acceptance / `blocked` | Implement Kaggle instance configuration, credential resolver integration, version checks, and read-only preflight. | PRD-04/08, SEC-01, PRV-03 | M1-08 go for integrated batch; M2-04/M2-05, M3-01 | Offline No / No; live verification Yes / No GPU | PR #19: explicit env references, immutable non-secret configuration, local pin checks before token access, bounded isolated SDK account/quota reads, opt-in operator command, negative/transport/process and real pinned-SDK fixture tests. No Provider registration, durable config composition or batch readiness. See providers/kaggle-preflight.md and ADR-0015; K-01/K-12 live evidence remains blocked. |
 | M4-02 | implementation / `proposed` | Implement private attempt staging/readiness and resource-ledger recording. | DAT-04, OPS-05, SEC-03 | M1-08, M3-04/M3-07, M4-01 | Live verification Yes / provider storage | K-03/K-04 behavior matches evidence; no public fallback. |
 | M4-03 | implementation / `proposed` | Implement attempt-scoped submit, observation, raw-state mapping, and ambiguity reconciliation. | PRV-02, DUR-03, DOM-02/03 | M1-08, M3-04, M4-02 | Live verification Yes / Finite GPU | Adapter fixture/fault/live tests preserve identity and never blind-resubmit. |
 | M4-04 | implementation / `proposed` | Implement logs, quota, timeout, capability, and cancellation/manual-required mappings. | PRV-03, OPS-02/03/04 | M1-08, M3-05, M4-03 | Live verification Yes / bounded where needed | Optional capabilities exactly match evidence; missing values remain unknown/unsupported. |
@@ -238,16 +255,16 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M3-08 review
+## Next work after M4-01 foundation review
 
-Stop after reporting PR #18 and wait for owner merge. Passing qualification and owner merge
-close M3's implemented offline orchestration gate, not the full MVP or live-provider gate.
-Use [fault-matrix.md](fault-matrix.md) for the exact tests and their limited evidence tiers;
-use [recovery.md](recovery.md) for the safe actions supported by the current services.
+Stop after reporting PR #19 and wait for owner merge. Do not begin M4-02 in this task.
+M4-01's local/read-only foundation is not complete integrated M4 acceptance. Its operator
+utility requires explicit authenticated-read opt-in and never enables batch dispatch.
+M1-02 can use that bounded path for separately authorized evidence; M1-03–M1-07 and the M1-08
+go decision remain prerequisites for private staging and integrated execution.
 
-Do not automatically begin M4 when CI becomes green. M1-02 remains an operator-run, explicitly
-authorized read-only probe; M1-03–M1-07 and the M1-08 go decision remain separate prerequisites.
 Provider mutation, GPU allocation, remote cleanup apply and live compatibility require their
-own authorization and evidence. Artifact HTTP/CLI and production `serve` remain product work.
-No live Kaggle capability, overall-job deadline service, staging cleanup or remote apply is
-implied by the offline matrix or synthetic helper-process tests.
+own authorization and evidence. Artifact HTTP/CLI, durable provider configuration and production
+`serve` remain composition/product work. A successful preflight is not a persistent credential
+grant, numerical quota allowance or execution permit. No live Kaggle capability, overall-job
+deadline service, staging cleanup or remote apply is implied by offline tests.

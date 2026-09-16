@@ -1,10 +1,10 @@
 # Compute Relay
 
-> **Project status:** portable-core components, SQLite metadata, durable admission,
-> scheduling, one-shot dispatch/recovery, durable controls, verified collection and
-> pin-aware retention/cleanup previews are implemented offline. M3-01 through M3-07 are
-> merged; M3-08 fault qualification is in review in PR #18. Production `serve`, artifact
-> HTTP routes, remote cleanup apply and live Kaggle remain separate gates.
+> **Project status:** portable-core components and M3 durable orchestration are complete
+> at their implemented offline gates; PR #18 is merged. M4-01's local/read-only Kaggle
+> preflight foundation is in review in PR #19. M1 live acceptance and the integrated batch
+> adapter remain gated. Production `serve`, artifact HTTP and remote cleanup apply are
+> separate work; offline preflight is not live Kaggle or GPU readiness.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -63,9 +63,11 @@ The repository currently establishes:
 - a bounded transfer-only collector, immutable per-attempt result snapshots, verified local
   blobs, atomic artifact/state/event publication and authenticated internal result reads;
 - named retention holds, irreversible expiry/audit, exact bound-store local byte deletion,
-  expired-input admission/retry guards and authenticated exact-ledger remote dry-run previews; and
+  expired-input admission/retry guards and authenticated exact-ledger remote dry-run previews;
 - an executable 25-scenario fault catalog with fresh named-test qualification, linked
-  evidence boundaries and a recovery/state-semantics guide.
+  evidence boundaries and a recovery/state-semantics guide; and
+- explicit environment-reference resolution and a bounded local/read-only Kaggle preflight,
+  with server-account checking, a fixed isolated SDK helper and an opt-in operator command.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -98,11 +100,17 @@ identity and rejects missing, skipped, failed or incomplete fresh test evidence.
 [recovery guide](docs/recovery.md) separates receipt recovery, reconciliation, transfer retry,
 explicit compute retry, cancellation, expiry and cleanup preview.
 
+M4-01's [preflight](docs/providers/kaggle-preflight.md) defaults to installed-version checks
+without credential lookup or provider calls. Explicit read-only opt-in uses one selected
+environment token, compares a server-returned account identity before querying quota-data
+availability, and returns sanitized observations. It always reports `batch_ready=false` and
+does not implement/register a dispatch-capable Provider. No M1 live gate is waived.
+
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
-blob bytes or prove full runtime recovery. M3's offline gate remains pending PR #18 owner
-merge. These explicitly composed components are not a complete production orchestration
-service; production `serve` and live-provider acceptance remain unimplemented/unverified.
+blob bytes or prove full runtime recovery. M3's offline gate closed with PR #18's owner merge.
+These components and the separate preflight utility are not a complete production
+orchestration service; production `serve` and live-provider acceptance remain separate gates.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -126,6 +134,7 @@ live Kaggle support.
 | [`docs/retention.md`](docs/retention.md) | Pin-aware expiry, exact bound-store byte sweep, metadata preservation, remote dry runs and recovery limits. |
 | [`docs/fault-matrix.md`](docs/fault-matrix.md) | All 25 fault cases, exact nominated tests, executable qualification and offline/live evidence limits. |
 | [`docs/recovery.md`](docs/recovery.md) | Operational state interpretation and safe recovery by durable boundary, without invented runtime commands. |
+| [`docs/providers/kaggle-preflight.md`](docs/providers/kaggle-preflight.md) | Explicit local/read-only commands, credential scope, pinned SDK transport, bounded reports and the unchanged live gate. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -153,6 +162,7 @@ go run ./cmd/dispatchsmoke
 go test -run=TestCollection ./internal/store/sqlite
 go test -run='TestRetention|TestCleanupPreview|TestDelete' ./internal/store/sqlite ./internal/blobfs ./internal/retention
 go run ./cmd/devtool fault-test
+go run ./cmd/kagglepreflight --help
 ```
 
 The upload check exercises loopback HTTP, synthetic workspace tokens, streamed upload,
@@ -176,9 +186,10 @@ fixture command or apply remote cleanup.
 faults separately from injected provider observations, local deadlines and dry-run outcomes.
 No admitted workload or official live provider CLI is invoked by qualification.
 
-These checks are finite, clean up temporary files and never call Kaggle. None is a
-production runtime. See the component and fault-matrix guides for their distinct evidence
-limits and local-versus-CI verification disclosures.
+These checks and preflight help are finite and never call Kaggle. None is a production
+runtime. Read the preflight guide before explicitly enabling its authenticated network mode.
+See the component and fault-matrix guides for their distinct evidence limits and
+local-versus-CI verification disclosures.
 
 ## Current execution boundary
 
@@ -195,8 +206,9 @@ side effect:
 - identity-safe test-resource cleanup.
 
 Credentials must not be pasted into chat, committed, passed to remote jobs, or captured in
-fixtures. Completing M3's offline qualification does not automatically authorize M4 or any
-live side effect. Follow the implementation plan's owner-review and provider-evidence gates.
+fixtures. The owner's request for offline/read-only M4-01 preparation does not waive M1-08
+or authorize live side effects in this session. Follow the implementation plan's owner-review
+and provider-evidence gates; preflight success never grants dispatch permission.
 
 ## Contributing
 

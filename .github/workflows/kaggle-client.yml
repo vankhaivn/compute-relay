@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "tools/kaggle-client/**"
+      - "internal/provider/kaggle/**"
       - "scripts/kaggle-client.*"
       - ".github/workflows/kaggle-client.yml"
   push:
     branches: [main]
     paths:
       - "tools/kaggle-client/**"
+      - "internal/provider/kaggle/**"
       - "scripts/kaggle-client.*"
       - ".github/workflows/kaggle-client.yml"
 
