@@ -81,7 +81,7 @@ func runVersion(args []string, stdout, stderr io.Writer) error {
 	flags.SetOutput(stderr)
 	jsonOutput := flags.Bool("json", false, "write machine-readable build metadata")
 
-	if err := flags.Parse(args[1:]); err != nil {
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
