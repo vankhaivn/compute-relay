@@ -17,7 +17,7 @@ Semantic Versioning once a public compatibility surface exists.
 - Requirement-to-component-to-test traceability for the approved MVP boundaries.
 - Dated Kaggle CLI `v2.2.4` interface review and populated K-01 through K-16 feasibility
   ledger.
-- Initial ADRs for the official-client boundary, attempt-scoped Kaggle identity, and
+- Initial ADRs for the official-client boundary, attempt-scoped provider identity, and
   Go/SQLite baseline.
 - Dependency-aware M-0 through M-6 implementation plan with explicit credential/compute
   authorization boundaries.
@@ -126,13 +126,22 @@ Semantic Versioning once a public compatibility surface exists.
   immutable receipts, current state, uncertainty, cancellation, collection and retention.
   Local deadlines, cleanup dry runs and synthetic helper/account effects remain explicitly
   distinct from production overall-job deadlines, remote apply and live-provider acceptance.
+- M4-01 offline/read-only foundation: explicitly allowlisted environment credential references,
+  fresh scoped access and callback-buffer clearing without ambient source fallback.
+- Immutable non-secret instance preflight configuration, local Python/client/SDK metadata
+  checks before credential access, and server-account verification before quota-data reads.
+- A fixed isolated SDK helper with stdin-only tokens, ordered HTTPS request allowlist,
+  redirect/retry/proxy restrictions, bounded strict responses and an independent watchdog.
+- Finite `cmd/kagglepreflight` utility with local default, explicit authenticated-read opt-in,
+  interrupt/SIGTERM handling and sanitized dated reports that always keep batch readiness false.
+- Configuration, credential lifetime, process isolation, deadline, redaction and real pinned-SDK
+  fixture tests; preflight guide and ADR-0015 disclose the private transport seam and live gates.
 
 ### Changed
 
-- Synchronized living README, roadmap, plan, developer commands and persistence guidance
-  with merged M3-01 through M3-07 and M3-08's in-review boundary. Preserved the approved
-  proposal, historical ADR decisions and dated provider evidence without upgrading live
-  support or claiming a production runtime. ADR-0012/0013/0014 statuses reflect owner merges.
+- Synchronized living README, roadmap, plan and documentation/ADR indexes with merged M3
+  and M4-01's in-review offline/read-only foundation. Preserved the approved proposal and
+  dated provider evidence. No M1 live acceptance or integrated batch activation is claimed.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -140,5 +149,10 @@ Semantic Versioning once a public compatibility surface exists.
   checkpoints rather than relying on disposable local runtime state.
 - Included fault qualification in the existing developer `check` task without changing
   CI workflows, dependencies, migration bytes, public contracts or production runtime logic.
+- Extended only the existing Kaggle-client workflow's path filters to include the embedded
+  preflight helper package. Tests remain offline, permissions stay read-only and dependency
+  pins, lockfiles, runner assets, public contracts and database migrations are unchanged.
+- Corrected the process-isolation test to compare cwd/home filesystem identity rather than
+  textual path spelling, preserving the isolation requirement across canonical path aliases.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
