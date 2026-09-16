@@ -3,7 +3,6 @@ package runtimehost
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -95,20 +94,9 @@ func (h *Host) issueToken(ctx context.Context, id domain.WorkspaceID, scopes []a
 		}
 		seen[scope] = true
 	}
-	output, err := filepath.Abs(output)
-	if err != nil || statefs.CheckDir(filepath.Dir(output)) != nil {
-		return receipt, ErrRequest
-	}
-	relative, err := filepath.Rel(h.root.Path, output)
+	output, err := tokenDestination(h.root.Path, output)
 	if err != nil {
-		return receipt, ErrRequest
-	}
-	first := strings.ToLower(strings.Split(filepath.ToSlash(relative), "/")[0])
-	if first == "state" || first == "inputs" || first == "results" || relative == "." {
-		return receipt, ErrRequest
-	}
-	if _, err := os.Lstat(output); !errors.Is(err, os.ErrNotExist) {
-		return receipt, ErrRequest
+		return receipt, err
 	}
 	secret, record, err := h.access.Issue(ctx, id, scopes, time.Now().UTC().Add(ttl))
 	if err != nil {
