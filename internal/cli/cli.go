@@ -1,4 +1,4 @@
-// Package cli contains the small local command boundary for the pre-release binary.
+// Package cli contains the local command boundary for the pre-release binary.
 package cli
 
 import (
@@ -12,6 +12,8 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/buildinfo"
 	"github.com/vankhaivn/compute-relay/internal/bundlectl"
+	"github.com/vankhaivn/compute-relay/internal/operatorcli"
+	"github.com/vankhaivn/compute-relay/internal/runtimehost"
 )
 
 const usage = `Compute Relay (pre-release)
@@ -24,22 +26,31 @@ Usage:
   compute-relay bundle inspect --file FILE
 
 Bundle commands are local and never execute workload code.
-The runtime and job commands are introduced by later milestones.
-`
+` + "\n" + operatorcli.Usage
 
-// Run executes the command and returns a process exit code.
+// Run retains the embeddable command boundary. The executable uses RunContext
+// so interrupt/SIGTERM reaches serving, upload shutdown and finite local work.
 func Run(args []string, stdout, stderr io.Writer) int {
+	return RunContext(context.Background(), args, stdout, stderr)
+}
+func RunContext(parent context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = io.WriteString(stdout, usage)
+		if _, err := io.WriteString(stdout, usage); err != nil {
+			return 1
+		}
 		return 0
 	}
 
 	switch args[0] {
 	case "help", "-h", "--help":
-		_, _ = io.WriteString(stdout, usage)
+		if _, err := io.WriteString(stdout, usage); err != nil {
+			return 1
+		}
 		return 0
+	case "init", "state", "serve", "workspace", "token", "validate":
+		return operatorcli.Run(parent, args, stdout, stderr, runtimehost.Command)
 	case "bundle":
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 		defer cancel()
 		if err := bundlectl.Run(ctx, args[1:], stdout, stderr); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
@@ -56,7 +67,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
+		// A token pasted as an unknown command must not be reflected.
+		_, _ = io.WriteString(stderr, "unknown command; use compute-relay help\n")
 		return 2
 	}
 }

@@ -2,7 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,11 +27,11 @@ func TestRunHelp(t *testing.T) {
 
 func TestRunUnknownCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"serve"}, &stdout, &stderr); code != 2 {
+	if code := Run([]string{"SYNTHETIC_SECRET"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("Run() code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr.String(), `unknown command "serve"`) {
-		t.Fatalf("stderr = %q, want unknown-command diagnostic", stderr.String())
+	if !strings.Contains(stderr.String(), "unknown command") || strings.Contains(stderr.String(), "SYNTHETIC_SECRET") {
+		t.Fatalf("stderr = %q, want sanitized unknown-command diagnostic", stderr.String())
 	}
 }
 
@@ -62,5 +65,24 @@ func TestRunVersionRejectsPositionals(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "accepts no positional arguments") {
 		t.Fatalf("stderr = %q, want argument diagnostic", stderr.String())
+	}
+}
+
+func TestLocalRoutesKeepHelpAndCancellationFreeOfStateWrites(t *testing.T) {
+	for _, command := range []string{"init", "state", "serve", "workspace", "token", "validate"} {
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{command, "--help"}, &stdout, &stderr); code != 0 || stdout.Len() == 0 || stderr.Len() != 0 {
+			t.Fatal("local help routing failed", command, code)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "must-not-create")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stdout, stderr bytes.Buffer
+	if code := RunContext(ctx, []string{"init", "--root", path}, &stdout, &stderr); code != 1 || stdout.Len() != 0 {
+		t.Fatal("cancelled init succeeded", code)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatal("cancelled action created state")
 	}
 }
