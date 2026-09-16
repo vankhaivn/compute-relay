@@ -1,7 +1,7 @@
 # Dependency-aware implementation plan
 
 > **Status:** active; M-0, M1-01, M2 and M3 are merged at their offline gates.
-> M4-01/M4-02 offline components are merged; M4-03 is in review in PR #21.
+> M4-01 through M4-03 offline components are merged; M4-04 is in review in PR #22.
 > M1/live batch acceptance remains blocked on separate evidence.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-16.
@@ -35,11 +35,13 @@ implemented offline gate. It did not close M1 or establish a production runtime.
 PR #19 merged M4-01's [local/read-only preflight foundation](providers/kaggle-preflight.md)
 at `52b1655` on 2026-09-16. PR #20 merged M4-02's
 [private staging and readiness](providers/kaggle-staging.md) at `91fa6be` on 2026-09-16.
-PR #21 implements M4-03 [one-shot execution and exact-version observation](providers/kaggle-execution.md)
-and remains in review until owner merge. Proposal section 23.6 permits offline work without
-waiving M1-08 go for integrated batch activation. No live-provider work or M4-04 has started.
-See ADR-0015/0016/0017. The retained `checkpoint/m4-02-offline-staging` branch is obsolete,
-not an integration prerequisite; its conflicting package is not part of PR #20 or PR #21.
+PR #21 merged M4-03 [one-shot execution and exact-version observation](providers/kaggle-execution.md)
+at `ac547e9` on 2026-09-16. PR #22 implements M4-04
+[operational capabilities, quota and log snapshots](providers/kaggle-operations.md) and remains
+in review until owner merge. Proposal section 23.6 permits offline work without waiving M1-08
+go for integrated batch activation. No live-provider work or M4-05 has started. See
+ADR-0015/0016/0017/0018. The retained `checkpoint/m4-02-offline-staging` branch is obsolete,
+not an integration prerequisite; its conflicting package is not part of the active implementation.
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
 real-loopback tests, atomic blob publication and an explicit ownership-commit seam.
@@ -98,11 +100,20 @@ journal observation is unknown. SDK/leaf-process/bootstrap tests are offline, wi
 upsert, same-version rerun, dataset-mount and cross-binary recovery limits. Full Provider
 registration, optional capabilities and output retrieval are not supplied by this component.
 
+M4-04 adds a serialized read-only Monitor, reservation-aware GPU quota in conservative whole
+seconds and reference/snapshot-bound provider log pagination. Missing quota/log fields do not
+inherit SDK zero/empty defaults, and reset time is not guessed. Manual cancellation uses no
+provider call because the recorded kernel ID is not a verified session target. Frozen timeout
+layers and unknown enforcement remain distinct. Real SQLite tests preserve quota exhaustion
+and original manual-control receipts through restart and later completion; actual SDK tests
+use mocked HTTP. These ports add no public route, live SSE, overall deadline controller or
+complete runtime registration. Source/runner and existing M3 state logic are unchanged.
+
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one task/PR, report its evidence, and stop for owner merge
-before beginning another task. PR #21 implements M4-03's offline execution boundary, not
+before beginning another task. PR #22 implements M4-04's offline operational boundary, not
 complete integrated Kaggle batch. Artifact HTTP/CLI, production `serve`, remote cleanup and
 live Kaggle remain separate. Commit and push reviewable checkpoints during implementation;
 the disposable local runtime must not be the only copy of ongoing work.
@@ -157,7 +168,7 @@ M1 thin live-provider proof   M2 portable offline core
 M2 may begin after M-0 while credentials are unavailable. Integrated M4 batch activation
 requires M1 go and M3's durable semantics. The owner's requested M4 offline preparation
 under proposal section 23.6 does not remove that dependency or grant live mutation authority.
-ADR-0015/0016/0017 record the distinction; live acceptance rows remain blocked.
+ADR-0015 through ADR-0018 record the distinction; live acceptance rows remain blocked.
 
 ## M-0 — Evidence and scope
 
@@ -231,8 +242,8 @@ live tasks remain `blocked-environment`.
 |---|---|---|---|---|---|---|
 | M4-01 | offline foundation / `complete`; live acceptance / `blocked` | Implement Kaggle instance configuration, credential resolver integration, version checks, and read-only preflight. | PRD-04/08, SEC-01, PRV-03 | M1-08 go for integrated batch; M2-04/M2-05, M3-01 | Offline No / No; live verification Yes / No GPU | Merged PR #19: explicit env references, immutable non-secret configuration, local pin checks before token access, bounded isolated SDK account/quota reads, opt-in operator command, negative/transport/process and real pinned-SDK fixture tests. No Provider registration, durable config composition or batch readiness. See providers/kaggle-preflight.md and ADR-0015; K-01/K-12 live evidence remains blocked. |
 | M4-02 | offline implementation / `complete`; live acceptance / `blocked` | Implement private attempt staging/readiness and resource-ledger recording. | DAT-04, OPS-05, SEC-03 | M1-08, M3-04/M3-07, M4-01 | Offline No / No; live verification Yes / provider storage | Merged PR #20: stable attempt/preparation naming, exact marker/input identity, pre-credential byte/EOF/Close checks, bounded no-retry private SDK creation, paginated marker-first/all-file verification and read-only recovery. Real SQLite integration tests cover ownership-before-helper, lost acknowledgements, reopen/remap and pinned resource replacement rejection. Explicit source-completion trailer prevents pipe errors from authorizing dataset creation. See providers/kaggle-staging.md and ADR-0016; no production Provider or live K-03/K-04 claim. |
-| M4-03 | offline component / `in-review`; live acceptance / `blocked` | Implement attempt-scoped submit, observation, raw-state mapping, and ambiguity reconciliation. | PRV-02, DUR-03, DOM-02/03 | M1-08, M3-04, M4-02 | Offline No / No; live verification Yes / Finite GPU | PR #21: locked remote source and stable intent-derived slug; per-attempt Executor under M3 authority; bounded one-shot private SDK save, exact ID/version/source/account reads and raw-field status mapping. Unit/real-process/SQLite fault tests preserve original intent and confirmed state across lost acknowledgements, restart/remap and stale/replaced observations; actual pinned SDK uses mocked HTTP. See providers/kaggle-execution.md and ADR-0017 for upsert, same-version identity, mount/upgrade and composition limits. No blind resubmit or live acceptance. |
-| M4-04 | implementation / `proposed` | Implement logs, quota, timeout, capability, and cancellation/manual-required mappings. | PRV-03, OPS-02/03/04 | M1-08, M3-05, M4-03 | Live verification Yes / bounded where needed | Optional capabilities exactly match evidence; missing values remain unknown/unsupported. |
+| M4-03 | offline component / `complete`; live acceptance / `blocked` | Implement attempt-scoped submit, observation, raw-state mapping, and ambiguity reconciliation. | PRV-02, DUR-03, DOM-02/03 | M1-08, M3-04, M4-02 | Offline No / No; live verification Yes / Finite GPU | Merged PR #21: locked remote source and stable intent-derived slug; per-attempt Executor under M3 authority; bounded one-shot private SDK save, exact ID/version/source/account reads and raw-field status mapping. Unit/real-process/SQLite fault tests preserve original intent and confirmed state across lost acknowledgements, restart/remap and stale/replaced observations; actual pinned SDK uses mocked HTTP. See providers/kaggle-execution.md and ADR-0017 for upsert, same-version identity, mount/upgrade and composition limits. No blind resubmit or live acceptance. |
+| M4-04 | offline component / `in-review`; live acceptance / `blocked` | Implement logs, quota, timeout, capability, and cancellation/manual-required mappings. | PRV-03, OPS-02/03/04 | M1-08, M3-05, M4-03 | Offline No / No; live verification Yes / bounded where needed | PR #22: explicit account Monitor, exact raw-duration/reservation mapping with lower-bound seconds and freshness, version/identity/snapshot-bound log pagination, capability evidence and manual cancellation without guessed session IDs. Real SQLite tests preserve quota exhaustion and original receipts through restart/completion; actual SDK uses mocked HTTP. See providers/kaggle-operations.md and ADR-0018. Live SSE, provider timeout enforcement and full runtime registration remain unverified/separate. |
 | M4-05 | implementation / `proposed` | Implement paginated output retrieval and manifest-bound artifact collection. | JOB-05, PRV-02, VER-02 | M3-06, M4-03 | Live verification Yes / existing completed run | K-07 fixtures/live proof; all required outputs verified against the exact attempt. |
 | M4-06 | integration / `proposed` | Run sanitized end-to-end private GPU acceptance through the durable runtime, including restart recovery. | PRD-04, VER-03 | M4-01–M4-05 | Yes / Explicit finite GPU | Proposal live checklist passes; gaps remain explicitly unobservable/unsupported. |
 
@@ -277,17 +288,22 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M4-03 review
+## Next work after M4-04 review
 
-Stop after reporting PR #21 for owner review/merge. Do not begin M4-04 in this task.
-The per-attempt Executor requires NEW M3 submission authority; a reconstructed executor,
-preflight success or missing resource cannot authorize another save. Preserve original source,
-configuration/binary and remote identity when investigating uncertainty. Provider terminal
-observation opens collection, not job success or a claim of retained verified artifacts.
+Stop after reporting PR #22 for owner review/merge. Do not begin M4-05 in this task.
+M4-04 exposes conservative account quota and bounded provider log snapshots, not reservations,
+complete payload artifacts or real-time streams. Manual cancellation retains unresolved remote
+activity and original receipts. A local timeout or known kernel ID cannot replace evidence of
+a stopped, correctly identified remote session. Existing M3 intent/state rules remain unchanged.
+
+The per-attempt Executor still requires NEW M3 submission authority; missing resource or
+preflight success cannot authorize another save. Preserve original source/configuration/binary
+and remote identity when investigating uncertainty. Provider terminal observation and provider
+log presence do not establish verified output publication.
 
 M1-02 read-only evidence and M1-03–M1-07/M1-08 retain their own authorization requirements.
 Provider mutation, GPU allocation, remote cleanup apply and live compatibility require explicit
-authorization and evidence. Optional capability/cancellation/quota mapping, output retrieval,
-full Provider registration, artifact HTTP/CLI, durable configuration and production `serve`
-remain separate work. No remote exactly-once guarantee, same-version session attestation,
-immutable dataset mount or transparent cross-binary recovery is implied by offline tests.
+authorization and evidence. Output retrieval, full Provider registration, public log/quota and
+artifact routes, durable configuration and production `serve` remain separate work. No remote
+exactly-once guarantee, same-version session attestation, immutable dataset mount or transparent
+cross-binary recovery is implied by offline tests.
