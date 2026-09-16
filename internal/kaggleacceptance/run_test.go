@@ -114,11 +114,15 @@ func (p *acceptanceFake) ReadQuota(context.Context) (provider.QuotaObservation, 
 	if p.f.quota == "zero" {
 		remaining = 0
 	}
-	q := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Unit: "seconds", Remaining: &remaining, ObservedAt: p.f.clock.Now(), Source: "offline-fixture", Precision: "exact"}
+	limit, used := float64(600), 600-remaining
+	q := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Unit: "seconds", Limit: &limit, Used: &used, Remaining: &remaining, ObservedAt: p.f.clock.Now(), Source: "offline-fixture", Precision: "exact"}
 	if p.f.quota == "unknown" {
 		q.Status = provider.QuotaUnknown
-		q.Remaining = nil
+		q.Limit, q.Used, q.Remaining = nil, nil, nil
 		q.Precision = "unknown"
+	}
+	if err := q.Validate(); err != nil {
+		p.f.t.Fatal("invalid test quota", err)
 	}
 	return q, nil
 }
