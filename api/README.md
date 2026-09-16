@@ -2,11 +2,11 @@
 
 > **Tasks:** M2-03 contracts; M2-05 through M2-08 auth/object input handlers;
 > M3-02 durable job admission, validation and cached status; M3-05 durable controls;
-> M3-07 expiry events and input-retention guards.
+> M3-07 expiry events and input-retention guards; M5-01a local serving.
 >
 > **Status:** contracts and fifteen composable handler operations are implemented offline.
-> Scheduling, dispatch, verified collection and retention are separate offline components.
-> Production composition, artifact/cleanup HTTP routes and live integration remain gates.
+> M5-01a serves configured local services without provider workers or default profiles.
+> Complete production composition, artifact/cleanup HTTP and live integration remain gates.
 
 ## Contract versions
 
@@ -145,7 +145,8 @@ See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for HTTP/owners
 [`../docs/packaging-and-import.md`](../docs/packaging-and-import.md) for import/bundle safety,
 [`../docs/https-ingestion.md`](../docs/https-ingestion.md) for SSRF policy, and
 [`../docs/admission.md`](../docs/admission.md) for canonicalization, replay and frozen inputs.
-SQLite repositories exist; production CLI/configuration composition remains separate.
+SQLite repositories exist; local CLI serving is described below, while general profile/provider
+configuration remains separate.
 
 M3-05 adds five `implemented-offline` control operations, bringing the total to fifteen:
 
@@ -175,10 +176,10 @@ requires a new explicit collect request/key. Neither path refreshes a durable re
 or reruns compute. See [`../docs/operations.md`](../docs/operations.md) and
 [`../docs/collection.md`](../docs/collection.md).
 
-The root status remains `planned` because a production runtime is not composed yet.
-Artifact HTTP transfer/listings, logs, events, attempts, profiles and quota retain their own
-implementation gates. Receipt links reserve these contract locations; they do not claim
-that the corresponding collection routes exist. M3-06 adds authenticated internal result
+The OpenAPI root status remains `planned`: M5-01a local serving does not complete the full
+production workflow. Artifact HTTP transfer/listings, logs, events, attempts, profiles and quota
+retain their own implementation gates. Receipt links reserve these contract locations; they
+do not claim the corresponding result routes exist. M3-06 adds authenticated internal result
 reads, not new public routes or a change to the fifteen-handler inventory. M3-07 likewise
 adds no cleanup/hold HTTP route. Expired results remain historical publications and return
 `retention.ErrExpired` through internal reads; existing job status can show `result=expired`
@@ -190,6 +191,27 @@ notebook slugs, credential material, and provider filesystem paths do not appear
 normal contract. `INVALID_REQUEST` and `REQUEST_LIMIT_EXCEEDED` distinguish local request
 validation/backpressure from provider failures. Import source changes use `INPUT_CHANGED`;
 unsafe local paths use `INVALID_INPUT_PATH` without exposing absolute host paths.
+
+## M5-01a local serving
+
+`compute-relay serve` composes existing auth/object/admission/control handlers on literal
+loopback with actual SQLite/blob repositories. It does not enable local import or HTTPS
+ingestion, and no scheduler/dispatch/collection/retention worker is started. New workspaces
+have no allowed profiles: a fresh installation can serve authorized object operations but
+cannot admit a job for an unconfigured profile. Tests explicitly seed profiles to verify
+admission/receipt recovery; this is not a production provisioning command or SQL workaround.
+
+The actual assigned port is used for Host validation. Responses identify
+`X-Compute-Relay-Mode: local-admission-only`; `/readyz` is local dependency readiness, not
+provider availability or a promise of executing queued jobs. Signal shutdown joins active
+handlers before closing stores. Local administration requires exclusive ownership and the
+server to stop first. Tokens are delivered to private files, not through an HTTP admin route.
+
+The separate local `validate --file` checks schema/semantics only and reports
+`admitted=false`/`provider_checked=false`; it is not the contextual HTTP validation response.
+No existing JSON schema, OpenAPI operation or contract-lock bytes change in this slice.
+See [`../docs/local-runtime.md`](../docs/local-runtime.md) and
+[ADR-0021](../docs/decisions/0021-local-runtime-lifecycle.md) for commands and evidence limits.
 
 ## Validation commands
 
