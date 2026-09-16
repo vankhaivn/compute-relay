@@ -10,6 +10,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/appcli"
 	"github.com/vankhaivn/compute-relay/internal/buildinfo"
 	"github.com/vankhaivn/compute-relay/internal/bundlectl"
 	"github.com/vankhaivn/compute-relay/internal/operatorcli"
@@ -26,7 +27,7 @@ Usage:
   compute-relay bundle inspect --file FILE
 
 Bundle commands are local and never execute workload code.
-` + "\n" + operatorcli.Usage
+` + "\n" + operatorcli.Usage + "\n" + appcli.Usage
 
 // Run retains the embeddable command boundary. The executable uses RunContext
 // so interrupt/SIGTERM reaches serving, upload shutdown and finite local work.
@@ -47,8 +48,10 @@ func RunContext(parent context.Context, args []string, stdout, stderr io.Writer)
 			return 1
 		}
 		return 0
-	case "init", "state", "serve", "workspace", "token", "validate":
+	case "init", "state", "serve", "workspace", "token", "validate", "profile":
 		return operatorcli.Run(parent, args, stdout, stderr, runtimehost.Command)
+	case "object", "job", "operation":
+		return appcli.Run(parent, args, stdout, stderr)
 	case "bundle":
 		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 		defer cancel()
@@ -78,7 +81,7 @@ func runVersion(args []string, stdout, stderr io.Writer) error {
 	flags.SetOutput(stderr)
 	jsonOutput := flags.Bool("json", false, "write machine-readable build metadata")
 
-	if err := flags.Parse(args); err != nil {
+	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
