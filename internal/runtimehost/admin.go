@@ -63,9 +63,9 @@ func (h *Host) EnableWorkspace(ctx context.Context, id domain.WorkspaceID, enabl
 type TokenReceipt struct {
 	ID          string             `json:"id"`
 	WorkspaceID domain.WorkspaceID `json:"workspace_id"`
-	Scopes      []auth.Scope        `json:"scopes"`
-	ExpiresAt   time.Time           `json:"expires_at"`
-	Delivery    string              `json:"delivery"`
+	Scopes      []auth.Scope       `json:"scopes"`
+	ExpiresAt   time.Time          `json:"expires_at"`
+	Delivery    string             `json:"delivery"`
 }
 
 var ErrTokenDelivery = errors.New("token file delivery failed; inspect the non-secret receipt and preserve any partial file")
