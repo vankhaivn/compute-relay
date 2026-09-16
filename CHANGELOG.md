@@ -27,8 +27,8 @@ Semantic Versioning once a public compatibility surface exists.
 - Go module, pre-release executable, cross-platform developer commands, and offline CI
   foundation.
 - Provider-neutral Go domain model with typed opaque identities, capability/evidence
-  semantics, stable structured errors, explicit entities, independent state dimensions,
-  and monotonic transition tests.
+  semantics, stable structured errors, explicit entities, independent attempt-state
+  dimensions, and monotonic transition tests.
 - Strict Draft 2020-12 JSON Schemas, OpenAPI 3.1 skeleton, positive/negative fixtures,
   domain-enum drift checks, and a reviewable contract-content lock.
 - Provider-neutral execution and infrastructure ports, explicit instance registry, optional
@@ -129,7 +129,7 @@ Semantic Versioning once a public compatibility surface exists.
 - M4-01 offline/read-only foundation: explicitly allowlisted environment credential references,
   fresh scoped access and callback-buffer clearing without ambient source fallback.
 - Immutable non-secret instance preflight configuration, local Python/client/SDK metadata
-  checks before credential access, and server-account verification before quota-data reads.
+  checks before token access, and server-account verification before quota-data reads.
 - A fixed isolated SDK helper with stdin-only tokens, ordered HTTPS request allowlist,
   redirect/retry/proxy restrictions, bounded strict responses and an independent watchdog.
 - Finite `cmd/kagglepreflight` utility with local default, explicit authenticated-read opt-in,
@@ -204,15 +204,25 @@ Semantic Versioning once a public compatibility surface exists.
   authority, byte/receipt persistence, startup/forced-close errors and interrupt/death recovery.
 - Local runtime guide and ADR-0021 separating the first M5-01 delivery slice from remaining
   application/profile/provider/result work and preserving unverified live acceptance.
+- M5-01b explicit immutable admission-profile apply/show and separate workspace grant/revoke,
+  reusing existing profile storage with closed private documents and sanitized metadata views.
+- Private-token application CLI for upload, contextual validation, submit/status and explicit
+  controls/current-operation reads through the running loopback API, without database access.
+- Fresh one-request HTTP transport with no redirect/proxy/replay; bounded strict response identity,
+  actual upload hashing, source/response acknowledgement and conservative commit-uncertainty errors.
+- Real CLI/HTTP/SQLite/blob tests for response loss after admission commit, explicit original-key
+  recovery, reopen/remap/revoke, original profile/receipt preservation and zero remote intent.
+- Additional parser/main-route, control-kind, source-growth, output-failure and request-reader
+  ownership tests; application guide and ADR-0022 distinguish local admission from worker activation.
 
 ### Changed
 
 - Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
   request, preserving existing history and all other format rules. Added 16 regression checks
   to the existing convention workflow; synchronized the canonical policy and commit template.
-- Synchronized living documentation for merged M4 components/harness and M5-01a's PR #25 review
-  gate, without declaring live acceptance or completion of parent M5-01. ADR-0020 records owner
-  acceptance after PR #24; historical decision/evidence text and original dependencies remain.
+- Synchronized living documentation for merged M5-01a and M5-01b's PR #26 review gate, without
+  declaring live acceptance or completion of parent M5-01. ADR-0021 records acceptance after
+  PR #25; historical decisions, earlier evidence and original dependencies remain preserved.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -244,5 +254,8 @@ Semantic Versioning once a public compatibility surface exists.
 - Main CLI routing propagates interrupt/SIGTERM context and no longer echoes unknown commands.
   Existing version and bundle interfaces remain, with bundle cancellation using the parent context.
   M5-01a changes no dependency, workflow, schema, migration or existing durable state-machine code.
+- M5-01b extends only local/application command routing and adds a validated profile read; existing
+  profile/admission/control mutations, public schemas, migrations and provider/runner sources remain.
+  Client corrections use the established object_id field and retry_compute kind, not a changed API.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
