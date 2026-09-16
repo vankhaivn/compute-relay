@@ -70,7 +70,7 @@ func runStagingSource(parent context.Context, c Config, mode string, secret []by
 	defer body.Close()
 	cmd.Stdin = bytes.NewReader(prefix)
 	if mode == "create" {
-		cmd.Stdin = io.MultiReader(bytes.NewReader(prefix), bytes.NewReader(p.marker), body)
+		cmd.Stdin = stagingCreateInput(prefix, p.marker, body)
 	}
 	out := &boundedOutput{cancel: cancel}
 	diagnostic := &boundedOutput{cancel: cancel, discard: true}

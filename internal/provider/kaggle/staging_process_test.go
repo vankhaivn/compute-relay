@@ -66,6 +66,7 @@ if sys.argv[1]=='create':
             remaining-=len(part)
             digest.update(part)
         assert digest.hexdigest()==f['sha256']
+    assert sys.stdin.buffer.read(len(b'\x00compute-relay/staging-upload-complete/v1\n'))==b'\x00compute-relay/staging-upload-complete/v1\n'
 assert sys.stdin.buffer.read(1)==b''
 `
 			source += "\nprint(" + strconv.Quote(string(encoded)) + ")\n"
@@ -105,5 +106,31 @@ func TestStagingProcessRejectsInvalidOutputAndExpires(t *testing.T) {
 	_, err = runStagingSource(ctx, s.config, "observe", []byte("SYNTHETIC_TOKEN"), p, b, `import time;time.sleep(60)`)
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second || b.reads != 0 {
 		t.Fatal("unbounded or mutating observation", err, b.reads)
+	}
+}
+
+func TestStagingTrailerRequiresFinalPayloadCloseAndEOF(t *testing.T) {
+	for _, mode := range []string{"normal", "late", "close"} {
+		t.Run(mode, func(t *testing.T) {
+			s, plan, b, _ := newTestStager(t, false)
+			p, err := buildStagingPlan(s.config, s.policy, plan, "prep")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Focus on the final source boundary: all three payload bytes reach
+			// the pipe before either the EOF probe or Close can fail.
+			p.objects = p.objects[len(p.objects)-1:]
+			b.mode = mode
+			body := &stagingBody{ctx: context.Background(), blobs: b, plan: p}
+			defer body.Close()
+			data, err := io.ReadAll(stagingCreateInput(nil, nil, body))
+			if mode == "normal" {
+				if err != nil || string(data) != "abc"+stagingUploadComplete {
+					t.Fatal("missing source acknowledgement", err)
+				}
+			} else if err == nil || string(data) != "abc" {
+				t.Fatal("failed final payload issued a create trailer", err)
+			}
+		})
 	}
 }

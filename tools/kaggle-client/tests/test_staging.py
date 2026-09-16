@@ -261,7 +261,7 @@ class Backend:
         raise AssertionError("unapproved provider operation " + operation)
 
     def run(self, mode, data=None):
-        if data is None: data=b"".join(self.payloads.values())
+        if data is None: data=b"".join(self.payloads.values()) + staging.UPLOAD_COMPLETE
         with mock.patch.object(requests.adapters.HTTPAdapter,"send",lambda adapter,req,**kw:self.exchange(adapter,req,**kw)), \
              mock.patch.dict(os.environ,{"KAGGLE_API_TOKEN":"AMBIENT_CANARY","HTTPS_PROXY":"http://do-not-use.invalid"}), \
              mock.patch("kagglesdk.kaggle_http_client.get_access_token_from_env",side_effect=AssertionError("ambient credential")), \
@@ -325,6 +325,7 @@ class StagingPinnedSDKTests(unittest.TestCase):
                 data=b"".join(p.values())
                 if mode=="truncated": data=data[:-1]
                 if mode=="changed": data=b"X"+data[1:]
+                data += staging.UPLOAD_COMPLETE
                 if mode=="trailing": data+=b"X"
                 with self.assertRaises((ValueError,OSError,staging.IdentityError,requests.RequestException)):
                     b.run("create",data)

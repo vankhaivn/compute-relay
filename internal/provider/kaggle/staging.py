@@ -18,6 +18,7 @@ MAX_TOTAL = (4 << 30) + (100 << 20) + (64 << 10)
 DIGEST = re.compile(r"[a-f0-9]{64}\Z")
 ACCOUNT = re.compile(r"[a-z0-9][a-z0-9_-]{1,49}\Z")
 SLUG = re.compile(r"crs-[a-f0-9]{40}\Z")
+UPLOAD_COMPLETE = b"\x00compute-relay/staging-upload-complete/v1\n"
 
 
 class IdentityError(Exception):
@@ -242,9 +243,22 @@ def upload(guard, client, r, source):
         entry = ApiDatasetNewFile()
         entry.token = ticket.token
         files.append(entry)
+    require_upload_complete(source)
+    return files
+
+
+def require_upload_complete(source):
+    # EOF alone is unsafe: the Go stdin copier also closes its pipe on a source
+    # read/Close error. Only the trailer emitted after all source checks grants
+    # permission to finish upload and proceed to the one-shot create call.
+    remaining = UPLOAD_COMPLETE
+    while remaining:
+        part = source.read(len(remaining))
+        if not part or part != remaining[:len(part)]:
+            raise ValueError("source completion not acknowledged")
+        remaining = remaining[len(part):]
     if source.read(1) != b"":
         raise ValueError("trailing upload data")
-    return files
 
 
 def dataset_call(guard, client, r, request_type, method_name):
