@@ -89,7 +89,7 @@ func open(ctx context.Context, path string, create bool) (_ *Host, err error) {
 			return nil, ErrState
 		}
 		canonical, e := json.Marshal(h.identity)
-		if e != nil || !bytes.Equal(raw, canonical) || h.identity.Version != 1 || !domain.InstallationID(h.identity.InstallationID).Valid() || h.identity.InputsID == h.identity.ResultsID {
+		if e != nil || !bytes.Equal(raw, canonical) || h.identity.Version != 1 || !domain.RuntimeInstallationID(h.identity.InstallationID).Valid() || h.identity.InputsID == h.identity.ResultsID {
 			return nil, ErrState
 		}
 		for _, name := range []string{"state", "inputs", "results"} {
