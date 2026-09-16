@@ -163,6 +163,7 @@ class Guard:
             clean.status_code = response.status_code
             clean.headers = {"Location": signed_url(location), "Content-Type": "application/octet-stream"}
             clean._content = b""
+            clean._content_consumed = True
             return clean
         if download and response.status_code == 200:
             if response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() == "application/octet-stream":
