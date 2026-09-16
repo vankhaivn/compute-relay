@@ -150,6 +150,9 @@ Semantic Versioning once a public compatibility surface exists.
 
 ### Changed
 
+- Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
+  request, preserving existing history and all other format rules. Added 16 regression checks
+  to the existing convention workflow; synchronized the canonical policy and commit template.
 - Updated README and the implementation plan for merged M4-01 and active M4-02 PR #20,
   without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015
   records owner acceptance through PR #19; its historical decision text is preserved.
@@ -166,6 +169,7 @@ Semantic Versioning once a public compatibility surface exists.
 - Corrected the process-isolation test to compare cwd/home filesystem identity rather than
   textual path spelling, preserving the isolation requirement across canonical path aliases.
 - Fixed safely closable sanitized staging redirects and rejected local input Close failures
-  before credential lookup. M4-02 changes no dependency, workflow or migration.
+  before credential lookup. M4-02 staging changes no dependency or migration; the separately
+  approved convention adjustment adds only a validator regression step to its existing workflow.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
