@@ -2,8 +2,9 @@
 
 > **Status:** acceptance-based roadmap active; synchronized 2026-09-16.
 >
-> **Current milestone:** M-3 — durable orchestration; M3-01 through M3-07 merged,
-> M3-08 fault qualification in review in PR #18. M-1 live acceptance remains blocked.
+> **Current work:** M3's implemented offline gate is complete through merged PR #18.
+> M4-01 local/read-only preparation is in review in PR #19; M1 live acceptance and
+> integrated Kaggle batch activation remain blocked on their evidence gates.
 >
 > Dates and sprint estimates are intentionally not assigned without an execution context.
 
@@ -18,16 +19,16 @@ proof of the first real compute path.
 | M-0 — Evidence and scope | `complete` | PR #1 merged the traceability, evidence, ADR, risk, compatibility and dependency-aware plan set. |
 | M-1 — Thin real-provider proof | `blocked` for live acceptance | M1-01 offline harness merged in PR #3; authorized private bounded GPU path with identity-safe verified outputs is still required. |
 | M-2 — Portable core | `complete` offline | M2-01 through M2-09 merged through PR #10; provider-neutral API/domain/objects/auth/fake-provider and finite runner evidence, not a live-provider claim. |
-| M-3 — Durable orchestration | `in-review` for offline acceptance | M3-01 through M3-07 merged in PRs #11–#17; PR #18 supplies executable 25-scenario qualification and recovery documentation. Exact-head checks and owner merge close this offline gate only. |
-| M-4 — Integrated Kaggle batch | `not-started` | Evidence-matching Kaggle adapter inside the durable core. |
+| M-3 — Durable orchestration | `complete` offline | PRs #11–#18 merged the components, executable 25-scenario qualification and recovery documentation. This closes the implemented offline gate, not production or live acceptance. |
+| M-4 — Integrated Kaggle batch | Offline preparation `in-review`; integrated batch `blocked` | PR #19 supplies M4-01's local/read-only foundation only. M1-08 go, live verification and dispatch-capable integration remain required. |
 | M-5 — Usable developer product | `not-started` | CLI, doctor, install, examples, and three thin clients. |
 | M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
 
 Detailed task dependencies and authorization boundaries are in
-[`implementation-plan.md`](implementation-plan.md). PR #18 stops for owner merge. Passing
-offline qualification does not automatically start M4 or authorize provider side effects.
-Production `serve`, artifact HTTP/CLI, remote cleanup apply and staging preview remain
-separate gates; the matrix does not claim those behaviors exist.
+[`implementation-plan.md`](implementation-plan.md). PR #19 stops for owner merge. The owner
+requested M4 after merging M3; proposal section 23.6 permits useful offline/read-only
+preparation without claiming live evidence. Production `serve`, artifact HTTP/CLI, remote
+cleanup apply and staging preview remain separate gates. Preflight never grants dispatch.
 
 ## M-0 — Evidence and scope
 
@@ -49,8 +50,8 @@ transport/default decisions are recorded.
 
 - proposal requirements mapped to components, tests, and milestones;
 - Kaggle feasibility report populated with exact source versions and evidence levels;
-- initial material decisions recorded with alternatives and verification;
 - dependency-aware task plan separates offline work from credential/compute tasks;
+- initial material decisions recorded with alternatives and verification;
 - no live capability presented as verified without an authorized test; and
 - the M-0 PR is merged with required checks passing.
 
@@ -126,7 +127,8 @@ deletion.
 root tests. The developer checker compares exact proposal/source identities, executes fresh
 uncached tests and rejects missing/skipped/failed evidence. [Recovery semantics](recovery.md)
 explains safe actions without inventing production commands. PR #18's final-head CI and
-owner merge close the implemented **offline** gate; this is not a full-MVP completion claim.
+owner merge closed the implemented **offline** gate on 2026-09-16; this is not a full-MVP
+completion claim.
 
 The evidence remains scoped: local invocation deadlines are not a production overall-job
 deadline service; cleanup coverage is dry-run-only; synthetic account/CLI/resource faults
@@ -148,8 +150,16 @@ provider-neutral core.
 - paginated collection verifies the correct attempt; and
 - a sanitized durable end-to-end acceptance run survives local restart.
 
-Unsupported or unknown capabilities remain visible. M3's offline qualification does not
-replace the M1-08 provider go decision or authorize M4 to bypass its prerequisites.
+M4-01's [preflight foundation](providers/kaggle-preflight.md) supplies explicit environment
+references, version checks and opt-in server-account/quota reads through a bounded isolated
+SDK helper. Tests use synthetic transport with the real pinned SDK. The package is deliberately
+not a dispatch-capable Provider; every report says `batch_ready=false`. Numeric quota mapping,
+durable configuration, staging/submission and M4-02 onward remain separate work.
+
+Unsupported or unknown capabilities remain visible. This preparatory work under
+[ADR-0015](decisions/0015-read-only-kaggle-preflight.md) does not replace the M1-08 provider go
+decision or turn source/fixture evidence into live compatibility. No live credential or
+provider resource was used for PR #19.
 
 ## M-5 — Usable developer product
 
