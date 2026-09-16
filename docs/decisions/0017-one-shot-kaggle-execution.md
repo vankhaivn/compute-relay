@@ -1,6 +1,6 @@
 # ADR-0017: One-shot Kaggle execution with exact-source observation
 
-- Status: proposed; implemented offline in PR #21, pending owner review/merge
+- Status: accepted; PR #21 merged on 2026-09-16
 - Date: 2026-09-16
 - Task: M4-03
 - Requirements: PRV-02, DUR-03, DOM-02/03
