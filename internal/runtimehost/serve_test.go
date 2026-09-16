@@ -121,7 +121,7 @@ func TestLocalHTTPAuthUploadAdmissionAndReopenWithoutDispatch(t *testing.T) {
 		t.Fatal("invalid object receipt")
 	}
 	requestHost(t, url+"/v1/workspaces/app/objects/"+string(object.ID), "GET", token, "", nil, 200)
-	spec := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"local fixture","profile":"local-test","bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","MUST_NOT_EXECUTE.py"]},"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`, object.ID)
+	spec := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"local fixture","profile":"local-test","bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","MUST_NOT_EXECUTE.py"]},"inputs":[],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`, object.ID)
 	// New installations have no profiles. Explicit TEST-ONLY profile seeding below
 	// proves handler composition without inventing a production provider setup path.
 	requestHost(t, url+"/v1/workspaces/app/jobs", "POST", token, spec, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "local-idempotency-001"}, 403)

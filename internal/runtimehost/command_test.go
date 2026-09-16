@@ -13,7 +13,7 @@ import (
 
 func TestLocalValidationNeedsNoStateOrProviderAndRejectsInvalidFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "job.json")
-	good := []byte(`{"api_version":"compute-connector/v1alpha1","name":"schema only","profile":"not-configured","bundle":{"object_id":"absent"},"execution":{"kind":"python","command":["python","MUST_NOT_RUN.py"]},"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`)
+	good := []byte(`{"api_version":"compute-connector/v1alpha1","name":"schema only","profile":"not-configured","bundle":{"object_id":"absent"},"execution":{"kind":"python","command":["python","MUST_NOT_RUN.py"]},"inputs":[],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`)
 	if err := os.WriteFile(path, good, 0600); err != nil {
 		t.Fatal(err)
 	}
