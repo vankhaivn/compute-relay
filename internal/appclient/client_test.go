@@ -128,7 +128,7 @@ func TestUploadChecksReceiptDigestAndWorkspace(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(201)
-		_, _ = io.WriteString(w, `{"id":"obj_result","workspace_id":"workspace","bytes":1572864,"sha256":"`+digest+`"}`)
+		_, _ = io.WriteString(w, `{"object_id":"obj_result","workspace_id":"workspace","bytes":1572864,"sha256":"`+digest+`"}`)
 	})
 	r := Request{Action: "upload", Workspace: "workspace", Body: bytes.NewReader(data), Bytes: int64(len(data)), SHA256: digest}
 	if _, err := Exchange(context.Background(), server.URL, token, r); err != nil {

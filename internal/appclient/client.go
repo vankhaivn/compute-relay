@@ -324,7 +324,7 @@ func responseIdentity(m map[string]json.RawMessage, r Request) bool {
 	switch r.Action {
 	case "upload":
 		var n int64
-		return ValidID(text(m, "id")) && text(m, "workspace_id") == r.Workspace && json.Unmarshal(m["bytes"], &n) == nil && string(m["bytes"]) != "null" && n == r.Bytes && text(m, "sha256") == r.SHA256
+		return ValidID(text(m, "object_id")) && text(m, "workspace_id") == r.Workspace && json.Unmarshal(m["bytes"], &n) == nil && string(m["bytes"]) != "null" && n == r.Bytes && text(m, "sha256") == r.SHA256
 	case "validate":
 		var warnings, requirements []json.RawMessage
 		return string(bytes.TrimSpace(m["valid"])) == "true" && json.Unmarshal(m["warnings"], &warnings) == nil && warnings != nil && json.Unmarshal(m["requirements"], &requirements) == nil && requirements != nil

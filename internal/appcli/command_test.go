@@ -111,7 +111,7 @@ func TestApplicationUploadChecksActualSourceIncludingEmptyFile(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(201)
-			_, _ = fmt.Fprintf(w, `{"id":"obj_original","workspace_id":"app","bytes":%d,"sha256":%q}`, len(data), digest)
+			_, _ = fmt.Fprintf(w, `{"object_id":"obj_original","workspace_id":"app","bytes":%d,"sha256":%q}`, len(data), digest)
 		}))
 		var out, diagnostic bytes.Buffer
 		args := []string{"object", "upload", "--workspace", "app", "--url", server.URL, "--token-file", tokenFile, "--file", input}
@@ -138,7 +138,7 @@ func TestApplicationOutputFailureDoesNotRepeatMutation(t *testing.T) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(201)
-		_, _ = io.WriteString(w, `{"id":"obj_original","workspace_id":"app","bytes":0,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}`)
+		_, _ = io.WriteString(w, `{"object_id":"obj_original","workspace_id":"app","bytes":0,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}`)
 	}))
 	defer server.Close()
 	var diagnostic bytes.Buffer
