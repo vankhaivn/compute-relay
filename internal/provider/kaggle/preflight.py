@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import threading
 
 PROTOCOL = 1
 MAX_TOKEN = 8192
@@ -163,5 +164,17 @@ def main():
     return 0
 
 
+def bounded_main(seconds=25):
+    # Independent wall limit: a dead Go parent must not leave the fixed helper
+    # waiting indefinitely on stdin or a dribbling provider connection.
+    timer = threading.Timer(seconds, lambda: os._exit(3))
+    timer.daemon = True
+    timer.start()
+    try:
+        return main()
+    finally:
+        timer.cancel()
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(bounded_main())

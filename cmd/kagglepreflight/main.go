@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/credentials"
@@ -20,10 +21,11 @@ import (
 type checker interface {
 	Check(context.Context, kaggle.Mode) (kaggle.Report, error)
 }
+
 type factory func(kaggle.Config) (checker, error)
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, func(c kaggle.Config) (checker, error) {
 		resolver, err := credentials.NewEnvironment([]ports.CredentialRef{c.CredentialRef}, os.LookupEnv)
 		if err != nil {
