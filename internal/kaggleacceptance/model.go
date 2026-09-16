@@ -68,7 +68,7 @@ type record struct {
 type submissionMark struct {
 	Protocol     int                       `json:"protocol"`
 	ProcessNonce string                    `json:"process_nonce"`
-	PlanSHA256   domain.SHA256Digest        `json:"plan_sha256"`
+	PlanSHA256   domain.SHA256Digest       `json:"plan_sha256"`
 	IntentID     domain.SubmissionIntentID `json:"intent_id"`
 	RecordedAt   time.Time                 `json:"recorded_at"`
 }
