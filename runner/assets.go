@@ -11,7 +11,12 @@ import (
 	"strings"
 )
 
-//go:embed all:python/relay_runner assets.lock.json
+// Enumerate exact files, including __init__.py, without embedding __pycache__
+// or unrelated local files created between builds.
+//
+//go:embed python/relay_runner/__init__.py python/relay_runner/contract.py
+//go:embed python/relay_runner/files.py python/relay_runner/main.py
+//go:embed python/relay_runner/process.py assets.lock.json
 var assets embed.FS
 
 var sourceNames = [...]string{"__init__.py", "contract.py", "files.py", "main.py", "process.py"}
