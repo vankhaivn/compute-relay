@@ -113,17 +113,32 @@ Semantic Versioning once a public compatibility surface exists.
   SQLite disk-full, receipt preservation and preview hold/revocation races.
 - Retention guidance and ADR-0014 separating metadata expiry, local byte removal and remote
   preview, with conservative defaults, backup identity and metadata-pruning limitations.
+- M3-08 versioned fault catalog mapping all 25 numbered proposal scenarios to 34 distinct
+  named tests, with fresh uncached qualification through `devtool fault-test`.
+- Exact section/order/text and source identity checks; bounded Go test-event consumption
+  rejects missing/skipped/failed roots or descendants, incomplete packages and invalid output.
+- Regressions for unknown/modified observations, stale terminal polls, active restart,
+  local observation deadlines, frozen-account recovery, quota rejection, missing cancellation
+  identity and a nonzero helper exit after synthetic provider acceptance.
+- A 16 MiB halfway-transfer failure/reopen/explicit-recovery test preserving the original
+  result pin, exact final bytes and one original compute submission.
+- Executable evidence and recovery guides linking requirements to tests while separating
+  immutable receipts, current state, uncertainty, cancellation, collection and retention.
+  Local deadlines, cleanup dry runs and synthetic helper/account effects remain explicitly
+  distinct from production overall-job deadlines, remote apply and live-provider acceptance.
 
 ### Changed
 
-- Synchronized living README, roadmap, plan, architecture, API and persistence guidance
-  with merged M3-01 through M3-06 and M3-07's in-review boundary. Preserved the approved
+- Synchronized living README, roadmap, plan, developer commands and persistence guidance
+  with merged M3-01 through M3-07 and M3-08's in-review boundary. Preserved the approved
   proposal, historical ADR decisions and dated provider evidence without upgrading live
-  support or claiming a production runtime. ADR-0012/0013 statuses reflect owner merges.
+  support or claiming a production runtime. ADR-0012/0013/0014 statuses reflect owner merges.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
   event HTTP route is introduced. Contributor guidance records pushed feature-branch
   checkpoints rather than relying on disposable local runtime state.
+- Included fault qualification in the existing developer `check` task without changing
+  CI workflows, dependencies, migration bytes, public contracts or production runtime logic.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
