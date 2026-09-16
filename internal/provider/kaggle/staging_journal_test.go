@@ -79,18 +79,18 @@ func (r *stagingJournalRepository) CommitDispatch(ctx context.Context, h dispatc
 }
 
 type stagingJournalFixture struct {
-	root                                       string
-	store                                      *sqlite.Store
-	blobs                                      *blobfs.Store
-	clock                                      *stagingClock
-	profile                                    admission.Profile
-	config                                     Config
-	receipt                                    admission.Receipt
-	engine                                     *dispatch.Engine
-	repo                                       *stagingJournalRepository
-	creates, observes                          int
+	root                                        string
+	store                                       *sqlite.Store
+	blobs                                       *blobfs.Store
+	clock                                       *stagingClock
+	profile                                     admission.Profile
+	config                                      Config
+	receipt                                     admission.Receipt
+	engine                                      *dispatch.Engine
+	repo                                        *stagingJournalRepository
+	creates, observes                           int
 	created, ready, public, swapped, loseCreate bool
-	marker                                     []byte
+	marker                                      []byte
 }
 
 func stagingJournalBundle(t *testing.T) []byte {
