@@ -352,7 +352,7 @@ func responseIdentity(m map[string]json.RawMessage, r Request) bool {
 		if r.Action == "operation" {
 			return text(m, "operation_id") == r.ID
 		}
-		return text(m, "job_id") == r.ID && text(m, "attempt_id") == r.Attempt && text(m, "kind") == r.Action
+		return controlIdentity(m, r)
 	}
 }
 
