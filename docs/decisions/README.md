@@ -22,9 +22,11 @@ defaults.
 | [`0012-attempt-scoped-durable-controls.md`](0012-attempt-scoped-durable-controls.md) | accepted; PR #15 merged | Separate immutable receipts from current operation status, require explicit attempts and preserve one-shot cancellation, frozen-input retry and transfer-only collection. |
 | [`0013-verified-collection-and-publication.md`](0013-verified-collection-and-publication.md) | accepted; PR #16 merged | Pin one result snapshot per attempt, independently verify streamed/cached bytes and atomically publish artifacts with fenced collection-only recovery. |
 | [`0014-retention-tombstones-and-cleanup-preview.md`](0014-retention-tombstones-and-cleanup-preview.md) | accepted; PR #17 merged | Preserve recovery pins and metadata, commit expiry before exact bound-store deletion, and keep remote cleanup strictly ledger-based and dry-run-only. |
+| [`0015-read-only-kaggle-preflight.md`](0015-read-only-kaggle-preflight.md) | proposed; PR #19 in review | Separate local checks from explicit credential-scoped SDK reads, bound the private transport seam, verify the server account and retain the M1/batch activation gate. |
 
-M3-08 adds [fault qualification](../fault-matrix.md) and [recovery guidance](../recovery.md)
-without changing these architectural decisions. Historical task-specific stop instructions
+M3-08's merged [fault qualification](../fault-matrix.md) and [recovery guidance](../recovery.md)
+do not change the earlier architectural decisions. M4-01's preflight is non-dispatching
+preparation, not acceptance of M1 live behavior. Historical task-specific stop instructions
 inside an ADR describe that decision's scope; the [implementation plan](../implementation-plan.md)
 owns the current review/next-task boundary. Accepted outcomes and dated evidence are not
 silently rewritten to look like results from a later task.
