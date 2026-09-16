@@ -11,7 +11,7 @@ Semantic Versioning once a public compatibility surface exists.
 
 - Initial open-source repository policy and documentation system.
 - Approved project proposal and provider-neutral architecture baseline.
-- Apache-2.0 license, security policy, governance, support, and contribution guidance.
+- Apache-2.0 licensing and OSS governance/security/contribution policies.
 - Repository-wide instructions for human and automated contributors.
 - Conventional Commits documentation, local hooks, commit template, and CI validation.
 - Requirement-to-component-to-test traceability for the approved MVP boundaries.
@@ -160,14 +160,26 @@ Semantic Versioning once a public compatibility surface exists.
   are tested separately without changing the existing M3 merge semantics.
 - Execution guide and ADR-0017 documenting upsert/CAS, same-version identity, dataset mount,
   free-only quota, cross-binary source recovery and separate full-Provider/live acceptance limits.
+- M4-04 serialized read-only Monitor with explicit account verification and conservative GPU
+  quota normalization from raw nanosecond durations, including used and reserved capacity.
+- Quota freshness and missing/unavailable distinctions without inferred reset time or numerical
+  defaults; existing SQLite exhaustion survives unknown/stale reads and restart.
+- Bounded version-scoped provider log snapshots with exact identity checks before/after reads,
+  token-literal redaction, UTF-8 limits, explicit truncation and reference/snapshot-bound cursors.
+- Independent capability evidence, frozen timeout-layer reporting and reference-validated manual
+  cancellation without guessing session IDs, invoking provider mutations or claiming termination.
+- Operational tests for real isolated helper protocols, pinned-SDK mocked HTTP, precision and
+  missing fields, log identity races, pagination and persistent quota/control receipt semantics.
+- Operational guide and ADR-0018 documenting delayed snapshots, non-reservation quota, unsupported
+  batch cancellation and unverified provider timeout/live support separately from implementation.
 
 ### Changed
 
 - Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
   request, preserving existing history and all other format rules. Added 16 regression checks
   to the existing convention workflow; synchronized the canonical policy and commit template.
-- Synchronized living documentation for merged M4-01/M4-02 and M4-03's PR #21 review gate,
-  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015/0016
+- Synchronized living documentation for merged M4-01 through M4-03 and M4-04's PR #22 review gate,
+  without declaring live readiness or importing the obsolete staging checkpoint. ADR-0015/0016/0017
   record owner acceptance; their historical decision text and earlier evidence are preserved.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
@@ -186,5 +198,7 @@ Semantic Versioning once a public compatibility surface exists.
   approved convention adjustment adds only a validator regression step to its existing workflow.
 - M4-03 adds no dependency, workflow, public contract or migration changes; original Python
   runner asset/lock bytes and existing durable state-machine implementations remain unchanged.
+- M4-04 likewise preserves dependency/workflow/public-contract/migration and original execution/
+  runner sources. New optional ports reuse the existing identity, quota and durable-control rules.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main
