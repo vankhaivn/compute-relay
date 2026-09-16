@@ -3,8 +3,8 @@
 > **Status:** acceptance-based roadmap active; synchronized 2026-09-16.
 >
 > **Current work:** M3's implemented offline gate is complete through merged PR #18.
-> M4-01 local/read-only preparation is in review in PR #19; M1 live acceptance and
-> integrated Kaggle batch activation remain blocked on their evidence gates.
+> M4-01 local/read-only preparation is merged in PR #19; M4-02 private staging is
+> in review in PR #20. M1 live acceptance and integrated batch activation remain gated.
 >
 > Dates and sprint estimates are intentionally not assigned without an execution context.
 
@@ -20,15 +20,16 @@ proof of the first real compute path.
 | M-1 — Thin real-provider proof | `blocked` for live acceptance | M1-01 offline harness merged in PR #3; authorized private bounded GPU path with identity-safe verified outputs is still required. |
 | M-2 — Portable core | `complete` offline | M2-01 through M2-09 merged through PR #10; provider-neutral API/domain/objects/auth/fake-provider and finite runner evidence, not a live-provider claim. |
 | M-3 — Durable orchestration | `complete` offline | PRs #11–#18 merged the components, executable 25-scenario qualification and recovery documentation. This closes the implemented offline gate, not production or live acceptance. |
-| M-4 — Integrated Kaggle batch | Offline preparation `in-review`; integrated batch `blocked` | PR #19 supplies M4-01's local/read-only foundation only. M1-08 go, live verification and dispatch-capable integration remain required. |
+| M-4 — Integrated Kaggle batch | Offline preparation `in-review`; integrated batch `blocked` | M4-01's local/read-only foundation is merged in PR #19. PR #20 adds private staging and separately verified readiness against the M3 ownership journal. M1-08 go, live verification and dispatch-capable integration remain required. |
 | M-5 — Usable developer product | `not-started` | CLI, doctor, install, examples, and three thin clients. |
 | M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
 
 Detailed task dependencies and authorization boundaries are in
-[`implementation-plan.md`](implementation-plan.md). PR #19 stops for owner merge. The owner
-requested M4 after merging M3; proposal section 23.6 permits useful offline/read-only
-preparation without claiming live evidence. Production `serve`, artifact HTTP/CLI, remote
-cleanup apply and staging preview remain separate gates. Preflight never grants dispatch.
+[`implementation-plan.md`](implementation-plan.md). PR #20 stops for owner review/merge;
+M4-03 has not started. The owner requested M4 after merging M3; proposal section 23.6 permits
+useful offline preparation without claiming live evidence. Production `serve`, artifact HTTP/CLI,
+remote cleanup apply and staging cleanup remain separate gates. Neither preflight nor staging
+readiness grants a new compute submission permit.
 
 ## M-0 — Evidence and scope
 
@@ -150,16 +151,24 @@ provider-neutral core.
 - paginated collection verifies the correct attempt; and
 - a sanitized durable end-to-end acceptance run survives local restart.
 
-M4-01's [preflight foundation](providers/kaggle-preflight.md) supplies explicit environment
+M4-01's merged [preflight foundation](providers/kaggle-preflight.md) supplies explicit environment
 references, version checks and opt-in server-account/quota reads through a bounded isolated
-SDK helper. Tests use synthetic transport with the real pinned SDK. The package is deliberately
-not a dispatch-capable Provider; every report says `batch_ready=false`. Numeric quota mapping,
-durable configuration, staging/submission and M4-02 onward remain separate work.
+SDK helper. Tests use synthetic transport with the real pinned SDK. Every report says
+`batch_ready=false`; this is not a dispatch-capable Provider.
 
-Unsupported or unknown capabilities remain visible. This preparatory work under
-[ADR-0015](decisions/0015-read-only-kaggle-preflight.md) does not replace the M1-08 provider go
+M4-02's [private staging](providers/kaggle-staging.md) uses stable attempt/preparation identity,
+one-shot private creation and separately observed metadata/readiness/bytes. The M3 journal
+persists ownership before helper entry and recovery never recreates after ambiguity. Explicit
+source-completion framing prevents a producer Read/Close failure from masquerading as successful
+EOF in the helper. SDK and SQLite integration tiers are tested separately with synthetic remote
+responses; no production batch Provider, mutation CLI or live upload is introduced. Numeric quota,
+durable configuration, submission and M4-03 onward remain separate work.
+
+Unsupported or unknown capabilities remain visible. Preparatory work under
+[ADR-0015](decisions/0015-read-only-kaggle-preflight.md) and
+[ADR-0016](decisions/0016-private-staging-and-readiness.md) does not replace the M1-08 provider go
 decision or turn source/fixture evidence into live compatibility. No live credential or
-provider resource was used for PR #19.
+provider resource was used for PR #19 or PR #20.
 
 ## M-5 — Usable developer product
 
