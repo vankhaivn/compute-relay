@@ -1,4 +1,5 @@
 # <type>(<scope>)!: <summary>
+# Keep the full subject at 80 characters or fewer.
 #
 # Explain what changed and why. Wrap body lines near 100 characters.
 #

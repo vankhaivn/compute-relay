@@ -19,6 +19,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Test commit subject validator
+        run: ./scripts/test-commit-subject.sh
+
       - name: Validate pull request title
         if: github.event_name == 'pull_request'
         env:

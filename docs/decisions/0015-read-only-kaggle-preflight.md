@@ -1,6 +1,6 @@
 # ADR-0015: Explicit credential scope and read-only Kaggle preflight
 
-- Status: proposed; implemented offline in PR #19, pending owner review/merge
+- Status: accepted; PR #19 merged on 2026-09-16
 - Date: 2026-09-16
 - Task: M4-01 offline/read-only foundation
 - Requirements: PRD-04/08, SEC-01, PRV-03; preserves DUR-03 and the M1 live gate

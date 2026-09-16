@@ -1,10 +1,10 @@
 # Compute Relay
 
 > **Project status:** portable-core components and M3 durable orchestration are complete
-> at their implemented offline gates; PR #18 is merged. M4-01's local/read-only Kaggle
-> preflight foundation is in review in PR #19. M1 live acceptance and the integrated batch
-> adapter remain gated. Production `serve`, artifact HTTP and remote cleanup apply are
-> separate work; offline preflight is not live Kaggle or GPU readiness.
+> at their implemented offline gates; M4-01 preflight is merged in PR #19. M4-02 private
+> staging/readiness is implemented offline on PR #20 with its review gate pending.
+> M1 live acceptance, production batch registration, `serve`, artifact HTTP and remote
+> cleanup apply remain separate work. Offline staging is not live Kaggle or GPU readiness.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -65,9 +65,11 @@ The repository currently establishes:
 - named retention holds, irreversible expiry/audit, exact bound-store local byte deletion,
   expired-input admission/retry guards and authenticated exact-ledger remote dry-run previews;
 - an executable 25-scenario fault catalog with fresh named-test qualification, linked
-  evidence boundaries and a recovery/state-semantics guide; and
+  evidence boundaries and a recovery/state-semantics guide;
 - explicit environment-reference resolution and a bounded local/read-only Kaggle preflight,
-  with server-account checking, a fixed isolated SDK helper and an opt-in operator command.
+  with server-account checking, a fixed isolated SDK helper and an opt-in operator command; and
+- private attempt staging with stable intent naming, frozen input markers, no-retry SDK
+  creation, separately verified readiness and real SQLite recovery-integration tests.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -106,6 +108,14 @@ environment token, compares a server-returned account identity before querying q
 availability, and returns sanitized observations. It always reports `batch_ready=false` and
 does not implement/register a dispatch-capable Provider. No M1 live gate is waived.
 
+M4-02's [staging component](docs/providers/kaggle-staging.md) requires a new committed M3
+preparation intent before creation. Upload/create acknowledgements do not imply readiness:
+private metadata, exact version/catalog and every original file's bytes are verified, then
+metadata is rechecked. Restart observes the same intent without repeating creation. Tests
+compose real admission/blobs/SQLite with the Stager through a test-only provider wrapper;
+separate tests use the real pinned SDK with mocked transport. No production batch Provider,
+mutation CLI, remote cleanup or live-provider evidence is supplied by this task.
+
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
 blob bytes or prove full runtime recovery. M3's offline gate closed with PR #18's owner merge.
@@ -135,6 +145,7 @@ live Kaggle support.
 | [`docs/fault-matrix.md`](docs/fault-matrix.md) | All 25 fault cases, exact nominated tests, executable qualification and offline/live evidence limits. |
 | [`docs/recovery.md`](docs/recovery.md) | Operational state interpretation and safe recovery by durable boundary, without invented runtime commands. |
 | [`docs/providers/kaggle-preflight.md`](docs/providers/kaggle-preflight.md) | Explicit local/read-only commands, credential scope, pinned SDK transport, bounded reports and the unchanged live gate. |
+| [`docs/providers/kaggle-staging.md`](docs/providers/kaggle-staging.md) | Private staging authority, frozen marker/catalog, byte-verified readiness, one-shot recovery and evidence limits. |
 | [`api/README.md`](api/README.md) | Versioned schemas and operation-level implementation status. |
 | [`docs/roadmap.md`](docs/roadmap.md) | Acceptance-based M-0 through M-6 outcomes and status. |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
@@ -163,6 +174,7 @@ go test -run=TestCollection ./internal/store/sqlite
 go test -run='TestRetention|TestCleanupPreview|TestDelete' ./internal/store/sqlite ./internal/blobfs ./internal/retention
 go run ./cmd/devtool fault-test
 go run ./cmd/kagglepreflight --help
+go test -run=TestStaging ./internal/provider/kaggle
 ```
 
 The upload check exercises loopback HTTP, synthetic workspace tokens, streamed upload,
@@ -178,7 +190,8 @@ fixture stops at collection, with no result-success claim or actual workload exe
 The collection component tests separately verify actual result blobs, complete publication,
 pagination and recovery against a synthetic provider. Retention tests exercise temporary
 byte expiry/deletion, root identity and synthetic remote previews. They never execute the
-fixture command or apply remote cleanup.
+fixture command or apply remote cleanup. Staging tests verify preparation/ownership integration
+and isolated helper framing without creating a real dataset or invoking a workload.
 
 `fault-test` runs the nominated fault regressions uncached and is also included in
 `go run ./cmd/devtool check`. Repository-wide race tests remain a separate
@@ -206,9 +219,9 @@ side effect:
 - identity-safe test-resource cleanup.
 
 Credentials must not be pasted into chat, committed, passed to remote jobs, or captured in
-fixtures. The owner's request for offline/read-only M4-01 preparation does not waive M1-08
-or authorize live side effects in this session. Follow the implementation plan's owner-review
-and provider-evidence gates; preflight success never grants dispatch permission.
+fixtures. The owner's request for offline M4 implementation does not waive M1-08 or authorize
+live side effects in this session. Follow the implementation plan's owner-review and provider-
+evidence gates; preflight or staging success alone never grants compute permission.
 
 ## Contributing
 

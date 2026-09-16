@@ -2,6 +2,7 @@
 set -eu
 
 subject=${1:-}
+max_subject_length=80
 pattern='^(feat|fix|docs|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9][a-z0-9._/-]*\))?(!)?: [a-z0-9].*$'
 
 fail() {
@@ -20,8 +21,8 @@ esac
 
 printf '%s\n' "$subject" | grep -Eq "$pattern" || fail
 
-[ "${#subject}" -le 72 ] || {
-  printf '%s\n' "Commit subject is ${#subject} characters; maximum is 72." >&2
+[ "${#subject}" -le "$max_subject_length" ] || {
+  printf '%s\n' "Commit subject is ${#subject} characters; maximum is $max_subject_length." >&2
   exit 1
 }
 
