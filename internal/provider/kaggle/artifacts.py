@@ -181,7 +181,12 @@ def operate(r, token, mode, sink):
             def terminal():
                 query = ApiGetKernelSessionStatusRequest()
                 query.user_name, query.kernel_slug, query.version_label = execution["owner"], execution["slug"], "1"
-                guard.call(KERNEL + "GetKernelSessionStatus", api.get_kernel_session_status, query)
+                try:
+                    guard.call(KERNEL + "GetKernelSessionStatus", api.get_kernel_session_status, query)
+                except Exception:
+                    # A new enum can fail SDK decoding before raw-state inspection.
+                    # It is not terminal evidence and must not authorize collection.
+                    raise ValueError("collectible termination not established") from None
                 if core.normalize_status(guard.last) not in ("COMPLETE", "ERROR"):
                     raise ValueError("collectible termination not established")
 
