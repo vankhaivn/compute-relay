@@ -48,9 +48,9 @@ assert sys.stdin.buffer.read(3)==b'abc'
 try:
     ns['require_upload_complete'](sys.stdin.buffer)
 except Exception:
-    print('denied')
+    sys.stdout.buffer.write(b'denied\n')
 else:
-    print('authorized')
+    sys.stdout.buffer.write(b'authorized\n')
 `
 	for _, fail := range []bool{false, true} {
 		var body io.Reader = bytes.NewBufferString("abc")
