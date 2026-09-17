@@ -40,8 +40,10 @@ def quota_result(raw):
         return empty("unknown", "missing_quota")
     if type(quota) is not dict:
         raise ValueError("invalid quota object")
-    # Never let an omitted SDK boolean default authorize free-only capacity.
-    if type(quota.get("isPayToScaleEnabled")) is not bool or quota["isPayToScaleEnabled"]:
+    # ApiAcceleratorQuota's implicit bool defaults to false in SDK 0.1.35;
+    # ProtoJSON may omit that value. Default only absence, not explicit null
+    # or false-like strings/numbers. Duration messages still require evidence.
+    if quota.get("isPayToScaleEnabled", False) is not False:
         return empty("unknown", "paid_or_unknown")
     names = ("totalTimeAllowed", "timeUsed", "timeReserved")
     if any(quota.get(name) is None for name in names):
