@@ -57,15 +57,24 @@ state. Existing fences reject stale nonterminal updates after terminal facts.
 
 ## Remote bootstrap and limits
 
-On the remote Linux host, resolve the provider-owned `/kaggle/input/<dataset>` mount before
-checking the staged marker. Kaggle may expose that dataset directory through a symlink/volume
-link; this is accepted only when the resolved marker is a regular file contained within the
-resolved dataset root. Missing mounts, escaped marker links and changed marker bytes fail with
-controlled diagnostics before any runner module is loaded. Require a new
-`/kaggle/working/relay-result` directory, reject duplicate in-process invocation and restore
-signal handlers. The original runner verifies bundle/input bytes and bounded execution. The
-control plane never runs the generated script. [Artifact retrieval](kaggle-artifacts.md) selects
-only agreed controls/outputs, not arbitrary code/input/scratch under the result tree.
+Attached Kaggle datasets may be mounted as
+`/kaggle/input/datasets/<owner>/<dataset-slug>/` or exposed through the legacy
+`/kaggle/input/<dataset-slug>` form. The generated bootstrap therefore carries the frozen dataset
+owner as well as slug, checks the nested owner path first and the legacy path second, and only when
+both are absent inspects one bounded owner namespace level under `/kaggle/input/datasets`. That
+fallback must resolve to exactly one matching slug. Provider-owned symlink/volume mounts may
+resolve, but the selected mount must be a directory and the resolved marker must remain a regular
+file inside that resolved dataset root. Missing, ambiguous or excessive layouts, marker escape
+and changed marker bytes fail before any runner module is loaded.
+
+The runner modules receive resolved staging/root paths and contain no additional absolute Kaggle
+input-layout dependency. Results remain rooted at a fresh `/kaggle/working/relay-result`
+directory. Monitoring uses provider APIs rather than container paths, while artifact collection
+addresses provider output with the matching relative `relay-result/` prefix; regression coverage
+keeps that prefix aligned with the bootstrap result directory. Duplicate in-process invocation is
+rejected and signal handlers are restored. The original runner verifies bundle/input bytes and
+bounded execution. The control plane never runs the generated script. [Artifact retrieval](kaggle-artifacts.md)
+selects only agreed controls/outputs, not arbitrary code/input/scratch under the result tree.
 
 Default policy is CPU-only, no internet, 1,800-second wall ceiling and one-minute local invocation.
 GPU requires explicit T4/P100 shape; no CPU upgrade or GPU fallback. New GPU saves recheck the

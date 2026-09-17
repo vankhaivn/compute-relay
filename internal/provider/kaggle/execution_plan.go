@@ -119,7 +119,7 @@ func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy Executi
 	payload, err := json.Marshal(map[string]any{
 		"identity": plan.Job.Identity, "plan_sha256": plan.Digest(),
 		"preparation_id": prepared.PreparationID, "dataset_id": ref.DatasetID,
-		"dataset_slug": stage.request.Slug, "marker_sha256": ref.Marker,
+		"dataset_owner": c.AccountName, "dataset_slug": stage.request.Slug, "marker_sha256": ref.Marker,
 		"manifest": manifest, "modules": modules, "remote_policy": map[string]any{"gpu": gpu, "machine_shape": policy.MachineShape},
 	})
 	if err != nil || len(payload) > 1<<20 {

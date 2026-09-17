@@ -13,6 +13,10 @@ SPEC = importlib.util.spec_from_file_location(
     "execution_bootstrap_fixture", ROOT / "internal/provider/kaggle/execution_bootstrap.py")
 bootstrap = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bootstrap)
+CONTRACT_SPEC = importlib.util.spec_from_file_location(
+    "artifact_contract_fixture", ROOT / "internal/provider/kaggle/artifact_contract.py")
+artifact_contract = importlib.util.module_from_spec(CONTRACT_SPEC)
+CONTRACT_SPEC.loader.exec_module(artifact_contract)
 PACKAGE = "_compute_relay_remote_runner"
 
 
@@ -28,6 +32,7 @@ class ExecutionBootstrapTests(unittest.TestCase):
         self.marker = self.staging / "relay-stage.bin"
         self.marker.write_bytes(b"fixture marker")
         self.payload = {
+            "dataset_owner": "fixture-owner",
             "dataset_slug": self.staging.name,
             "marker_sha256": hashlib.sha256(self.marker.read_bytes()).hexdigest(),
             "manifest": {"network": {"remote_internet": "disabled"}, "phase": "completed"},
@@ -88,6 +93,38 @@ class ExecutionBootstrapTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 bootstrap.run_remote(self.payload)
 
+    def test_live_nested_direct_and_fallback_mount_layouts_are_bounded(self):
+        raw = self.marker.read_bytes()
+        self.marker.unlink()
+        self.staging.rmdir()
+
+        nested = (self.root / "input" / "datasets" / self.payload["dataset_owner"] /
+                  self.payload["dataset_slug"])
+        nested.mkdir(parents=True)
+        (nested / "relay-stage.bin").write_bytes(raw)
+        self.run_bootstrap()
+        main = sys.modules[PACKAGE + ".main"]
+        self.assertEqual(main.calls[0][0], nested.resolve())
+
+        self.clear_modules()
+        (nested / "relay-stage.bin").unlink()
+        nested.rmdir()
+        nested.parent.rmdir()
+        fallback = self.root / "input" / "datasets" / "alternate-owner" / self.payload["dataset_slug"]
+        fallback.mkdir(parents=True)
+        (fallback / "relay-stage.bin").write_bytes(raw)
+        self.run_bootstrap()
+        main = sys.modules[PACKAGE + ".main"]
+        self.assertEqual(main.calls[0][0], fallback.resolve())
+
+        self.clear_modules()
+        second = self.root / "input" / "datasets" / "second-owner" / self.payload["dataset_slug"]
+        second.mkdir(parents=True)
+        (second / "relay-stage.bin").write_bytes(raw)
+        with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+            self.run_bootstrap()
+        self.assertNotIn(PACKAGE, sys.modules)
+
     def test_provider_mount_symlink_is_resolved_but_marker_cannot_escape(self):
         raw = self.marker.read_bytes()
         self.marker.unlink()
@@ -119,6 +156,7 @@ class ExecutionBootstrapTests(unittest.TestCase):
         main = sys.modules[PACKAGE + ".main"]
         self.assertEqual(main.VERSION, "fixture")
         self.assertEqual(main.calls, [(self.staging.resolve(), self.root / "working" / "relay-result", "disabled", False)])
+        self.assertEqual(main.calls[0][1].name + "/", artifact_contract.PREFIX)
         self.assertFalse((self.root / "working").exists())
         for sig, handler in previous.items():
             self.assertEqual(signal.getsignal(sig), handler)
