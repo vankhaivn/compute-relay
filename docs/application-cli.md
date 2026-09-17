@@ -1,6 +1,6 @@
 # Admission profiles and application CLI
 
-> **Task:** M5-01b, implemented in PR #26; pending owner review/merge.
+> **Task:** M5-01b, implemented offline; PR #26 merged.
 > **Requirements:** API-01/03, DX-01; preserves SEC-02 and durable receipt/binding identity.
 > **Boundary:** local admission and authenticated application requests, not provider activation.
 
@@ -8,7 +8,8 @@ M5-01a's local installation and HTTP lifecycle are merged in PR #25. This slice 
 operator commands for admission profiles and application commands using the running HTTP API.
 It removes the need for test-only profile seeding to exercise local admission. It does not
 configure a complete provider, start workers, run workloads or establish live Kaggle support.
-Parent M5-01, M5-02 TOML, artifact/log routes and general worker composition remain separate.
+M5-01c adds [published artifact delivery](artifact-delivery.md) in PR #27; parent M5-01,
+M5-02 TOML, remaining provider log/control/cleanup surfaces and worker composition remain separate.
 
 ## Local profile administration
 
@@ -167,19 +168,40 @@ is not verified artifact availability. This local server does not start the prov
 collection worker that later consumes such work. Use the appropriate command, not a generic retry
 loop. No command selects an implicit active attempt or automatically generates another key.
 
+### Published artifact metadata and downloads
+
+M5-01c adds `job artifacts`, `artifact show` and `artifact download` for results already published
+by M3 in this installation. They require current workspace read scope and explicit job/attempt;
+there is no implicit latest target or automatic collection. A newly admitted job with no publication
+has no downloadable result simply because these commands exist. Retained logs are files, not SSE.
+
+See [artifact delivery](artifact-delivery.md) for command shapes, bounded pagination and the
+mandatory final HTTP verification trailer. Download performs a metadata GET and a content GET,
+each with a fresh no-replay transport. It verifies identity, exact size/hash, clean EOF/Close and
+final acknowledgement before publishing a new private local file. An existing destination is
+never replaced; the filename comes only from the user's explicit output argument.
+
+A failure after final local linking can leave a verified file despite a failed receipt; the
+separate `download_may_be_published` diagnostic preserves that uncertainty. It is not a server
+mutation or compute-commit flag. Repeated downloads must not silently delete or overwrite output.
+No Range resume, provider URL fallback or automatic retry is supplied.
+
 ## One request and explicit uncertainty
 
-Each invocation creates one fresh HTTP/1 transport, sends one request and closes it. There is no
-connection reuse, redirect following, ambient proxy, cookie jar, GetBody replay or automatic retry.
-The [Go Transport contract](https://pkg.go.dev/net/http#Transport) permits some retries on reused
-connections, including requests with Idempotency-Key; the fresh transport prevents that path.
-The transport's request-body closure is joined before the caller reuses/closes an upload source.
+For the M5-01b commands, each invocation creates one fresh HTTP/1 transport, sends one request
+and closes it. There is no connection reuse, redirect following, ambient proxy, cookie jar,
+GetBody replay or automatic retry. The [Go Transport contract](https://pkg.go.dev/net/http#Transport)
+permits some retries on reused connections, including requests with Idempotency-Key; the fresh
+transport prevents that path. The transport's request-body closure is joined before the caller
+reuses/closes an upload source. M5-01c download deliberately makes the two explicit reads above,
+not a retry of one request.
 
-Responses require bounded identity-encoded JSON, successful EOF/Close and the expected HTTP status
-and target fields. Duplicate/ambiguous JSON and raw/escaped current-token reflection are rejected.
-These checks are not a full future-response schema validator or business-success classifier.
-Compatible extra fields and unknown status strings remain raw JSON data, not commands, HTML or
-trusted log instructions. Literal-token rejection is not universal secret detection.
+The M5-01b JSON responses require bounded identity encoding, successful EOF/Close and the expected
+HTTP status and target fields. Duplicate/ambiguous JSON and raw/escaped current-token reflection
+are rejected. These checks are not a full future-response schema validator or business-success
+classifier. Compatible extra fields and unknown status strings remain raw JSON data, not commands,
+HTML or trusted log instructions. Literal-token rejection is not universal secret detection.
+M5-01c content is binary and uses its stricter stream/acknowledgement contract, not this JSON path.
 
 Errors expose only bounded stage/status/code and `request_may_have_committed`, never the raw server
 message, exception, source path or token. The uncertainty flag is conservative; it does not prove a
@@ -197,7 +219,8 @@ Limits are 1 MiB job JSON/response, 2 GiB upload, 64 bytes token-file framing, 3
 30 seconds for metadata calls and two minutes for upload including prehashing. Connect/header
 budgets are 5/10 seconds. Partial upload resume is not implemented. Large files can exceed the
 budget safely; there is no throughput guarantee. Contexts and joined readers rely on cooperative
-callbacks/OS operations and are not a hostile-host or hard-real-time sandbox.
+callbacks/OS operations and are not a hostile-host or hard-real-time sandbox. Artifact-specific
+bounds and transfer-pool sharing are recorded separately in the artifact guide.
 
 ## Verification and next gate
 
@@ -216,12 +239,17 @@ attempt, original profile and input bytes, with zero remote submission/resource/
 New parser/main-route tests check inert help and invalid flags; these are not additional OS-process
 or live-provider experiments. Existing main-entry subprocess and M3 fault suites remain separate.
 
-Local Go 1.23.2 runs the exact standard-library client/JSON packages with race repetition and vet.
-This is not full local pinned Go/modernc/CLI integration. Exact-head native, full race and fault-matrix
-evidence is recorded in PR #26. No dependency downgrade, replacement driver or temporary local test
-module is shipped. Earlier fixture corrections are not relabeled as changing the public contract.
+Local M5-01b evidence used Go 1.23.2 for the exact standard-library client/JSON packages with race
+repetition and vet. This is not full local pinned Go/modernc/CLI integration. Exact-head native,
+full race and fault-matrix evidence is recorded in merged PR #26. No dependency downgrade,
+replacement driver or temporary local test module is shipped. Earlier fixture corrections are
+not relabeled as changing the public contract.
+
+PR #27 records M5-01c stream/trailer/private-file tests and real published-result HTTP/CLI reopen
+coverage separately. Local delivery preserves five committed artifact records, original receipts,
+attempt state and event history, and does not increment provider fetch/list counters.
 
 See [ADR-0022](decisions/0022-immutable-profiles-and-application-client.md), [local runtime](local-runtime.md),
-[admission](admission.md), [controls](operations.md) and the [implementation plan](implementation-plan.md).
-Stop after PR #26 for owner merge; parent M5-01 result/worker work, M5-02 and M4-06/M1 live acceptance
-are not completed by these local commands.
+[artifact delivery](artifact-delivery.md), [admission](admission.md) and [controls](operations.md).
+The [implementation plan](implementation-plan.md) owns the current owner-review gate; stop after
+PR #27. Parent M5-01 worker/log/cleanup work, M5-02 and M4-06/M1 live acceptance remain separate.

@@ -1,10 +1,10 @@
 # Compute Relay
 
 > **Project status:** portable core, M3 orchestration and M4's offline components/harness
-> are merged. **No live M4-06/M1 acceptance is recorded.** M5-01a local runtime is merged
-> in PR #25; M5-01b admission profiles and application CLI are in review in PR #26.
-> Parent M5-01 remains in progress. The server is admission-only: general provider workers,
-> public artifact/log routes and remote cleanup are not enabled by profile/client setup.
+> are merged. **No live M4-06/M1 acceptance is recorded.** M5-01a/b are merged in PRs #25/#26;
+> M5-01c published artifact API and verified downloads are in review in PR #27.
+> Parent M5-01 remains in progress. The admission-only server can read already published
+> results; general provider workers, live-log routes and remote cleanup remain separate.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -79,9 +79,11 @@ The repository currently establishes:
 - a finite one-job acceptance adapter/CLI, fixed CUDA arithmetic example, original-binary
   state binding and separate-process resume with honest offline-versus-live report semantics;
 - explicit local init/state/workspace/token/validate commands and a literal-loopback `serve`
-  that composes durable HTTP services without starting provider workers; and
+  that composes durable HTTP services without starting provider workers;
 - immutable admission-profile apply/show and workspace grant/revoke, plus private-token
-  application upload/validate/submit/status/control commands without automatic HTTP replay.
+  application upload/validate/submit/status/control commands without automatic HTTP replay; and
+- explicit-attempt published artifact metadata/content API and verified, create-only application
+  downloads with final stream acknowledgement, current authority and explicit expiry.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -170,20 +172,29 @@ joins active HTTP handlers before closing stores. `serve` reports `local-admissi
 and no scheduler, dispatch, collector or retention worker starts. Local schema validation is
 not admission.
 
-M5-01b's [profiles and application CLI](docs/application-cli.md) add explicit immutable admission
-policies and separate workspace grants, without resolving provider credentials or activating workers.
-Application commands use the running API rather than opening its database. One fresh transport per
-request refuses redirects/proxies/replays; upload bytes and response identity are checked before
-successful output. Lost acknowledgement requires explicit recovery of the original request/key.
-Remap/revoke preserves accepted bindings and original receipts; current status remains a separate
-read. Result/log routes, general provider setup and worker integration remain later M5-01 work.
+M5-01b's merged [profiles and application CLI](docs/application-cli.md) add explicit immutable
+admission policies and separate workspace grants, without resolving provider credentials or
+activating workers. Application commands use the running API rather than opening its database.
+One fresh transport per request refuses redirects/proxies/replays; upload bytes and response
+identity are checked before successful output. Lost acknowledgement requires explicit recovery
+of the original request/key. Remap/revoke preserves accepted bindings and original receipts;
+current status remains a separate read.
+
+M5-01c's [artifact delivery](docs/artifact-delivery.md) reads only existing M3 publications through
+three authorized GET routes and `job artifacts` / `artifact show` / `artifact download` commands.
+Every target names an attempt; page cursors bind the publication and survive reopen. Content is
+independently hashed and requires a final verification trailer after source Close and current
+authority/expiry checks. A 200 response or complete body alone is not success. The CLI rehashes
+temporary local bytes and creates the chosen final filename without replacement; a failed stdout
+receipt can still follow successful local publication and is reported explicitly. These reads
+never start collection or compute. Retained payload logs are artifacts, not a live log service.
 
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
 blob bytes or prove full runtime recovery. M3's offline gate closed with PR #18's owner merge.
 The scoped acceptance adapter and admission-only server are not a complete production multi-job
-compute runtime. General configuration/registration, public result routes and live acceptance
-remain separate gates.
+compute runtime. General configuration/registration, remaining log/cleanup surfaces and live
+acceptance remain separate gates.
 
 Implementation claims must be backed by code, tests, and—where provider behavior is
 involved—dated evidence. A passing fake-provider test will not be described as proof of
@@ -199,6 +210,7 @@ live Kaggle support.
 | [`docs/architecture.md`](docs/architecture.md) | Provider-neutral architecture baseline and invariants. |
 | [`docs/local-runtime.md`](docs/local-runtime.md) | Local operator commands, private state/token delivery, admission-only HTTP and joined shutdown. |
 | [`docs/application-cli.md`](docs/application-cli.md) | Immutable admission profiles, workspace grants, private-token application requests and explicit receipt recovery. |
+| [`docs/artifact-delivery.md`](docs/artifact-delivery.md) | Explicit-attempt published artifact API, mandatory final acknowledgement and private create-only file downloads. |
 | [`docs/auth-and-objects.md`](docs/auth-and-objects.md) | Implemented workspace auth, HTTP/upload boundary, blob recovery and smoke checks. |
 | [`docs/storage.md`](docs/storage.md) | SQLite repositories, locking, migrations, database-only backup/restore and evidence limits. |
 | [`docs/admission.md`](docs/admission.md) | Durable job acceptance, canonical request identity, replay, frozen references and pending preparation. |
@@ -220,7 +232,7 @@ live Kaggle support.
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Dependency-aware executable task plan and authorization boundaries. |
 | [`docs/research/kaggle-interface-review.md`](docs/research/kaggle-interface-review.md) | Pinned official-client source review and M-1 probe sequence. |
 | [`docs/research/kaggle-feasibility.md`](docs/research/kaggle-feasibility.md) | K-01 through K-16 evidence ledger and go/no-go rule. |
-| [`docs/risk-register.md`](docs/risk-register.md) | Ranked risks, predetermined responses, and evidence gates. |
+| [`docs/risk-register.md`](docs/risk-register.md) | Ranked risks, predetermined responses, evidence gates, and decision register. |
 | [`docs/compatibility.md`](docs/compatibility.md) | Toolchain/provider/host targets and live-verification checklist. |
 | [`docs/decisions/`](docs/decisions/README.md) | Accepted and proposed architecture decisions. |
 | [`docs/development/commit-convention.md`](docs/development/commit-convention.md) | Canonical commit-message rules. |
@@ -250,6 +262,8 @@ go test -run='TestArtifact' ./internal/provider/kaggle
 go test ./internal/kaggleacceptance ./cmd/kaggleacceptance
 go test ./internal/operatorcli ./internal/runtimehost ./cmd/compute-relay
 go test ./internal/appclient ./internal/appcli ./internal/jsonwire ./internal/cli
+go test ./internal/artifactwire ./internal/api
+go test -run=TestPublishedArtifactHTTPAndCLIReuseImmutableM3Publication ./internal/store/sqlite
 go test ./runner
 ```
 
@@ -286,7 +300,10 @@ qualification. The operator-only acceptance commands are documented separately, 
 Local runtime tests separately execute real HTTP/store/CLI lifecycle and token boundaries.
 M5-01b's integration uses actual profile apply/grant and application commands, including lost
 HTTP receipt after real admission commit, reopen/remap/revoke and original binding checks.
-These local tests invoke no provider worker or admitted workload; older fixture tiers remain distinct.
+M5-01c then downloads five already published files through real HTTP/CLI after reopen, preserving
+original receipts/events and checking expiry/revocation without another provider read. Its
+stream and filesystem tests reject late failures, lost trailers and destination races. These
+local tests invoke no provider worker or admitted workload; older fixture tiers remain distinct.
 
 `fault-test` runs the nominated fault regressions uncached and is also included in
 `go run ./cmd/devtool check`. Repository-wide race tests remain a separate
@@ -316,8 +333,8 @@ Credentials must not be pasted into chat, committed, passed to remote jobs, or c
 fixtures. An implementation request does not waive M1-08 or authorize provider side effects
 in CI. The acceptance command requires explicit private-staging/GPU opt-in and a separate
 read-only resume; neither a green harness test nor preflight/staging readiness grants a new
-compute permit. PR #25 is merged at its local-runtime gate. Stop for owner review at PR #26;
-M5-01b does not close parent M5-01 or the live acceptance gate.
+compute permit. PRs #25/#26 are merged at their local-product gates. Stop for owner review at
+PR #27; verified artifact delivery does not close parent M5-01 or live acceptance.
 
 ## Contributing
 

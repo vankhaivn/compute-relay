@@ -29,9 +29,10 @@ owner-approved proposal update.
 | [`scope-and-requirements.md`](scope-and-requirements.md) | M-0 requirements baseline | Stable requirement IDs and minimum acceptance evidence; the fault matrix links the implemented offline evidence without changing requirements. |
 | [`architecture.md`](architecture.md) | Active baseline | Provider-neutral layers, responsibilities, entities, and invariants. |
 | [`domain-model.md`](domain-model.md) | M2-02 implemented offline | Typed IDs, entities, capability evidence, structured errors, independent state dimensions, and transition invariants. |
-| [`../api/README.md`](../api/README.md) | Contracts and fifteen composable handlers implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock and operation status. Local serving/application clients do not add provider workers or claim complete production behavior. |
+| [`../api/README.md`](../api/README.md) | Contracts and eighteen composable operations implemented offline | Strict JSON Schema/OpenAPI contracts, fixtures, lock and operation status, including three published-artifact reads. Local serving/application clients do not add provider workers or claim complete production behavior. |
 | [`local-runtime.md`](local-runtime.md) | M5-01a local operator/HTTP slice; PR #25 merged | Explicit state identity, private token delivery, workspace controls, local validation, literal-loopback serving and joined shutdown; no automatic profiles or provider workers. |
-| [`application-cli.md`](application-cli.md) | M5-01b profiles/application CLI; PR #26 in review | Immutable admission profile apply/show, separate workspace grants and private-token HTTP commands with explicit receipt recovery and no automatic replay or provider activation. |
+| [`application-cli.md`](application-cli.md) | M5-01b profiles/application CLI; PR #26 merged | Immutable admission profile apply/show, separate workspace grants and private-token HTTP commands with explicit receipt recovery and no automatic replay or provider activation. |
+| [`artifact-delivery.md`](artifact-delivery.md) | M5-01c published-artifact delivery; PR #27 in review | Authorized explicit-attempt metadata/pages/content, final transfer acknowledgement, private create-only downloads, expiry and unchanged-publication cursor recovery. |
 | [`providers/contract.md`](providers/contract.md) | M2-04 implemented offline | Provider contracts, deterministic fake, infrastructure ports and local smoke. |
 | [`auth-and-objects.md`](auth-and-objects.md) | M2-05/M2-06 implemented offline; merged | Workspace authorization, HTTP guards, streaming upload, atomic blobs and recovery boundaries. |
 | [`packaging-and-import.md`](packaging-and-import.md) | M2-07 implemented offline; merged | Explicit bundle commands, strict archive validation, rooted snapshots and opt-in local import. |
@@ -41,7 +42,7 @@ owner-approved proposal update.
 | [`admission.md`](admission.md) | M3-02 implemented offline; merged | Atomic job/attempt/idempotency, frozen references, pending preparation, state/event CAS and admission HTTP. |
 | [`scheduler.md`](scheduler.md) | M3-03 implemented offline; merged | Durable FIFO/round-robin fairness, account capacity, fenced local claims, quota policy and the no-remote-side-effect boundary. |
 | [`dispatch.md`](dispatch.md) | M3-04 implemented offline; merged | Input freeze, private staging, one-shot mutation intents, fenced reconciliation and cached recovery conditions. |
-| [`operations.md`](operations.md) | M3-05 implemented offline; merged | Attempt-scoped controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only collection tickets. |
+| [`operations.md`](operations.md) | M3-05 implemented offline; merged | Attempt-scoped controls, immutable receipt replay/current GET, cancellation evidence, frozen-input retry and transfer-only tickets. |
 | [`collection.md`](collection.md) | M3-06 implemented offline; merged | Immutable result pins, bounded transfers, manifest/byte verification, atomic publication, scoped internal reads and collection-only recovery. |
 | [`retention.md`](retention.md) | M3-07 implemented offline; merged | Named holds, atomic expiry/events, bound-store local sweep, metadata preservation and exact-ledger remote dry runs. |
 | [`fault-matrix.md`](fault-matrix.md) | M3-08 offline qualification; PR #18 merged | The 25 numbered proposal scenarios, 34 nominated root tests, fresh executable evidence, requirement mapping and explicit limitations. |
@@ -56,7 +57,7 @@ owner-approved proposal update.
 | [`implementation-plan.md`](implementation-plan.md) | Active | Dependency-aware task backlog, delivery slices, live/offline boundaries and acceptance tests. |
 | [`risk-register.md`](risk-register.md) | M-0 baseline | Ranked risks, predetermined responses, evidence gates, and decision register. |
 | [`compatibility.md`](compatibility.md) | M-0 target matrix | Toolchain/provider/host targets and rules for support claims/live evidence. |
-| [`decisions/`](decisions/README.md) | Active ADR system | Material decisions, including accepted ADR-0021 and proposed ADR-0022 for immutable admission profiles and one-shot application requests. |
+| [`decisions/`](decisions/README.md) | Active ADR system | Material decisions, including accepted ADR-0022 and proposed ADR-0023 for authorized published-result reads and verified private delivery. |
 | [`research/`](research/README.md) | Active evidence system | Primary-source and live-test evidence rules. |
 | [`research/kaggle-interface-review.md`](research/kaggle-interface-review.md) | Upstream review complete | Pinned official client surfaces, gaps, transport gate, and M-1 probe sequence. |
 | [`research/kaggle-feasibility.md`](research/kaggle-feasibility.md) | Upstream review complete; live blocked | K-01 through K-16 evidence ledger and go/no-go rule. |
@@ -67,17 +68,17 @@ owner-approved proposal update.
 
 Additional testing, provider support, troubleshooting and security design documents should
 be added when implementation makes them concrete. Do not create empty documents merely to
-mirror a proposed tree. The admission-only local server does not imply complete production
-worker composition, public artifact/log routes, remote cleanup or an overall-job deadline service.
-The plan owns the current stop/next-task boundary. Historical component/ADR statements describe
-their task's implementation; read the current local/application guides for executable composition.
-Historical evidence must not be relabeled as a newer task's test run.
+mirror a proposed tree. The admission-only local server and published-artifact reads do not imply
+complete production worker composition, provider log routes, remote cleanup or an overall-job
+deadline service. The plan owns the current stop/next-task boundary. Historical component/ADR
+statements describe their task's implementation; read the current local/application/artifact guides
+for executable composition. Historical evidence must not be relabeled as a newer task's test run.
 
 M3's offline gate and M4's components/harness are merged through PR #24. No actual live GPU/result/
-restart report is recorded. M5-01a is merged in PR #25; M5-01b in PR #26 adds profile/application
-commands without closing parent M5-01. In-review means implementation exists, not that every check
-or live acceptance gate passed; the PR records exact-head CI. M4 remains live-blocked and M5-02
-has not started. Admission-profile JSON is not a replacement for normalized runtime/TOML configuration.
+restart report is recorded. M5-01a/M5-01b are merged in PRs #25/#26; M5-01c in PR #27 adds artifact
+HTTP/CLI delivery without closing parent M5-01. In-review means implementation exists, not that every
+check or live acceptance gate passed; the PR records exact-head CI. M4 remains live-blocked and
+M5-02 has not started. Admission-profile JSON is not normalized runtime/TOML configuration.
 
 ## Status vocabulary
 
@@ -118,6 +119,11 @@ policy or issuing an application token is not granting provider credentials. Tok
 acknowledgement or stdout failure does not roll back previously committed metadata. Client local-
 commit uncertainty is not remote compute evidence, and original receipts differ from current status.
 
+Published-artifact metadata describes historical verification, not a new disk check. The content
+stream needs independent size/hash verification and its final acknowledgement; initial HTTP 200 or
+complete bytes alone are insufficient. A failed local receipt after create-only publication does
+not prove the chosen destination was rolled back. Existing files are never silently overwritten.
+
 ## Required update paths
 
 | Change | Documents to review |
@@ -128,6 +134,7 @@ commit uncertainty is not remote compute evidence, and original receipts differ 
 | Authentication/object lifecycle | auth-and-objects, storage, ADR-0004/0008, architecture, `api/`, plan, tests |
 | Local operator/HTTP lifecycle | local-runtime, ADR-0021, plan, main/operatorcli/runtimehost, private token/state tests and real HTTP/child-process shutdown evidence |
 | Admission profiles/application CLI | application-cli, local-runtime, ADR-0022, plan, profile/parser/transport/source-ack tests and actual CLI/HTTP/SQLite receipt recovery |
+| Published artifact delivery | artifact-delivery, ADR-0023, application-cli, local-runtime, api contracts/inventory, plan, stream/trailer/private-file tests and real M3/HTTP/CLI reopen evidence |
 | Admission/idempotency/profile snapshots | admission, ADR-0009, architecture, `api/`, plan, migration/CAS/HTTP tests |
 | Scheduling/capacity/leases/quota | scheduler, ADR-0010, architecture, event schema, plan, migration/fencing/crash tests |
 | Preparation/submission/reconciliation | dispatch, ADR-0011, provider contracts, architecture, event schema, plan, intent/crash/status tests |

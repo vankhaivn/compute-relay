@@ -1,12 +1,13 @@
 # API contracts
 
 > **Tasks:** M2-03 contracts; M2-05 through M2-08 auth/object input handlers;
-> M3-02 durable job admission, validation and cached status; M3-05 durable controls;
-> M3-07 expiry events and input-retention guards; M5-01a local serving.
+> M3-02 admission/status, M3-05 controls and M3-07 expiry; M5-01a/b local serving/client;
+> M5-01c published artifact delivery in PR #27.
 >
-> **Status:** contracts and fifteen composable handler operations are implemented offline.
-> M5-01a serves configured local services without provider workers or default profiles.
-> Complete production composition, artifact/cleanup HTTP and live integration remain gates.
+> **Status:** contracts and eighteen composable handler operations are implemented offline.
+> Local `serve` composes auth/object/admission/control and published-result reads, without
+> provider workers. Complete production composition, log/cleanup HTTP and live integration
+> remain gates. M5-01c is in review until owner merge.
 
 ## Contract versions
 
@@ -33,7 +34,7 @@ later requires an explicit compatibility decision rather than a silent rename.
 | [`schemas/runtime-config.v1alpha1.schema.json`](schemas/runtime-config.v1alpha1.schema.json) | Normalized non-secret runtime configuration. TOML decoding is a later task. |
 | [`schemas/job-status.v1alpha1.schema.json`](schemas/job-status.v1alpha1.schema.json) | Truthful independent attempt-state dimensions. |
 | [`schemas/operation.v1alpha1.schema.json`](schemas/operation.v1alpha1.schema.json) | Generic domain operation, including the reserved cleanup kind; not the HTTP control receipt. |
-| [`schemas/control-request.v1alpha1.schema.json`](schemas/control-request.v1alpha1.schema.json) | Explicit attempt target and optional non-secret reason; the retry definition requires a nonblank reason. |
+| [`schemas/control-request.v1alpha1.schema.json`](schemas/control-request.v1alpha1.schema.json) | Explicit attempt target and optional non-secret reason; retry requires a nonblank reason. |
 | [`schemas/control-operation.v1alpha1.schema.json`](schemas/control-operation.v1alpha1.schema.json) | Actual HTTP control receipt/current view: effect, replay, termination evidence, optional new attempt, safe problem and links. |
 | [`schemas/error.v1alpha1.schema.json`](schemas/error.v1alpha1.schema.json) | Stable error envelope without a dangerous generic `retryable` flag. |
 | [`schemas/job-admission.v1alpha1.schema.json`](schemas/job-admission.v1alpha1.schema.json) | Durable asynchronous admission response. |
@@ -42,72 +43,57 @@ later requires an explicit compatibility decision rather than a silent rename.
 | [`schemas/object-import.v1alpha1.schema.json`](schemas/object-import.v1alpha1.schema.json) | Named-root raw-file or explicitly selected bundle import request. |
 | [`schemas/object-ingest.v1alpha1.schema.json`](schemas/object-ingest.v1alpha1.schema.json) | Public HTTPS input request with an optional expected SHA-256; destination policy remains a runtime check. |
 | [`schemas/bundle-manifest.v1.schema.json`](schemas/bundle-manifest.v1.schema.json) | Regular-file bundle manifest with portable paths, sizes, hashes and executable flags. |
+| [`schemas/artifact.v1alpha1.schema.json`](schemas/artifact.v1alpha1.schema.json) | Published artifact metadata/pages with explicit workspace/job/attempt, size/digest, historical phase/time and pagination. |
 | [`examples/`](examples/) | Valid examples and deliberately invalid negative fixtures. |
 | [`contract-manifest.json`](contract-manifest.json) | Explicit schema-to-fixture inventory. No untracked root schema is allowed. |
 | [`contract.lock.json`](contract.lock.json) | SHA-256/byte-size identity of every committed JSON contract and fixture. |
 
 ## Strictness and limits
 
-Object schemas reject unknown fields unless a field is explicitly an open map, such as
-bounded labels or diagnostic details. Public control problems exclude arbitrary details.
-Schemas validate:
+Object schemas reject unknown fields unless explicitly open, such as bounded labels or
+diagnostic details. Public control problems exclude arbitrary details. Schemas validate
+opaque IDs, lowercase digests, command/count/byte/time bounds, safe relative paths, HTTPS input
+syntax, explicit enums and structural state/phase combinations. Normalized configuration
+forbids automatic compute retries and provider fallback.
 
-- provider-neutral opaque IDs and lowercase SHA-256 values;
-- command vector, item count, string length, byte, duration, and retention bounds;
-- relative paths with no absolute path, backslash, control byte, duplicate separator, or
-  parent traversal;
-- HTTPS-only URL syntax for public ingestion requests;
-- explicit Python/shell, GPU/network, operation, state, capability, evidence, and error
-  enums;
-- no automatic compute retry or provider fallback in normalized configuration;
-- success/result/cancellation combinations that can be established structurally; and
-- result-manifest requirements such as zero exit code, no error, and verified GPU when a
-  completed run says GPU was required.
+Runtime context is still necessary. Admission checks name/path collisions, setup/finalization
+budgets, reserved environment variables, workspace ownership and current profile bounds.
+Byte integrity, bundle layout and actual provider eligibility must pass later before dispatch.
+The embedded admission parser rejects duplicate decoded keys, invalid Unicode, trailing values,
+excessive nesting and oversized canonical expansion. Request identity uses a named integer-only
+format, not raw JSON or an RFC 8785 claim. See [admission](../docs/admission.md).
 
-Some invariants require runtime context or arithmetic. Admission additionally checks
-input-name/path collisions, setup/finalization budgets, reserved environment variables,
-workspace ownership and current profile-policy bounds. Byte integrity, bundle layout,
-provider capability and remaining preparation checks must still pass before dispatch.
+Bundle/import runtime checks additionally cover case/prefix collisions, ordering, root authority,
+exclusions, USTAR representation and actual bytes. HTTPS ingestion additionally enforces
+DNS/connected-peer/TLS/redirect policy; schema validity is not SSRF authorization. Unknown,
+duplicate/case-alias fields and nulls cannot be repaired by ordinary schema decoding after
+ambiguity has already been discarded. Lower configured limits still apply under schema ceilings.
 
-The admission parser uses these embedded schemas with external loading disabled. It rejects
-duplicate decoded keys, invalid Unicode, trailing values, excessive nesting and oversized
-canonical expansion. Request identity uses a named integer-only format, not raw JSON bytes
-or an RFC 8785 claim. See [`../docs/admission.md`](../docs/admission.md).
+Control requests require `attempt_id`; no implicit active attempt is resolved. The actual
+parser rejects duplicate keys, invalid UTF-8, nulls, unknown fields, bodies over 4,096 bytes
+and reasons over 512 UTF-8 bytes. Retry requires a nonblank reason. Record validation checks
+identity/time ordering and source/new-attempt separation in durable context. JSON Schema's
+character count does not replace the byte limit.
 
-Bundle/import schemas impose a stricter portable ASCII path subset. Runtime validation
-additionally checks case/prefix collisions, manifest ordering, allowed roots, exclusions,
-USTAR encoding, total sizes and actual digests. Schema ceilings are hard representational
-bounds; lower configured/default policy limits still apply. Strict import decoding also
-rejects duplicate JSON keys and nulls, which ordinary schema validation cannot disambiguate
-after a parser has already discarded duplicate keys.
+M3 collection reuses the result-manifest schema and checks attempt/nonce, frozen input digests,
+GPU requirements and output declarations. It rejects path collisions, wrong/missing bytes and
+false success. A schema-valid manifest is not a verified artifact. See [collection](../docs/collection.md)
+for the empty-required-directory limitation and atomic publication boundary.
 
-HTTPS ingestion likewise rejects duplicate/case-alias fields and nulls in the actual
-decoder. Its structural schema does not replace runtime port/query/host policy, DNS answer
-validation, connected-peer verification or TLS/redirect checks. An input that passes a
-schema can still be rejected as an unsafe destination before a network connection.
+M3-07's `result.expired` event, result state and tombstones commit atomically. New input references
+and explicit retry reject expired inventory even while bytes await sweep; original receipts
+remain replayable under current authority. The event enum does not create an event HTTP route.
+M5-01c adds HTTP expiry reporting without changing that history. See [retention](../docs/retention.md).
 
-Control requests require `attempt_id`; they never resolve an implicit active attempt. The
-runtime rejects duplicate keys, invalid UTF-8, nulls, unknown fields, bodies over 4,096 bytes
-and reasons over 512 UTF-8 bytes. JSON Schema's character ceiling is not a substitute for
-the byte limit. Retry requires a nonblank reason. Record validation additionally checks
-identities, time ordering and source/new-attempt separation against durable context.
+Public artifact metadata/pages describe a historical publication. Their schema does not prove
+current disk bytes, valid HTTP trailers or workload success. The runtime validates complete
+publication identities, total bytes, uniqueness, ordering and snapshot offsets; content is
+independently rehashed. Clients validate exact known lowercase keys and required values while
+ignoring compatible future fields, rather than reflecting them into trusted output.
 
-The M3-06 collector reuses the embedded result-manifest schema and checks the actual
-attempt/nonce, frozen input digests, GPU requirements and output declarations separately.
-It rejects duplicate keys, unpaired Unicode, path collisions, missing required outputs and
-incorrect bytes. A schema-valid manifest alone is not proof of verified artifacts. See
-[`../docs/collection.md`](../docs/collection.md), including its empty-directory limitation.
+## OpenAPI operation inventory
 
-M3-07 adds `result.expired` to the shared event enum and the checked Go domain inventory.
-The expiry event, attempt result state and tombstones commit atomically; this is not a new
-event HTTP route. New admission/validation and explicit retry reject expired input inventory
-using existing input errors, even while physical bytes await sweep. Original job/control
-receipt replay remains unchanged and current-authority checked. See
-[`../docs/retention.md`](../docs/retention.md).
-
-## OpenAPI status
-
-The following ten base operations have offline component and HTTP integration evidence:
+The ten original operations retain their established offline component/HTTP evidence:
 
 ```text
 GET  /healthz
@@ -122,33 +108,20 @@ POST /v1/workspaces/{workspace_id}/jobs
 GET  /v1/workspaces/{workspace_id}/jobs/{job_id}
 ```
 
-Only `/healthz` is public. The readiness callback checks local services, not provider or
-GPU availability. Upload/import/ingestion require workspace write scope; metadata requires
-read scope. They return 201 only after verified bytes and ownership metadata commit.
-Local import is disabled unless the operator composes a named, workspace-allowed root
-manager. HTTPS ingestion is disabled unless a guarded input service is supplied; it only
-fetches permitted public HTTPS sources, never arbitrary headers or provider credentials.
+Only `/healthz` is public. Readiness checks local dependencies, not GPU availability. Upload,
+import and ingestion require write scope and return 201 only after byte/ownership commit.
+Named-root import and guarded HTTPS ingestion remain optional composition services, not enabled
+by the current local server. See [auth/objects](../docs/auth-and-objects.md),
+[packaging/import](../docs/packaging-and-import.md) and [HTTPS ingestion](../docs/https-ingestion.md).
 
-Job creation requires write scope and exactly one 8–256 byte printable-ASCII
-`Idempotency-Key`, with no whitespace. Job validation/status require read scope. Job,
-first attempt/nonce, profile revision, object references, event and receipt commit together
-before 202. Repeated equivalent requests return original IDs and `idempotency_replay=true`;
-changed requests return 409. Replay preserves original resolution but still checks current
-authority. No job handler executes uploaded commands, downloads URLs or calls a provider.
+Job creation requires write scope and exactly one printable-ASCII `Idempotency-Key`, 8–256 bytes
+without whitespace. Job/attempt/profile/object/event/receipt state commits before 202. Equivalent
+requests replay original IDs and `idempotency_replay=true`; changed requests conflict. Current
+authority is always checked. Validation/status require read scope; validation reports remaining
+checks, not provider eligibility. No job handler executes commands, refreshes inputs or calls a
+provider. Nil admission composition has no nondurable fallback.
 
-The admission service must be supplied explicitly; nil configuration has no nondurable
-fallback. `/v1/info` reports whether that service is configured. Validation reports remaining
-`before_dispatch` and `verify_after_start` checks rather than claiming provider eligibility.
-Direct HTTPS input records can be durably accepted while still pending preparation.
-
-See [`../docs/auth-and-objects.md`](../docs/auth-and-objects.md) for HTTP/ownership limits,
-[`../docs/packaging-and-import.md`](../docs/packaging-and-import.md) for import/bundle safety,
-[`../docs/https-ingestion.md`](../docs/https-ingestion.md) for SSRF policy, and
-[`../docs/admission.md`](../docs/admission.md) for canonicalization, replay and frozen inputs.
-SQLite repositories exist; local CLI serving is described below, while general profile/provider
-configuration remains separate.
-
-M3-05 adds five `implemented-offline` control operations, bringing the total to fifteen:
+M3-05 supplies five control operations:
 
 ```text
 POST /v1/workspaces/{workspace_id}/jobs/{job_id}/cancel
@@ -158,64 +131,80 @@ POST /v1/workspaces/{workspace_id}/jobs/{job_id}/collect
 GET  /v1/workspaces/{workspace_id}/operations/{operation_id}
 ```
 
-Control POSTs require `operate` scope and exactly one `Idempotency-Key` with the same ASCII
-bounds as job admission. GET requires `read`. The operation service must be composed
-explicitly; `/v1/info` advertises the five control features only when it is supplied.
-All successful POSTs return 202, `Location` and the strict control-operation view. A replay
-returns the original immutable receipt with `replay=true`; GET returns the current durable
-revision with `replay=false`. The control replay field is distinct from job admission's
-`idempotency_replay` field. No HTTP control calls a provider; retry verifies local frozen
-bytes, and the separately composed worker performs any permitted provider action.
+Control POSTs require operate scope and the same explicit key bounds; GET requires read scope.
+Successful POSTs return 202 and Location. `replay=true` preserves the original control receipt;
+GET returns current durable status with `replay=false`. This field differs from job admission's
+`idempotency_replay`. The `/retry` route has operation kind `retry_compute`, source `attempt_id`
+and distinct `new_attempt_id`. No control handler calls a provider. Explicit compute retry
+verifies original local bytes, while reconcile never repeats submission and collect creates a
+transfer-only ticket. Neither acceptance nor cancellation acknowledgement proves execution
+termination, verified results or hardware release. See [operations](../docs/operations.md).
 
-Cancellation acknowledgement is not terminal evidence. Retry names both the source attempt
-and a distinct new attempt. Reconcile never repeats submission. Collect accepts a durable
-transfer-only ticket after terminal execution evidence. The separately composed M3-06
-collector consumes tickets and publishes results only after verifying the pinned manifest
-and every selected blob. An interrupted accepted ticket can be reclaimed; a failed ticket
-requires a new explicit collect request/key. Neither path refreshes a durable result pin
-or reruns compute. See [`../docs/operations.md`](../docs/operations.md) and
-[`../docs/collection.md`](../docs/collection.md).
+M5-01c adds **three published artifact operations**, bringing the inventory to **eighteen**:
 
-The OpenAPI root status remains `planned`: M5-01a local serving does not complete the full
-production workflow. Artifact HTTP transfer/listings, logs, events, attempts, profiles and quota
-retain their own implementation gates. Receipt links reserve these contract locations; they
-do not claim the corresponding result routes exist. M3-06 adds authenticated internal result
-reads, not new public routes or a change to the fifteen-handler inventory. M3-07 likewise
-adds no cleanup/hold HTTP route. Expired results remain historical publications and return
-`retention.ErrExpired` through internal reads; existing job status can show `result=expired`
-without changing successful execution/orchestration or a historical operation receipt.
+```text
+GET /v1/workspaces/{workspace_id}/jobs/{job_id}/artifacts
+GET /v1/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_id}
+GET /v1/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_id}/content
+```
 
-`GET` operations are observational. Compute creation requires an explicit `POST`, and job
-creation plus every control POST expose an `Idempotency-Key` requirement. Provider names,
-notebook slugs, credential material, and provider filesystem paths do not appear in the
-normal contract. `INVALID_REQUEST` and `REQUEST_LIMIT_EXCEEDED` distinguish local request
-validation/backpressure from provider failures. Import source changes use `INPUT_CHANGED`;
-unsafe local paths use `INVALID_INPUT_PATH` without exposing absolute host paths.
+All require one explicit `attempt_id` query parameter and current read authority. List additionally
+accepts canonical `limit=1..100` and a snapshot-bound cursor. Unknown/duplicate query parameters,
+request bodies, encoded paths, Range/If-Range and non-GET methods are rejected. A page has explicit
+`next_cursor`, empty only at the end. Its complete-publication digest survives server reopen;
+wrong/stale cursor returns 409. Cursors are not permission tokens.
 
-## M5-01a local serving
+A nil result reader, missing/unpublished result or invisible artifact returns 404. Expired
+publications return 410 with `ARTIFACT_MISSING`, after current authorization. Revoked credentials
+return 401 even when the requested publication expired. Metadata contains no host paths or
+provider URLs. Historical `result_phase` need not mean payload success.
 
-`compute-relay serve` composes existing auth/object/admission/control handlers on literal
-loopback with actual SQLite/blob repositories. It does not enable local import or HTTPS
-ingestion, and no scheduler/dispatch/collection/retention worker is started. New workspaces
-have no allowed profiles: a fresh installation can serve authorized object operations but
-cannot admit a job for an unconfigured profile. Tests explicitly seed profiles to verify
-admission/receipt recovery; this is not a production provisioning command or SQL workaround.
+Content starts an octet-stream attachment with identity/size/digest headers and HTTP/1.1 chunked
+framing, **not Content-Length**. The server declares `Trailer: X-Compute-Relay-Verified` before
+the body and sets `X-Compute-Relay-Verified: true` only after actual byte verification, clean
+source EOF/Close and final authorization/expiry checks. A late failure aborts the response
+without JSON or the success trailer. Already delivered bytes cannot be recalled.
 
-The actual assigned port is used for Host validation. Responses identify
-`X-Compute-Relay-Mode: local-admission-only`; `/readyz` is local dependency readiness, not
-provider availability or a promise of executing queued jobs. Signal shutdown joins active
-handlers before closing stores. Local administration requires exclusive ownership and the
-server to stop first. Tokens are delivered to private files, not through an HTTP admin route.
+**A 200 response or complete body is not sufficient.** Require exact metadata/header identity,
+independent byte count/SHA-256, clean body EOF/Close and exactly one declared final true trailer.
+An initial header is not final acknowledgement. Use an unpublished temporary sink until all
+checks pass. Missing/stripped/duplicate trailers, wrong bytes, compression or a fixed-length
+replacement cannot qualify. The OpenAPI `x-completion-trailers` extension documents this
+additional semantic requirement; JSON Schema alone cannot enforce it.
 
-The separate local `validate --file` checks schema/semantics only and reports
-`admitted=false`/`provider_checked=false`; it is not the contextual HTTP validation response.
-No existing JSON schema, OpenAPI operation or contract-lock bytes change in this slice.
-See [`../docs/local-runtime.md`](../docs/local-runtime.md) and
-[ADR-0021](../docs/decisions/0021-local-runtime-lifecycle.md) for commands and evidence limits.
+See [artifact delivery](../docs/artifact-delivery.md) and
+[ADR-0023](../docs/decisions/0023-verified-artifact-delivery.md) for commands, private create-only
+publication, limits and evidence. These GETs read local publications only, never auto-collect,
+submit or change durable receipts/events. Retained stdout/stderr are historical artifacts, not
+live provider logs.
+
+The root OpenAPI status remains `planned` for the complete product. Logs, events, attempts,
+profile/quota reads and cleanup retain separate endpoint gates. Operation status is granular;
+a link in a receipt does not implement its target. M3 collection/retention semantics and all
+existing mutation contracts remain unchanged by the additive artifact routes.
+
+## Local serving and application commands
+
+`compute-relay serve` composes auth/object/admission/control services and the published result
+reader with actual SQLite/input/result stores on literal loopback. It starts no scheduler,
+provider, collector or retention workers and does not enable local import or HTTPS ingestion.
+`X-Compute-Relay-Mode: local-admission-only` and local readiness do not promise execution.
+Signal shutdown joins active handlers before closing stores and releasing ownership.
+
+M5-01b's local profile apply/show and workspace grant/revoke commands configure admission using
+the existing immutable profile revisions. They require a stopped server and do not create
+provider bindings or activate workers. Application commands use a separately selected private
+token file and HTTP while the server retains its installation lock. Local `validate --file`
+reports `admitted=false`/`provider_checked=false`; `job validate` uses contextual server checks.
+No SQL seed or direct database modification is an operator procedure.
+
+M5-01c application commands list/show published artifacts and download verified bytes to a
+user-chosen new file in a private directory. They perform no automatic retry or overwrite.
+A late output-report failure can follow successful file publication and is reported explicitly.
+See [local runtime](../docs/local-runtime.md), [application CLI](../docs/application-cli.md)
+and [artifact delivery](../docs/artifact-delivery.md). Parent M5-01 and live M1/M4-06 stay separate.
 
 ## Validation commands
-
-Use the repository wrappers:
 
 ```bash
 ./scripts/dev.sh contract-check
@@ -223,29 +212,20 @@ Use the repository wrappers:
 ./scripts/dev.sh check
 ```
 
-PowerShell and CMD wrappers accept the same task names.
+PowerShell and CMD wrappers accept the same task names. Contract checking is offline: validate
+the manifest/schema inventory, reject remote/escaping refs, compile Draft 2020-12 with formats,
+require positive/negative fixture results, compare domain enums, validate OpenAPI and its exact
+operation inventory, then verify the content lock. `contract-lock` is an explicit reviewed
+update, not an automatic CI repair.
 
-`contract-check` performs entirely local validation:
-
-1. parses the strict manifest and requires every schema to be accounted for;
-2. rejects remote, absolute, platform-dependent, or escaping `$ref` values;
-3. compiles every root schema as Draft 2020-12 with format assertions;
-4. requires every positive fixture to pass and every negative fixture to fail;
-5. compares public enum arrays against the Go domain constants;
-6. loads and validates OpenAPI 3.1.1 and its operation/status inventory; and
-7. verifies `contract.lock.json` is current.
-
-Tests additionally validate serialized object/error/import/bundle/HTTPS-input types and
-actual admission/validation/status/control HTTP responses against their contracts. Control
-serializer tests check 880 state/effect/identity-presence/termination combinations against
-the record validator, including rejection of false termination and invalid new-attempt
-claims. No fixture URL is fetched by schema validation. `contract-lock` is the explicit
-update step after reviewing an intentional JSON change. CI never contacts Kaggle or
-allocates compute.
+Tests validate actual object/admission/validation/status/control and artifact HTTP responses.
+Control serializer tests retain the 880-combination truth table. Artifact fixtures reject
+missing attempt/cursor, null bytes and traversal; stream tests separately verify trailers and
+failure acknowledgement. No fixture URL is fetched, provider credential used or compute allocated.
 
 ## Change policy
 
-A contract change must update the schema, valid example, relevant negative fixture, lock,
-and documentation together. Breaking changes must be visible in commit/PR history and use
-the repository breaking-change convention. Do not generate clients or claim endpoint
-support merely because a schema exists.
+A contract change updates schemas, positive/negative examples, lock and documentation together.
+Breaking changes must be visible in commit/PR history under the repository convention. M5-01c
+adds artifact schemas/fixtures, three operations, advertised features and their locks; it does
+not rewrite existing request/response semantics. Do not claim endpoint support from schemas alone.

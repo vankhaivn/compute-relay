@@ -7,8 +7,9 @@
 PR #24 merged the M4-06 acceptance harness, not its live GPU acceptance. M5-01a exposes
 local initialization, workspace/token administration, schema validation and guarded HTTP
 serving through the main executable. M5-01b's [application/profile guide](application-cli.md)
-now supplies admission-policy configuration and authenticated application commands in PR #26.
-General provider/worker composition, artifact/log routes, cleanup and M5-02 TOML remain separate.
+supplies admission-policy configuration and authenticated application commands, merged in PR #26.
+M5-01c's [artifact delivery](artifact-delivery.md) adds published-result reads in PR #27. General
+provider/worker composition, provider log/cleanup surfaces and M5-02 TOML remain separate.
 
 ## Build and start a private local installation
 
@@ -108,13 +109,21 @@ cooperate, so this is not a hard-real-time guarantee.
 
 ## HTTP and shutdown boundaries
 
-The host composes existing `api`, `auth`, `objects`, `admission` and `operations` services with
-actual SQLite/filesystem repositories. It retains their body, concurrency, rate, Host/Origin,
-workspace and idempotency rules. Health is anonymous; readiness/info and application operations
-retain authentication. Local import and HTTPS ingestion are not enabled, and no new artifact,
-log, event-stream or administration route is introduced. Existing route/schema definitions
-are unchanged. See [API status](../api/README.md), [objects](auth-and-objects.md) and
-[controls](operations.md) for their individual contracts.
+The host composes `api`, `auth`, `objects`, `admission` and `operations` services with actual
+SQLite/filesystem repositories. M5-01c also composes the existing `collection.Reader` for three
+read-only published-artifact operations. The API inventory is eighteen composable operations;
+optional import/HTTPS routes remain disabled in this local host. Body, concurrency, rate,
+Host/Origin, workspace and idempotency rules remain enforced. Health is anonymous; readiness/info
+and application operations retain authentication. No provider log, event-stream or administration
+route is added. See [API status](../api/README.md), [objects](auth-and-objects.md),
+[controls](operations.md) and [artifact delivery](artifact-delivery.md).
+
+Artifact reads require an existing committed publication and current workspace read authority.
+The metadata/page/content routes name an explicit attempt, reject expired results, and never start
+collection, provider calls or compute. Content uses a final verification trailer after exact byte
+checks, source Close and renewed authority/expiry checks. A late failure withholds that trailer.
+Downloads share existing bounded transfer admission and are joined during shutdown like uploads.
+A newly initialized or admission-only installation does not manufacture results for these routes.
 
 Every accepted HTTP response carries `X-Compute-Relay-Mode: local-admission-only`. `/readyz`
 means the configured local dependencies are ready, **not** provider/GPU availability, a usable
@@ -175,9 +184,16 @@ Go/native/race evidence is recorded in merged PR #25. No replacement driver or d
 M5-01b adds actual profile-command and application-HTTP integration without test-only profile
 seeding, including lost admission response after commit, original receipt/binding recovery,
 remap/revoke and token revocation. Its client/JSON local checks and final-head CI are recorded
-separately in PR #26 and the application guide, not relabeled as M5-01a evidence.
+separately in merged PR #26 and the application guide, not relabeled as M5-01a evidence.
 
-See [ADR-0021](decisions/0021-local-runtime-lifecycle.md), [application CLI](application-cli.md)
-and the [implementation plan](implementation-plan.md) for the current owner-review boundary.
-Parent M5-01 remains incomplete until its remaining provider/worker/result/cleanup surfaces;
-M4 live acceptance and M5-02 configuration remain separate. No release-ready compute service is claimed.
+M5-01c adds actual M3 publication, HTTP/CLI download and database-reopen tests, including missing
+publication, stable snapshot pagination, exact protected bytes, expiry/revocation and unchanged
+receipts/events. Provider counters do not advance during local delivery. Stream/trailer tests
+cover late failures and private create-only delivery; see PR #27 for exact-head evidence and
+local limits. No new live-provider or process-kill experiment is implied by those tests.
+
+See [ADR-0021](decisions/0021-local-runtime-lifecycle.md), [application CLI](application-cli.md),
+[artifact delivery](artifact-delivery.md) and the [implementation plan](implementation-plan.md)
+for the current owner-review boundary. Parent M5-01 still needs remaining provider/worker/log/
+cleanup surfaces; M4 live acceptance and M5-02 configuration remain separate. No release-ready
+compute service is claimed.

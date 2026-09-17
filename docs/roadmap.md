@@ -3,8 +3,9 @@
 > **Status:** acceptance-based roadmap active; synchronized 2026-09-17.
 >
 > **Current work:** M3 and M4's offline components/harness are merged through PR #24.
-> M5-01a local runtime is merged in PR #25; M5-01b profiles/application CLI is in review
-> in PR #26. Parent M5-01 remains in progress. No live M4-06/M1 experiment is recorded.
+> M5-01a local runtime and M5-01b profiles/application CLI are merged in PRs #25/#26.
+> M5-01c artifact delivery is in review in PR #27. Parent M5-01 remains in progress.
+> No live M4-06/M1 experiment is recorded.
 >
 > Dates and sprint estimates are intentionally not assigned without an execution context.
 
@@ -21,16 +22,17 @@ proof of the first real compute path.
 | M-2 — Portable core | `complete` offline | M2-01 through M2-09 merged through PR #10; provider-neutral API/domain/objects/auth/fake-provider and finite runner evidence, not a live-provider claim. |
 | M-3 — Durable orchestration | `complete` offline | PRs #11–#18 merged the components, executable 25-scenario qualification and recovery documentation. This closes the implemented offline gate, not production or live acceptance. |
 | M-4 — Integrated Kaggle batch | Offline components/harness merged; live acceptance `blocked` | PRs #19–#24 supply the component ports and finite fixed-job GPU/restart harness. No real live result is recorded; general production registration and remaining M1 evidence are not complete. |
-| M-5 — Usable developer product | `in-progress` | PR #25 merged the local runtime; PR #26 adds immutable admission profiles, separate workspace grants and one-shot application HTTP commands. Parent M5-01 still needs general provider/worker and result/cleanup surfaces; TOML, doctor, examples, language clients and packaging retain their gates. |
+| M-5 — Usable developer product | `in-progress` | PRs #25/#26 merged local runtime, immutable admission profiles and application commands. PR #27 adds authorized published-artifact HTTP reads and verified private downloads. Parent M5-01 still needs general provider/worker, remaining log/control and cleanup surfaces; TOML, doctor, examples, language clients and packaging retain their gates. |
 | M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
 
 Detailed task dependencies, delivery slices and authorization boundaries are in
-[`implementation-plan.md`](implementation-plan.md). Stop at PR #26 for owner review/merge.
-M5-01b is not the whole M5-01 runtime/CLI. Proposal section 23.6 permits offline work, not a
+[`implementation-plan.md`](implementation-plan.md). Stop at PR #27 for owner review/merge.
+M5-01c is not the whole M5-01 runtime/CLI. Proposal section 23.6 permits offline work, not a
 live-success declaration from CI. The local server still starts no provider worker; explicit
-profile admission policy is not full provider configuration. Public result routes, general
-worker composition and remote cleanup remain separate. Local timeouts/process exits do not
-cancel remote compute or grant another submission permit.
+profile admission policy is not full provider configuration. Published-result reads do not
+start collection or generate artifacts. General worker composition, provider log surfaces and
+remote cleanup remain separate. Local timeouts/process exits do not cancel remote compute or
+grant another submission permit.
 
 ## M-0 — Evidence and scope
 
@@ -224,7 +226,7 @@ provides explicit workspace/private-file token administration, validates schemas
 existing durable services on literal loopback. Shutdown joins handlers before releasing stores.
 Its tests use real local stores/HTTP/main-entry child processes, not a live provider.
 
-M5-01b's [profiles/application CLI](application-cli.md) supplies immutable admission revisions,
+M5-01b's merged [profiles/application CLI](application-cli.md) supplies immutable admission revisions,
 separate workspace grants and private-token requests through that running API. New profiles do
 not grant authority or activate workers implicitly. Explicit receipt recovery across lost HTTP
 responses, reopen/remap/revoke retains original accepted bindings; commands never automatically
@@ -232,12 +234,21 @@ replay requests. Upload source and response acknowledgement are separate from se
 Local profile, object_id and retry_compute wire contracts are checked without changing existing
 API schemas or M3 mutation semantics.
 
-The server remains admission-only with dispatch disabled. General provider setup, result/log/
-cleanup surfaces and worker lifecycle remain necessary before parent M5-01 completion. TOML,
+M5-01c's [artifact delivery](artifact-delivery.md) adds three read-only API operations for already
+published results and application commands for pagination, metadata and private create-only downloads.
+Explicit workspace/job/attempt identity, current authorization and expiry checks protect reads.
+Independent hashes, clean EOF/Close and a mandatory final HTTP trailer qualify the transfer;
+complete bytes without final acknowledgement cannot publish a local file. Reopen preserves
+unchanged-publication cursors and original receipts/events. These routes do not collect new results,
+start workers or provide live provider logs. The additive contract inventory is eighteen operations.
+
+The server remains admission-only with dispatch disabled. General provider setup, remaining log/
+control/cleanup surfaces and worker lifecycle remain necessary before parent M5-01 completion. TOML,
 doctor, examples, language clients and first-run release evidence keep their original gates.
-[ADR-0021](decisions/0021-local-runtime-lifecycle.md) and
-[ADR-0022](decisions/0022-immutable-profiles-and-application-client.md) record these slices without
-weakening the approved outcome or turning local admission into live compute acceptance.
+[ADR-0021](decisions/0021-local-runtime-lifecycle.md),
+[ADR-0022](decisions/0022-immutable-profiles-and-application-client.md) and
+[ADR-0023](decisions/0023-verified-artifact-delivery.md) record these slices without weakening the
+approved outcome or turning local admission or artifact reads into live compute acceptance.
 
 ## M-6 — Release hardening
 

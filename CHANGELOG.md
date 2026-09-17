@@ -27,8 +27,8 @@ Semantic Versioning once a public compatibility surface exists.
 - Go module, pre-release executable, cross-platform developer commands, and offline CI
   foundation.
 - Provider-neutral Go domain model with typed opaque identities, capability/evidence
-  semantics, stable structured errors, explicit entities, independent attempt-state
-  dimensions, and monotonic transition tests.
+  semantics, stable structured errors, explicit entities, independent state dimensions,
+  and monotonic transition tests.
 - Strict Draft 2020-12 JSON Schemas, OpenAPI 3.1 skeleton, positive/negative fixtures,
   domain-enum drift checks, and a reviewable contract-content lock.
 - Provider-neutral execution and infrastructure ports, explicit instance registry, optional
@@ -214,15 +214,25 @@ Semantic Versioning once a public compatibility surface exists.
   recovery, reopen/remap/revoke, original profile/receipt preservation and zero remote intent.
 - Additional parser/main-route, control-kind, source-growth, output-failure and request-reader
   ownership tests; application guide and ADR-0022 distinguish local admission from worker activation.
+- M5-01c explicit workspace/job/attempt artifact metadata, sorted snapshot pagination and binary
+  HTTP reads of already published M3 results, with current authorization and expiry handling.
+- Application commands for artifact listing, metadata and private create-only delivery. Exact
+  size/hash, successful EOF/Close and a mandatory final verification trailer precede local publication.
+- Independent local-file rehash, no-overwrite hard-link publication and explicit uncertainty after
+  final linking or stdout failure, without automatic retry, collection or provider access.
+- Stream/query/schema and real HTTP/CLI/SQLite tests for late faults, final expiry/revocation,
+  stable cursors across reopen, five protected files and unchanged publication/receipt/event history.
+- Artifact delivery guide and ADR-0023 documenting final acknowledgement, temporary sinks,
+  HTTP/1.1 trailer compatibility, local filesystem limits and remaining M5/live boundaries.
 
 ### Changed
 
 - Increased the commit-subject and PR-title ceiling from 72 to 80 characters at the owner's
   request, preserving existing history and all other format rules. Added 16 regression checks
   to the existing convention workflow; synchronized the canonical policy and commit template.
-- Synchronized living documentation for merged M5-01a and M5-01b's PR #26 review gate, without
-  declaring live acceptance or completion of parent M5-01. ADR-0021 records acceptance after
-  PR #25; historical decisions, earlier evidence and original dependencies remain preserved.
+- Synchronized living documentation for merged M5-01a/M5-01b and M5-01c's PR #27 review gate,
+  without declaring live acceptance or completion of parent M5-01. ADR-0022 records acceptance
+  after PR #26; historical decisions, earlier evidence and original dependencies remain preserved.
 - Updated OpenAPI collection descriptions and their content lock without changing wire
   schemas, the fifteen-handler inventory or the production-runtime implementation gate.
 - Extended the shared event enum and contract lock for `result.expired`; no cleanup or
@@ -257,5 +267,8 @@ Semantic Versioning once a public compatibility surface exists.
 - M5-01b extends only local/application command routing and adds a validated profile read; existing
   profile/admission/control mutations, public schemas, migrations and provider/runner sources remain.
   Client corrections use the established object_id field and retry_compute kind, not a changed API.
+- M5-01c adds artifact schema/examples and three OpenAPI operations, increasing the composable
+  inventory to eighteen. The host composes only existing published-result reads; dispatch stays
+  disabled. Dependency/workflow/migration/provider/runner and M3 mutation semantics are unchanged.
 
 [Unreleased]: https://github.com/vankhaivn/compute-relay/commits/main

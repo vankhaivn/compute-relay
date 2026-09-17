@@ -3,8 +3,18 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "3c50a9c04d4368a838ed20e87e2547139a9bf9ed268a0d56d3621ea9fd3c2847",
-      "bytes": 4672
+      "sha256": "06cd7440720fc6055a364323441fc2faa6ef1ca60475602fc2db8dbcc43f7887",
+      "bytes": 5107
+    },
+    {
+      "path": "api/examples/artifact.metadata.valid.json",
+      "sha256": "c06dd9d19213a40f91f87494a5529cd21a0fc0f98f6a4867de32b6041185f2fc",
+      "bytes": 370
+    },
+    {
+      "path": "api/examples/artifact.page.valid.json",
+      "sha256": "a375cf8877a38b5863844045f52be316f5fcbcbc374b550c6440ffdab8d9d4ea",
+      "bytes": 527
     },
     {
       "path": "api/examples/bundle-manifest.valid.json",
@@ -35,6 +45,26 @@
       "path": "api/examples/error.submission-unknown.valid.json",
       "sha256": "5579f141bfed88ccfb42b85a834515e773b6fdea64ecb2fdbc8cd77e37e2e2ed",
       "bytes": 479
+    },
+    {
+      "path": "api/examples/invalid/artifact.missing-attempt.json",
+      "sha256": "ca6184bf5fdf3517c9f6cc2548deaf96e398c51fa6611b39db56c106a89ab6c3",
+      "bytes": 339
+    },
+    {
+      "path": "api/examples/invalid/artifact.missing-cursor.json",
+      "sha256": "e16696855467257bcacfb9126167940c8509e8c99b330cf8af9b642ae6c6188b",
+      "bytes": 506
+    },
+    {
+      "path": "api/examples/invalid/artifact.null-bytes.json",
+      "sha256": "63ee7f9efae78471945bfdabf707ef43e1a62a974a017b7978221e5abbc8e370",
+      "bytes": 373
+    },
+    {
+      "path": "api/examples/invalid/artifact.traversal.json",
+      "sha256": "a50ad0e6ce6e63e2f69471ba4c0070dc1d32887fe7dee942be3a0af761f56652",
+      "bytes": 370
     },
     {
       "path": "api/examples/invalid/bundle-manifest.missing-mode.json",
@@ -258,8 +288,13 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "3425a1a103a7454ff9947ebb3a57b9da0f9cbde6181e590e84a9ef218877b348",
-      "bytes": 34519
+      "sha256": "9e2acda867ab3f50dfc982c9f3e355b976dd1586c5b6cf70cdd4ac67d1af99dd",
+      "bytes": 45390
+    },
+    {
+      "path": "api/schemas/artifact.v1alpha1.schema.json",
+      "sha256": "db3fcb0a4c863cd10acf5fdcd92b17d4aa2cb5ffca399a48ffc531b2edc3fa77",
+      "bytes": 5542
     },
     {
       "path": "api/schemas/bundle-manifest.v1.schema.json",
