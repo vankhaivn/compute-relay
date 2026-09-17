@@ -1,216 +1,66 @@
-# Verified artifact collection and recovery
+# Verified collection and publication
 
-> **Task:** M3-06, implemented offline; PR #16 merged.
->
-> **Scope:** an explicitly composed transfer service, SQLite publication and authenticated
-> internal result reads. No production `serve`, artifact HTTP routes or live provider claim.
+The collection engine consumes transfer-only work for an exact terminal attempt. It does not
+execute compute, refresh inputs or switch profiles. Normal `serve` exposes existing results
+but does not start this engine. The fixed acceptance utility composes it explicitly.
 
-## Collection boundary
-
-`internal/collection.Engine` consumes M3-05 collect tickets for attempts with matching
-terminal provider evidence. When explicitly run, it can create the first ticket for a
-collectible attempt with no collection history. Migration, admission, cached GET and
-terminal dispatch do not start an engine. A failed ticket is not replaced automatically.
+## Stages
 
 ```text
-terminal attempt and matching frozen provider identity
-  -> commit collection ticket/lease and collecting state
-  -> resolve and verify the original provider/configuration/account binding
-  -> enumerate bounded pages; retrieve the result manifest
-  -> validate schema, identity, frozen requirements and selected file metadata
-  -> commit an immutable per-attempt result snapshot
-  -> stream selected bytes into a dedicated private blob store
-  -> reopen and independently hash every pinned blob
-  -> atomically commit all artifact metadata, result/state/events and operation outcome
+commit ticket/lease -> verify original provider binding -> complete candidate listing
+ -> retrieve and validate original manifest -> commit immutable result snapshot
+ -> transfer selected bytes -> reopen/hash local blobs
+ -> atomically publish all artifacts + state/events + operation outcome
 ```
 
-The worker's private source interface exposes only binding verification, artifact listing
-and artifact fetch. It has no Prepare, Submit, Cancel or Cleanup method. Profile remapping
-cannot change the accepted binding. Collection neither reruns compute nor refreshes inputs.
+Use a dedicated private result blob store, separate from application uploads. No transaction
+spans network or byte I/O. Leases bind workspace/job/attempt/operation, generation/fence, expiry
+and attempt revision. Stale owners or cancellation races cannot publish using an old claim.
 
-Compose `collection.New(store, registry, resultBlobs, clock, config)` and invoke `RunOnce`
-for one finite operation or `Run` for a fixed transfer pool. Supply a **dedicated
-collector-owned `blobfs.Store` root**, not the application upload root. This is a trusted
-Go composition API, not a shipped CLI command. The blob store keeps its existing process
-lock, private permissions, create-only publication and local capacity policy. Configure its
-per-object and total limits deliberately; lower blob limits can reject a transfer even
-when collection's aggregate ceiling permits it.
+## What qualifies
 
-## Identity, manifests and paths
+The strict result manifest must match job/attempt/nonce, original bundle/input digests, frozen
+output declarations, GPU requirements and consistent phase/exit/time evidence. The complete
+catalog must be bounded, collision-free and tied to the same provider resource/version.
 
-The collector uses the existing embedded result-manifest v1 schema, with external schema
-loading disabled. It also rejects duplicate decoded keys, invalid UTF-8/unpaired surrogates,
-trailing JSON and excessive nesting. Identity must match job, attempt, nonce, bundle digest
-and input-manifest digest. Provider file references must match the exact resource/version.
+Select only declared manifest outputs and fixed controls: `control/execution-result.json`,
+optional stdout/stderr and environment JSON. Code/input/scratch files are not outputs. Paths are
+logical portable relative names, never host paths; no provider archive/link extraction occurs.
+Manifest v1 has no directory-presence entries: an empty required directory cannot be proven and
+fails rather than becoming a fabricated output. Use an explicit marker file when necessary.
 
-The manifest is `control/execution-result.json`. Its artifact paths are relative to the
-logical `outputs/` namespace. Each file must match the frozen output declaration and the
-provider catalog's size and digest. Required outputs must be present for a completed payload;
-per-directory byte ceilings apply to the sum of its manifest files. GPU-required/verified
-flags are checked against the frozen specification, not trusted as a replacement for it.
-Timestamps must be ordered and timeout/phase evidence must be consistent.
+Candidate hashes are not verified payload bytes. A bounded independent writer checks actual
+length/digest; successful blob EOF is withheld until the provider call and receipt succeed.
+Errors after the last byte still fail. Reopen and rehash every completed blob before publication.
+SQLite commits the complete artifact set, result/attempt state, sequenced events and operation
+outcome together. A failed commit publishes no partial metadata, even if complete blobs exist.
 
-Portable ASCII path, case-collision and file/prefix-collision checks apply to the complete
-catalog and manifest. Remote paths never become host filesystem paths and provider archives
-are never extracted. The provider port supplies logical regular-file streams, not an archive
-or a local symlink. A provider adapter remains responsible for meeting that port's contract.
+## Recovery
 
-Only declared manifest outputs and a fixed control-file allowlist are selected. Available
-`control/stdout.log`, `control/stderr.log` and `control/environment.json` are retained as
-historical logs/provenance, not live streaming or trusted instructions. Scratch/code and
-other unselected files are not downloaded. Artifact IDs bind the complete remote identity,
-logical path, size and digest; a different attempt does not overwrite prior artifacts.
+One immutable snapshot per attempt survives restart and explicit collection retry. Reuse complete
+blobs only after hashing, and fetch missing files against the original pin. Never replace the pin
+with a newer listing. An interrupted accepted ticket may be reclaimed; a committed failure needs
+one explicit new collect request/key. Lost pin/publication acknowledgement is resolved by reading
+committed state, not new compute or duplicate publication. Partial-byte range resume is absent.
 
-**Directory limitation:** manifest v1 lists files but has no directory-presence entries.
-An empty required directory cannot prove presence and fails with `ARTIFACT_MISSING` rather
-than inventing a verified output. Nonempty declared directories are verified through their
-file entries. Use an explicit marker/output file when empty-directory presence matters;
-changed output requirements require a new job.
+Verified failure manifests/logs can be available even when the payload failed. Provider terminal
+status alone is not business success, cancellation or hardware release. Original control receipts
+remain immutable. [Kaggle retrieval](providers/kaggle-artifacts.md) additionally checks terminal
+status/identity after transfer; failed final checks invalidate complete temporary bytes.
 
-## Transfer and publication safety
+## Access, bounds and retention
 
-An independently hashing, size-bounded writer sits between the provider and blob storage.
-The pipe delivers EOF only after the provider call returns successfully and both actual
-bytes and the provider transfer receipt match the pinned identity. An error after the last
-byte is still a failed transfer. Ignoring a writer overflow error cannot make it succeed.
+`collection.Reader` requires current workspace read authority and explicit job/attempt; opening
+content also requires a committed artifact ID. It returns local bytes, never provider URLs.
+[HTTP/CLI delivery](artifact-delivery.md) adds final verified streaming and create-only file output.
 
-Every completed blob is reopened and hashed before the engine creates its private
-verification value. `Store.CompleteCollection` accepts only that value for the current
-lease and durable snapshot. This is a typed trusted-process boundary, not cryptographic
-attestation against malicious in-process code or an untrusted provider operator.
+Defaults are two workers, ten-minute invocations, leases with thirty seconds additional margin,
+4 GiB selected bytes, 10,000 payload files plus four controls. Manifest/environment are at most
+1 MiB each; each log at most 20 MiB. Lower blob/policy limits still apply. Callbacks must cooperate;
+shutdown joins them rather than replacing stalled workers without bound.
 
-SQLite migration 7 adds `collection_leases`, `collection_snapshots`,
-`collection_publications` and `artifacts`. The publication transaction commits all file
-rows, result/attempt state, sequenced events, cached condition, collect-operation completion
-and lease release together. A failed insert or SQLITE_FULL rolls back all publication
-metadata. Complete blobs can exist before that commit but are not application-visible.
-
-No SQL transaction spans provider calls or blob I/O. Leases check workspace/job/attempt,
-operation, generation, random fence, expiry and attempt revision. Cancellation changing an
-attempt during transfer invalidates the old publisher; recovery uses the latest revision
-without changing the remote execution identity or fabricating a cancellation.
-
-## Outcomes and recovery
-
-Verified artifact availability and payload success remain separate. A valid failure
-manifest and available logs can be published with failed orchestration. A successful
-provider wrapper plus a failed payload is not job success. Provider execution, cancellation
-and release evidence are not rewritten from local transfer timing. Provider cancellation
-without confirmed local intent stays needs-attention rather than inventing that intent.
-
-| Interruption | Safe next behavior |
-|---|---|
-| Before a snapshot is committed | Reclaim the accepted ticket after lease expiry and revalidate the same remote identity. |
-| Lost snapshot-commit acknowledgement | Reload the durable pin; do not select a newer result. |
-| Partial/erroring transfer | Record incomplete/invalid results and a failed operation; publish no artifact metadata. |
-| After complete blobs, before publication | Reclaim and rehash the pinned cache; fetch only missing complete files. |
-| Lost publication acknowledgement | Read committed status; do not create another publication or duplicate its events. |
-| Wrong identity/digest or missing manifest/output | Preserve evidence and a sanitized condition; inspect or explicitly retry collection, never compute. |
-
-A committed failure requires a **new explicit collect request/key** for the same attempt.
-Replaying the previous key still returns its original immutable receipt, not a fresh ticket;
-GET returns the current operation revision. Interrupted accepted tickets can be reclaimed
-without creating another operation. A previously pinned snapshot is reused across both
-restart and explicit collection retry; it is never silently replaced with a current listing.
-Completed files are reused only after hashing. Partial-byte range resume is not implemented.
-
-Failure conditions appear through existing cached job status. Identity mismatches retain
-the domain's `observation` failure stage; artifact failures use `results`. No provider
-message, internal cause or credential is copied into the public condition.
-
-## Kaggle artifact-port integration
-
-M4-05's [ArtifactReader](providers/kaggle-artifacts.md) supplies version-scoped candidate
-listing and selected-file transfers for the original Executor reference. It reads every
-bounded provider page, verifies the original manifest/declarations and ignores listing URLs.
-Explicit file/version SDK requests select declared outputs and fixed control files only;
-code, input, scratch and provider archives are not downloaded or extracted.
-
-Candidate payload digests still require independent verification. The reader's in-memory
-catalog cursor is not this collector's durable pin; reconstruction rejects stale cursors,
-while an already committed M3 snapshot is reused without replacing its manifest or file set.
-Each missing file is checked against the original pinned length/hash and remote identity.
-
-Temporary bytes can precede the helper's final status/identity checks and process exit.
-Failure after all bytes remains a failed provider call; the existing M3 pipe withholds
-successful blob EOF and publishes nothing. No special-case bypass, migration or collector
-state-machine change is introduced. Full production Provider registration and artifact
-HTTP/CLI remain separate from this tested composition.
-
-## Defaults and operational limits
-
-Defaults are two workers (configurable 1–16), a ten-minute invocation deadline, a lease
-lasting that deadline plus thirty seconds, and a one-second idle poll. Selected result bytes
-are capped at 4 GiB, with at most 10,000 payload files plus four control files. Manifest and
-environment JSON are capped at 1 MiB each, and each selected log at 20 MiB. Lower settings
-are supported. Listings use pages of at most 100 entries, bounded cursors/page count and
-cycle detection; oversized catalogs fail instead of being silently truncated.
-
-Callbacks must honor context and bounded writes. On blob failure or panic the pipe is
-closed and the callback is joined. A callback ignoring cancellation can delay shutdown;
-the fixed pool does not replace it with an unbounded new goroutine. Lease expiry alone is
-not proof that a callback has stopped, nor a change to remote activity/accounting.
-
-`collection.Reader` requires current workspace `read` authority and explicit job/attempt
-identity; `Open` additionally requires a committed artifact ID. It returns metadata and a
-stream from the dedicated result store, never a provider URL. Token revocation and foreign
-workspace/attempt/ID reads are rejected. Public artifact download/listing routes and CLI
-composition remain separate work; the existing fifteen HTTP handlers are unchanged.
-
-## Retention integration
-
-Do not delete pins or completed blobs to repair a failed collection. [M3-07 retention](retention.md)
-now supplies explicit pin-aware expiry and local byte sweep. Pending operations, held leases,
-incomplete/invalid collections and unpublished recovery files remain protected. The complete
-verified artifact set expires together; metadata/publication identity survives, and one
-`result.expired` event records expiry without changing execution outcome or original receipts.
-Current internal reads return `retention.ErrExpired` rather than reporting no publication.
-
-Database-only backups do not include either input or result blob root. Retain matching bytes,
-recovery evidence and each root's `.retention-id` when backing up or moving a whole store.
-Root replacement is not authorized by a matching path. A restored database does not stop
-remote compute or recover deleted bytes. Arbitrary schema downgrade is unsupported. Remote
-cleanup previews remain separate from collection and never apply deletion.
-
-## Verification
-
-With the repository's pinned Go 1.27.1 toolchain:
-
-```text
-go test -race ./internal/collection ./internal/store/sqlite
-go test -count=10 -run=TestCollection ./internal/store/sqlite
-go run ./cmd/devtool check
-go run ./cmd/devtool test-race
-```
-
-The first pair are focused developer checks. The existing offline CI runs the latter
-repository-wide commands plus native Linux/macOS/Windows tests and CGo-free builds. The
-component tests compose actual SQLite and private filesystem blobs with synthetic provider
-bytes; no admitted command executes. They force pagination, partial/late-error transfers,
-wrong identity/digest/required-output failures, twenty-way claim contention, cancellation
-races, profile remapping, revoked reads, schema-6 upgrade and actual SQLITE_FULL rollback.
-
-Separate tests cover snapshot/publication acknowledgement loss and an actual Go subprocess
-kill after a durable pin. The killed child performs no provider call; the fake backend stays
-in the parent process. Recovery asserts one attempt and one simulated compute submission,
-not a live-provider exactly-once guarantee. EOF/panic tests verify callback joining and
-that unacknowledged bytes cannot reach publication.
-
-Local engineering had Go 1.23.2 with no pinned-toolchain/module download access. Formatting
-and the exact strict-JSON decoder's isolated standard-library race/ten-repeat tests passed;
-a two-second bounded fuzz run executed 43,491 inputs. That harness supplies only constants
-and an error sentinel and is not shipped. It is **decoder-only** evidence, not local schema,
-modernc, full-engine or production-runtime execution. PR #16 records exact final-head CI
-results separately. No dependency downgrade, replacement driver or CI workflow was added.
-M3-07 retention/expiry evidence is recorded separately in PR #17 and the retention guide.
-
-M4-05's separate tests compose the concrete artifact reader with this engine and real
-SQLite/private blobs. They independently check committed lease/pin before helper entry,
-scoped verified reads, original receipt replay, profile remapping, 16 MiB partial/late/wrong
-transfers and lost pin/publication acknowledgements across restart. SDK HTTP fixtures are a
-different tier; no live provider or new process-kill experiment is claimed. See PR #23 and
-[the artifact guide](providers/kaggle-artifacts.md) for exact-head evidence and local limits.
-
-See [ADR-0013](decisions/0013-verified-collection-and-publication.md),
-[durable controls](operations.md), [dispatch](dispatch.md), [storage](storage.md),
-[retention](retention.md) and [Kaggle artifacts](providers/kaggle-artifacts.md).
+Unpublished complete blobs and incomplete collection remain recovery material. [Retention](retention.md)
+expires a whole verified publication atomically and preserves metadata/history. Expiry prevents
+new reads but cannot recall delivered bytes. Database-only backups do not include either blob
+root. See [storage](storage.md), [recovery](recovery.md) and the
+[operator checklist](development/validation-checklist.md).
