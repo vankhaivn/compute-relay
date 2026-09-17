@@ -1,113 +1,49 @@
-# Contributing to Compute Relay
+# Contributing
 
-Thank you for improving Compute Relay. The project is in an early, evidence-driven stage:
-provider-neutral core, durable orchestration components, verified collection and pin-aware
-retention have offline implementations and tests. Production runtime composition and live
-provider acceptance remain separate gates. See the [implementation plan](docs/implementation-plan.md)
-for merged tasks and the current review boundary.
+Read [AGENTS.md](AGENTS.md), [current status](docs/status.md) and the relevant
+[component guide](docs/README.md). Use the approved proposal and requirement IDs for design
+constraints, not as proof that a proposed command or provider capability exists.
 
-## Start here
+## Change workflow
 
-Read these documents before opening a substantial change:
+Create one focused branch/PR. Use atomic [Conventional Commits](docs/development/commit-convention.md),
+push checkpoints for long tasks and keep code/docs changes separate. Do not add an AI co-author,
+rewrite shared history or push directly to `main` without explicit task authorization. Stop at
+the owner-review boundary; do not merge or start the next task automatically.
 
-1. [`AGENTS.md`](AGENTS.md)
-2. [`docs/proposal.md`](docs/proposal.md)
-3. [`docs/architecture.md`](docs/architecture.md)
-4. relevant ADRs and research notes under [`docs/`](docs/README.md)
+Enable the local hook from the clone root:
 
-The proposal's owner-approved decisions are product constraints. Implementation defaults may be improved through an ADR when evidence supports a better choice.
-
-## Ways to contribute
-
-Useful contributions include:
-
-- corrections that preserve the approved scope;
-- primary-source provider research and reproducible evidence;
-- threat modeling and failure-case tests;
-- provider-neutral domain, API, persistence, and packaging work;
-- fake-provider contract tests;
-- cross-platform developer tooling; and
-- concise documentation that distinguishes implemented, tested, and unverified behavior.
-
-Do not submit account farming, quota evasion, CAPTCHA bypass, anti-idle behavior, hidden browser automation, credential harvesting, automatic paid fallback, or features intended to violate provider terms.
-
-## Local repository setup
-
-Clone the repository, then enable the versioned commit hook and commit template:
-
-```bash
+```sh
 ./scripts/setup-git-hooks.sh
 ```
 
-PowerShell and CMD alternatives are available under [`scripts/`](scripts/).
+PowerShell/CMD equivalents are in `scripts/`. The hook supplements CI; it does not replace checks.
 
-The hook is an early local check. GitHub Actions performs the authoritative repository check.
+## Checks and evidence
 
-## Branches and pull requests
-
-Use a short-lived branch with a descriptive name such as:
-
-```text
-feat/fake-provider-contract
-fix/ambiguous-submission-recovery
-docs/kaggle-feasibility
+```sh
+go run ./cmd/devtool check
+go run ./cmd/devtool test-race
 ```
 
-Keep a pull request focused. Its description should state:
+Use [toolchain guidance](docs/development/go-toolchain.md) and narrow component tests during
+implementation. PR descriptions should state behavior changed, exact checks/limits and external
+effects. Fake-provider/SDK fixtures are not live acceptance.
 
-- intended behavior and affected boundaries;
-- tests and validation performed;
-- documentation or ADR changes;
-- whether any external credentials, provider calls, or compute quota were used; and
-- known limitations or unverified assumptions.
+For a real installation/account run, follow the [operator checklist](docs/development/validation-checklist.md),
+update [results](docs/development/validation-results.md) and use the
+[bug template](docs/development/bug-report-template.md). Only sanitized reports enter Git.
+Credentials, binaries, private raw logs, inputs and runtime databases stay on the operator host.
 
-Direct pushes to `main` are reserved for tasks where the owner explicitly authorizes that workflow.
+## Keep docs useful
 
-For a long-running task, commit and push reviewable checkpoints on its feature branch so
-work is not stored only in a disposable runtime. Record unresolved checks in the draft PR;
-a pushed checkpoint is not a completion claim. Preserve existing history and keep code and
-documentation changes in separate scoped commits. Stop at the requested owner-merge boundary.
+Usage guides describe current commands. Component references explain contracts and limitations.
+ADRs capture material decisions and consequences. Plans contain remaining work. Changelog entries
+summarize user-visible features, not every audit/commit/test run. Remove stale completion stories;
+Git/PR history already preserves them. Do not copy owner or agent messages into documentation.
 
-## Commit convention
+Live provider facts need dated, versioned primary-source evidence. Do not add account farming,
+quota evasion, browser/anti-idle bypasses, hidden retries or automatic paid fallback. See
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
-Every commit must follow [`docs/development/commit-convention.md`](docs/development/commit-convention.md):
-
-```text
-<type>(<scope>)!: <summary>
-```
-
-Examples:
-
-```text
-docs(repo): bootstrap open-source project
-feat(api): add durable job admission endpoint
-fix(provider): preserve unknown submission outcome
-```
-
-Keep commits atomic. Do not add an AI assistant as an author or co-author.
-
-## Tests and evidence
-
-Use the narrowest relevant test tier:
-
-- unit and component tests for domain, storage, authorization, and failure semantics;
-- deterministic fake-provider contract tests for provider-neutral behavior;
-- adapter fixtures for parsing and compatibility assumptions;
-- fault injection for ambiguous submission and recovery; and
-- separately gated live provider tests only with explicit authorization and a finite budget.
-
-Never present fixture or fake-provider success as live Kaggle evidence. Record live results in the feasibility report with sanitized procedures, dates, versions, and evidence levels.
-
-## Documentation and decisions
-
-Create or update an ADR for a material architectural decision that changes a dependency boundary, persistence model, public contract, provider transport, security property, or major default. Do not create ADRs for trivial naming or formatting choices.
-
-Public examples must be executable against the implementation before a release. Unsupported or untested features must remain labeled accordingly.
-
-## Security and secrets
-
-Follow [`SECURITY.md`](SECURITY.md). Never include credentials, tokens, real private inputs, provider account exports, or sensitive logs in commits, issues, pull requests, or test fixtures.
-
-## Licensing
-
-By contributing, you agree that your contribution is licensed under the repository's [Apache License 2.0](LICENSE). Retain third-party notices and original licenses for dependencies, data, models, and assets.
+Contributions use [Apache-2.0](LICENSE); preserve third-party notices and terms for data/models.
