@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -185,13 +183,10 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 		}
 	}()
 	w.WriteHeader(http.StatusOK)
-	hash := sha256.New()
-	n, copyErr := io.CopyN(io.MultiWriter(w, hash), stream, selected.Bytes)
-	var extra [1]byte
-	extraN, eofErr := stream.Read(extra[:])
+	copyErr := artifactwire.Copy(r.Context(), w, stream, *selected)
 	closeErr := closeArtifact(stream)
 	closed = true
-	if copyErr != nil || n != selected.Bytes || extraN != 0 || eofErr != io.EOF || closeErr != nil || hex.EncodeToString(hash.Sum(nil)) != selected.SHA256 || r.Context().Err() != nil || !stillPublished() {
+	if copyErr != nil || closeErr != nil || r.Context().Err() != nil || !stillPublished() {
 		panic(http.ErrAbortHandler)
 	}
 	w.Header().Set(artifactwire.VerifiedTrailer, "true")
