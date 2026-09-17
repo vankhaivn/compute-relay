@@ -112,7 +112,9 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
                     self.kernel["metadata"]["id"] = 43
             return response(json.dumps(self.kernel).encode())
         if op == bridge.KERNEL + "GetKernelSessionStatus":
-            self.assertEqual(body["versionLabel"], "1")
+            self.assertEqual(body["userName"], self.r["execution"]["owner"])
+            self.assertEqual(body["kernelSlug"], self.r["execution"]["slug"])
+            self.assertNotIn("versionLabel", body)
             return response(json.dumps(dict(status=self.status)).encode())
         if op == bridge.KERNEL + "ListKernelSessionOutput":
             self.assertEqual(body["versionLabel"], "1")

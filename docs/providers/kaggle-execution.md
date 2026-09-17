@@ -31,12 +31,17 @@ and explicit CPU/GPU/internet; no TPU, extra sources, custom image, priority, in
 or paid fallback is exposed.
 
 Acceptance requires a usable version-1 receipt and exact numeric kernel ID/source/private
-metadata readback. A timeout, HTTP/receipt error, nonzero exit or lost acknowledgement after a
-possible save remains submission-unknown. Reconciliation sends original identity/source digest,
-not another save. Observation additionally checks the first-pinned numeric ID.
+metadata readback. Kaggle's `author` field is a human display name, so account/resource identity
+is bound by the canonical `owner/slug` reference plus exact slug, not display-name equality. A
+timeout, HTTP/receipt error, nonzero exit or lost acknowledgement after a possible save remains
+submission-unknown. Reconciliation sends original identity/source digest, not another save.
+Observation additionally checks the first-pinned numeric ID.
 
 Validate raw metadata rather than SDK defaults, read version 1 explicitly, read its status and
-recheck current metadata. New source/version/account/privacy/ID or additional sources fail closed.
+recheck current metadata. `GetKernelSessionStatus` intentionally sends only account username and
+kernel slug because the live Kaggle endpoint rejects `versionLabel`; version-1 identity remains
+verified by the surrounding `GetKernel` reads. The same status-request contract is used by logs
+and artifact collection. New source/version/account/privacy/ID or additional sources fail closed.
 
 | Raw state | Execution / activity |
 |---|---|
@@ -52,8 +57,12 @@ state. Existing fences reject stale nonterminal updates after terminal facts.
 
 ## Remote bootstrap and limits
 
-On the remote Linux host, check the staged marker before loading the locked runner. Require a
-new `/kaggle/working/relay-result` directory, reject duplicate in-process invocation and restore
+On the remote Linux host, resolve the provider-owned `/kaggle/input/<dataset>` mount before
+checking the staged marker. Kaggle may expose that dataset directory through a symlink/volume
+link; this is accepted only when the resolved marker is a regular file contained within the
+resolved dataset root. Missing mounts, escaped marker links and changed marker bytes fail with
+controlled diagnostics before any runner module is loaded. Require a new
+`/kaggle/working/relay-result` directory, reject duplicate in-process invocation and restore
 signal handlers. The original runner verifies bundle/input bytes and bounded execution. The
 control plane never runs the generated script. [Artifact retrieval](kaggle-artifacts.md) selects
 only agreed controls/outputs, not arbitrary code/input/scratch under the result tree.

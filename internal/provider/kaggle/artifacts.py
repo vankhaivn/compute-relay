@@ -179,8 +179,8 @@ def operate(r, token, mode, sink):
                 core.check_kernel(guard.last, execution, execution["kernel_id"])
 
             def terminal():
-                query = ApiGetKernelSessionStatusRequest()
-                query.user_name, query.kernel_slug, query.version_label = execution["owner"], execution["slug"], "1"
+                query = core.kernel_status_request(
+                    ApiGetKernelSessionStatusRequest, execution["owner"], execution["slug"])
                 try:
                     guard.call(KERNEL + "GetKernelSessionStatus", api.get_kernel_session_status, query)
                 except Exception:

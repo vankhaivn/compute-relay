@@ -124,8 +124,7 @@ def operate(request, token, mode):
                 core.check_kernel(guard.last, r, r["kernel_id"])
             check("")
             check("1")
-            status = ApiGetKernelSessionStatusRequest()
-            status.user_name, status.kernel_slug, status.version_label = r["owner"], r["slug"], "1"
+            status = core.kernel_status_request(ApiGetKernelSessionStatusRequest, r["owner"], r["slug"])
             try:
                 guard.call("status", api.get_kernel_session_status, status)
                 state = core.normalize_status(guard.last)

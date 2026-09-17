@@ -56,7 +56,9 @@ class MonitorPinnedSDKTests(unittest.TestCase):
                 return response(b'{}', 503)
             return response(json.dumps(self.kernel).encode())
         if operation == execution.OPERATIONS["status"]:
-            self.assertEqual(body["versionLabel"], "1")
+            self.assertEqual(body["userName"], self.execution["owner"])
+            self.assertEqual(body["kernelSlug"], self.execution["slug"])
+            self.assertNotIn("versionLabel", body)
             if self.fault == "status-http":
                 return response(b'{}', 503)
             return response(json.dumps(self.status).encode())

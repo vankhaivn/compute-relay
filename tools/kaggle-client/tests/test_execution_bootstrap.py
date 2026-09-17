@@ -88,12 +88,37 @@ class ExecutionBootstrapTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 bootstrap.run_remote(self.payload)
 
+    def test_provider_mount_symlink_is_resolved_but_marker_cannot_escape(self):
+        raw = self.marker.read_bytes()
+        self.marker.unlink()
+        self.staging.rmdir()
+        mounted = self.root / "provider-mount" / self.staging.name
+        mounted.mkdir(parents=True)
+        mounted_marker = mounted / "relay-stage.bin"
+        mounted_marker.write_bytes(raw)
+        try:
+            self.staging.symlink_to(mounted, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest("directory symlink unavailable: " + str(exc))
+        self.run_bootstrap()
+        main = sys.modules[PACKAGE + ".main"]
+        self.assertEqual(main.calls[0][0], mounted.resolve())
+
+        self.clear_modules()
+        mounted_marker.unlink()
+        outside = self.root / "outside-marker.bin"
+        outside.write_bytes(raw)
+        mounted_marker.symlink_to(outside)
+        with self.assertRaisesRegex(RuntimeError, "escaped"):
+            self.run_bootstrap()
+        self.assertNotIn(PACKAGE, sys.modules)
+
     def test_relative_imports_arguments_and_duplicate_invocation(self):
         previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
         self.run_bootstrap()
         main = sys.modules[PACKAGE + ".main"]
         self.assertEqual(main.VERSION, "fixture")
-        self.assertEqual(main.calls, [(self.staging, self.root / "working" / "relay-result", "disabled", False)])
+        self.assertEqual(main.calls, [(self.staging.resolve(), self.root / "working" / "relay-result", "disabled", False)])
         self.assertFalse((self.root / "working").exists())
         for sig, handler in previous.items():
             self.assertEqual(signal.getsignal(sig), handler)
