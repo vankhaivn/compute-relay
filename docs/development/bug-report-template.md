@@ -14,6 +14,9 @@ belongs in the implementation blocker register instead. Report vulnerabilities p
 - **Environment:** OS/architecture/filesystem and actual Go/Python/uv/client/SDK versions.
 - **Configuration:** minimal sanitized shape, relevant limits, account alias and shape; actual
   secrets, paths and complete configuration remain private.
+- **Workload/input:** minimal sanitized job specification and synthetic reproduction fixture,
+  or the fixed acceptance case ID. Record original bundle/input/pin hashes; do not attach private
+  bundles or replace frozen inputs just to reproduce the error.
 - **Authorization:** exact approved reads/mutations/budget; state which effects were attempted.
 
 ### Reproduction
@@ -21,8 +24,10 @@ belongs in the implementation blocker register instead. Report vulnerabilities p
 1. Necessary starting state and prerequisite check IDs. Distinguish fresh state from resumed
    state; do not instruct another agent to delete or reinitialize uncertain remote work.
 2. Exact command with literal flags and private path/ID aliases. Token values never appear.
-3. Actual UTC time, exit code and decisive sanitized output. Include the first failure, not
-   only the last retry. State reproduction count without rerunning unsafe effects to increase it.
+3. Actual UTC time, exit code and decisive sanitized output. Include HTTP status, stable problem
+   code and request ID when present, or explicitly state that no response was received. Record
+   the first failure, not only the last retry, and reproduction count without rerunning unsafe
+   effects to increase it.
 
 **Expected:** One concrete observable result from the current contract.
 
