@@ -7,10 +7,17 @@ ports used by explicit composition, not normal-server public log/quota routes or
 ## Quota
 
 `NewMonitor(config, resolver, clock)` performs no work until called. Each serialized ReadQuota
-checks local pins and active server account before the SDK read. Require raw free-GPU policy
-`isPayToScaleEnabled=false` plus total, used and reserved durations; SDK default zeros/false
-cannot fill missing evidence. Missing fields/policy give unknown; malformed/failed reads unavailable.
+checks local pins and active server account before the SDK read. Require a GPU quota object,
+free-GPU policy and explicit total, used and reserved duration messages. For the pinned
+`ApiAcceleratorQuota`, an omitted `isPayToScaleEnabled` means its schema-defined scalar `false`;
+explicit `false` is equivalent. Explicit `true`, null or a non-boolean remains blocked.
+Missing/null duration messages remain unknown, never zero; malformed/failed reads unavailable.
 Reset time is absent rather than guessed.
+
+This is a field-specific [ProtoJSON default](https://protobuf.dev/programming-guides/json/#presence-and-default-values),
+matching [SDK 0.1.35's quota type](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/types/kernels_api_service.py).
+It does not relax missing account, privacy, status, log or duration evidence. Explicit null is
+still conservatively rejected by this adapter even though generic ProtoJSON parsers can accept it.
 
 Parse canonical nonnegative protobuf durations at nanosecond precision, bounded defensively to
 366 days per field, then expose conservative whole seconds:

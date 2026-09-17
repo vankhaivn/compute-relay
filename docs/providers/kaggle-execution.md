@@ -57,8 +57,11 @@ control plane never runs the generated script. [Artifact retrieval](kaggle-artif
 only agreed controls/outputs, not arbitrary code/input/scratch under the result tree.
 
 Default policy is CPU-only, no internet, 1,800-second wall ceiling and one-minute local invocation.
-GPU requires explicit T4/P100 shape; no CPU upgrade or GPU fallback. New GPU saves require an
-explicitly false pay-to-scale observation, not missing/default false. This is not quota reservation.
+GPU requires explicit T4/P100 shape; no CPU upgrade or GPU fallback. New GPU saves recheck the
+pay-to-scale flag in the returned GPU quota object: omitted scalar false and explicit false are
+equivalent under the [pinned quota schema](kaggle-operations.md#quota). Missing quota objects,
+explicit true, null or non-booleans block save. This is a free-policy recheck, not numeric quota
+scheduling or a reservation; the acceptance harness separately requires known remaining time.
 Policy bounds are 1–86,400 wall seconds and one second–five minutes per invocation.
 
 Source/payload/request bounds are 2 MiB/1 MiB/3 MiB; token 8 KiB, each output stream 16 KiB.
