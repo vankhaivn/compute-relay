@@ -2,8 +2,11 @@
 
 This is the editable handoff for the [validation checklist](validation-checklist.md).
 It contains current operator evidence and unresolved failures, not development commit diaries.
-**No operator run has been recorded yet.** Historical offline CI is not a pass for a new local
-installation or a real Kaggle account. Do not prefill success from documentation or test names.
+**Latest operator report: RUN-20260917-01; V10 failed before dispatch.** The original full report
+and failed run are preserved at [6a7d95d](https://github.com/vankhaivn/compute-relay/blob/6a7d95d/docs/development/validation-results.md)
+on `validate/run-20260917-01`. The current register below follows its detailed V08–V10 run rows;
+the older overview in that report still says those checks were awaiting authorization.
+These are operator-reported results, not live tests repeated by the fixing agent.
 
 ## Status vocabulary
 
@@ -15,28 +18,29 @@ retest is still an open failure with disposition `fix-pending-verification`.
 
 ## Current check register
 
-Update this table to point to the latest relevant run, retaining older records below.
+Update this table to point to the latest relevant run, retaining older records below or at their
+immutable source links. Do not replace an operator failure with an offline regression result.
 
 | Check | Status | Run / evidence or blocker |
 |---|---|---|
-| V01 source/toolchain/build | not-run | — |
-| V02 offline suites | not-run | — |
-| V03 local installation/authority | not-run | — |
-| V04 profile/upload/admission | not-run | — |
-| V05 reopen/conflict/control/authorization | not-run | — |
-| V06 artifact delivery on operator host | not-run | — |
-| V07 local Kaggle preflight | not-run | — |
-| V08 authorized account reads | not-run | Approval and local credentials required. |
-| V09 fixed experiment preparation | not-run | — |
-| V10 private staging/GPU submission | not-run | Separate effect/budget approval required. |
-| V11 separate-process live results | not-run | — |
+| V01 source/toolchain/build | pass-offline | RUN-20260917-01; source 83b7d32, macOS arm64; executable hashes in original report. |
+| V02 offline suites | pass-offline | Same run: Go/race/client checks; runner recorded 4 passed and 20 Linux-only skips. |
+| V03 local installation/authority | pass-offline | Same run: init, repeated-init refusal, workspace/token and state. |
+| V04 profile/upload/admission | pass-offline | Same run: profile, bundle, HTTP upload/validation/admission/replay. |
+| V05 reopen/conflict/control/authorization | pass-offline | Same run: lock, conflict, cancellation receipt, reopen and revoked-token denial. |
+| V06 artifact delivery on operator host | pass-offline | Same run: actual component integration suites with race detection. |
+| V07 local Kaggle preflight | pass-offline | Same run: local pins and missing-token negative. |
+| V08 authorized account reads | pass-live | Same run, 2026-09-17T07:15:30Z: account matched, quota endpoint available; not numeric quota qualification. |
+| V09 fixed experiment preparation | pass-offline | Same run, 2026-09-17T07:16:57Z: prepared-local; original root/binary retained. |
+| V10 private staging/GPU submission | fail | BUG-RUN-20260917-01-01: quota-blocked; fix awaits operator retest. |
+| V11 separate-process live results | not-run | Blocked by V10; no GPU/result/restart pass. |
 | V12 collection failure recovery | not-run | Applicable only to an actual failed/interrupted transfer. |
 | V13 live optional/multi-page probes | blocked-procedure | Fixed six-file smoke does not force these cases; bounded probe required. |
 | V14 timeout/cancellation qualification | blocked-procedure | No timeout-fault CLI; cancellation target is unverified/manual. |
 | V15 induced provider-response loss | blocked-procedure | Reviewed injection/recovery/evidence plan required. |
 | V16 cleanup/coordinated restore | blocked-procedure | No acceptance cleanup apply/general backup CLI; exact-target authorization required. |
 | V17 general runtime/release acceptance | blocked-implementation | Remaining provider/worker/product/release integration. |
-| V18 gate review | not-run | Depends on actual evidence and bug dispositions. |
+| V18 gate review | not-run | No new gate signoff; depends on retest evidence and bug dispositions. |
 
 ## Gate decisions
 
@@ -44,7 +48,7 @@ A check can contribute evidence without closing an entire gate. Update rows only
 
 | Gate | Decision | Evidence / reviewer / UTC date |
 |---|---|---|
-| M1-02 account/quota | unverified | — |
+| M1-02 account/quota | unverified | V08 supplies account evidence; numeric quota/retest and full gate review remain. |
 | M1-03 private staging | unverified | — |
 | M1-04 actual GPU | unverified | — |
 | M1-05 lifecycle/logs/all-page results | unverified | — |
@@ -96,12 +100,18 @@ Do not infer remote execution count or termination from local call count or an e
 
 ## Bug register
 
-No reported bugs yet. Copy [the bug template](bug-report-template.md) below for every unexpected
-failure. Use a stable ID in the check table. Do not paste secrets or full raw responses.
+Use [the bug template](bug-report-template.md) for each unexpected failure. Preserve the original
+report and use its stable ID in the check table. Do not paste secrets or full raw responses.
 
 | Bug ID | Affected check / source SHA | Status | Fix SHA / retest run |
 |---|---|---|---|
-| — | — | No report recorded | — |
+| BUG-RUN-20260917-01-01 | V10 / 83b7d32; full report at 6a7d95d linked above | fix-pending-verification | [PR #29](https://github.com/vankhaivn/compute-relay/pull/29); code/tests 4ed6de067119ba78d1646daccb91d65efb715a80; operator retest not run. |
+
+The reported omitted billing boolean is interpreted under its pinned ProtoJSON schema by both
+Monitor and the pre-save gate. No paid fallback, numeric default or retry was added. Follow the
+[quota retest handoff](quota-default-retest.md): the preserved root is bound to the old executable,
+so the patched binary cannot directly reopen it. No hash override or same-state migration is
+provided; retain old evidence and confirm no preparation/submission before any authorized new run.
 
 ## Retest and handoff rules
 

@@ -219,11 +219,12 @@ def operate(r, token, mode):
                 if mode != "submit":
                     return outcome("not_found")
                 if r["gpu"]:
-                    # Do not opt into paid capacity or assume an omitted boolean is
-                    # false. This is a free-only gate, not numeric quota scheduling.
+                    # Match ApiAcceleratorQuota/ProtoJSON: an omitted implicit
+                    # bool is false, but explicit null/non-booleans/true block.
+                    # This rechecks free-only policy, not numeric scheduling.
                     guard.call("quota", api.get_accelerator_quota_statistics, ApiGetAcceleratorQuotaStatisticsRequest())
                     quota = guard.last.get("gpuQuota")
-                    if type(quota) is not dict or quota.get("isPayToScaleEnabled") is not False:
+                    if type(quota) is not dict or quota.get("isPayToScaleEnabled", False) is not False:
                         return outcome("rejected")
                 save = ApiSaveKernelRequest()
                 save.slug = r["owner"] + "/" + r["slug"]

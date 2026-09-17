@@ -36,6 +36,27 @@ func (c *acceptanceClock) advance() {
 	c.at = c.at.Add(20 * time.Second)
 	c.mu.Unlock()
 }
+func (c *acceptanceClock) catchUp(at time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.at.Before(at) {
+		c.at = at
+	}
+}
+
+func TestAcceptanceFixtureClockCatchesUpWithoutMovingBackwards(t *testing.T) {
+	start := time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)
+	clock := &acceptanceClock{at: start}
+	clock.catchUp(start.Add(time.Minute))
+	if !clock.Now().Equal(start.Add(time.Minute)) {
+		t.Fatal("fixture did not catch up with completed setup")
+	}
+	clock.advance()
+	clock.catchUp(start)
+	if !clock.Now().Equal(start.Add(time.Minute + 20*time.Second)) {
+		t.Fatal("setup clock erased simulated forward progress")
+	}
+}
 
 type acceptanceFixture struct {
 	t             *testing.T
@@ -59,13 +80,17 @@ func newAcceptanceFixture(t *testing.T, mode fake.SubmitMode) *acceptanceFixture
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &acceptanceFixture{t: t, backend: backend, quota: "known", clock: &acceptanceClock{at: time.Now().UTC().Add(2 * time.Second)}, options: Options{
+	return &acceptanceFixture{t: t, backend: backend, quota: "known", clock: &acceptanceClock{at: time.Now().UTC()}, options: Options{
 		Mode: "prepare", Root: filepath.Join(t.TempDir(), "experiment"), ProgramSHA256: provider.Digest([]byte("fixture binary")), MaxWait: time.Minute,
 		Config: kaggle.Config{InstanceID: "fixture", Revision: "1", AccountName: "fixture_user", CredentialRef: "env:DO_NOT_READ", PythonExecutable: filepath.Join(t.TempDir(), "python.exe")}, MachineShape: "NvidiaTeslaT4",
 	}}
 }
 func (f *acceptanceFixture) deps(process string) dependencies {
 	return dependencies{clock: f.clock, process: process, fixture: true, pause: func(ctx context.Context) error { f.clock.advance(); return ctx.Err() }, makeProvider: func(s *session, allow bool, clock ports.Clock) (provider.Provider, error) {
+		// Admission/setup uses the real clock. Anchor the simulated timeline only
+		// after it completes, without assuming the host finishes within two seconds.
+		// Later simulated progress must never move backwards to the wall clock.
+		f.clock.catchUp(time.Now().UTC())
 		f.constructed++
 		p, err := fake.NewBound(f.backend, clock, s.record.binding())
 		if err != nil {
@@ -229,6 +254,10 @@ func TestAcceptancePrepareSubmitReopenAndVerifyOffline(t *testing.T) {
 	for _, mode := range []fake.SubmitMode{fake.Accept, fake.AcceptLoseResponse} {
 		t.Run(string(mode), func(t *testing.T) {
 			f := newAcceptanceFixture(t, mode)
+			// Model arbitrarily slow setup deterministically, without a real sleep.
+			f.clock.mu.Lock()
+			f.clock.at = f.clock.at.Add(-time.Hour)
+			f.clock.mu.Unlock()
 			prepared := f.must("prepare", processA, "prepared-local")
 			if f.constructed != 0 {
 				t.Fatal("prepare constructed provider")

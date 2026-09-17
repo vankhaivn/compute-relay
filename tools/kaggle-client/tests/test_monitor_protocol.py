@@ -31,27 +31,54 @@ class MonitorProtocolTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     monitor.duration_ns(raw)
 
-    def test_quota_missing_fields_do_not_inherit_free_or_zero_defaults(self):
+    def test_quota_missing_duration_messages_do_not_inherit_zero_defaults(self):
         expected = monitor.quota_result(quota_fixture())
         self.assertEqual((expected["limit_ns"], expected["used_ns"], expected["reserved_ns"]),
                          ("19999999999", "2000000001", "3000000001"))
-        for field in ("isPayToScaleEnabled", "totalTimeAllowed", "timeUsed", "timeReserved"):
+        for field in ("totalTimeAllowed", "timeUsed", "timeReserved"):
             for remove in (False, True):
-                raw = quota_fixture()
-                if remove:
-                    del raw["gpuQuota"][field]
-                else:
-                    raw["gpuQuota"][field] = None
-                result = monitor.quota_result(raw)
-                self.assertEqual(result["status"], "unknown")
-                self.assertEqual(result["limit_ns"] + result["used_ns"] + result["reserved_ns"], "")
-        for flag in (True, "false", 0):
+                for omit_flag in (False, True):
+                    raw = quota_fixture()
+                    if omit_flag:
+                        del raw["gpuQuota"]["isPayToScaleEnabled"]
+                    if remove:
+                        del raw["gpuQuota"][field]
+                    else:
+                        raw["gpuQuota"][field] = None
+                    result = monitor.quota_result(raw)
+                    self.assertEqual(result["status"], "unknown")
+                    self.assertEqual(result["limit_ns"] + result["used_ns"] + result["reserved_ns"], "")
+        for flag in (True, None, "false", "true", "", 0, 1, 0.0, [], {}):
             raw = quota_fixture()
             raw["gpuQuota"]["isPayToScaleEnabled"] = flag
-            self.assertEqual(monitor.quota_result(raw)["reason"], "paid_or_unknown")
-        self.assertEqual(monitor.quota_result({})["status"], "unknown")
+            self.assertEqual(monitor.quota_result(raw), monitor.empty("unknown", "paid_or_unknown"))
+        for raw in ({}, {"gpuQuota": None}, {"gpuQuota": {}}):
+            self.assertEqual(monitor.quota_result(raw)["status"], "unknown")
         with self.assertRaises(ValueError):
             monitor.quota_result({"gpuQuota": []})
+
+    def test_omitted_billing_bool_uses_its_schema_default_not_a_quota_default(self):
+        # BUG-RUN-20260917-01-01: representative non-secret operator wire shape.
+        raw = {"gpuQuota": {"totalTimeAllowed": "108000s", "timeUsed": "0s",
+                            "timeReserved": "0s", "minimumTimeAllowed": "108000s",
+                            "hasEverRun": True}}
+        result = monitor.quota_result(raw)
+        self.assertEqual(result, dict(monitor.empty("known", "none"),
+                                      limit_ns="108000000000000", used_ns="0", reserved_ns="0"))
+        raw["gpuQuota"]["isPayToScaleEnabled"] = False
+        self.assertEqual(monitor.quota_result(raw), result)
+        fractional = quota_fixture()
+        expected = monitor.quota_result(fractional)
+        del fractional["gpuQuota"]["isPayToScaleEnabled"]
+        self.assertEqual(monitor.quota_result(fractional), expected)
+        for name in ("totalTimeAllowed", "timeUsed", "timeReserved"):
+            fractional["gpuQuota"][name] = "0s"
+        zero = monitor.quota_result(fractional)
+        self.assertEqual((zero["status"], zero["limit_ns"], zero["used_ns"], zero["reserved_ns"]),
+                         ("known", "0", "0", "0"))
+        fractional["gpuQuota"]["timeReserved"] = "-1s"
+        with self.assertRaises(ValueError):
+            monitor.quota_result(fractional)
 
     def test_logs_redact_before_bounding_and_preserve_explicit_availability(self):
         result = monitor.log_result({"log": "first\r\nSYNTHETIC_TOKEN\rlast"}, "RUNNING", "SYNTHETIC_TOKEN")
@@ -73,7 +100,7 @@ class MonitorProtocolTests(unittest.TestCase):
         data = base64.b64decode(large["text_b64"])
         self.assertTrue(large["truncated"])
         self.assertLessEqual(len(data), monitor.MAX_LOG_BYTES)
-        self.assertEqual(data.decode("utf-8"), "界" * (monitor.MAX_LOG_BYTES // 3))
+        self.assertEqual(data.decode("utf-8"), "界" * (65536 // 3))
         self.assertEqual(large["availability"], "delayed")
 
     def test_quota_request_and_local_pins_reject_before_credentials(self):
