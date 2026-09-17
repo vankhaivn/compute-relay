@@ -210,6 +210,7 @@ func validateOpenAPI(root, relative string) error {
 		"cancelJob": {}, "retryJob": {}, "reconcileJob": {},
 		"collectJob": {}, "getOperation": {},
 		"uploadObject": {}, "getObject": {}, "importObject": {}, "ingestObject": {},
+		"listArtifacts": {}, "getArtifact": {}, "downloadArtifact": {},
 	}
 	observedOperations := make(map[string]struct{}, len(expectedOperations))
 	for path, pathItem := range document.Paths.Map() {
@@ -232,12 +233,12 @@ func validateOpenAPI(root, relative string) error {
 	return nil
 }
 
-// Handler-level evidence does not imply production CLI composition or provider dispatch.
-// Durable controls have offline evidence; accepted collection still stops at its ticket.
+// Handler-level evidence does not imply provider dispatch. Artifact delivery reads
+// published local bytes; collect POST still only accepts a durable transfer ticket.
 func operationStatus(id string) string {
 	switch id {
 	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob",
-		"cancelJob", "retryJob", "reconcileJob", "collectJob", "getOperation":
+		"cancelJob", "retryJob", "reconcileJob", "collectJob", "getOperation", "listArtifacts", "getArtifact", "downloadArtifact":
 		return "implemented-offline"
 	default:
 		return "planned"

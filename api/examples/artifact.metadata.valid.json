@@ -1,0 +1,14 @@
+{
+  "workspace_id": "example",
+  "job_id": "job_example",
+  "attempt_id": "att_example",
+  "result_phase": "completed",
+  "verified_at": "2026-09-17T00:00:00Z",
+  "artifact": {
+    "artifact_id": "art_example",
+    "path": "outputs/answer.txt",
+    "role": "output",
+    "bytes": 3,
+    "sha256": "8a798890fe93817163b10b5f7bd2ca4d25d84c52739a645a889c173eee7d9d3d"
+  }
+}

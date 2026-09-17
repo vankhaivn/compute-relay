@@ -152,6 +152,19 @@
         "examples/invalid/control-operation.false-termination.json",
         "examples/invalid/control-operation.retry-without-attempt.json"
       ]
+    },
+    {
+      "schema": "schemas/artifact.v1alpha1.schema.json",
+      "valid": [
+        "examples/artifact.metadata.valid.json",
+        "examples/artifact.page.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/artifact.missing-attempt.json",
+        "examples/invalid/artifact.null-bytes.json",
+        "examples/invalid/artifact.traversal.json",
+        "examples/invalid/artifact.missing-cursor.json"
+      ]
     }
   ]
 }
