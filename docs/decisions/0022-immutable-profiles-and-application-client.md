@@ -1,6 +1,6 @@
 # ADR-0022: Immutable admission profiles and one-shot application requests
 
-- Status: proposed; implemented in PR #26, pending owner review/merge
+- Status: accepted; PR #26 merged on 2026-09-17
 - Date: 2026-09-17
 - Task: M5-01b, a delivery slice of parent M5-01
 - Requirements: API-01/03, DX-01; preserves SEC-02 and accepted job/receipt identity
