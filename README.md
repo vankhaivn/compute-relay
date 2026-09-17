@@ -29,16 +29,21 @@ Installation and token directories must be private and outside the source checko
 ./compute-relay init --root /absolute/private/runtime
 ./compute-relay workspace create --root /absolute/private/runtime --id app
 ./compute-relay token issue --root /absolute/private/runtime --workspace app --scope read --scope write --scope operate --ttl 24h --output /absolute/private/runtime/app-token
+```
+
+The token is delivered to the new private file, not printed. To admit jobs, first apply an
+admission profile and grant it to the workspace using [application commands](docs/application-cli.md).
+Do that before starting the server; local profile/token/workspace administration requires the
+installation lock. Uploads alone do not require a profile.
+
+```sh
 ./compute-relay serve --root /absolute/private/runtime --listen 127.0.0.1:7331
 ```
 
-The token is delivered to the new private file, not printed. `serve` runs in the foreground
-and reports `local-admission-only` with `dispatch_enabled=false`.
-
-Next, follow [application commands](docs/application-cli.md) to configure an admission profile,
-upload a bundle, validate and submit a job. Stop `serve` before local profile/token/workspace
-administration; application HTTP commands work while it runs. **A successful admission is
-not remote execution.** New installations do not generate artifacts automatically.
+`serve` runs in the foreground and reports `local-admission-only` with `dispatch_enabled=false`.
+Use a second terminal for application HTTP commands: upload a bundle, validate and submit a job.
+**A successful admission is not remote execution.** New installations do not generate artifacts
+automatically. Stop `serve` before any further local administration.
 
 ## Choose your next step
 
