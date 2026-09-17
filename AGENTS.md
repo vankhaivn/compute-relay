@@ -54,9 +54,15 @@ The changelog describes a few user-visible unreleased features until an actual r
 ## Git and validation
 
 Use a focused branch/PR. No direct `main` push, auto-merge, force push or shared-history rewrite
-without task-specific authorization. Keep commits atomic, push reviewable checkpoints and stop
-for owner merge. Follow the [commit convention](docs/development/commit-convention.md); no
-AI/model/agent authors or co-authors. Keep code and docs in separate scoped commits.
+without task-specific authorization. Keep commits atomic and coherent: each commit must represent
+a complete logical change or milestone. Do not bunch unrelated subsystems into a monolithic commit,
+but strictly avoid artificial micro-commit spam (e.g. splitting a single fix or feature across
+multiple single-file commits by artificially separating code and its direct unit tests). A logical
+fix or capability and its direct regression tests belong together in one self-contained commit.
+Keep large documentation updates and code in separate scoped commits when appropriate, but do
+not dilute history with redundant micro-commits. Push reviewable checkpoints and stop for owner
+merge. Follow the [commit convention](docs/development/commit-convention.md); no AI/model/agent
+authors or co-authors.
 
 Before reporting completion, run relevant format/tests/contracts/link checks that are available,
 inspect the final diff for secrets and unrelated changes, and report exact commands and limits.
