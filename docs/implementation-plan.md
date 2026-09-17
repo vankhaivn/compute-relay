@@ -1,7 +1,7 @@
 # Dependency-aware implementation plan
 
 > **Status:** active; M-0, M1-01, M2, M3 and M4's offline components/harness are merged.
-> M5-01a is merged in PR #25; M5-01b profiles/application CLI is in review in PR #26.
+> M5-01a/b are merged in PRs #25/#26; M5-01c artifact delivery is in review in PR #27.
 > Parent M5-01 remains in progress. M4-06/M1 live acceptance requires separate evidence.
 >
 > **Planning date:** 2026-09-13; execution record updated 2026-09-17.
@@ -43,11 +43,13 @@ at `4b5517c` on 2026-09-16. PR #24 merged the M4-06
 [fixed GPU/restart acceptance harness](providers/kaggle-acceptance.md) at `9fbd7d4` on 2026-09-16.
 No live account/GPU acceptance has been run; harness delivery is not a live M4 completion claim.
 PR #25 merged M5-01a [local administration and admission-only HTTP lifecycle](local-runtime.md)
-at `6e8e417`. PR #26 implements M5-01b [admission profiles and application CLI](application-cli.md),
-in review until owner merge. These are delivery slices, not completion of the parent workflow.
-Proposal section 23.6 permits offline work without waiving live go/no-go evidence.
-See ADR-0015 through ADR-0022. M5-02 has not started. The retained
-`checkpoint/m4-02-offline-staging` branch is obsolete and is not part of the active implementation.
+at `6e8e417`. PR #26 merged M5-01b [admission profiles and application CLI](application-cli.md)
+at `c1cc58e` on 2026-09-17. PR #27 implements M5-01c
+[published artifact API and verified downloads](artifact-delivery.md), in review until owner merge.
+These are delivery slices, not completion of the parent workflow. Proposal section 23.6 permits
+offline work without waiving live go/no-go evidence. See ADR-0015 through ADR-0023.
+M5-02 has not started. The retained `checkpoint/m4-02-offline-staging` branch is obsolete and
+is not part of the active implementation.
 
 [Authentication and object storage](auth-and-objects.md) have offline components,
 real-loopback tests, atomic blob publication and an explicit ownership-commit seam.
@@ -153,12 +155,22 @@ without retargeting the accepted profile or starting compute. Profile metadata i
 configuration/readiness, local-commit uncertainty is not remote activity, and worker activation
 remains absent. Original object_id and retry_compute wire names are preserved.
 
+M5-01c adds three current-authority GET routes for already published artifact pages, metadata and
+binary content, with explicit attempts, stable publication cursors and expiry as HTTP 410.
+A successful content transfer requires independently verified bytes/EOF/Close and one declared
+final verification trailer after current-authority/expiry rechecks; a 200 body alone is insufficient.
+Application commands deliver only to a user-selected new private file, independently rehash local
+bytes and never overwrite or retry automatically. Real M3/SQLite/blob/HTTP/CLI tests preserve five-file
+publication, original receipts and events across reopen and do not call the provider during download.
+The additive schema/OpenAPI inventory is eighteen operations. No provider or collector activation,
+new migration or change to existing mutation contracts is introduced.
+
 Operator credentials and live probes belong to the operator's own runtime, not GitHub
 Actions. Actions are offline code-quality/build/test only. Use the available local Linux
 runtime for executable smoke checks; do not add deployment or real Kaggle/GPU workflows.
 At the owner's request, finish one task/PR, report its evidence, and stop for owner merge
-before beginning another task. PR #26 delivers M5-01b, not the complete M5-01 compute runtime.
-General provider registration, worker lifecycle, public artifact/log routes and remote cleanup
+before beginning another task. PR #27 delivers M5-01c, not the complete M5-01 compute runtime.
+General provider registration, worker lifecycle, public live-log/quota surfaces and remote cleanup
 remain separate. Commit and push reviewable checkpoints during implementation; the disposable
 runtime must not be the only copy of work.
 
@@ -212,7 +224,7 @@ M1 thin live-provider proof   M2 portable offline core
 M2 may begin after M-0 while credentials are unavailable. Integrated M4 batch activation
 requires M1 go and M3's durable semantics. The owner's continuation permits useful offline
 harness and local-product work under proposal section 23.6, not live mutation authority or
-waiver of provider evidence. ADR-0015 through ADR-0022 record the distinct boundaries;
+waiver of provider evidence. ADR-0015 through ADR-0023 record the distinct boundaries;
 actual live acceptance rows remain blocked until authorized evidence is recorded.
 
 ## M-0 — Evidence and scope
@@ -296,7 +308,7 @@ live tasks remain `blocked-environment`.
 
 | ID | Type / status | Intended behavior and components | Requirements | Dependencies | External credentials / compute | Acceptance evidence |
 |---|---|---|---|---|---|---|
-| M5-01 | implementation / `in-progress` | Build unified runtime/CLI commands for init, serve, workspace/token, validate, submit/status/logs/artifacts, explicit operations, and cleanup. | API-01/03, DX-01 | M3 complete, M4 interfaces stable | No for offline commands; provider commands vary | Merged PR #25 supplies local operator/HTTP lifecycle. PR #26 adds immutable admission profiles, workspace grants and application upload/validate/submit/status/control CLI through the existing API. Real HTTP/SQLite/blob tests preserve original receipts/bindings across lost responses, reopen/remap/revoke; no automatic request replay or provider activation. Parent acceptance still requires result/log/cleanup surfaces and general provider/worker composition. See the delivery slices below. |
+| M5-01 | implementation / `in-progress` | Build unified runtime/CLI commands for init, serve, workspace/token, validate, submit/status/logs/artifacts, explicit operations, and cleanup. | API-01/03, DX-01 | M3 complete, M4 interfaces stable | No for offline commands; provider commands vary | Merged PRs #25/#26 supply local operator/HTTP lifecycle, immutable admission profiles, grants and application commands. PR #27 adds authorized published artifact API and verified create-only downloads, with original receipts/events preserved across reopen and no provider calls. Parent acceptance still requires remaining log/cleanup surfaces and general provider/worker composition. See the delivery slices below. |
 | M5-02 | implementation / `proposed` | Finalize strict TOML config, example config, precedence, path resolution, validation, and safe defaults. | PRD-08, JOB-03, SEC-01, DX-01 | M4-01/M5-01 | No / No | Examples validate; unknown/contradictory keys fail; effective config excludes secret values. |
 | M5-03 | implementation / `proposed` | Implement doctor modes separating local, read-only provider, and explicitly compute-consuming checks. | VER-03, DX-01 | M4-01/M5-02 | Optional credentials; GPU only explicit | Default doctor consumes no GPU; explicit smoke flag shows budget and evidence tier. |
 | M5-04 | example/live / `proposed` | Ship real GPU smoke and small pinned open-access LLM batch examples outside core. | DX-02, VER-03 | M4-06, verified environment/model card | Yes / Explicit finite GPU for live acceptance | Actual GPU use, bounded prompts/output, model revision/license, manifests, and verified artifacts. |
@@ -306,16 +318,18 @@ live tasks remain `blocked-environment`.
 ### M5-01 delivery slices
 
 These are review-sized subdivisions of the original M5-01 outcome, not relaxed replacement
-acceptance criteria or a waiver of live authorization. See [ADR-0021](decisions/0021-local-runtime-lifecycle.md)
-and [ADR-0022](decisions/0022-immutable-profiles-and-application-client.md).
+acceptance criteria or a waiver of live authorization. See [ADR-0021](decisions/0021-local-runtime-lifecycle.md),
+[ADR-0022](decisions/0022-immutable-profiles-and-application-client.md) and
+[ADR-0023](decisions/0023-verified-artifact-delivery.md).
 
 | Slice | Status | Boundary |
 |---|---|---|
 | M5-01a — Local operator and HTTP lifecycle | `complete`, PR #25 merged | Explicit state identity, private token delivery, workspace controls, schema-only validation and authenticated loopback serving. No automatic profile or provider worker; readiness is local only. |
-| M5-01b — Admission profiles and application CLI | `in-review`, PR #26 | Explicit immutable profile apply/show and workspace grant/revoke; private-token loopback upload, contextual validation, submit/status and controls. No test-only seeding instructions, automatic request replay or provider workers. Admission profile records are not complete provider configuration. |
-| Remaining M5-01 result/worker integration | `proposed` | Add authorized artifact/log and cleanup surfaces and general provider registration/worker lifecycle, preserving exact identity, no automatic compute retry and explicit unsupported/live gates. |
+| M5-01b — Admission profiles and application CLI | `complete`, PR #26 merged | Explicit immutable profile apply/show and workspace grant/revoke; private-token loopback upload, contextual validation, submit/status and controls. No test-only seeding instructions, automatic request replay or provider workers. Admission profile records are not complete provider configuration. |
+| M5-01c — Published artifact API and application delivery | `in-review`, PR #27 | Depends on M5-01a/b and M3-06/07. Read-only explicit-attempt metadata/content, stable publication pagination, current authority and expiry; independent hash/EOF/Close plus final trailer, private create-only CLI file publication. No automatic collect/provider/compute; retained payload logs are artifacts, not live logs. |
+| Remaining M5-01 log/cleanup/worker integration | `proposed` | Add remaining log and cleanup surfaces and general provider registration/worker lifecycle, preserving exact identity, no automatic compute retry and explicit unsupported/live gates. |
 
-Stop after PR #26; remaining result/provider/worker work requires its own review and evidence
+Stop after PR #27; remaining log/cleanup/provider/worker work requires its own review and evidence
 before parent M5-01 can be complete. M5-02 strict TOML and later product/release acceptance
 remain separate. The M5-01b local profile document does not replace normalized runtime configuration.
 
@@ -349,13 +363,15 @@ Residual risks or unknowns:
 “Tests pass” without the test tier and command is insufficient. “Kaggle supported” without
 the tested client/account/path is insufficient.
 
-## Next work after M5-01b review
+## Next work after M5-01c review
 
-Stop after reporting PR #26 for owner review/merge. Local profile configuration and application
-requests now reach existing durable admission/control services, but serve still starts no provider
-or result worker. The remaining reviewed work must connect result/log/cleanup surfaces and general
-provider/worker lifecycle without bypassing original identity or live gates. Do not begin another
-slice or M5-02 in this PR, and do not claim a complete production compute runtime.
+Stop after reporting PR #27 for owner review/merge. Published artifacts now have read-only
+API and verified CLI delivery. A 200 response, complete body or old collection receipt is not
+current download success: check original identity/bytes and the final acknowledgement before
+publishing a new local file. Retained stdout/stderr are artifacts, not live provider log streams.
+The server still starts no provider or result worker. Remaining log/cleanup/provider lifecycle
+work needs separate review without bypassing original identity or live gates. Do not begin
+another slice or M5-02 in this PR, or claim a complete production compute runtime.
 
 M4-06's harness is merged, but no live GPU/result/restart report has been recorded. An operator
 can use its explicit procedure with separately authorized credentials, private staging and a
@@ -364,7 +380,7 @@ Even a scoped passed-live experiment does not close the full M1 timeout/cancella
 cleanup checklist or establish remote execution count/hardware release by inference.
 
 M1-02 through M1-07 and the M1-08 go decision retain their authorization and evidence gates.
-General provider workers, public log/quota/artifact routes, durable configuration and remote
+General provider workers, public live-log/quota routes, durable configuration and remote
 cleanup remain separate. No remote exactly-once guarantee, same-version session attestation,
 immutable dataset mount or transparent cross-binary recovery is implied by local serving,
 offline tests, process markers or retained-result verification.
