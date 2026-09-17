@@ -111,7 +111,11 @@ class MonitorPinnedSDKTests(unittest.TestCase):
         for key in ("timeReserved", "isPayToScaleEnabled"):
             self.quota = quota_fixture()
             del self.quota["gpuQuota"][key]
-            self.assertEqual(self.invoke("quota")["status"], "unknown")
+            observed = self.invoke("quota")
+            if key == "isPayToScaleEnabled":
+                self.assertEqual(observed, result)  # implicit scalar false, same raw durations
+            else:
+                self.assertEqual(observed["status"], "unknown")  # absent message is not zero
         self.quota = quota_fixture()
         self.quota["gpuQuota"]["isPayToScaleEnabled"] = True
         self.assertEqual(self.invoke("quota")["status"], "unknown")
