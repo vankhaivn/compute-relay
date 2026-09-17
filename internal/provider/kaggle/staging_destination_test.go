@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -39,7 +40,7 @@ print('ok')
 	cmd := exec.Command(python, "-I", "-c", script)
 	var out, diagnostic bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &diagnostic
-	if err := cmd.Run(); err != nil || out.String() != "ok\n" {
+	if err := cmd.Run(); err != nil || strings.ReplaceAll(out.String(), "\r\n", "\n") != "ok\n" {
 		t.Fatal("embedded staging destination validation failed", err, out.String(), diagnostic.String())
 	}
 }
