@@ -1,225 +1,61 @@
-# Durable metadata and database-only recovery
+# Durable storage and recovery
 
-> **Task:** M3-01, implemented offline; PR #11 merged.
->
-> **Scope:** SQLite workspace/token/object repositories, migrations, process ownership and
-> backup/restore, with links to subsequent persistence components. This is not a complete
-> durable job runtime or a production `serve` mode.
+SQLite stores installation/workspace authority, object metadata, jobs/attempts, original receipts,
+queue/intent/resource journals, collection publications and retention history. Blob payloads live
+in separate private filesystem roots, not the database. Provider credential values are not stored.
+The normal host binds these stores with its own [installation marker](local-runtime.md).
 
-## Implemented boundary
+## Ownership and transactions
 
-`internal/store/sqlite.Store` implements the existing `auth.TokenRepository`,
-`auth.WorkspaceRepository` and `objects.Repository` interfaces. It persists installation
-identity, workspace enablement/profile grants, token digests/scopes/expiry/revocation, and
-immutable object ID/owner/size/digest metadata. It never stores blob payloads or provider
-credential values. The object service remains responsible for publishing verified bytes
-before committing metadata; SQL does not span an upload, HTTPS request or provider call.
+A state directory has one OS-lock owner. Do not remove `runtime.lock`, `.installation`,
+`.compute-relay-state` or restore blockers to force an open. Root/database/sidecar symlinks and
+unsafe file types/permissions are rejected. Original and restored copies must never run concurrently
+against the same provider identity. Network/shared filesystem guarantees are not established.
 
-`PutWorkspace` is local configuration authority. Token issuance/revocation still goes through
-`auth.Service`; newly generated secrets are returned only after the SQLite insert succeeds.
-No application-facing administrative API or nondurable production fallback is introduced.
+The pinned CGo-free SQLite stack uses WAL/FULL, foreign keys, trusted-schema restrictions,
+immediate short transactions and one private connection. Default ordinary operations have
+five-second contexts, backup one minute and busy timeout one second. Filesystem/OS calls still
+must cooperate; a deadline is not a hard real-time disk guarantee. Exact versions are in `go.mod`.
 
-Subsequent migrations supply [durable admission](admission.md), [fenced scheduling](scheduler.md),
-[preparation/submission journals](dispatch.md), [durable controls](operations.md),
-[verified result publication](collection.md) and [retention](retention.md). M3-01 through
-M3-07 are merged. M3-08 [fault qualification](fault-matrix.md) and [recovery guidance](recovery.md)
-remain in review in PR #18. These are explicit composition APIs, not a production server.
-Existing developer upload/import/ingest fixtures remain explicitly nondurable unless a
-caller deliberately composes the SQLite repositories.
+No transaction spans provider or blob I/O. State/events and related receipts/ownership updates
+commit together at each local boundary. Busy/full/corrupt/conflict/incompatible errors remain
+distinct. A commit error is not permission to replay a transaction blindly.
 
-## State layout and process ownership
+## Migrations and history
 
-```text
-state/
-  runtime.lock             persistent lock inode; OS lock, not PID-file ownership
-  .compute-relay-state     versioned root marker
-  .installation            guard against accidental database deletion/replacement
-  runtime.db               SQLite metadata
-  runtime.db-wal           SQLite-owned while needed
-  runtime.db-shm           SQLite-owned while needed
-```
+Embedded migrations 1–9 supply the current repositories. Applied version/name/bytes are checked
+against their checksummed ledger. Add a new migration instead of changing an applied one.
+Reject newer/foreign/tampered/gapped state; do not reset it. Restore/open may upgrade supported
+older schemas; arbitrary downgrade is unsupported.
 
-The parent of a new state directory must already exist. Supply a dedicated private path,
-not an application repository or home directory. Root and database/sidecar symlinks and
-nonregular files are rejected. Unix permissions exclude group/other access; new Windows
-roots receive a protected DACL for the current user, SYSTEM and administrators. Existing
-unsafe directories are rejected without rewriting their permissions.
+Job/attempt/operation/event history, object/artifact metadata, receipts, publications and resource
+ledgers remain retained. Byte expiry does not prune these records. Input and result store identities
+are bound separately; a replacement path does not inherit deletion authority.
 
-Only one Store/process may own a state directory. A second opener returns
-`statefs.ErrLocked`. Close waits for active store operations, closes SQLite and only then
-releases the OS lock. Never delete `runtime.lock` to bypass a lock: another process may
-still hold the old inode. Blob storage retains its independent root lock.
+## Database-only backup API
 
-The local administrator and same-user filesystem writers are trusted; this is not a
-filesystem sandbox. Network/shared filesystem locking and arbitrary storage hardware
-power-loss behavior have not been established by the component tests.
+`Store.Backup(ctx, newBackupDir)` creates a consistent `VACUUM INTO` snapshot and writes a
+receipt after flushing and validating it. `Restore(ctx, backupDir, newStateDir, options)` requires
+a completely new destination and verifies checksum/schema/identity/integrity before publication.
+The bundle contains `metadata.sqlite` and `backup.json`; missing receipts, sidecars, changed bytes,
+excessive size or unsupported schemas fail. These are Go composition APIs, **not a backup CLI**.
+Default snapshot ceiling is 256 MiB, explicitly configurable within implementation bounds.
 
-## SQLite and transaction policy
+A database snapshot does not contain input/result bytes, acceptance process markers or future
+revocations/expiry facts. Checksums detect corruption, not malicious replacement of both data
+and receipt. Preserve interrupted output for diagnosis; it is not a successful backup.
 
-| Setting | Value |
-|---|---|
-| Driver / required libc | `modernc.org/sqlite v1.58.0` / `modernc.org/libc v1.75.6` |
-| Toolchain / production CGo | Go 1.27.1 / disabled build supported |
-| Journal / synchronous | WAL / FULL (2) |
-| Foreign keys / trusted schema | ON / OFF |
-| Private connection pool | One open and one idle connection |
-| Transaction lock | IMMEDIATE |
-| Busy timeout / WAL auto-checkpoint | 1,000 milliseconds / 1,000 pages |
-| Default ordinary operation / backup budget | Five seconds / one minute |
-| Default maximum database snapshot | 256 MiB, configurable up to 1 TiB |
+## Coordinated recovery
 
-DSNs are constructed from escaped paths, not concatenated operator URI parameters.
-Connection-scoped pragmas are configured through the driver for every physical connection.
-Operations have context deadlines, including queueing for the connection. Filesystem
-flushes still depend on the host OS; a context is not a hard real-time disk watchdog.
+1. Preserve the original state, all matching blob roots and identity/process markers. A plain
+   copy of a live database can omit committed WAL state.
+2. Quiesce writers and retention. Take the database snapshot and separately preserve every
+   referenced blob, including unpublished collection recovery files and root `.retention-id`.
+3. Stop the original installation. Restore into a new private directory with compatible binary,
+   migrations and complete matching stores; inspect identity, bytes and current authority before use.
+4. Review grants/tokens/expiry restored from older snapshots. Do not rewrite markers or bind old
+   tombstones to unrelated roots. Missing receipts/bytes do not prove remote work never started.
 
-Transactions are short, internal and atomic. Failures roll back; commit errors are never
-blindly replayed. Busy, full, corrupt, conflict and unsupported-schema conditions have
-separate sentinel errors without exposing raw SQL or host paths. Metadata size can exceed
-the default backup ceiling; increase that explicit ceiling only after reviewing disk and
-time budgets rather than silently enlarging it.
-
-## Migration rules
-
-Embedded migration versions 1 through 9 are present in the merged M3-07 baseline. The original
-`0001_identity.sql` and `0002_workspace_objects.sql` are followed by admission (3), scheduling
-(4), dispatch journals (5), operations (6) and `0007_collection.sql` (7). Migration 6 adds
-operation records, immutable receipts, control uniqueness, collection tickets and linked
-events. Migration 7 preserves those records and adds fenced collection leases, immutable
-per-attempt result snapshots, atomic publications and scoped artifact metadata. Publication,
-result/attempt state, events and operation outcome commit together after verified blob I/O.
-
-M3-07 adds inventory, named holds, irreversible tombstones, audit, a rotating expiry cursor
-and remote preview records in migration 8, then persistent input/result store bindings in
-migration 9. Existing bytes receive a conservative new inventory observation time. Upgrade
-does not expire or delete them and makes no provider call. M3-08 changes no migration bytes;
-it qualifies the existing durable behavior through tests and recovery documentation.
-
-Applied migration bytes are immutable. SQL bytes, version and name are checked against
-`schema_migrations`; DDL, ledger insertion and `user_version` changes share one transaction.
-Never fix an applied migration in place. Add a new version and regression test.
-
-Open rejects a newer version, a foreign application ID, missing/gapped/tampered migration
-history, invalid installation identity or failed integrity/foreign-key check. It does not
-reset unknown databases. Initial migrations are additive. A future destructive migration
-must define and verify a pre-change backup procedure; arbitrary downgrade is not supported.
-
-Do not remove `.installation`, `.compute-relay-state` or a `runtime.db.restore` blocker to
-make a damaged directory open. Preserve evidence and recover into a new directory.
-
-## Retention and metadata history
-
-Expiry and byte deletion are separate operations. A bounded expiry transaction checks all
-pins/references and commits tombstones plus audit. Result expiry preserves execution outcome
-and appends one `result.expired` job event with the state change. A subsequent explicitly
-composed sweeper removes only exact committed targets from their bound blob stores.
-
-Job/attempt/operation/event history, input/artifact metadata, receipts, publications and
-provider-resource ledgers are retained indefinitely in this component. There is no metadata
-pruner. Expired bytes cannot become new admission/retry inputs, but original receipt replay
-remains available under current authorization. Read [retention](retention.md) for windows,
-manual/worker/recovery pins, exact byte checks and local-versus-remote cleanup boundaries.
-
-## Backup and restore API
-
-The Go library exposes `Open(ctx, stateDir, options)`, `Store.Backup(ctx, newBackupDir)` and
-`Restore(ctx, backupDir, newStateDir, options)`. These are local composition APIs, not public
-HTTP routes. Administrative command wiring is not shipped yet; do not assume a
-`compute-relay backup` command exists.
-
-Backup uses `VACUUM INTO`, preserving committed WAL contents in a consistent snapshot.
-The private output directory contains:
-
-```text
-metadata.sqlite    standalone database, without required WAL/SHM sidecars
-backup.json        format/scope/installation/schema/time/size/SHA-256 receipt
-```
-
-A receipt is written only after the snapshot is flushed and validated. A missing or
-malformed receipt, sidecars, excessive size, changed bytes or unsupported schema makes the
-bundle unusable for restore. A failed ordinary operation removes only its newly created
-incomplete output; a crash may leave an incomplete directory. Preserve it for diagnosis
-rather than treating it as a successful backup.
-
-Restore refuses **every existing destination**, even an empty directory. It copies into
-private staging, verifies the digest/schema/identity/integrity, and publishes the database
-only after validation. An interrupted restore marker blocks accidental fresh initialization.
-The resulting installation ID is unchanged, and supported older schemas upgrade on Open.
-
-### Operator recovery procedure
-
-1. Preserve the original state and matching blob stores; do not copy only a live
-   `runtime.db` and assume committed WAL data came with it.
-2. Obtain a verified database-only snapshot through `Store.Backup`. For a whole-installation
-   checkpoint, quiesce writes/retention and separately retain all referenced immutable input
-   and result blob bytes, including pinned pre-publication collection files and each root's
-   `.retention-id`. This API does not automate or verify a combined database/blob backup.
-3. Stop the original runtime before activating a restored copy. Restoring local metadata
-   does not stop remote compute and must not cause a new dispatch.
-4. Restore into a new private directory with the matching binary/schema support. Open it,
-   inspect installation identity/readiness, and verify referenced blob availability and
-   bound input/result store identities before exposing job operations or retention. Keep
-   the old directory intact until verification ends.
-5. Review workspace access and revoke/rotate tokens as needed: restoring a snapshot from
-   before revocation can restore that old grant. Keep backups private and out of ordinary
-   support bundles, user artifacts and source control.
-
-The receipt detects accidental corruption, not a maliciously rewritten snapshot plus
-receipt. Never run original/restored copies concurrently against the same provider identity.
-Windows files are flushed; directory-sync and sudden-power-loss guarantees remain unclaimed.
-An older snapshot also lacks later operation receipts, execution observations and expiry
-facts; a missing receipt is not evidence that remote work never started, and restored
-metadata does not bring back deleted bytes.
-
-Collection uses a dedicated result blob root. Complete files can precede SQLite publication
-and remain recovery material, not visible artifact metadata. Do not delete its pins or files
-to reset a failed operation. [Collection recovery](collection.md) distinguishes accepted
-interruption from committed failure and never obtains results through another compute run.
-
-Retention binds both blob-store identities in SQLite. A replacement/swapped root is rejected;
-there is no automatic rebind. Preserve `.retention-id` with a whole-store move or backup, and
-never remove it or rewrite root bindings to force old tombstones onto unrelated bytes.
-
-## Developer checks and evidence
-
-With the pinned toolchain:
-
-```text
-go test -race ./internal/statefs ./internal/store/sqlite
-go test -count=25 ./internal/statefs ./internal/store/sqlite
-go run ./cmd/storesmoke
-```
-
-`storesmoke` creates private temporary SQLite state, persists synthetic workspace/token and
-object metadata, reopens it, checks isolation/revocation, makes a live consistent snapshot
-and restores it under the same identity. Its report says `backup_scope=database-only` and
-`blob_bytes_checked=false`; it is not an upload, workload or GPU test. It exits and cleans
-up the temporary state.
-
-Local engineering evidence on 2026-09-14 used Go 1.23.2 and system SQLite 3.46.1 through an
-external temporary CGo `database/sql` adapter because module/toolchain downloads were
-unavailable. The new Store/statefs code passed vet, race tests, 25 repeated tests and the
-executable smoke. Neither the adapter nor its temporary modfile is committed, and that run
-is not represented as testing modernc or a CGo-free production binary.
-
-The existing offline CI checks the actual pinned modernc driver with Go 1.27.1, full-repo
-contracts/vet/tests and Linux race checks, plus native Linux/macOS/Windows tests and
-CGo-free builds. Its trigger includes SQL migration assets. No provider credentials,
-Kaggle API calls, GPU allocation or deployment participate. See the corresponding admission,
-scheduler, dispatch, operations, collection and retention guides for task-specific evidence
-and limits; historical M3-01 local evidence is not relabeled as a later task's verification.
-
-M3-08 adds `go run ./cmd/devtool fault-test` to the existing `check` command. Its
-[fault matrix](fault-matrix.md) distinguishes actual state-lock/process-kill/SQLITE_FULL
-checks from synthetic provider faults and injected byte-write failures. See
-[recovery semantics](recovery.md) for boundary-specific safe actions and the
-[implementation plan](implementation-plan.md) for the current owner-review gate.
-
-## Dependency review
-
-M3-01 introduced the driver as a direct dependency; its tagged source declares BSD-3-Clause
-and requires the exact libc version pinned above. See the primary-source references in
-[ADR-0008](decisions/0008-sqlite-durability-and-backup.md). Transitive module identities are
-locked in `go.mod`/`go.sum`; keep original distribution notices when building release SBOMs.
-The final release-artifact license inventory remains M6 rather than a claim that every
-upstream test/tool module is linked into the runtime.
+No library call here automates a whole-installation checkpoint or stops remote compute. Retain
+original compatible binaries/configuration for source-bound provider recovery. See
+[retention](retention.md), [collection](collection.md) and [recovery](recovery.md).

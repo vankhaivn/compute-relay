@@ -1,25 +1,18 @@
-# Provider documentation
+# Provider references
 
-Provider documents describe adapter-specific configuration, capabilities, evidence, limits, and operational recovery while keeping the public application contract provider-neutral.
+Adapters translate provider-neutral ports into supported provider operations. They do not own
+application authorization, the durable queue or permission to retry ambiguous compute.
 
-The implemented offline [provider contract and deterministic fake](contract.md) document the
-M2-04 interfaces, registry, reusable tests and local smoke command. This is not live Kaggle
-support or a production local execution provider.
+| Reference | Purpose |
+|---|---|
+| [Provider contract](contract.md) | Required/optional ports, identity and outcome semantics. |
+| [Kaggle preflight](kaggle-preflight.md) | Locked environment, explicit credentials and local/read-only checks. |
+| [Private staging](kaggle-staging.md) | One-shot preparation, exact bytes and separately observed readiness. |
+| [Execution](kaggle-execution.md) | Frozen source, submission authority and exact-version observation. |
+| [Operational mappings](kaggle-operations.md) | Quota, log snapshots, cancellation and timeout evidence. |
+| [Artifacts](kaggle-artifacts.md) | Versioned selected-file reads and immutable collection recovery. |
+| [Acceptance runbook](kaggle-acceptance.md) | The fixed, explicitly authorized GPU experiment. |
 
-A provider document should include:
-
-- supported and tested client versions;
-- authentication modes and credential-reference handling;
-- capability matrix with `supported`, `unsupported`, or `unknown` plus evidence level;
-- input/staging privacy and readiness behavior;
-- submission and execution identity semantics;
-- raw-to-domain state and error mapping;
-- timeout, cancellation, logs, quota, and artifact behavior;
-- recovery from ambiguous submission and local restart;
-- cleanup ownership and manual operator procedures;
-- known provider/account/version limitations; and
-- date of last live verification.
-
-Applications must not require provider slugs, provider filesystem paths, notebook metadata, provider credentials, or adapter-specific SDKs for their normal lifecycle.
-
-The initial Kaggle document should be written from [`../research/kaggle-feasibility.md`](../research/kaggle-feasibility.md) after the relevant evidence exists. Do not copy optimistic assumptions into a support matrix.
+Use the [operator checklist](../development/validation-checklist.md) for actual verification and
+[results](../development/validation-results.md) for observed outcomes. Source/fixture evidence
+is not live account support. The normal server remains [admission-only](../status.md).

@@ -1,100 +1,65 @@
 # Repository instructions
 
-These instructions apply to the entire repository. They are mandatory for human contributors and automated coding agents.
+These instructions apply to humans and coding agents throughout the repository. Follow the
+owner's current task first, then applicable repository instructions, governance and security.
+Do not change approved product scope as a routine implementation preference.
 
-## Instruction priority
+## Start with the task, not the development history
 
-Follow, in order:
+Read [current status](docs/status.md) and the relevant guide from [docs](docs/README.md).
+For a substantial design change, consult the [approved proposal](docs/proposal.md),
+[requirement IDs](docs/scope-and-requirements.md), applicable ADRs and source/tests.
+The proposal defines intended scope; current guides/code define available commands.
+Do not make a new user read all completed PR audits before using the repository.
 
-1. an explicit instruction from the project owner for the current task;
-2. this file and any more specific `AGENTS.md` in a modified subdirectory;
-3. repository governance, contribution, security, and development documentation; and
-4. general tool or language conventions.
+For operator verification, start with [the validation checklist](docs/development/validation-checklist.md)
+and existing [results/bugs](docs/development/validation-results.md). Fill non-secret values,
+run one stage at a time, inspect the actual result and record it before proceeding. A missing
+implementation, unsupported capability or skipped test is not a pass. Preserve failures and
+append retests; hand off reproducible bugs before changing code during validation-only work.
 
-Do not silently override an owner-approved product requirement with a routine implementation preference.
+## Product and safety invariants
 
-## Required reading before changes
+- OSS, self-hosted finite batch runtime; operator-owned accounts, no hosted quota pool or
+  mandatory paid service. Go control plane, HTTP/JSON boundary, Docker optional.
+- Provider-neutral public/domain contracts. Keep Kaggle-specific behavior inside its adapter.
+  Workspaces separate applications of one trusted operator, not hostile SaaS tenants.
+- Persist original jobs, attempts, inputs, receipts, intents and exact provider identity.
+  Never automatically repeat ambiguous submission, change providers/accounts, fall back to
+  CPU or enable billed capacity. Read-only recovery is not a new mutation permit.
+- Unknown stays unknown. Cancellation intent, local timeout, cleanup, payload completion,
+  artifact availability and hardware release are different facts.
+- Keep credentials out of application jobs, chat, logs, fixtures and Git. Real credentials
+  belong only in the operator's explicitly configured environment.
+- No compute, quota consumption, public data, destructive cleanup, billing or deployment
+  without exact authorization and a finite budget. CI is offline, never an operator runtime.
+- Preserve state and original binaries/configuration after uncertainty; do not reset or
+  delete evidence to manufacture a successful retry.
 
-Before planning or editing substantial work:
+## Documentation rules
 
-1. read [`docs/proposal.md`](docs/proposal.md) completely;
-2. inspect the current repository, relevant history, and applicable instructions;
-3. identify whether each relied-on statement is an owner-approved requirement, implementation default, provider fact, or verification gate; and
-4. inspect relevant ADRs, research notes, tests, and provider evidence.
+Write usage in usage guides, current constraints in component references and remaining work
+in the implementation plan. **Remove completed development narrative rather than appending
+another status update.** Do not put owner/agent prompts, audit trails, commit inventories,
+local sandbox stories, CI transcripts or repeated merge handoffs in living docs or changelog.
+Keep PR-specific checks in the PR. Keep current operator runs and reproducible failures in
+validation results. Preserve stable requirement IDs, essential safety semantics, exact test
+traceability and dated primary-source evidence; brevity is not permission to invent support.
 
-Do not restart product discovery or ask the owner to choose between routine reversible technical alternatives already covered by the proposal. Choose the simplest defensible option, record material decisions, and continue.
+The [proposal](docs/proposal.md) and requirement definitions are the approved product record.
+Do not silently rewrite them or the numbered fault scenarios to satisfy a test. ADRs should
+state decisions, reasons and consequences; completed implementation/CI diaries are not ADRs.
+The changelog describes a few user-visible unreleased features until an actual release exists.
 
-## Product invariants
+## Git and validation
 
-Preserve these boundaries unless the owner explicitly changes the approved scope:
+Use a focused branch/PR. No direct `main` push, auto-merge, force push or shared-history rewrite
+without task-specific authorization. Keep commits atomic, push reviewable checkpoints and stop
+for owner merge. Follow the [commit convention](docs/development/commit-convention.md); no
+AI/model/agent authors or co-authors. Keep code and docs in separate scoped commits.
 
-- The project is an OSS, self-hosted runtime; there is no maintainer-hosted control plane or shared quota pool.
-- The runtime is a sidecar process with a language-neutral HTTP/JSON application boundary.
-- Go is the control-plane implementation language; direct execution is primary and Docker is optional.
-- The domain and public job contract remain provider-neutral. Kaggle-specific types and behavior stay inside its adapter.
-- MVP is finite batch execution for remote Python and explicit Linux shell commands.
-- SQLite and local filesystem storage are the initial persistence model; no mandatory broker, cloud database, tunnel, or paid service.
-- Jobs, attempts, inputs, submission intent, and provider identity must survive restart.
-- Unknown provider or execution state must remain representable as unknown.
-- Never automatically repeat ambiguous compute submission, silently switch providers, silently fall back to CPU, or silently enable billed capacity.
-- Cancellation intent is not proof of remote termination. Cleanup is not cancellation.
-- Applications do not receive provider credentials and do not need Kaggle-specific integration.
-- Workspaces separate applications for one trusted operator; they are not a hostile multi-tenant security boundary.
-- Live provider behavior is claimed only after dated, versioned, sanitized evidence exists.
-
-## Evidence and documentation rules
-
-- Treat [`docs/proposal.md`](docs/proposal.md) as the approved brief, not as proof that software or provider capabilities exist.
-- Keep support status explicit: `planned`, `implemented-offline`, `documented-upstream`, `passed-live`, `not-tested`, `unsupported`, or `blocked-environment` as appropriate.
-- Provider facts must cite current primary sources and record the checked date and client/version context.
-- Live tests must use authorized credentials, explicit opt-in, and a finite budget. Never request secrets through chat or commit them.
-- Update architecture, ADRs, research notes, operations documentation, and examples when behavior or public contracts change.
-- Do not create empty package trees merely to mirror the proposal. Add structure when it protects a real boundary.
-
-## Git workflow
-
-- The normal workflow is a focused branch and pull request. Push directly to `main` only when the owner explicitly authorizes it for the current task.
-- Keep commits atomic, reviewable, and scoped to one coherent change.
-- Follow [`docs/development/commit-convention.md`](docs/development/commit-convention.md). CI validates commit subjects.
-- Do not add an AI system, coding agent, or model as an author or co-author. The authenticated human or service identity remains the commit author.
-- Do not rewrite shared history, force-push, delete tags, or remove unrelated work unless explicitly instructed.
-- Avoid drive-by formatting or unrelated dependency changes.
-
-## Change quality
-
-Before reporting completion:
-
-- run the narrowest relevant formatter, linter, tests, schema validation, and documentation checks available;
-- state exactly what was tested and what was not;
-- distinguish offline tests from live-provider evidence;
-- verify no credentials, tokens, private account data, runtime databases, generated artifacts, or model weights were added;
-- confirm public examples match implemented behavior; and
-- keep error and status language operationally honest.
-
-A task is not complete merely because code compiles. It must preserve the relevant invariants, include tests for failure semantics, and update durable project knowledge where needed.
-
-## External side effects
-
-Without explicit authorization, do not:
-
-- allocate provider compute or spend quota;
-- enable paid services or billing;
-- publish private data or provider resources;
-- create, rotate, or expose credentials;
-- delete remote resources;
-- deploy a public service; or
-- push to a repository or branch other than the requested target.
-
-When an external prerequisite is unavailable, mark the precise block and continue all safe offline work.
-
-## Operator runtime and CI boundary
-
-- Operators configure credentials in their own runtime environments. Do not centralize
-  users' credentials or runtime operation in maintainer-controlled GitHub Actions.
-- GitHub Actions are for offline format/lint/compile/unit/component/contract/security checks,
-  not deployment, real Kaggle executions, GPU allocation or secret-backed live probes.
-- Build and run executable local smoke checks in the available Linux runtime whenever
-  possible. Report toolchain or sandbox limitations precisely; do not silently weaken the
-  committed toolchain or substitute CI-only execution for feasible local checks.
-- Keep live probes as explicit opt-in operator-run commands with separately authorized
-  credentials and finite budgets. Do not ask for credentials in chat.
+Before reporting completion, run relevant format/tests/contracts/link checks that are available,
+inspect the final diff for secrets and unrelated changes, and report exact commands and limits.
+Distinguish offline component tests, current-host checks and live-provider evidence. Never lower
+a dependency/toolchain pin, substitute a driver or weaken an assertion to claim a pass.
+If a prerequisite is unavailable, record the exact block and continue independent safe work.

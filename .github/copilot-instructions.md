@@ -1,13 +1,15 @@
 # Copilot repository instructions
 
-Before proposing or applying changes, read the root [`AGENTS.md`](../AGENTS.md) and the complete [`docs/proposal.md`](../docs/proposal.md).
+Follow [AGENTS.md](../AGENTS.md). Start with [current status](../docs/status.md) and the guide
+for the requested task. Consult the [approved proposal](../docs/proposal.md), requirement IDs
+and relevant ADRs for design or scope changes, not as mandatory onboarding for routine usage.
 
-Mandatory rules include:
+For operator validation, use [the checklist](../docs/development/validation-checklist.md) and
+[results and bugs](../docs/development/validation-results.md). Record actual commands, evidence,
+failures and retests without secrets; never infer a pass from a test name or previous CI run.
+Preserve uncertain submissions and their original state instead of resetting or resubmitting.
 
-- keep the core and public job contract provider-neutral;
-- do not claim Kaggle or other provider capabilities without dated evidence;
-- do not introduce automatic compute retries, provider fallback, CPU downgrade, paid fallback, or credential exposure;
-- keep changes focused and update relevant tests and documentation; and
-- use the repository's Conventional Commits format.
-
-Do not add AI-generated co-author trailers to commits.
+Keep public contracts provider-neutral, unknown evidence explicit and live effects separately
+authorized. No automatic compute retry, provider/CPU/paid fallback or credential disclosure.
+Use focused commits and current-purpose documentation, not completed development diaries.
+Follow Conventional Commits and do not add AI/model co-author trailers.

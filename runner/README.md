@@ -1,200 +1,134 @@
 # Finite remote runner
 
-> **Task:** M2-09, implemented offline; PR #10 in review.
->
-> **Execution target:** Linux with Python 3.11 or newer. CI pins Python 3.11.16.
-> This is a remote deployment asset, not a local compute provider or an HTTP admission
-> handler. No Go production component invokes it locally.
+The runner executes one resolved attempt on **Linux with Python 3.11 or newer**, writes
+bounded results and exits. It is not a local compute provider, job queue or admission handler.
+The implementation uses the Python standard library; GPU checks require PyTorch already
+present in the remote environment. It does not install PyTorch or fall back to CPU.
 
-The runner processes one resolved attempt, writes bounded results, and exits. It does not
-poll for more work, retry a payload, call the control plane, or claim provider hardware
-release. The implementation uses only the Python standard library. An optional GPU check
-uses PyTorch already present in the remote environment; the runner does not install it.
+## Entry points and files
 
-See [ADR-0007](../docs/decisions/0007-finite-remote-runner.md) for the design and evidence
-boundary, and the [approved runner requirements](../docs/proposal.md#11-remote-runner-and-execution-lifecycle).
-
-## Files and contracts
-
-| Path | Purpose |
-|---|---|
-| `python/run.py` | Explicit validation or one-attempt execution entry point. |
-| `python/relay_runner/contract.py` | Strict resolved-manifest decoding, limits and semantic validation. |
-| `python/relay_runner/files.py` | Verified staging snapshots, strict bundle extraction and declared-output hashing. |
-| `python/relay_runner/process.py` | Linux process-group supervision and bounded log capture. |
-| `python/relay_runner/main.py` | Preparation, environment/resource checks, setup, payload and finalization. |
-| `manifest.schema.json` | Internal adapter-to-runner Draft 2020-12 manifest, version `compute-relay/runner/v1`. |
-| `examples/` | Schema/decoder examples, not a complete staged execution. |
-| `assets.lock.json` | Reviewable hashes and lengths of runner source and JSON assets. |
-| `dependency-inventory.json` | Empty third-party runtime dependency inventory and toolchain boundary. |
-| `check.py`, `tests/` | Credential-free checks and explicit repository-owned CPU fixtures. |
-
-The public HTTP job schema is unchanged. A future adapter resolves immutable object IDs to
-staged relative paths, supplies job/attempt/nonce identities, and produces this narrower
-manifest. It contains no source URLs, provider credentials, runtime tokens, account
-configuration, or callback addresses. `bundle` has `path`, `bytes`, and `sha256`; every input
-has `name`, staged `path`, logical `target`, `bytes`, and `sha256`.
-
-`input_manifest_sha256` hashes the compact ASCII JSON array of input records containing
-only `name`, `target`, `bytes`, and `sha256`. Sort records by target and object keys
-lexicographically, with no whitespace or trailing newline. Physical staging paths are
-excluded; remapping a provider path does not change input identity. Changing input bytes or
-logical targets does. The runner verifies both the aggregate identity and every copied file.
-
-The schema rejects unknown fields and bounds representation. Runtime validation additionally
-checks duplicate keys, reserved environment names, portable path/case/prefix collisions,
-aggregate byte limits, budget arithmetic and actual digests. The source manifest must be
-at most 1 MiB. Job limits may lower, but not silently raise, the runner's bounds.
-
-## Entry points
-
-From the repository root, validation is non-executing and does not create a work directory:
+From the repository root, contract validation does not execute the workload:
 
 ```text
 python runner/python/run.py --manifest runner/examples/request.valid.json --validate-only
 ```
 
-The committed example contains illustrative staged identities. It is suitable for contract
-validation, not execution without matching bundle/input bytes.
-
-An adapter, or an explicitly authorized fixture on a disposable test host, invokes execution
-with prepared paths:
+The example contains illustrative staged identities, not runnable matching bundle/input bytes.
+An adapter or explicitly authorized disposable fixture host can execute a prepared attempt:
 
 ```text
 python runner/python/run.py --manifest resolved-attempt.json --execute --staging-root staged --work-root attempt-new --network-mode disabled
 ```
 
-`--execute` really runs the manifest's commands on the machine invoking it. Never use it
-as a control-plane admission check or an automatic local fallback. The work directory must
-not already exist and must not overlap staging. Parents and staging belong to the trusted
-adapter. A second invocation cannot overwrite or resume the same work root.
+**`--execute` runs the manifest's commands on the invoking host. Never use it to validate
+untrusted jobs on the control plane.** The work root must be new and must not overlap staging.
+There is no overwrite, resume or automatic retry of a payload.
 
-## Lifecycle and application environment
+| File | Responsibility |
+|---|---|
+| `python/run.py` | Explicit validation/execution entry point. |
+| `python/relay_runner/contract.py` | Strict manifest decoding and semantic limits. |
+| `python/relay_runner/files.py` | Frozen-input verification, safe bundle extraction and output hashing. |
+| `python/relay_runner/process.py` | Process-group supervision and bounded logs. |
+| `python/relay_runner/main.py` | Preparation, setup, resource checks, execution and finalization. |
+| `manifest.schema.json` / `examples/` | Adapter-to-runner contract `compute-relay/runner/v1`. |
+| `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the five modules. |
+| `check.py` / `tests/` | Offline checks and repository-owned CPU fixtures. |
 
-The runner verifies frozen inputs, extracts the M2-07 bundle into a fresh directory,
-checks the environment/resources, performs bounded setup, invokes the exact argument
-vector, supervises its process group, hashes declared outputs, and atomically writes results.
-No `shell=True`, extra shell interpolation, or automatic retry is introduced.
+The [Kaggle execution component](../docs/providers/kaggle-execution.md) constructs the remote
+script from the locked modules and frozen plan. Packaging those modules is not local execution.
+The runner receives staged relative paths, job/attempt/nonce and digests, not provider tokens,
+source URLs, account configuration or callback addresses.
+
+## Frozen manifest and environment
+
+The bundle declares staged path, size and SHA-256. Inputs additionally declare logical names
+and targets. `input_manifest_sha256` hashes compact ASCII JSON input records containing only
+`name`, `target`, `bytes`, `sha256`, sorted by target with sorted keys and no trailing newline.
+Physical provider paths do not affect that identity. Each copied file is verified independently.
+The manifest is limited to 1 MiB; duplicate keys, unknown fields, unsafe paths, case/prefix
+collisions, reserved environment names and invalid budget arithmetic are rejected.
+
+The attempt layout is:
 
 ```text
 attempt-new/
-  code/       validated bundle files
-  inputs/     verified copied input snapshots
-  outputs/    declared payload results
-  scratch/    disposable files, HOME and optional venv
-  control/    manifests, environment provenance and bounded logs
+  code/       validated bundle contents
+  inputs/     verified input snapshots
+  outputs/    declared results
+  scratch/    temporary files, HOME and optional venv
+  control/    manifest, provenance and bounded logs
 ```
 
 Applications receive `CC_JOB_ID`, `CC_ATTEMPT_ID`, `CC_CODE_DIR`, `CC_INPUT_DIR`,
-`CC_OUTPUT_DIR`, `CC_SCRATCH_DIR`, and `CC_EXECUTION_MANIFEST_PATH`. Argument values such as
-`$CC_INPUT_DIR` remain literal unless the application explicitly requests shell evaluation.
-Python payloads select `python` or `python3`; shell payloads select `sh` or `bash`. Missing
-interpreters fail rather than selecting a different execution kind.
+`CC_OUTPUT_DIR`, `CC_SCRATCH_DIR` and `CC_EXECUTION_MANIFEST_PATH`. Arguments are literal
+values; `$CC_INPUT_DIR` expands only when the job explicitly invokes a shell. Python jobs
+select `python`/`python3`; shell jobs select `sh`/`bash`. Missing interpreters fail.
 
-A replacement environment supplies fixed search paths and attempt-owned temporary/home
-locations. Only `CUDA_VISIBLE_DEVICES`, `NVIDIA_VISIBLE_DEVICES`, and `LD_LIBRARY_PATH`
-are inherited as an explicit trusted-provider allowlist. Provider/runtime credentials,
-proxy variables, arbitrary Python startup configuration and unrelated host environment
-are not inherited or exported to provenance. Plain job environment remains non-secret.
+The replacement environment uses attempt-owned paths. Only `CUDA_VISIBLE_DEVICES`,
+`NVIDIA_VISIBLE_DEVICES` and `LD_LIBRARY_PATH` are inherited from the trusted provider host.
+Credentials, ambient proxies and arbitrary Python startup configuration are not inherited.
+Declared job environment is workload data, not a safe place for provider credentials.
 
-## Resource and network evidence
+## Resources, setup and networking
 
-For GPU-required jobs, an isolated interpreter imports existing PyTorch, checks count and
-device-memory capacity, performs a tiny computation on visible devices, and synchronizes.
-Failure prevents business execution and reports `RESOURCE_REQUIREMENT_UNSATISFIED`; CPU is
-never a fallback. Device capacity is not a VRAM reservation, and a successful runner probe
-does not prove that arbitrary payload code subsequently used the GPU.
+GPU-required jobs check existing PyTorch, device count/memory and a tiny device computation,
+then repeat resource checking after setup changes. Failure prevents payload execution.
+Device capacity is not a VRAM reservation and this probe does not prove arbitrary payload
+code used the GPU; the separate [GPU acceptance job](../docs/providers/kaggle-acceptance.md)
+verifies its own calculation.
 
-The runner records Python/package and available GPU/framework/CUDA information in bounded
-provenance. The resource check is repeated after dependency/setup changes. Local positive
-GPU tests supply synthetic observations only. Actual GPU/provider compatibility still
-requires authorized M1/M4 evidence.
+The requested network mode must match the adapter's `--network-mode` declaration. The runner
+does not implement a firewall/network namespace or prove internet availability. Provider-side
+configuration must establish that boundary; provenance reports this limitation explicitly.
 
-The requested network mode must match `--network-mode`, which is the adapter's declaration.
-The Python runner does not implement network namespaces, a firewall, or reliable internet
-availability detection. Provenance says `provider_required_not_runner_enforced`. An adapter
-must establish the requested provider setting or reject the job before claiming support.
-CPU fixtures make no network request even though their host is not a network sandbox.
+Optional Python requirements use an attempt-local `--system-site-packages` venv. Only a
+complete compatible list of `name==version` pins and comments is accepted: no editable/VCS/URL
+requirements, custom indexes, source builds or replacement of managed GPU/framework packages.
+Install is wheel-only, `--no-deps`, noninteractive and bounded by setup time, without retry or
+upgrade. Internet must be explicitly requested; staged offline wheels are not implemented.
+Shell setup uses explicit argument arrays under the same budget. Neither runs during validation.
 
-## Bounded dependencies
+## Deadlines and results
 
-Optional Python requirements run remotely in an attempt-local `--system-site-packages`
-venv, preserving access to managed GPU packages without modifying their base installation.
-V1 accepts a restricted complete list of `name==version` pins and comments. Editable/VCS/URL
-requirements, index flags, source builds and GPU/framework replacement are rejected.
-Installation is wheel-only, `--no-deps`, no automatic retries or upgrade, noninteractive,
-and under the shared setup deadline. Pip configuration inheritance is disabled.
+Preparation, resource checks and setup share `setup_seconds`. Setup plus finalization grace
+must be strictly less than the remote wall budget. Runner monotonic time is separate from
+provider queue/allocation time. On deadline, SIGTERM/SIGINT or leader completion, ordinary
+child process groups receive TERM then KILL with bounded waits. Deliberate session escape,
+uninterruptible kernel I/O, SIGKILL/OOM and provider loss are outside that guarantee.
+Provider timeout enforcement still requires independent evidence.
 
-The workload author must provide complete compatible transitive pins. Python requirement
-installation requires explicitly requested remote internet; offline wheel staging is not
-implemented in this task. Shell setup uses explicit remote argument arrays and the same
-budget. Neither setup path executes during `--validate-only` or on API admission.
+Stdout/stderr default to 20 MiB retained per stream, with seen/stored counts and truncation.
+Known credential-pattern redaction is best-effort hygiene, not a universal secret detector.
+There is no live-log transport here. Declared outputs are checked for containment, links,
+type, count, size and digest. Missing required output prevents success; a collection error
+does not erase an earlier payload failure.
 
-Installation command construction is unit-tested with a fake process result. No package was
-downloaded and no remote venv/GPU-package compatibility was established in M2-09. These
-remain provider-environment acceptance checks, not a promise that arbitrary requirements work.
+`control/execution-result.json` conforms to the public
+[result manifest](../api/schemas/result-manifest.v1alpha1.schema.json), preserving identity,
+phase, exit code and timeout facts. `control/environment.json` records bounded runtime/setup
+provenance. CLI exit 0 means a completed runner result, 1 a recorded unsuccessful result,
+and 64 rejected input or inability to finalize. A hard kill may prevent any final output.
+A runner cancellation phase does not prove provider cancellation or hardware release.
 
-## Deadlines, logs and results
+The control plane still requires matching provider termination and verified artifact
+publication. Code/input/scratch files are not application artifacts. See
+[collection](../docs/collection.md) and [artifact retrieval](../docs/providers/kaggle-artifacts.md).
 
-Preparation, resource checks and setup share `setup_seconds` within the remote wall budget.
-Payload work stops before the finalization reserve. `setup_seconds + finalization_grace_seconds`
-must be strictly less than `remote_wall_seconds`; invalid budgets are rejected. The deadline
-origin is the runner's monotonic start, distinct from provider queue/allocation clocks.
-
-Each child starts in a new process group. On timeout, SIGTERM/SIGINT, or leader completion,
-the wrapper sends group TERM then KILL and bounds its waits. Even a successful leader is
-not permission to leave ordinary background children running. Deliberate session escape,
-uninterruptible filesystem/kernel calls, SIGKILL/OOM and provider loss are outside this
-watchdog's guarantees. Provider-side timeout remains a separate necessary defense.
-
-Stdout/stderr stream independently through 64 KiB reads. Each defaults to 20 MiB retained,
-with explicit truncation markers and seen/stored counts. Known token/authorization patterns
-are redacted across chunks. This is best-effort hygiene, not a general private-data detector.
-No live-log delivery or structured-progress API is introduced.
-
-Declared file/directory outputs are checked for containment, links, type, count, size and
-digest. Missing required output prevents success; absent optional output is allowed. An
-output limit or collection error cannot overwrite the original payload/setup failure.
-
-`control/execution-result.json` conforms to the existing
-[result-manifest schema](../api/schemas/result-manifest.v1alpha1.schema.json). It preserves
-attempt identity, payload exit code (null when not launched), failure phase and timeout.
-`control/environment.json` records process/setup exit codes, durations, bounded package
-provenance and log truncation. Files are flushed and atomically renamed where possible.
-
-CLI exit 0 means a completed runner result, 1 means a recorded unsuccessful result, and
-64 means rejected input or inability to finalize; it does not fabricate a result. A hard
-provider kill may prevent all finalization. A runner `cancelled` phase records local signal
-handling, not proof of provider cancellation or accelerator release. The eventual control
-plane still requires matching artifacts and provider terminal evidence before job success.
-
-## Verification and contributor commands
+## Contributor checks
 
 ```text
 python runner/check.py
-python runner/python/run.py --manifest runner/examples/request.valid.json --validate-only
+go test ./runner
 ```
 
-`check.py` checks UTF-8/LF/trailing whitespace, Python 3.11-compatible syntax, indentation,
-JSON parsing, the source hash lock, the actual request decoder and the CPU fixture suite.
-It does not claim to run a third-party formatter or static type checker. A dedicated type
-checker/formatter is deferred rather than adding unverified tooling dependencies here.
-After reviewing an intentional source/JSON change, update the lock explicitly:
+The Python check validates source/JSON syntax, the asset lock, decoder and explicit CPU
+fixtures. It can execute those repository-owned fixtures on Linux; it does not call Kaggle
+or allocate GPU. Go tests check the embedded source inventory/lock. For an intentional,
+reviewed asset change only, update hashes with `python runner/check.py --lock` and rerun checks.
+Never refresh the lock to conceal an unexpected source difference.
 
-```text
-python runner/check.py --lock
-```
-
-The Linux suite covers Python/shell success and failure, preparation identity, unsafe
-archives, required/optional/directory outputs, setup deadlines, payload timeout, actual
-SIGTERM, child cleanup, bounded logs, environment canaries and synthetic resource decisions.
-The available Linux runtime ran all 24 tests on Python 3.13.5. An optional local coverage
-measurement using the already available coverage tool reported 94% over 668 statements;
-coverage is not a runner runtime dependency.
-
-The `Runner offline` CI job repeats the suite on Python 3.11.16, exports actual fixture
-result JSON into its temporary directory, then uses the repository's pinned Go schema
-validator to check those exact results. Existing Go CI also checks the runner schema and
-asset lock on native Linux/macOS/Windows. Native control-plane CI is not a claim that the
-remote runner executes on macOS/Windows. No job authenticates Kaggle, installs workload
-packages, deploys a service, executes admitted user code, or allocates GPU compute.
+The locked client/CI Python is 3.11.16. Native control-plane checks on macOS/Windows do not
+mean the remote runner supports those hosts. Record operator/provider results in the
+[validation ledger](../docs/development/validation-results.md), not in this guide.
+Design constraints are in [ADR-0007](../docs/decisions/0007-finite-remote-runner.md).

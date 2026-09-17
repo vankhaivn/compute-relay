@@ -1,89 +1,42 @@
-# Architecture decision records
+# Architecture decisions
 
-Use ADRs for material choices that affect public contracts, dependency boundaries,
-persistence, provider transport, security properties, compatibility, or major operational
-defaults.
+These records preserve accepted design choices, their reasons and consequences. They are not
+implementation diaries or evidence that a provider feature passed a live test. Use
+[current status](../status.md) and [validation results](../development/validation-results.md) for that.
 
-## Index
+All decisions below are accepted. Editing for clarity does not change their outcome; a material
+new choice requires a superseding ADR. Historical wording and review discussion remain in Git.
 
-| ADR | Status | Decision |
-|---|---|---|
-| [`0001-official-kaggle-client-boundary.md`](0001-official-kaggle-client-boundary.md) | accepted | Isolate a pinned official-client environment; use CLI plus a narrow public-client bridge where structured results require it. |
-| [`0002-attempt-scoped-kaggle-resources.md`](0002-attempt-scoped-kaggle-resources.md) | accepted | Use one persisted Kaggle execution resource per attempt plus manifest identity; make no exactly-once claim. |
-| [`0003-go-and-sqlite-baseline.md`](0003-go-and-sqlite-baseline.md) | accepted | Start with Go 1.27.1 and a CGo-free `modernc.org/sqlite` driver family, exact dependency pin deferred to implementation. |
-| [`0004-workspace-auth-and-atomic-objects.md`](0004-workspace-auth-and-atomic-objects.md) | accepted | Separate token authority, atomic blob publication and ownership metadata commit; no nondurable production fallback. |
-| [`0005-bundle-format-and-rooted-import.md`](0005-bundle-format-and-rooted-import.md) | accepted | Use manifest-bound regular-file USTAR/gzip bundles, explicit selections and rooted, workspace-allowed local snapshots; no local extraction. |
-| [`0006-public-https-ingestion.md`](0006-public-https-ingestion.md) | accepted | Revalidate DNS/peer/TLS on every HTTPS hop, bound transfers and publish immutable inputs only after verified EOF. |
-| [`0007-finite-remote-runner.md`](0007-finite-remote-runner.md) | accepted | Keep one-attempt Python/Linux execution outside admission, with frozen identities, bounded supervision and honest provider-evidence limits. |
-| [`0008-sqlite-durability-and-backup.md`](0008-sqlite-durability-and-backup.md) | accepted | Pin SQLite/libc, protect installation identity with OS locking and ordered migrations, and separate database-only backup/restore from complete runtime recovery. |
-| [`0009-durable-idempotent-admission.md`](0009-durable-idempotent-admission.md) | accepted | Atomically persist canonical request identity, original receipt, job/attempt, frozen resolution and references; replay without remapping or executing compute. |
-| [`0010-fair-scheduling-and-fenced-local-claims.md`](0010-fair-scheduling-and-fenced-local-claims.md) | accepted | Persist FIFO/round-robin fairness and fenced local ownership; keep remote capacity evidence independent from lease expiry and submission intent. |
-| [`0011-one-shot-mutations-and-recovery.md`](0011-one-shot-mutations-and-recovery.md) | accepted | Freeze inputs, commit staging/submission identities before one-shot mutations, and recover uncertainty through fenced observation rather than replay. |
-| [`0012-attempt-scoped-durable-controls.md`](0012-attempt-scoped-durable-controls.md) | accepted; PR #15 merged | Separate immutable receipts from current operation status, require explicit attempts and preserve one-shot cancellation, frozen-input retry and transfer-only collection. |
-| [`0013-verified-collection-and-publication.md`](0013-verified-collection-and-publication.md) | accepted; PR #16 merged | Pin one result snapshot per attempt, independently verify streamed/cached bytes and atomically publish artifacts with fenced collection-only recovery. |
-| [`0014-retention-tombstones-and-cleanup-preview.md`](0014-retention-tombstones-and-cleanup-preview.md) | accepted; PR #17 merged | Preserve recovery pins and metadata, commit expiry before exact bound-store deletion, and keep remote cleanup strictly ledger-based and dry-run-only. |
-| [`0015-read-only-kaggle-preflight.md`](0015-read-only-kaggle-preflight.md) | accepted; PR #19 merged | Separate local checks from explicit credential-scoped SDK reads, bound the private transport seam, verify the server account and retain the M1/batch activation gate. |
-| [`0016-private-staging-and-readiness.md`](0016-private-staging-and-readiness.md) | accepted; PR #20 merged | Bind one-shot private staging to the prewritten attempt/operation, verify readiness and exact bytes separately, and recover through observation under the existing M3 ownership journal. |
-| [`0017-one-shot-kaggle-execution.md`](0017-one-shot-kaggle-execution.md) | accepted; PR #21 merged | Package locked remote source, allow one save under durable intent, verify exact version/ID/source around observations and preserve uncertainty without remote exactly-once claims. |
-| [`0018-kaggle-operational-evidence.md`](0018-kaggle-operational-evidence.md) | accepted; PR #22 merged | Preserve missing quota, subtract reservations conservatively, bind bounded log snapshots to original identity, and require manual cancellation when a verified session target is absent. |
-| [`0019-version-scoped-kaggle-artifacts.md`](0019-version-scoped-kaggle-artifacts.md) | accepted; PR #23 merged | Read complete versioned listings and selected files, require successful final byte/identity acknowledgement, and reuse M3 immutable pins and atomic publication without new compute. |
-| [`0020-explicit-durable-gpu-acceptance.md`](0020-explicit-durable-gpu-acceptance.md) | accepted; PR #24 merged | Scope a finite GPU experiment to original binary/state, separate submit and read-only resume processes, and keep offline harness results distinct from actual live acceptance. |
-| [`0021-local-runtime-lifecycle.md`](0021-local-runtime-lifecycle.md) | accepted; PR #25 merged | Bind local installation/store identities, deliver tokens to private files and join loopback HTTP handlers before releasing storage, without enabling provider workers or closing parent M5-01. |
-| [`0022-immutable-profiles-and-application-client.md`](0022-immutable-profiles-and-application-client.md) | accepted; PR #26 merged | Reuse immutable admission profiles with separate workspace grants and private-token, non-retrying application HTTP commands; preserve original receipts and keep provider activation separate. |
-| [`0023-verified-artifact-delivery.md`](0023-verified-artifact-delivery.md) | proposed; PR #27 in review | Require explicit publication identity, current authority and final stream acknowledgement before create-only private application file delivery, without provider calls or automatic retry. |
+| ADR | Decision |
+|---|---|
+| [0001](0001-official-kaggle-client-boundary.md) | Isolated pinned official client, narrow bridge and no hidden retries. |
+| [0002](0002-attempt-scoped-kaggle-resources.md) | Attempt-scoped resources and manifest identity, without exactly-once claims. |
+| [0003](0003-go-and-sqlite-baseline.md) | Go control plane and CGo-free SQLite. |
+| [0004](0004-workspace-auth-and-atomic-objects.md) | Current authority, atomic blob bytes and separate ownership commit. |
+| [0005](0005-bundle-format-and-rooted-import.md) | Strict bundle format and rooted explicit input selection. |
+| [0006](0006-public-https-ingestion.md) | Per-hop public HTTPS/DNS/peer checks before immutable input publication. |
+| [0007](0007-finite-remote-runner.md) | One finite remote runner, frozen inputs and bounded results. |
+| [0008](0008-sqlite-durability-and-backup.md) | State identity, checksummed migrations and database-only backup. |
+| [0009](0009-durable-idempotent-admission.md) | Original immutable admission receipts and frozen resolution. |
+| [0010](0010-fair-scheduling-and-fenced-local-claims.md) | Durable fairness, shared-account capacity and fenced local claims. |
+| [0011](0011-one-shot-mutations-and-recovery.md) | New write-ahead intent for each one-shot mutation; observational recovery. |
+| [0012](0012-attempt-scoped-durable-controls.md) | Explicit attempts and original control receipts versus current state. |
+| [0013](0013-verified-collection-and-publication.md) | Immutable result pins and independently verified atomic publication. |
+| [0014](0014-retention-tombstones-and-cleanup-preview.md) | Pin-aware expiry before exact bound-store deletion; remote preview only. |
+| [0015](0015-read-only-kaggle-preflight.md) | Local/read-only opt-in, explicit token scope and bounded SDK transport. |
+| [0016](0016-private-staging-and-readiness.md) | One-shot private staging and complete separately observed readiness. |
+| [0017](0017-one-shot-kaggle-execution.md) | Locked source and exact-identity execution under durable intent. |
+| [0018](0018-kaggle-operational-evidence.md) | Conservative quota, bounded log snapshots and manual cancellation. |
+| [0019](0019-version-scoped-kaggle-artifacts.md) | Explicit version/file reads and original-pin collection recovery. |
+| [0020](0020-explicit-durable-gpu-acceptance.md) | Fixed authorized GPU experiment with a separate resume process. |
+| [0021](0021-local-runtime-lifecycle.md) | Private local operator commands and admission-only HTTP lifecycle. |
+| [0022](0022-immutable-profiles-and-application-client.md) | Immutable admission profiles and non-replaying application CLI. |
+| [0023](0023-verified-artifact-delivery.md) | Current-authority downloads with final acknowledgement and create-only files. |
 
-M3-08's merged [fault qualification](../fault-matrix.md) and [recovery guidance](../recovery.md)
-do not change earlier architectural decisions. The M4-01 through M4-05 component guides retain
-their own evidence tiers. M4-06's merged [acceptance harness](../providers/kaggle-acceptance.md)
-composes those ports into one explicitly authorized experiment; it does not turn fixtures into
-live evidence. The live ledger remains not run. M5-01a/b's merged [local runtime](../local-runtime.md)
-and [application/profile commands](../application-cli.md) configure and serve local services,
-not general provider workers. M5-01c [artifact delivery](../artifact-delivery.md) reads only
-existing publications, with current authority and mandatory final verification before a new
-client file is published. Profile policy, collection publication, delivery acknowledgement and
-remote execution remain distinct; no response can waive a live-provider gate.
+## Add or revise a decision
 
-Historical task-specific stop instructions inside an ADR describe that decision's scope;
-the [implementation plan](../implementation-plan.md) owns the current review/next-task boundary.
-Accepted outcomes and dated evidence are not silently rewritten to look like results from a
-later task. Proposed ADR-0023 remains subject to owner review and PR #27's checks. Neither local
-readiness, a configured admission profile, a verified local download nor accepting the harness
-decision closes parent M5-01 or M4-06/M1 live acceptance.
-
-## Naming
-
-```text
-NNNN-short-kebab-case-title.md
-```
-
-Numbers are sequential and never reused. Copy [`template.md`](template.md) and replace every
-placeholder.
-
-## Status
-
-Use one of:
-
-- `proposed`
-- `accepted`
-- `superseded by ADR-NNNN`
-- `deprecated`
-- `rejected`
-
-An accepted ADR records the decision at that point in time. Do not edit its outcome silently
-after implementation. Add a superseding ADR when the decision changes; minor typo and link
-corrections are acceptable.
-
-## When an ADR is required
-
-Examples include:
-
-- selecting the SQLite driver or migration strategy;
-- choosing CLI-only versus a pinned official-client Python bridge for Kaggle;
-- changing the public job or HTTP versioning scheme;
-- changing archive format or safety semantics;
-- introducing a new provider capability or session resource model;
-- changing authentication, credential, or workspace boundaries; or
-- changing no-retry, fallback, or cleanup behavior.
-
-Do not create ADRs for routine variable names, formatting, or an easily reversible library
-helper.
+Use `NNNN-short-name.md`, never reuse numbers, and start from [template](template.md).
+Statuses are proposed, accepted, superseded by ADR-NNNN, deprecated or rejected. State the
+material decision, alternatives/reason and actual consequences. Link the current detailed guide
+rather than duplicating it. Keep tests/run outcomes in the PR or validation ledger, not a growing
+ADR audit. Do not create an ADR for routine formatting, naming or documentation cleanup.
