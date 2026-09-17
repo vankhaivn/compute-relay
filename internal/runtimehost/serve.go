@@ -9,6 +9,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/api"
+	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
@@ -46,6 +47,10 @@ func (h *Host) Serve(ctx context.Context, address string, announce func(Listenin
 	if err != nil {
 		return ErrState
 	}
+	results, err := collection.NewReader(h.access, h.store, h.results)
+	if err != nil {
+		return ErrState
+	}
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", address)
 	if err != nil {
 		return ErrState
@@ -53,7 +58,7 @@ func (h *Host) Serve(ctx context.Context, address string, announce func(Listenin
 	defer listener.Close()
 	cfg := api.DefaultConfig()
 	cfg.Listen = listener.Addr().String()
-	cfg.Jobs, cfg.Operations = jobs, controls
+	cfg.Jobs, cfg.Operations, cfg.Results = jobs, controls, results
 	server, err := api.NewServer(cfg, h.access, objectService, h.store.Ready)
 	if err != nil {
 		return ErrState
