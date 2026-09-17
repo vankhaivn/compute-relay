@@ -22,12 +22,14 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
 	"github.com/vankhaivn/compute-relay/internal/buildinfo"
+	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
 type Config struct {
+	Results        *collection.Reader // nil disables published artifact reads; no provider fallback.
 	Operations     *operations.Service // nil disables durable controls; never use an in-memory fallback.
 	Jobs           *admission.Service  // nil disables durable job routes; never use a memory fallback.
 	HTTPSInputs    *objects.Ingestor   // nil disables HTTPS ingestion; operator composition supplies the guarded client.
@@ -115,7 +117,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	defer func() {
-		if recover() != nil {
+		if value := recover(); value != nil {
+			if value == http.ErrAbortHandler {
+				panic(http.ErrAbortHandler) // Preserve a failed binary stream's missing acknowledgement.
+			}
 			// No panic value, token, request dump, or private host path is returned/logged.
 			respondError(w, r, http.StatusServiceUnavailable, domain.CodeStateStoreUnavailable, domain.FailureStageLocalRuntime, "runtime request failed")
 		}
@@ -135,7 +140,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.limited(w, r, 1)
 		return
 	}
-	if r.URL.RawQuery != "" || len(r.URL.Path) > 2048 || r.URL.RawPath != "" {
+	isArtifact := artifactPath(r.URL.Path)
+	if r.URL.RawQuery != "" && !isArtifact || len(r.URL.Path) > 2048 || r.URL.RawPath != "" || len(r.URL.RawQuery) > 512 {
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "unexpected query or encoded path")
 		return
 	}
@@ -160,11 +166,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	isUpload := len(segments) == 4 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && r.Method == http.MethodPost
 	isImport := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "import" && r.Method == http.MethodPost
 	isIngest := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "ingest" && r.Method == http.MethodPost
+	isDownload := isArtifact && len(segments) == 8 && r.Method == http.MethodGet
 	timeout, maxBody := h.config.RequestTimeout, h.config.MaxJSONBytes
 	if isUpload {
 		timeout, maxBody = h.config.UploadTimeout, h.config.MaxUploadBytes
 	}
-	if isImport || isIngest {
+	if isImport || isIngest || isDownload {
 		timeout = h.config.UploadTimeout // JSON body stays bounded by MaxJSONBytes.
 	}
 	if r.ContentLength > maxBody {
@@ -180,6 +187,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(timeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		mapError(w, r, objects.ErrUnavailable)
 		return
+	}
+	if isDownload {
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			artifactError(w, r, collection.ErrUnavailable)
+			return
+		}
 	}
 	ctx, cancel = context.WithTimeout(r.Context(), timeout)
 	defer cancel()
@@ -202,6 +215,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.config.Operations != nil {
 			features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", "operation_status")
 		}
+		if h.config.Results != nil {
+			features = append(features, "artifact_list", "artifact_metadata", "artifact_download")
+		}
 		respond(w, 200, map[string]any{"api_version": "compute-connector/v1alpha1", "runtime_version": buildinfo.Current().Version, "implementation_status": "implemented-offline", "features": features, "job_admission": admissionStatus})
 		return
 	}
@@ -216,6 +232,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if workspace != principal.WorkspaceID() {
 		mapError(w, r, auth.ErrForbidden)
+		return
+	}
+	if isArtifact {
+		h.artifacts(w, r, principal, workspace, segments)
 		return
 	}
 	if segments[3] == "operations" || segments[3] == "jobs" && len(segments) == 6 {
