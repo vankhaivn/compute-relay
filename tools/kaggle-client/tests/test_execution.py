@@ -29,7 +29,7 @@ def request_fixture():
 def kernel_fixture(r, kernel_id=42):
     return {"metadata": {
         "id": kernel_id, "ref": r["owner"] + "/" + r["slug"],
-        "author": r["owner"], "slug": r["slug"], "language": "python", "kernelType": "script",
+        "author": "Fixture Display Name", "slug": r["slug"], "language": "python", "kernelType": "script",
         "currentVersionNumber": 1, "isPrivate": True, "enableGpu": r["gpu"],
         "enableInternet": r["internet"], "enableTpu": False,
         "datasetDataSources": [r["dataset"]], "kernelDataSources": [],
@@ -68,7 +68,9 @@ class ExecutionProtocolTests(unittest.TestCase):
         r = request_fixture()
         good = kernel_fixture(r)
         self.assertEqual(bridge.check_kernel(good, r), "42")
-        for field in ("id", "ref", "author", "slug", "currentVersionNumber", "isPrivate", "enableGpu", "enableTpu", "enableInternet", "datasetDataSources"):
+        good["metadata"]["author"] = "Another Human Display Name"
+        self.assertEqual(bridge.check_kernel(good, r), "42")
+        for field in ("id", "ref", "slug", "currentVersionNumber", "isPrivate", "enableGpu", "enableTpu", "enableInternet", "datasetDataSources"):
             with self.subTest(field=field):
                 raw = kernel_fixture(r)
                 del raw["metadata"][field]
@@ -207,7 +209,9 @@ class ExecutionPinnedSDKTests(unittest.TestCase):
                 receipt["invalidDatasetSources"] = ["bad/source"]
             return response(json.dumps(receipt).encode())
         if operation == bridge.OPERATIONS["status"]:
-            self.assertEqual(body["versionLabel"], "1")
+            self.assertEqual(body["userName"], self.r["owner"])
+            self.assertEqual(body["kernelSlug"], self.r["slug"])
+            self.assertNotIn("versionLabel", body)
             if self.change_during_status:
                 self.kernel["metadata"]["currentVersionNumber"] = 2
             return response(json.dumps(self.status_reply).encode())

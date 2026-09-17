@@ -8,13 +8,32 @@ import sys
 import types
 
 
+def staging_paths(payload):
+    requested = Path("/kaggle/input") / payload["dataset_slug"]
+    try:
+        staging = requested.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise RuntimeError("Compute Relay staging mount is unavailable") from None
+    if not staging.is_dir():
+        raise RuntimeError("Compute Relay staging mount is not a directory")
+    marker = staging / "relay-stage.bin"
+    try:
+        marker = marker.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise RuntimeError("Compute Relay staging marker is unavailable") from None
+    try:
+        marker.relative_to(staging)
+    except ValueError:
+        raise RuntimeError("Compute Relay staging marker escaped its dataset mount") from None
+    if not marker.is_file():
+        raise RuntimeError("Compute Relay staging marker is not a regular file")
+    return staging, marker
+
+
 def run_remote(payload):
     if sys.platform != "linux":
         raise RuntimeError("Compute Relay runner requires Linux")
-    staging = Path("/kaggle/input") / payload["dataset_slug"]
-    marker = staging / "relay-stage.bin"
-    if staging.is_symlink() or marker.is_symlink() or not marker.is_file():
-        raise RuntimeError("Compute Relay staging identity is unavailable")
+    staging, marker = staging_paths(payload)
     with marker.open("rb") as stream:
         raw = stream.read(65537)
     if len(raw) > 65536 or hashlib.sha256(raw).hexdigest() != payload["marker_sha256"]:
