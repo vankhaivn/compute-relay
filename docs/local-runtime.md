@@ -1,13 +1,14 @@
 # Local operator commands and admission-only HTTP lifecycle
 
-> **Task:** M5-01a in PR #25, in review until owner merge. This is one slice of M5-01.
+> **Task:** M5-01a, merged in PR #25. This is one slice of M5-01.
 > **Requirements:** API-01/03, DX-01, preserving SEC-02 and durable ownership.
 > **Mode:** local-admission-only; no provider workers, remote calls or live acceptance.
 
-PR #24 merged the M4-06 acceptance harness, not its live GPU acceptance. M5-01a now exposes
+PR #24 merged the M4-06 acceptance harness, not its live GPU acceptance. M5-01a exposes
 local initialization, workspace/token administration, schema validation and guarded HTTP
-serving through the main executable. Application client commands, profile/provider composition,
-artifact/log routes and cleanup commands remain later M5-01 slices. M5-02 TOML is not supplied.
+serving through the main executable. M5-01b's [application/profile guide](application-cli.md)
+now supplies admission-policy configuration and authenticated application commands in PR #26.
+General provider/worker composition, artifact/log routes, cleanup and M5-02 TOML remain separate.
 
 ## Build and start a private local installation
 
@@ -40,11 +41,12 @@ requests an OS-assigned port. Literal IPv4/IPv6 loopback is required. DNS names,
 network addresses, scoped IPv6, mapped aliases and noncanonical ports are rejected. There is no
 remote-exposure, proxy, TLS-bypass or provider-enable flag in this slice.
 
-**New workspaces have no allowed profiles.** They can use authorized local object operations,
-but cannot admit a new job under a nonexistent/unallowed profile. No fictional default provider
-or profile is installed. Existing job/control handlers are composed and tested with explicitly
-seeded test-only profiles; no production profile configuration command or SQL-editing workaround
-is advertised. Even an admitted job remains local: no scheduler/dispatch/collection worker runs.
+**Initialization still seeds no profiles.** To admit a job, stop serve and explicitly apply an
+immutable admission profile and grant it to the workspace using the [M5-01b commands](application-cli.md).
+No SQL editing or fake/default provider is required. A profile is local admission metadata, not
+proof that a provider/account is configured or available. Restart serve and use application
+upload/validate/submit/status commands through HTTP. Even an admitted job remains local: no
+scheduler/dispatch/collection worker runs. Application HTTP calls do not acquire the state lock.
 
 ## State identity and local administration
 
@@ -55,10 +57,10 @@ Other commands never create a missing installation or silently recreate absent d
 markers. Corrupt markers and swapped input/result roots fail closed.
 
 Opening takes exclusive OS locks for the root, SQLite and both blob stores. **Stop serve before
-running administrative commands**, including local state inspection. A second command/process
-fails rather than racing an active server. No application-admin HTTP endpoints are introduced.
-The package's trusted composition methods require serialized operator access and closing only
-after all consumers finish; the CLI owns that lifecycle.
+running administrative commands**, including local state inspection and profile changes. A second
+command/process fails rather than racing an active server. No application-admin HTTP endpoints
+are introduced. The package's trusted composition methods require serialized operator access
+and closing only after all consumers finish; the CLI owns that lifecycle.
 
 ```text
 ./compute-relay state --root /absolute/private/runtime
@@ -142,11 +144,12 @@ job schema/semantics. Required arrays such as `inputs` must be explicit. Success
 `schema-valid-local`, a canonical specification digest, `admitted=false` and `provider_checked=false`.
 It opens no runtime state and checks no actual object/profile/account availability. Actual
 admission still needs current authority, allowed profile, input ownership and its transaction.
+M5-01b's separate `job validate` command calls contextual server validation; it also admits nothing.
 
 Help/invalid flags do no state work. Cross-command and duplicate singleton flags are rejected;
-scopes may be repeated only as distinct explicit values. The new local diagnostics and unknown
+scopes may be repeated only as distinct explicit values. The local diagnostics and unknown
 command branch do not echo raw arguments, token values or private paths. Existing bundle/version
-commands remain separate, and bundle work now inherits the executable's cancellation context.
+commands remain separate, and bundle work inherits the executable's cancellation context.
 
 ## Tests and remaining work
 
@@ -156,21 +159,25 @@ go run ./cmd/devtool check
 go run ./cmd/devtool test-race
 ```
 
-Real SQLite/blob/loopback tests cover initialization/reopen/locking, missing/swapped evidence,
-workspace/expiry/revocation boundaries, token-file delivery compensation, Host/Origin rejection,
+M5-01a's real SQLite/blob/loopback tests cover initialization/reopen/locking, missing/swapped
+state, workspace/expiry/revocation, token-file delivery compensation, Host/Origin rejection,
 uploaded bytes, original admission receipt replay and queued cancellation without remote intent.
-Tests seed profiles explicitly for admission; production initialization does not. Separate child
-processes invoke the real main entry for init/admin/serve/state and authenticated HTTP. Unix
-children receive interrupt; Windows tests exercise abrupt process death/reopen instead of claiming
-POSIX signal delivery. Symlink tests explicitly skip when the host cannot create test symlinks.
+Those historical tests seed fixture profiles; production initialization still does not. Separate
+child processes invoke the real main entry for init/admin/serve/state and authenticated HTTP. Unix
+children receive interrupt; Windows tests abrupt process death/reopen instead of claiming POSIX
+signal delivery. Symlink tests explicitly skip when the host cannot create their fixtures.
 
-Local Go 1.23.2 ran the exact standard-library parser's vet and race tests ten times, and the exact
-HTTP lifecycle's vet/race tests five times in an unshipped harness supplying only its ErrState
-sentinel. These are parser/lifecycle evidence, not full local SQLite/pinned-repository integration.
-Full pinned Go/native/race evidence belongs to final-head CI in PR #25. No replacement driver,
-dependency downgrade or production test hook is shipped. No live provider/GPU call is performed.
+Local M5-01a evidence used Go 1.23.2 for exact standard-library parser vet/race tests ten times,
+and HTTP lifecycle vet/race tests five times in an unshipped module supplying only ErrState.
+Those are parser/lifecycle checks, not full local SQLite/pinned-repository integration. Full pinned
+Go/native/race evidence is recorded in merged PR #25. No replacement driver or downgrade is shipped.
 
-See [ADR-0021](decisions/0021-local-runtime-lifecycle.md) and the
-[implementation plan](implementation-plan.md). Stop at PR #25 for owner merge. Parent M5-01
-remains incomplete until its later client/profile/provider/route slices; M4 live acceptance and
-M5-02 configuration remain separate, and no release-ready multi-job compute service is claimed.
+M5-01b adds actual profile-command and application-HTTP integration without test-only profile
+seeding, including lost admission response after commit, original receipt/binding recovery,
+remap/revoke and token revocation. Its client/JSON local checks and final-head CI are recorded
+separately in PR #26 and the application guide, not relabeled as M5-01a evidence.
+
+See [ADR-0021](decisions/0021-local-runtime-lifecycle.md), [application CLI](application-cli.md)
+and the [implementation plan](implementation-plan.md) for the current owner-review boundary.
+Parent M5-01 remains incomplete until its remaining provider/worker/result/cleanup surfaces;
+M4 live acceptance and M5-02 configuration remain separate. No release-ready compute service is claimed.

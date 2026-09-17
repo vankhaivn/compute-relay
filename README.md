@@ -1,10 +1,10 @@
 # Compute Relay
 
-> **Project status:** portable core, M3 orchestration and the M4-01–M4-06 offline
-> components/harness are merged through PR #24. **No live M4-06/M1 acceptance is recorded.**
-> M5-01a local administration and admission-only HTTP serving are in review in PR #25.
-> Parent M5-01 remains in progress: profile/provider workers, application client commands,
-> public artifact/log routes and remote cleanup are not enabled by this local server.
+> **Project status:** portable core, M3 orchestration and M4's offline components/harness
+> are merged. **No live M4-06/M1 acceptance is recorded.** M5-01a local runtime is merged
+> in PR #25; M5-01b admission profiles and application CLI are in review in PR #26.
+> Parent M5-01 remains in progress. The server is admission-only: general provider workers,
+> public artifact/log routes and remote cleanup are not enabled by profile/client setup.
 
 Compute Relay is the repository for an open-source, self-hosted **compute connector
 runtime**. The intended runtime sits beside an application, accepts finite jobs through a
@@ -77,9 +77,11 @@ The repository currently establishes:
 - complete version-scoped output listing, manifest-bound selected file transfers and M3
   immutable-pin/verified-publication integration without another compute execution;
 - a finite one-job acceptance adapter/CLI, fixed CUDA arithmetic example, original-binary
-  state binding and separate-process resume with honest offline-versus-live report semantics; and
+  state binding and separate-process resume with honest offline-versus-live report semantics;
 - explicit local init/state/workspace/token/validate commands and a literal-loopback `serve`
-  that composes durable HTTP services without starting provider workers.
+  that composes durable HTTP services without starting provider workers; and
+- immutable admission-profile apply/show and workspace grant/revoke, plus private-token
+  application upload/validate/submit/status/control commands without automatic HTTP replay.
 
 Admission returns `202` only after committing local metadata. It does not fetch pending URL
 inputs, inspect bundle bytes, start a scheduler or allocate compute. Scheduler/dispatch
@@ -161,13 +163,20 @@ a new process must resume and verify published CUDA arithmetic/hardware evidence
 can report only passed-offline. No actual live result was recorded by PR #24,
 and even a future scoped pass does not claim full M1, provider timeout or remote exactly-once.
 
-M5-01a's [local runtime](docs/local-runtime.md) binds installation/input/result identities,
+M5-01a's merged [local runtime](docs/local-runtime.md) binds installation/input/result identities,
 requires exclusive state ownership, delivers application tokens only to new private files and
 joins active HTTP handlers before closing stores. `serve` reports `local-admission-only` and
-`dispatch_enabled=false`; readiness is not provider capacity. New workspaces have no profiles,
+`dispatch_enabled=false`; readiness is not provider capacity. Initialization seeds no profiles,
 and no scheduler, dispatch, collector or retention worker starts. Local schema validation is
-not admission. Full application CLI/profile/provider and public artifact/log work remain later
-M5-01 slices, not hidden fallback behavior in this one.
+not admission.
+
+M5-01b's [profiles and application CLI](docs/application-cli.md) add explicit immutable admission
+policies and separate workspace grants, without resolving provider credentials or activating workers.
+Application commands use the running API rather than opening its database. One fresh transport per
+request refuses redirects/proxies/replays; upload bytes and response identity are checked before
+successful output. Lost acknowledgement requires explicit recovery of the original request/key.
+Remap/revoke preserves accepted bindings and original receipts; current status remains a separate
+read. Result/log routes, general provider setup and worker integration remain later M5-01 work.
 
 The upload smoke retains its explicitly nondurable metadata fixture; store/admission/scheduler/
 dispatch checks use temporary SQLite. A database-only backup does not include input or result
@@ -189,6 +198,7 @@ live Kaggle support.
 | [`docs/scope-and-requirements.md`](docs/scope-and-requirements.md) | Requirement-to-component-to-test traceability. |
 | [`docs/architecture.md`](docs/architecture.md) | Provider-neutral architecture baseline and invariants. |
 | [`docs/local-runtime.md`](docs/local-runtime.md) | Local operator commands, private state/token delivery, admission-only HTTP and joined shutdown. |
+| [`docs/application-cli.md`](docs/application-cli.md) | Immutable admission profiles, workspace grants, private-token application requests and explicit receipt recovery. |
 | [`docs/auth-and-objects.md`](docs/auth-and-objects.md) | Implemented workspace auth, HTTP/upload boundary, blob recovery and smoke checks. |
 | [`docs/storage.md`](docs/storage.md) | SQLite repositories, locking, migrations, database-only backup/restore and evidence limits. |
 | [`docs/admission.md`](docs/admission.md) | Durable job acceptance, canonical request identity, replay, frozen references and pending preparation. |
@@ -239,6 +249,7 @@ go test -run='TestMonitor|TestLogSnapshots|TestOperational' ./internal/provider/
 go test -run='TestArtifact' ./internal/provider/kaggle
 go test ./internal/kaggleacceptance ./cmd/kaggleacceptance
 go test ./internal/operatorcli ./internal/runtimehost ./cmd/compute-relay
+go test ./internal/appclient ./internal/appcli ./internal/jsonwire ./internal/cli
 go test ./runner
 ```
 
@@ -272,8 +283,10 @@ Separate child processes exercise the actual local prepare/status CLI and nonce 
 they do not run the live GPU workflow. Python tensor fixtures test arithmetic wiring without
 importing torch. Missing GPU, wrong results or incomplete restart records cannot become live
 qualification. The operator-only acceptance commands are documented separately, not part of CI.
-Local runtime tests separately execute real HTTP/store/CLI lifecycle and token boundaries;
-admission profiles are seeded only in tests, and no provider worker or workload is invoked.
+Local runtime tests separately execute real HTTP/store/CLI lifecycle and token boundaries.
+M5-01b's integration uses actual profile apply/grant and application commands, including lost
+HTTP receipt after real admission commit, reopen/remap/revoke and original binding checks.
+These local tests invoke no provider worker or admitted workload; older fixture tiers remain distinct.
 
 `fault-test` runs the nominated fault regressions uncached and is also included in
 `go run ./cmd/devtool check`. Repository-wide race tests remain a separate
@@ -303,8 +316,8 @@ Credentials must not be pasted into chat, committed, passed to remote jobs, or c
 fixtures. An implementation request does not waive M1-08 or authorize provider side effects
 in CI. The acceptance command requires explicit private-staging/GPU opt-in and a separate
 read-only resume; neither a green harness test nor preflight/staging readiness grants a new
-compute permit. PR #24 is merged at its harness gate. Stop for owner review at PR #25;
-M5-01a does not close parent M5-01 or the live acceptance gate.
+compute permit. PR #25 is merged at its local-runtime gate. Stop for owner review at PR #26;
+M5-01b does not close parent M5-01 or the live acceptance gate.
 
 ## Contributing
 

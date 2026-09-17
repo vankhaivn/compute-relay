@@ -1,10 +1,10 @@
 # Outcome roadmap
 
-> **Status:** acceptance-based roadmap active; synchronized 2026-09-16.
+> **Status:** acceptance-based roadmap active; synchronized 2026-09-17.
 >
-> **Current work:** M3's offline gate and M4's components/harness are merged through PR #24.
-> M5-01a local administration and admission-only HTTP are in review in PR #25;
-> parent M5-01 remains in progress. No live M4-06/M1 experiment is recorded.
+> **Current work:** M3 and M4's offline components/harness are merged through PR #24.
+> M5-01a local runtime is merged in PR #25; M5-01b profiles/application CLI is in review
+> in PR #26. Parent M5-01 remains in progress. No live M4-06/M1 experiment is recorded.
 >
 > Dates and sprint estimates are intentionally not assigned without an execution context.
 
@@ -21,15 +21,16 @@ proof of the first real compute path.
 | M-2 — Portable core | `complete` offline | M2-01 through M2-09 merged through PR #10; provider-neutral API/domain/objects/auth/fake-provider and finite runner evidence, not a live-provider claim. |
 | M-3 — Durable orchestration | `complete` offline | PRs #11–#18 merged the components, executable 25-scenario qualification and recovery documentation. This closes the implemented offline gate, not production or live acceptance. |
 | M-4 — Integrated Kaggle batch | Offline components/harness merged; live acceptance `blocked` | PRs #19–#24 supply the component ports and finite fixed-job GPU/restart harness. No real live result is recorded; general production registration and remaining M1 evidence are not complete. |
-| M-5 — Usable developer product | `in-progress` | PR #25 supplies M5-01a local init/admin/schema/HTTP lifecycle only. Parent M5-01 still needs application/profile/provider/worker and result surfaces; config, doctor, examples, clients and packaging retain their gates. |
+| M-5 — Usable developer product | `in-progress` | PR #25 merged the local runtime; PR #26 adds immutable admission profiles, separate workspace grants and one-shot application HTTP commands. Parent M5-01 still needs general provider/worker and result/cleanup surfaces; TOML, doctor, examples, language clients and packaging retain their gates. |
 | M-6 — Release hardening | `not-started` | Security, compatibility, cleanup, diagnostics, and reproducible release proof. |
 
 Detailed task dependencies, delivery slices and authorization boundaries are in
-[`implementation-plan.md`](implementation-plan.md). Stop at PR #25 for owner review/merge.
-M5-01a is not the whole M5-01 runtime/CLI. Proposal section 23.6 permits offline work, not a
-live-success declaration from CI. The local server starts no provider worker or automatic
-profile; public result routes, general worker composition and remote cleanup remain separate.
-Local timeouts/process exits do not cancel remote compute or grant another submission permit.
+[`implementation-plan.md`](implementation-plan.md). Stop at PR #26 for owner review/merge.
+M5-01b is not the whole M5-01 runtime/CLI. Proposal section 23.6 permits offline work, not a
+live-success declaration from CI. The local server still starts no provider worker; explicit
+profile admission policy is not full provider configuration. Public result routes, general
+worker composition and remote cleanup remain separate. Local timeouts/process exits do not
+cancel remote compute or grant another submission permit.
 
 ## M-0 — Evidence and scope
 
@@ -218,17 +219,25 @@ without provider-specific application code.
 - thin Node.js, Python, and Go HTTP clients using one contract; and
 - first-run documentation from install through verified artifacts.
 
-M5-01a's [local operator/HTTP lifecycle](local-runtime.md) in PR #25 is a first reviewable
-slice, not completion of parent M5-01. It binds original local state, provides explicit workspace
-and private-file token administration, validates schemas and serves existing durable HTTP
-services on literal loopback. Shutdown joins handlers before releasing store locks. Tests use
-real local stores/HTTP/main-entry child processes, not a live provider.
+M5-01a's merged [local operator/HTTP lifecycle](local-runtime.md) binds original state,
+provides explicit workspace/private-file token administration, validates schemas and serves
+existing durable services on literal loopback. Shutdown joins handlers before releasing stores.
+Its tests use real local stores/HTTP/main-entry child processes, not a live provider.
 
-New workspaces have no profiles and the server reports admission-only mode with dispatch disabled.
-Application submit/status/operation clients, profile/provider setup, result routes and worker
-lifecycle remain necessary. Strict TOML/doctor, examples, thin language clients and first-run
-release evidence keep their original gates. [ADR-0021](decisions/0021-local-runtime-lifecycle.md)
-records this subdivision without weakening the approved M5 outcome.
+M5-01b's [profiles/application CLI](application-cli.md) supplies immutable admission revisions,
+separate workspace grants and private-token requests through that running API. New profiles do
+not grant authority or activate workers implicitly. Explicit receipt recovery across lost HTTP
+responses, reopen/remap/revoke retains original accepted bindings; commands never automatically
+replay requests. Upload source and response acknowledgement are separate from server commitment.
+Local profile, object_id and retry_compute wire contracts are checked without changing existing
+API schemas or M3 mutation semantics.
+
+The server remains admission-only with dispatch disabled. General provider setup, result/log/
+cleanup surfaces and worker lifecycle remain necessary before parent M5-01 completion. TOML,
+doctor, examples, language clients and first-run release evidence keep their original gates.
+[ADR-0021](decisions/0021-local-runtime-lifecycle.md) and
+[ADR-0022](decisions/0022-immutable-profiles-and-application-client.md) record these slices without
+weakening the approved outcome or turning local admission into live compute acceptance.
 
 ## M-6 — Release hardening
 
