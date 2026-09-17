@@ -27,7 +27,7 @@ Usage:
   compute-relay bundle inspect --file FILE
 
 Bundle commands are local and never execute workload code.
-` + "\n" + operatorcli.Usage + "\n" + appcli.Usage
+` + "\n" + operatorcli.Usage + "\n" + appcli.Usage + "\n" + appcli.ArtifactUsage
 
 // Run retains the embeddable command boundary. The executable uses RunContext
 // so interrupt/SIGTERM reaches serving, upload shutdown and finite local work.
@@ -50,7 +50,14 @@ func RunContext(parent context.Context, args []string, stdout, stderr io.Writer)
 		return 0
 	case "init", "state", "serve", "workspace", "token", "validate", "profile":
 		return operatorcli.Run(parent, args, stdout, stderr, runtimehost.Command)
-	case "object", "job", "operation":
+	case "artifact":
+		return appcli.RunArtifacts(parent, args, stdout, stderr)
+	case "job":
+		if len(args) > 1 && args[1] == "artifacts" {
+			return appcli.RunArtifacts(parent, args, stdout, stderr)
+		}
+		return appcli.Run(parent, args, stdout, stderr)
+	case "object", "operation":
 		return appcli.Run(parent, args, stdout, stderr)
 	case "bundle":
 		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
