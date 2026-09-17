@@ -104,6 +104,26 @@ def chunks(response, limit):
         yield part
 
 
+def missing_dataset_error(exc):
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status == 404:
+        return True
+    if status != 403:
+        return False
+    data = getattr(response, "_content", None)
+    if not isinstance(data, bytes):
+        return False
+    try:
+        payload = strict_json(data)
+    except (TypeError, ValueError, UnicodeError):
+        return False
+    error = payload.get("error")
+    return (type(error) is dict and error.get("code") == 403
+            and error.get("status") == "PERMISSION_DENIED"
+            and error.get("message") == "Permission 'datasets.get' was denied")
+
+
 class Guard:
     """Official SDK owns wire types; this pinned transport permits one expected call."""
     def __init__(self, client, token, mode, file_count):
@@ -173,6 +193,13 @@ class Guard:
             raise ValueError("unexpected raw download type")
         try:
             if not 200 <= response.status_code < 300:
+                # Kaggle uses a structured 403 for a missing dataset on GetDataset.
+                # Preserve only that bounded JSON body so the caller can classify it narrowly.
+                if (request.url == API + DATASET + "GetDataset" and response.status_code == 403
+                        and response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() == "application/json"):
+                    data = b"".join(chunks(response, MAX_JSON))
+                    strict_json(data)
+                    response._content, response._content_consumed = data, True
                 response.raise_for_status()
                 raise ValueError("redirect forbidden")
             if download or response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
@@ -362,9 +389,9 @@ def stage(mode, token, r, source):
             try:
                 meta = dataset_call(guard, client, r, ApiGetDatasetRequest, "get_dataset")
             except requests.exceptions.HTTPError as exc:
-                # Only the precise read's HTTP 404 qualifies a fresh authorized
-                # creation path. Auth/permission/timeout/error-code JSON is not absence.
-                if getattr(getattr(exc, "response", None), "status_code", None) != 404:
+                # Kaggle reports a missing dataset as either 404 or one precise
+                # datasets.get PERMISSION_DENIED payload. Other 403s remain failures.
+                if not missing_dataset_error(exc):
                     raise
                 if mode == "observe":
                     return empty_result("not_found")
