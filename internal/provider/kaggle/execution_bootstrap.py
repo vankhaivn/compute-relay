@@ -8,14 +8,62 @@ import sys
 import types
 
 
-def staging_paths(payload):
-    requested = Path("/kaggle/input") / payload["dataset_slug"]
+MAX_DATASET_NAMESPACES = 4096
+
+
+def resolved_directory(candidate):
     try:
-        staging = requested.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
     except (OSError, RuntimeError):
         raise RuntimeError("Compute Relay staging mount is unavailable") from None
-    if not staging.is_dir():
+    if not resolved.is_dir():
         raise RuntimeError("Compute Relay staging mount is not a directory")
+    return resolved
+
+
+def fallback_staging(datasets_root, slug):
+    root = resolved_directory(datasets_root)
+    if root is None:
+        return None
+    try:
+        namespaces = list(root.iterdir())
+    except OSError:
+        raise RuntimeError("Compute Relay staging mount is unavailable") from None
+    if len(namespaces) > MAX_DATASET_NAMESPACES:
+        raise RuntimeError("Compute Relay staging mount layout exceeds the reviewed bound")
+    matches = []
+    for namespace in namespaces:
+        try:
+            if not namespace.is_dir():
+                continue
+        except OSError:
+            continue
+        match = resolved_directory(namespace / slug)
+        if match is not None and match not in matches:
+            matches.append(match)
+        if len(matches) > 1:
+            raise RuntimeError("Compute Relay staging mount is ambiguous")
+    return matches[0] if matches else None
+
+
+def staging_paths(payload):
+    owner, slug = payload.get("dataset_owner"), payload.get("dataset_slug")
+    if (type(owner) is not str or not owner or "/" in owner or "\\" in owner
+            or type(slug) is not str or not slug or "/" in slug or "\\" in slug):
+        raise RuntimeError("Compute Relay staging identity is invalid")
+    input_root = Path("/kaggle/input")
+    datasets_root = input_root / "datasets"
+    staging = None
+    for candidate in (datasets_root / owner / slug, input_root / slug):
+        staging = resolved_directory(candidate)
+        if staging is not None:
+            break
+    if staging is None:
+        staging = fallback_staging(datasets_root, slug)
+    if staging is None:
+        raise RuntimeError("Compute Relay staging mount is unavailable")
     marker = staging / "relay-stage.bin"
     try:
         marker = marker.resolve(strict=True)
