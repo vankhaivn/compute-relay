@@ -42,6 +42,43 @@ def strict_json(raw):
     return result
 
 
+def read_json_response(response):
+    if response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+        raise ValueError("invalid response type")
+    declared = response.headers.get("Content-Length")
+    if declared is not None and (not declared.isdecimal() or int(declared) > MAX_REQUEST):
+        raise ValueError("response over limit")
+    data = bytearray()
+    for chunk in response.iter_content(chunk_size=65536):
+        if len(chunk) > MAX_REQUEST - len(data):
+            raise ValueError("response over limit")
+        data.extend(chunk)
+    parsed = strict_json(data)
+    response._content = bytes(data)
+    response._content_consumed = True
+    return parsed
+
+
+def missing_kernel_error(exc):
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status == 404:
+        return True
+    if status != 403:
+        return False
+    data = getattr(response, "_content", None)
+    if not isinstance(data, bytes):
+        return False
+    try:
+        payload = strict_json(data)
+    except (TypeError, ValueError, UnicodeError):
+        return False
+    error = payload.get("error")
+    return (type(error) is dict and error.get("code") == 403
+            and error.get("status") == "PERMISSION_DENIED"
+            and error.get("message") == "Permission 'kernels.get' was denied")
+
+
 def identifier(value):
     if type(value) not in (int, str):
         raise ValueError("invalid numeric identity")
@@ -128,21 +165,13 @@ class Guard:
             request, timeout=(5, 10), stream=True, proxies={}, verify=True, cert=None)
         try:
             if not 200 <= response.status_code < 300:
+                # Preserve only the bounded structured GetKernel 403 so absence can be
+                # classified after HTTPError. Other error bodies remain unread.
+                if operation == "get" and response.status_code == 403:
+                    self.last = read_json_response(response)
                 response.raise_for_status()
                 raise ValueError("redirect rejected")
-            if response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
-                raise ValueError("invalid response type")
-            declared = response.headers.get("Content-Length")
-            if declared is not None and (not declared.isdecimal() or int(declared) > MAX_REQUEST):
-                raise ValueError("response over limit")
-            data = bytearray()
-            for chunk in response.iter_content(chunk_size=65536):
-                if len(chunk) > MAX_REQUEST - len(data):
-                    raise ValueError("response over limit")
-                data.extend(chunk)
-            self.last = strict_json(data)
-            response._content = bytes(data)
-            response._content_consumed = True
+            self.last = read_json_response(response)
             return response
         finally:
             response.close()
@@ -214,7 +243,9 @@ def operate(r, token, mode):
             try:
                 current_id = get("", r["kernel_id"])
             except requests.exceptions.HTTPError as exc:
-                if getattr(getattr(exc, "response", None), "status_code", None) != 404:
+                # Kaggle reports an absent kernel as either 404 or one precise
+                # kernels.get PERMISSION_DENIED payload. Other 403s remain failures.
+                if not missing_kernel_error(exc):
                     raise
                 if mode != "submit":
                     return outcome("not_found")

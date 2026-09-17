@@ -23,10 +23,12 @@ Reconstructing the executor after restart must never rearm submission.
 ## Submission and exact reads
 
 Submit re-verifies the entire original private staging reference before kernel work. After local
-pins and explicit account verification, only actual exact-resource HTTP 404 can lead to one
-SaveKernel wire call on a newly authorized path. An exact existing kernel is read, not updated.
-The request is a private Python script with finite requested timeout and explicit CPU/GPU/internet;
-no TPU, extra sources, custom image, priority, interactive session or paid fallback is exposed.
+pins and explicit account verification, exact-resource HTTP 404 or the precise Kaggle
+`kernels.get` 403 `PERMISSION_DENIED` absence response can lead to one SaveKernel wire call on a
+newly authorized path. Other authorization/permission errors fail closed. An exact existing
+kernel is read, not updated. The request is a private Python script with finite requested timeout
+and explicit CPU/GPU/internet; no TPU, extra sources, custom image, priority, interactive session
+or paid fallback is exposed.
 
 Acceptance requires a usable version-1 receipt and exact numeric kernel ID/source/private
 metadata readback. A timeout, HTTP/receipt error, nonzero exit or lost acknowledgement after a
