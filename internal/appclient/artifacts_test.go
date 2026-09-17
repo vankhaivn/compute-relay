@@ -22,7 +22,7 @@ import (
 func downloadPin(data []byte) artifactwire.Metadata {
 	h := sha256.Sum256(data)
 	return artifactwire.Metadata{
-		Target: artifactwire.Target{WorkspaceID: "app", JobID: "job_one", AttemptID: "att_one"},
+		Target:      artifactwire.Target{WorkspaceID: "app", JobID: "job_one", AttemptID: "att_one"},
 		ResultPhase: "completed", VerifiedAt: time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC),
 		Artifact: artifactwire.File{ID: "art_one", Path: "outputs/answer", Role: "output", Bytes: int64(len(data)), SHA256: hex.EncodeToString(h[:])},
 	}

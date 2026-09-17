@@ -30,8 +30,8 @@ A failed output receipt can follow a verified file publication; inspect the file
 
 type artifactOptions struct {
 	action, endpoint, tokenFile, id, cursor, output string
-	target                                        artifactwire.Target
-	limit                                         int
+	target                                          artifactwire.Target
+	limit                                           int
 }
 
 func parseArtifacts(args []string) (artifactOptions, error) {
@@ -113,6 +113,7 @@ func parseArtifacts(args []string) (artifactOptions, error) {
 }
 
 type deliveryError struct{ published bool }
+
 func (e *deliveryError) Error() string { return "artifact file delivery incomplete" }
 
 func RunArtifacts(parent context.Context, args []string, out, diagnostic io.Writer) int {

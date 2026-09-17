@@ -29,7 +29,7 @@ import (
 )
 
 type Config struct {
-	Results        *collection.Reader // nil disables published artifact reads; no provider fallback.
+	Results        *collection.Reader  // nil disables published artifact reads; no provider fallback.
 	Operations     *operations.Service // nil disables durable controls; never use an in-memory fallback.
 	Jobs           *admission.Service  // nil disables durable job routes; never use a memory fallback.
 	HTTPSInputs    *objects.Ingestor   // nil disables HTTPS ingestion; operator composition supplies the guarded client.

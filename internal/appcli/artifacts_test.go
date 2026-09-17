@@ -67,7 +67,7 @@ func TestArtifactCommandPublishesOnlyVerifiedNewFiles(t *testing.T) {
 			data := bytes.Repeat([]byte("original payload"), 10000)
 			digest := sha256.Sum256(data)
 			pin := artifactwire.Metadata{
-				Target: artifactwire.Target{WorkspaceID: "app", JobID: "job_one", AttemptID: "att_one"},
+				Target:      artifactwire.Target{WorkspaceID: "app", JobID: "job_one", AttemptID: "att_one"},
 				ResultPhase: "completed", VerifiedAt: time.Now().UTC(),
 				Artifact: artifactwire.File{ID: "art_one", Path: "outputs/not-the-destination", Role: "output", Bytes: int64(len(data)), SHA256: hex.EncodeToString(digest[:])},
 			}

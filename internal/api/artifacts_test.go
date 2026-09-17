@@ -24,9 +24,9 @@ import (
 // This tier injects publication/source faults. The separate SQLite test creates
 // publications through the real M3 collection engine, not this fixture repository.
 type artifactReadFixture struct {
-	result collection.Result
-	bytes  map[domain.ObjectID][]byte
-	fault  string
+	result  collection.Result
+	bytes   map[domain.ObjectID][]byte
+	fault   string
 	expired atomic.Bool
 	reads   atomic.Int64
 	closed  atomic.Int64
@@ -97,7 +97,10 @@ func artifactHTTPFixture(t *testing.T, payload []byte) (*fixture, *artifactReadF
 	repo := &artifactReadFixture{bytes: map[domain.ObjectID][]byte{}, result: collection.Result{
 		WorkspaceID: "a", JobID: "job_one", AttemptID: "att_one", Phase: "completed", VerifiedAt: time.Now().UTC(),
 	}}
-	for _, entry := range []struct{ id, path, role string; data []byte }{
+	for _, entry := range []struct {
+		id, path, role string
+		data           []byte
+	}{
 		{"art_manifest", collection.ManifestPath, "manifest", []byte("{}")},
 		{"art_output", "outputs/answer.bin", "output", payload},
 	} {
@@ -139,7 +142,10 @@ func TestArtifactHTTPExplicitTargetsPaginationAndSafeDownload(t *testing.T) {
 		t.Fatal("verified download failed", err, dst.Len())
 	}
 	prefix := "/v1/workspaces/a/jobs/job_one/artifacts"
-	for _, tc := range []struct{ path, who string; code int }{
+	for _, tc := range []struct {
+		path, who string
+		code      int
+	}{
 		{prefix, "a", 400},
 		{prefix + "?attempt_id=att_one&attempt_id=att_one", "a", 400},
 		{prefix + "?attempt_id=att_one&limit=01", "a", 400},
@@ -205,7 +211,9 @@ func TestArtifactHTTPEmptyFileAndUncomposedRoutes(t *testing.T) {
 	resp, body := base.request(t, "GET", "/v1/workspaces/a/jobs/job_one/artifacts?attempt_id=att_one", "a", nil, nil)
 	assertStatus(t, resp, body, 404)
 	resp, body = f.request(t, "GET", "/v1/info", "a", nil, nil)
-	var info struct{ Features []string `json:"features"` }
+	var info struct {
+		Features []string `json:"features"`
+	}
 	if json.Unmarshal(body, &info) != nil || !strings.Contains(strings.Join(info.Features, ","), "artifact_download") {
 		t.Fatal("composed capability missing", resp.StatusCode)
 	}

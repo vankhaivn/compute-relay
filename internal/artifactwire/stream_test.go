@@ -14,6 +14,7 @@ type finalReader struct {
 	payload []byte
 	err     error
 }
+
 func (r *finalReader) Read(p []byte) (int, error) {
 	if len(r.payload) == 0 {
 		return 0, r.err
@@ -27,8 +28,11 @@ func (r *finalReader) Read(p []byte) (int, error) {
 }
 
 type readerFunc func([]byte) (int, error)
+
 func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
+
 type writerFunc func([]byte) (int, error)
+
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 func TestCopyRetainsFinalReadErrorAndExactEOF(t *testing.T) {
