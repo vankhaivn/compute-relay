@@ -5,14 +5,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
+
+const (
+	stagingVisibilityGrace = 5 * time.Second
+	stagingVisibilityPoll  = 250 * time.Millisecond
+)
+
+var errStagingVisibilityPending = errors.New("created staging dataset is not yet query-visible")
 
 // StagingBlobs is the existing workspace-scoped immutable input store. No host
 // path, URL fetch, local extraction or command execution is part of staging.
@@ -64,6 +73,11 @@ func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation doma
 		return provider.Prepared{}, ErrConfig
 	}
 	seen, err := s.check(ctx, "create", plan, operation)
+	if errors.Is(err, errStagingVisibilityPending) {
+		// Creation was acknowledged but the exact dataset is briefly unreadable.
+		// Poll reads only; never repeat upload tickets or CreateDataset.
+		seen, err = s.awaitCreatedVisibility(ctx, plan, operation)
+	}
 	if err != nil {
 		return provider.Prepared{}, err
 	}
@@ -71,6 +85,28 @@ func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation doma
 		return provider.Prepared{}, ErrStaging
 	}
 	return *seen.Prepared, nil
+}
+
+func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+	var none provider.PreparationObservation
+	deadline := time.NewTimer(stagingVisibilityGrace)
+	defer deadline.Stop()
+	for {
+		seen, err := s.check(ctx, "observe", plan, operation)
+		if err != nil || seen.Status != provider.ReconciliationNotFound {
+			return seen, err
+		}
+		wait := time.NewTimer(stagingVisibilityPoll)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return none, ctx.Err()
+		case <-deadline.C:
+			wait.Stop()
+			return seen, nil
+		case <-wait.C:
+		}
+	}
 }
 
 // A miss is not permission to create/upload/version anything. This path does not
@@ -178,6 +214,9 @@ func (r stagingResponse) observation(p stagingPlan, plan provider.Plan, operatio
 	var none provider.PreparationObservation
 	if r.Protocol != 1 {
 		return none, ErrProtocol
+	}
+	if r.Status == "pending" && r == (stagingResponse{Protocol: 1, Status: "pending"}) {
+		return none, errStagingVisibilityPending
 	}
 	if r.Status == "unknown" || r.Status == "not_found" || r.Status == "invalid" {
 		if r != (stagingResponse{Protocol: 1, Status: r.Status}) {

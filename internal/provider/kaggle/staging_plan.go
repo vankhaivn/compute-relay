@@ -27,10 +27,10 @@ type StagingPolicy struct {
 }
 
 func DefaultStagingPolicy() StagingPolicy {
-	return StagingPolicy{License: "copyright-authors", MaxBytes: maxStagingBytes, Timeout: 5 * time.Minute}
+	return StagingPolicy{License: "other", MaxBytes: maxStagingBytes, Timeout: 5 * time.Minute}
 }
 func (p StagingPolicy) valid() bool {
-	return (p.License == "copyright-authors" || p.License == "other" || p.License == "unknown") &&
+	return (p.License == "other" || p.License == "unknown") &&
 		p.MaxBytes > 0 && p.MaxBytes <= maxStagingBytes && p.Timeout >= time.Second && p.Timeout <= time.Hour
 }
 

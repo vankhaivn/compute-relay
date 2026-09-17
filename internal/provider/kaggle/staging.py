@@ -79,6 +79,11 @@ def description(r):
     return "Compute Relay staging " + r["marker_sha256"] + ". Existing licenses remain applicable."
 
 
+def provider_license_name(value):
+    # Kaggle accepts these request identifiers but returns display names from GetDataset.
+    return {"other": "Other (specified in description)", "unknown": "Unknown"}.get(value, value)
+
+
 def signed_url(url):
     # Keep direct GCS object URLs and the specific JSON API upload surface separate.
     # Do not wildcard googleapis.com: www.googleapis.com is accepted only for storage uploads.
@@ -304,7 +309,7 @@ def matching_dataset(meta, r):
     if (type(meta.id) is not int or not 0 < meta.id < (1 << 63)
             or meta.ref != r["owner"] + "/" + r["slug"]
             or meta.current_version_number != 1 or meta.description != description(r)
-            or meta.license_name != r["license"]):
+            or meta.license_name != provider_license_name(r["license"])):
         raise IdentityError("dataset identity or version")
     return meta.id
 
@@ -313,8 +318,17 @@ def observe(guard, client, r, meta=None):
     from kagglesdk.datasets.types.dataset_api_service import (ApiGetDatasetRequest,
         ApiGetDatasetStatusRequest, ApiListDatasetFilesRequest, ApiDownloadDatasetRequest)
     from kagglesdk.datasets.types.dataset_enums import DatabundleVersionStatus as State
+    import requests
     if meta is None:
-        meta = dataset_call(guard, client, r, ApiGetDatasetRequest, "get_dataset")
+        try:
+            meta = dataset_call(guard, client, r, ApiGetDatasetRequest, "get_dataset")
+        except requests.exceptions.HTTPError as exc:
+            # Immediately after CreateDataset, Kaggle can temporarily reuse its exact
+            # missing-dataset 403 before the created resource becomes query-visible.
+            if (getattr(getattr(exc, "response", None), "status_code", None) == 403
+                    and missing_dataset_error(exc)):
+                return empty_result("pending")
+            raise
     dataset_id = matching_dataset(meta, r)
     result = dict(empty_result("pending"), dataset_id=str(dataset_id), owner=r["owner"],
                   slug=r["slug"], version=1, marker_sha256=r["marker_sha256"], private=meta.is_private is True)
