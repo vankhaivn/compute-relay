@@ -80,12 +80,16 @@ def description(r):
 
 
 def signed_url(url):
-    # An explicit conservative storage host, not a wildcard and not an app URL.
-    # Different upstream upload/CDN hosts remain blocked until separately reviewed.
+    # Keep direct GCS object URLs and the specific JSON API upload surface separate.
+    # Do not wildcard googleapis.com: www.googleapis.com is accepted only for storage uploads.
     if not isinstance(url, str) or not 1 <= len(url) <= 16384 or any(ord(c) < 33 or ord(c) > 126 for c in url) or "\\" in url:
         raise ValueError("storage URL")
     p = urlsplit(url)
-    if p.scheme != "https" or p.netloc not in ("storage.googleapis.com", "storage.googleapis.com:443") or not p.path.startswith("/") or p.fragment:
+    direct = (p.netloc in ("storage.googleapis.com", "storage.googleapis.com:443")
+              and p.path.startswith("/"))
+    upload = (p.netloc in ("www.googleapis.com", "www.googleapis.com:443")
+              and p.path.startswith("/upload/storage/v1/b/"))
+    if p.scheme != "https" or not (direct or upload) or p.fragment:
         raise ValueError("storage destination")
     return url
 
