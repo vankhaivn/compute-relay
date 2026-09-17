@@ -79,6 +79,14 @@ def missing_kernel_error(exc):
             and error.get("message") == "Permission 'kernels.get' was denied")
 
 
+def kernel_status_request(request_type, owner, slug):
+    # Live GetKernelSessionStatus rejects a versionLabel field. Version identity
+    # is enforced separately by the explicit GetKernel(version 1) readback.
+    request = request_type()
+    request.user_name, request.kernel_slug = owner, slug
+    return request
+
+
 def identifier(value):
     if type(value) not in (int, str):
         raise ValueError("invalid numeric identity")
@@ -186,7 +194,9 @@ def check_kernel(raw, r, expected_id=""):
     except ValueError as exc:
         raise IdentityMismatch("missing numeric identity") from exc
     reference = r["owner"] + "/" + r["slug"]
-    expected = {"ref": reference, "author": r["owner"], "slug": r["slug"],
+    # Kaggle's `author` field is a mutable display name, not the account slug.
+    # The canonical ref plus exact slug bind the account/resource identity.
+    expected = {"ref": reference, "slug": r["slug"],
                 "language": "python", "kernelType": "script", "currentVersionNumber": 1,
                 "isPrivate": True, "enableGpu": r["gpu"], "enableTpu": False,
                 "enableInternet": r["internet"], "datasetDataSources": [r["dataset"]],
@@ -279,8 +289,7 @@ def operate(r, token, mode):
                 current_id = identifier(receipt.get("kernelId"))
             # An already-existing exact kernel is observed, never updated/saved.
             get("1", current_id)
-            status = ApiGetKernelSessionStatusRequest()
-            status.user_name, status.kernel_slug, status.version_label = r["owner"], r["slug"], "1"
+            status = kernel_status_request(ApiGetKernelSessionStatusRequest, r["owner"], r["slug"])
             try:
                 guard.call("status", api.get_kernel_session_status, status)
                 raw_state = normalize_status(guard.last)
