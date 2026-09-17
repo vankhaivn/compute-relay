@@ -211,6 +211,18 @@ class Backend:
         self.test.assertEqual(body["datasetSlug"],self.r["slug"])
         if operation == "GetDataset":
             self.meta_reads += 1
+            if self.mode == "missing-forbidden" and not self.exists:
+                return response(json.dumps({"error": {
+                    "code": 403,
+                    "message": "Permission 'datasets.get' was denied",
+                    "status": "PERMISSION_DENIED",
+                }}).encode(), status=403)
+            if self.mode == "permission-other":
+                return response(json.dumps({"error": {
+                    "code": 403,
+                    "message": "Permission 'datasets.list' was denied",
+                    "status": "PERMISSION_DENIED",
+                }}).encode(), status=403)
             if self.mode == "forbidden": return response(status=403)
             if self.mode == "server-error": return response(status=503)
             if self.mode == "fake-404": return response(b'{"code":404,"message":"SYNTHETIC_TOKEN"}')
@@ -292,6 +304,21 @@ class StagingPinnedSDKTests(unittest.TestCase):
         self.assertGreater(sum(url.endswith("/ListDatasetFiles") for _,url in backend.calls),1)
         self.assertNotIn("SYNTHETIC_TOKEN",json.dumps(result))
 
+    def test_missing_dataset_permission_denied_allows_one_private_creation(self):
+        r,payloads=fixture()
+        missing=Backend(self,r,payloads)
+        missing.mode="missing-forbidden"
+        self.assertEqual(missing.run("observe",b""),staging.empty_result("not_found"))
+        self.assertEqual((missing.starts,missing.puts,missing.creates),(0,0,0))
+
+        backend=Backend(self,r,payloads)
+        backend.mode="missing-forbidden"
+        result=backend.run("create")
+        self.assertEqual(result["status"],"pending")
+        self.assertTrue(result["private"])
+        self.assertEqual((backend.meta_reads,backend.starts,backend.puts,backend.creates),
+                         (2,len(payloads),len(payloads),1))
+
     def test_lost_creation_acknowledgement_recovers_without_second_mutation(self):
         r,payloads=fixture()
         backend=Backend(self,r,payloads)
@@ -309,7 +336,7 @@ class StagingPinnedSDKTests(unittest.TestCase):
         self.assertEqual(calls,(backend.starts,backend.puts,backend.creates))
 
     def test_unknown_read_or_account_cannot_authorize_creation(self):
-        for mode in ("account","inactive","forbidden","server-error","fake-404"):
+        for mode in ("account","inactive","forbidden","permission-other","server-error","fake-404"):
             with self.subTest(mode=mode):
                 r,p=fixture();b=Backend(self,r,p);b.mode=mode
                 with self.assertRaises((staging.IdentityError,requests.HTTPError)): b.run("create")
