@@ -30,7 +30,7 @@ confirmed running/activity evidence.
 | Identity/source/version/root mismatch | Stop and retain evidence; do not adopt a replacement or rewrite markers to bypass the check. |
 
 Use [application controls](application-cli.md), [artifact delivery](artifact-delivery.md) and
-[collection](collection.md) for available commands/contracts. Normal serve cannot run missing
+[collection](development/collection.md) for available commands/contracts. Normal serve cannot run missing
 workers. A queued job there is not a live-provider outage.
 
 ## Fixed Kaggle experiment
@@ -39,7 +39,7 @@ Use its original acceptance binary/root/configuration. After `resume-required`, 
 process with `resume --allow-read-only`; the utility never grants another submission on resume.
 A failed transfer uses its explicit collect mode. Do not point normal serve at that directory.
 Missing process records or changed executable bytes cannot be repaired from plausible artifacts.
-See the [acceptance runbook](providers/kaggle-acceptance.md).
+See the [acceptance runbook](development/providers/kaggle-acceptance.md).
 
 Source/version/nonce checks reduce accidental mixups, not malicious-host attestation or proof that
 a provider never reran the same version. Upstream upsert and mount limits remain. Do not infer an
@@ -50,7 +50,7 @@ exact remote execution count, provider timeout enforcement or hardware release w
 Preserve SQLite with its committed WAL state, both blob roots and all identity/process markers.
 A database-only backup does not restore deleted bytes or stop remote work. Never activate original
 and restored copies concurrently against one provider identity. Review restored grants/revocations
-before exposing work. Follow [storage](storage.md), not ad-hoc database/file copies.
+before exposing work. Follow [storage](development/storage.md), not ad-hoc database/file copies.
 
 For an unexpected failure, retain raw state/logs privately and open a focused issue/PR containing
 only the source/binary SHA, exact check/command, actual result, possible committed/remote effects

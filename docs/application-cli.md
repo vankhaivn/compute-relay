@@ -118,7 +118,7 @@ Eligibility is enforced, so these are command references, not a sequence to run 
 Retry requires a nonblank non-secret reason and returns `kind=retry_compute`, source `attempt_id`
 and a distinct `new_attempt_id`. Do not retry successful compute just to retrieve missing results.
 Cancellation intent is not termination; reconcile is observational; collect is transfer-only.
-No handler starts a provider or collector. See [controls](operations.md) and [recovery](recovery.md).
+No handler starts a provider or collector. See [controls](development/operations.md) and [recovery](recovery.md).
 
 ### Retrieve published results
 

@@ -62,7 +62,7 @@ func checkFaultCatalog(root string, raw []byte) ([]faultCase, error) {
 	if d.Decode(&catalog) != nil || d.Decode(new(any)) != io.EOF || catalog.Version != 1 || len(catalog.Cases) != 25 {
 		return nil, errors.New("fault matrix must contain exactly 25 version-1 cases")
 	}
-	proposal, err := os.ReadFile(filepath.Join(root, "docs", "proposal.md"))
+	proposal, err := os.ReadFile(filepath.Join(root, "docs", "development", "proposal.md"))
 	if err != nil {
 		return nil, fmt.Errorf("read approved proposal: %w", err)
 	}

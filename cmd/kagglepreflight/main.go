@@ -78,7 +78,7 @@ func run(ctx context.Context, args []string, out, diagnostic io.Writer, makeChec
 	c, err := kaggle.ParseConfig(raw)
 	clear(raw)
 	if err != nil {
-		fmt.Fprintln(diagnostic, "Invalid non-secret preflight configuration; see docs/providers/kaggle-preflight.md.")
+		fmt.Fprintln(diagnostic, "Invalid non-secret preflight configuration; see docs/development/providers/kaggle-preflight.md.")
 		return 1
 	}
 	service, err := makeChecker(c)

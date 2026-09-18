@@ -1,7 +1,7 @@
 # Copilot repository instructions
 
 Follow [AGENTS.md](../AGENTS.md). Start with [current status](../docs/status.md) and the guide
-for the requested task. Consult the [approved proposal](../docs/proposal.md), requirement IDs
+for the requested task. Consult the [approved proposal](../docs/development/proposal.md), requirement IDs
 and relevant ADRs for design or scope changes, not as mandatory onboarding for routine usage.
 
 For operator validation, use [the checklist](../docs/development/validation-checklist.md) and any

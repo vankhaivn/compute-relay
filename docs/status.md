@@ -1,5 +1,7 @@
 # Current project status
 
+If you are evaluating or operating the repository, start with [Getting started](getting-started.md) and the [Operator runbook](runbook.md). This page is the implementation boundary those guides rely on.
+
 This page is the current implementation boundary, not a record of completed development work.
 No public release is available. Passing offline tests alone is not evidence of live-provider support.
 
@@ -37,7 +39,7 @@ compatibility are not implied by the scoped qualification.
 General provider registration and worker lifecycle, remaining log/cleanup surfaces, strict
 runtime TOML configuration, doctor, client examples, installation packaging and release
 hardening remain. These are development tasks, not gates that an operator can close merely
-by rerunning tests. See the [implementation plan](implementation-plan.md).
+by rerunning tests. See the [implementation plan](development/implementation-plan.md).
 
 ## Evidence hygiene
 

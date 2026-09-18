@@ -35,7 +35,7 @@ There is no overwrite, resume or automatic retry of a payload.
 | `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the five modules. |
 | `check.py` / `tests/` | Offline checks and repository-owned CPU fixtures. |
 
-The [Kaggle execution component](../docs/providers/kaggle-execution.md) constructs the remote
+The [Kaggle execution component](../docs/development/providers/kaggle-execution.md) constructs the remote
 script from the locked modules and frozen plan. Packaging those modules is not local execution.
 The runner receives staged relative paths, job/attempt/nonce and digests, not provider tokens,
 source URLs, account configuration or callback addresses.
@@ -75,7 +75,7 @@ Declared job environment is workload data, not a safe place for provider credent
 GPU-required jobs check existing PyTorch, device count/memory and a tiny device computation,
 then repeat resource checking after setup changes. Failure prevents payload execution.
 Device capacity is not a VRAM reservation and this probe does not prove arbitrary payload
-code used the GPU; the separate [GPU acceptance job](../docs/providers/kaggle-acceptance.md)
+code used the GPU; the separate [GPU acceptance job](../docs/development/providers/kaggle-acceptance.md)
 verifies its own calculation.
 
 The requested network mode must match the adapter's `--network-mode` declaration. The runner
@@ -113,7 +113,7 @@ A runner cancellation phase does not prove provider cancellation or hardware rel
 
 The control plane still requires matching provider termination and verified artifact
 publication. Code/input/scratch files are not application artifacts. See
-[collection](../docs/collection.md) and [artifact retrieval](../docs/providers/kaggle-artifacts.md).
+[collection](../docs/development/collection.md) and [artifact retrieval](../docs/development/providers/kaggle-artifacts.md).
 
 ## Contributor checks
 
@@ -131,4 +131,4 @@ Never refresh the lock to conceal an unexpected source difference.
 The locked client/CI Python is 3.11.16. Native control-plane checks on macOS/Windows do not
 mean the remote runner supports those hosts. Keep full operator/provider run records outside this
 guide; put only support-changing sanitized evidence in a focused issue/PR. Design constraints are
-in [ADR-0007](../docs/decisions/0007-finite-remote-runner.md).
+in [ADR-0007](../docs/development/decisions/0007-finite-remote-runner.md).

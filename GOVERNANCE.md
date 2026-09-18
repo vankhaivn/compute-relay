@@ -9,7 +9,7 @@ The approved proposal is the current product brief. Contributors and maintainers
 ## Decision process
 
 - Small, reversible implementation choices are made in focused pull requests.
-- Material architectural choices are recorded as ADRs under [`docs/decisions/`](docs/decisions/README.md).
+- Material architectural choices are recorded as ADRs under [`docs/development/decisions/`](docs/development/decisions/README.md).
 - Provider capability claims require current primary-source research and, where necessary, live evidence.
 - Changes to owner-approved requirements require explicit owner approval and corresponding documentation updates.
 - Security-sensitive decisions should receive focused review and threat-model consideration.

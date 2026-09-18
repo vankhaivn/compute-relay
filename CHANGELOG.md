@@ -16,4 +16,4 @@ feature set, not individual commits, audits or CI runs.
 
 **Not yet a complete production compute service:** the normal server is admission-only;
 general provider/worker integration and live acceptance remain unfinished. See
-[current status](docs/status.md) and the [remaining plan](docs/implementation-plan.md).
+[current status](docs/status.md) and the [remaining plan](docs/development/implementation-plan.md).
