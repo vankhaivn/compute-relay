@@ -45,7 +45,7 @@ workers. See [Kaggle runtime](docs/kaggle-runtime.md) for the end-to-end path.
 | Validate and admit provider-neutral jobs | Yes | [Application CLI](docs/application-cli.md) |
 | Recover an original receipt after an uncertain response | Yes | [Recovery](docs/recovery.md) |
 | Download an already published artifact with end-to-end verification | Yes | [Artifact delivery](docs/artifact-delivery.md) |
-| Run a bounded GPU job through provider-enabled `serve` | **Yes, pre-release** | [Kaggle runtime](docs/kaggle-runtime.md) |
+| Run a bounded GPU job through provider-enabled `serve` | **Implemented; live re-qualification required** | [Kaggle runtime](docs/kaggle-runtime.md) |
 | Keep `serve` local-only with no provider effects | Yes, default | [Local runtime](docs/local-runtime.md) |
 | Re-run the fixed Kaggle GPU qualification path | Maintainer/operator workflow | [Development docs](docs/development/README.md) |
 
