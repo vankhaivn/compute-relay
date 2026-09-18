@@ -2,8 +2,9 @@
 
 Run one operator-authorized experiment using the actual Kaggle components, durable state and
 a separate resume process. This is not an arbitrary-job server. Use the
-[validation checklist](../development/validation-checklist.md) for staged approval/expected results
-and [results ledger](../development/validation-results.md) for observed evidence and failures.
+[validation checklist](../development/validation-checklist.md) for staged approval/expected results.
+Keep the full run record private; share only minimal sanitized evidence in a focused issue/PR when
+a support conclusion changes or a reproducible failure needs handoff.
 
 ## Workload and prerequisites
 
@@ -125,7 +126,8 @@ original/restored copies concurrently. The operator controls the host and could 
 process nonces and hashes are not hostile-host attestation. SDK upsert, same-version rerun,
 mount and cross-binary limitations remain in [execution](kaggle-execution.md).
 
-Record failures using the [bug template](../development/bug-report-template.md) with source/binary
-hashes, exact command, observed status and possible effects. Preserve the original failed run;
-a patched binary may require a separately approved new experiment after old activity is resolved.
+Report failures using the [bug template](../development/bug-report-template.md) in a focused
+issue/PR with source/binary hashes, exact command, observed status and possible effects. Preserve
+the original failed run privately; a patched binary may require a separately approved new
+experiment after old activity is resolved.
 See [ADR-0020](../decisions/0020-explicit-durable-gpu-acceptance.md).

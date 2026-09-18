@@ -13,7 +13,6 @@ works now; the approved product brief describes the intended product, not implem
 | [Artifact delivery](artifact-delivery.md) | Read committed results and verify create-only downloads. |
 | [Recovery](recovery.md) | Interpret uncertainty and choose safe recovery without resubmitting compute. |
 | [Operator validation checklist](development/validation-checklist.md) | Values, commands, authorization and pass/fail criteria for a local agent. |
-| [Validation results](development/validation-results.md) | Current run/gate outcomes and reproducible failure handoff. |
 | [Bug report template](development/bug-report-template.md) | Minimum sanitized evidence for a fix and a retest. |
 
 ## Contributor references
@@ -49,7 +48,8 @@ the product authority. Their proposed examples are not a substitute for current 
 
 ## Keep this structure usable
 
-Usage belongs in usage guides; current constraints belong in component references; new run
-results belong in the validation ledger. Do not append commit lists, local sandbox stories,
-CI run transcripts, owner prompts or completed implementation audits to these pages.
+Usage belongs in usage guides; current constraints belong in component references. Keep full
+operator run records outside main; attach only minimal sanitized evidence to a focused issue/PR
+when it changes a support claim or reports a reproducible failure. Do not append commit lists,
+local sandbox stories, CI run transcripts, owner prompts or completed implementation audits here.
 Preserve requirements, safety constraints and relevant dated source evidence when editing.

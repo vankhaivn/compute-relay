@@ -30,10 +30,11 @@ evidence tier and remaining risks. Living usage guides describe current usage an
 not commit inventories or completed CI/audit transcripts. Dated provider research preserves
 provenance; it does not silently promote a source observation to live support.
 
-For operator testing, follow [the validation checklist](validation-checklist.md), fill
-[validation results](validation-results.md) and use [the bug template](bug-report-template.md).
-Work one observed stage at a time. Keep raw logs/state/secrets private and commit only reviewed
-sanitized reports. A validation-only run does not authorize code fixes or new remote effects.
+For operator testing, follow [the validation checklist](validation-checklist.md) and use
+[the bug template](bug-report-template.md) when a failure or changed support conclusion needs to
+be shared. Work one observed stage at a time. Keep full run records, raw logs/state and secrets
+private; attach only minimal sanitized evidence to a focused issue/PR. A validation-only run does
+not authorize code fixes or new remote effects.
 
 Preserve an unexpected failure, report its reproduction and uncertain effects, then track a
 focused fix and append a retest. A merged fix without an observed retest remains

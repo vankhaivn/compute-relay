@@ -15,5 +15,4 @@ owner prompts, brainstorming transcripts or completed implementation history.
 ## Consequences
 
 State operational trade-offs, compatibility limits, failure/recovery effects and any requirements
-that remain unresolved. A proposed test is not a passing result. Put actual run evidence in the
-PR or operator validation ledger. Supersede an accepted decision explicitly when its outcome changes.
+that remain unresolved. A proposed test is not a passing result. Put actual run evidence in the relevant PR or issue. Supersede an accepted decision explicitly when its outcome changes.

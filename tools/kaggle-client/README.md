@@ -65,5 +65,6 @@ commit credential values, or use a CI credential for operator acceptance.
 
 The SDK tests mock HTTP, so passing them is not account eligibility, provider compatibility
 or a live CUDA result. Follow the [operator validation checklist](../../docs/development/validation-checklist.md)
-and record real outcomes in its results ledger. See [ADR-0001](../../docs/decisions/0001-official-kaggle-client-boundary.md)
+for re-qualification and keep full operator records private; share only minimal sanitized evidence
+in a focused issue/PR when support changes. See [ADR-0001](../../docs/decisions/0001-official-kaggle-client-boundary.md)
 for the client isolation boundary and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency notices.

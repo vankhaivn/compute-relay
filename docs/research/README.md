@@ -6,12 +6,12 @@ requires real verification. They are reference material, not onboarding or compl
 | Document | Role |
 |---|---|
 | [Pinned interface evidence](kaggle-interface-review.md) | Versioned primary sources and transport/identity limitations. |
-| [Feasibility gates](kaggle-feasibility.md) | Stable K-01–K-16 questions and unverified live conclusions. |
+| [Feasibility gates](kaggle-feasibility.md) | Stable K-01–K-16 questions, qualified fixed-path facts and remaining limits. |
 
-For usage, read [provider guides](../providers/README.md). To execute checks, use the
-[validation checklist](../development/validation-checklist.md) and update
-[validation results](../development/validation-results.md). Keep one results record rather
-than separate competing checklists in every research document.
+For usage, read [provider guides](../providers/README.md). To re-qualify a provider, use the
+[validation checklist](../development/validation-checklist.md). Keep full operator run records
+outside main and attach only minimal sanitized evidence to focused issues/PRs when conclusions
+change; do not create competing run diaries in research documents.
 
 ## Evidence rules
 

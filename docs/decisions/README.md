@@ -1,8 +1,8 @@
 # Architecture decisions
 
 These records preserve accepted design choices, their reasons and consequences. They are not
-implementation diaries or evidence that a provider feature passed a live test. Use
-[current status](../status.md) and [validation results](../development/validation-results.md) for that.
+implementation diaries or live-run reports. Use [current status](../status.md) for current support
+claims and focused issues/PRs for sanitized evidence that changes those claims.
 
 All decisions below are accepted. Editing for clarity does not change their outcome; a material
 new choice requires a superseding ADR. Historical wording and review discussion remain in Git.
@@ -38,5 +38,4 @@ new choice requires a superseding ADR. Historical wording and review discussion 
 Use `NNNN-short-name.md`, never reuse numbers, and start from [template](template.md).
 Statuses are proposed, accepted, superseded by ADR-NNNN, deprecated or rejected. State the
 material decision, alternatives/reason and actual consequences. Link the current detailed guide
-rather than duplicating it. Keep tests/run outcomes in the PR or validation ledger, not a growing
-ADR audit. Do not create an ADR for routine formatting, naming or documentation cleanup.
+rather than duplicating it. Keep tests/run outcomes in the relevant PR or issue, not a growing ADR audit. Do not create an ADR for routine formatting, naming or documentation cleanup.

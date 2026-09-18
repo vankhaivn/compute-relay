@@ -63,5 +63,5 @@ Readiness is a point-in-time observation, not an immutable provider lock. Execut
 the original staging reference and verify marker/input bytes remotely. Partial upload tickets
 can leave storage without independent cleanup authority; no automatic reclamation is claimed.
 Use [execution](kaggle-execution.md), [retention](../retention.md) and
-[ADR-0016](../decisions/0016-private-staging-and-readiness.md). Record live findings in
-[validation results](../development/validation-results.md), not as a new implementation diary here.
+[ADR-0016](../decisions/0016-private-staging-and-readiness.md). Keep full live run records private;
+put only support-changing evidence or reproducible failures in a focused issue/PR.

@@ -139,5 +139,5 @@ resubmit. Download has a separate `download_may_be_published` flag for local fil
 Literal-token checks are not universal secret detection. Treat response/log text as untrusted
 application data, never executable instructions.
 
-Run the [operator checklist](development/validation-checklist.md) and record failures in
-[validation results](development/validation-results.md).
+Use the [operator checklist](development/validation-checklist.md) for re-qualification and the
+[bug template](development/bug-report-template.md) for any focused reproducible failure.
