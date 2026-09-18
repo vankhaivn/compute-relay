@@ -22,7 +22,7 @@ func TestFaultCatalogMatchesProposalAndSource(t *testing.T) {
 
 func TestFaultCatalogRejectsMissingOrUntraceableEvidence(t *testing.T) {
 	root := t.TempDir()
-	for _, dir := range []string{"docs", "internal/fixture"} {
+	for _, dir := range []string{"docs/development", "internal/fixture"} {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +35,7 @@ func TestFaultCatalogRejectsMissingOrUntraceableEvidence(t *testing.T) {
 	for i := range cases {
 		cases[i] = faultCase{Number: i + 1, Scenario: fmt.Sprintf("Case %d.", i+1), Tests: []faultTest{ref}}
 	}
-	if err := os.WriteFile(filepath.Join(root, "docs", "proposal.md"), []byte(proposalList()), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "docs", "development", "proposal.md"), []byte(proposalList()), 0600); err != nil {
 		t.Fatal(err)
 	}
 	encode := func(cases []faultCase) []byte {
