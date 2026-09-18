@@ -45,8 +45,9 @@ See [local runtime](local-runtime.md), [artifact delivery](artifact-delivery.md)
 Preflight, private staging, one-shot execution, quota/log snapshots and selected artifact
 retrieval have offline implementations. The fixed GPU harness composes them for an explicit
 operator experiment; its private-staging, Tesla T4 execution, separate-process recovery and
-complete artifact-publication path has been qualified live. The general server still starts no
-provider workers.
+complete artifact-publication path has been qualified live. The normal runtime can now compose
+bounded Kaggle dispatch/collection workers explicitly; that integrated path remains pre-release
+and does not inherit arbitrary-account/workload live support from the fixed experiment.
 
 Cancellation remains manual-required without a verified session target. Provider timeout
 enforcement, same-version rerun identity and exact hardware release cannot be inferred from
