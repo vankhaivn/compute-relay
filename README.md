@@ -18,25 +18,20 @@ Kaggle is the first provider adapter.
 ## Architecture at a glance
 
 ```mermaid
-flowchart LR
-    App["Applications<br/>Node.js · Python · Go · CLI"] -->|"HTTP/JSON + uploads"| API["Compute Relay<br/>loopback API"]
-    API --> Core["Durable local core<br/>auth · objects · jobs · attempts · receipts"]
-    Core --> Store[("SQLite + input/result stores")]
+flowchart TB
+    App["Your application / CLI"]
+    Relay["Compute Relay<br/>local HTTP/JSON API"]
+    Local["Durable local runtime<br/>inputs · jobs · receipts · published results"]
+    Provider["Provider compute<br/>Kaggle today"]
 
-    Core -. "general worker lifecycle<br/>not wired into normal serve yet" .-> Workers["Scheduler · dispatch · collection"]
-    Accept["Fixed Kaggle GPU<br/>acceptance utility"] --> Workers
-
-    Workers --> Adapter["Provider adapter"]
-    Adapter --> Kaggle["Kaggle"]
-    Kaggle --> Runner["Finite remote runner"]
-    Runner -->|"verified result files"| Publish["Artifact verification<br/>and publication"]
-    Publish --> Store
-    Store -->|"published artifacts"| API
+    App --> Relay
+    Relay --> Local
+    Local -. "execution path<br/>not enabled in normal serve yet" .-> Provider
 ```
 
-The normal server stops at the durable local control-plane boundary; it does not follow the dashed
-worker path yet. The separate fixed Kaggle acceptance utility composes that worker/provider path
-for the bounded live-qualified experiment.
+For normal use today, Compute Relay provides the local API and durable job state. Provider execution
+is a separate path; the fixed Kaggle workflow has been qualified, but normal `serve` does not
+dispatch admitted jobs yet. See [current status](docs/status.md) for the exact boundary.
 
 ## What you can use today
 
