@@ -12,11 +12,12 @@ For a substantial design change, consult the [approved proposal](docs/proposal.m
 The proposal defines intended scope; current guides/code define available commands.
 Do not make a new user read all completed PR audits before using the repository.
 
-For operator verification, start with [the validation checklist](docs/development/validation-checklist.md)
-and existing [results/bugs](docs/development/validation-results.md). Fill non-secret values,
-run one stage at a time, inspect the actual result and record it before proceeding. A missing
-implementation, unsupported capability or skipped test is not a pass. Preserve failures and
-append retests; hand off reproducible bugs before changing code during validation-only work.
+For operator verification, start with [the validation checklist](docs/development/validation-checklist.md).
+Keep raw run evidence outside the repository; put only minimal sanitized reproductions and changed
+support conclusions in focused issues/PRs. Run one stage at a time and inspect the actual result
+before proceeding. A missing implementation, unsupported capability or skipped test is not a pass.
+Preserve failures and original state; hand off reproducible bugs before changing code during
+validation-only work.
 
 ## Product and safety invariants
 
@@ -42,9 +43,9 @@ Write usage in usage guides, current constraints in component references and rem
 in the implementation plan. **Remove completed development narrative rather than appending
 another status update.** Do not put owner/agent prompts, audit trails, commit inventories,
 local sandbox stories, CI transcripts or repeated merge handoffs in living docs or changelog.
-Keep PR-specific checks in the PR. Keep current operator runs and reproducible failures in
-validation results. Preserve stable requirement IDs, essential safety semantics, exact test
-traceability and dated primary-source evidence; brevity is not permission to invent support.
+Keep PR-specific checks and sanitized operator evidence in the relevant PR or issue; do not keep
+a growing run ledger on main. Preserve stable requirement IDs, essential safety semantics, exact
+test traceability and dated primary-source evidence; brevity is not permission to invent support.
 
 The [proposal](docs/proposal.md) and requirement definitions are the approved product record.
 Do not silently rewrite them or the numbered fault scenarios to satisfy a test. ADRs should

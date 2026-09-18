@@ -1,20 +1,20 @@
 # Operator validation checklist
 
-**Start here when validating a fresh clone with a local agent.** This is the final handoff
-for evidence still missing from development: the real host, real account and controlled live
-execution. It is not a claim that all planned product features exist.
+**Start here when re-qualifying a fresh clone, host or provider account.** This is a repeatable
+operator procedure, not a living record of completed runs and not a claim that all planned product
+features exist.
 
-Record every outcome in [validation-results.md](validation-results.md). For failures, add a
-report using [bug-report-template.md](bug-report-template.md). The next agent must be able to
-reproduce the failure from the recorded commit, configuration shape, command and observations
-without receiving a secret or guessing whether compute already started.
+Keep the full run record outside Git. If a failure or changed support conclusion needs handoff,
+open a focused issue/PR using [bug-report-template.md](bug-report-template.md) with the minimal
+sanitized commit/configuration/command/observation needed to reproduce it without receiving a
+secret or guessing whether compute already started.
 
 ## 1. Rules for the executing agent
 
-Read [current status](../status.md), [AGENTS.md](../../AGENTS.md), this checklist and any existing
-run/bug records before acting. Work on a validation branch. Never erase an older failure to
-make a new run look successful. Record the source commit and dirty-code diff before the first
-check; a different binary/configuration is a different evidence context.
+Read [current status](../status.md), [AGENTS.md](../../AGENTS.md), this checklist and any focused
+issue/PR evidence linked by the task before acting. Never erase an older failure to make a new run
+look successful. Record the source commit and dirty-code diff in the private run record before the
+first check; a different binary/configuration is a different evidence context.
 
 Run one stage at a time. Inspect the actual result and record it before moving on. An unexpected
 failure blocks its dependents, not unrelated safe local checks. Do not label a skipped test,
@@ -33,13 +33,13 @@ use another account or switch to public resources. Never place real provider sec
 
 ## 2. Fill values before running
 
-Copy the run template in the results ledger. Keep actual private values in a separate operator
-file outside Git. The examples below use POSIX shell; on Windows use equivalent PowerShell
+Create a private run record outside Git using the fields below. Keep actual private values in a
+separate operator file. The examples below use POSIX shell; on Windows use equivalent PowerShell
 variables, `.exe` binary names and private-directory ACLs. Do not blindly paste POSIX paths.
 
 | Value | Fill locally | May be committed? |
 |---|---|---|
-| `RUN_ID` | Unique report ID, for example `RUN-20260917-01`. | Yes. |
+| `RUN_ID` | Unique report ID, for example `RUN-YYYYMMDD-NN`. | Yes. |
 | source SHA / dirty diff | Output of `git rev-parse HEAD`; record non-doc changes explicitly. | Sanitized SHA/diff only. |
 | `CR_WORK` | New absolute private directory outside the checkout; parent exists. | Alias only. |
 | `CR_ROOT` | `$CR_WORK/runtime`, initially nonexistent. | Alias only. |
@@ -56,7 +56,7 @@ or choose a fresh acceptance root merely to bypass an uncertain submission.
 
 ```sh
 umask 077
-export CR_WORK=/absolute/private/validation-run
+export CR_WORK=/absolute/private/qualification-run
 mkdir -m 700 "$CR_WORK"
 export CR_ROOT="$CR_WORK/runtime"
 export CR_ACCEPT_ROOT="$CR_WORK/acceptance"
@@ -71,8 +71,8 @@ A local GPU is not required: the acceptance payload runs on Kaggle, not on this 
 
 ## 3. Run register and dependencies
 
-All rows begin unverified for a new operator run. The results ledger distinguishes `pass-offline`
-from `pass-live`; a checklist row is not a blanket milestone signoff.
+All rows begin unverified for a new operator run. Distinguish `pass-offline` from `pass-live`
+in the private record; a checklist row is not a blanket milestone signoff.
 
 | ID | Check | Depends on | Expected evidence / gate contribution |
 |---|---|---|---|
@@ -384,18 +384,18 @@ for claims actually established; never turn all blocked rows green after one suc
 
 ## 7. Failure handoff and retest
 
-For every unexpected result create `BUG-<run>-NN` from the bug template in the results ledger
-(or a linked reviewed issue). Include expected/actual behavior, exact source/binary identity,
-minimal command with private values aliased, error/exit code, reproduction count, relevant
-sanitized evidence and possible local/remote effects. Mark downstream checks blocked by that ID.
+For every unexpected result create `BUG-<run>-NN` from the bug template in a focused reviewed
+issue/PR. Include expected/actual behavior, exact source/binary identity, minimal command with
+private values aliased, error/exit code, reproduction count, relevant sanitized evidence and
+possible local/remote effects. Mark downstream checks blocked by that ID in the private run record.
 
 After a fix, retain the original failure and append a retest with the fix SHA and new evidence.
 Do not overwrite the original acceptance binary or falsify its record to run patched code.
 Resolve any old remote activity and obtain approval before a new live experiment; a new binary
 may require a new separately authorized run rather than transparent old-state recovery.
 
-Review the report diff for secrets, then commit **only** the sanitized validation/bug documents
-on a report branch and open a PR. Preserve raw logs/state privately for targeted questions.
-The fixing agent should reproduce from this handoff, add a regression, push a focused fix PR,
-and request the same failing check again. A code change without an observed retest is
+Review any evidence excerpt for secrets before sharing it. Keep the complete run report and raw
+logs/state private; attach only the minimal sanitized reproduction to the focused issue/PR. The
+fixing agent should reproduce from that handoff, add a regression, push a focused fix PR and
+request the same failing check again. A code change without an observed retest is
 `fix-pending-verification`, not a closed validation failure.

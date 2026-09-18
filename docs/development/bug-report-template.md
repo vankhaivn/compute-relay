@@ -1,7 +1,7 @@
 # Reproducible validation bug
 
-Copy the section below into [validation results](validation-results.md) or a linked reviewed
-issue. A validation bug is an unexpected result of implemented behavior. Missing planned code
+Copy the section below into a focused reviewed issue or PR. A validation bug is an unexpected
+result of implemented behavior. Missing planned code
 belongs in the implementation blocker register instead. Report vulnerabilities privately through
 [SECURITY.md](../../SECURITY.md), not a public issue containing exploitation details or secrets.
 

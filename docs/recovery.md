@@ -52,8 +52,7 @@ A database-only backup does not restore deleted bytes or stop remote work. Never
 and restored copies concurrently against one provider identity. Review restored grants/revocations
 before exposing work. Follow [storage](storage.md), not ad-hoc database/file copies.
 
-For an unexpected failure, record the source/binary SHA, exact check/command, actual result,
-possible committed/remote effects and a sanitized reproduction in
-[validation results](development/validation-results.md). Retain raw state/logs privately. The
-[next agent's bug template](development/bug-report-template.md) distinguishes hypotheses from
-observations and requires a retest before closing a fix.
+For an unexpected failure, retain raw state/logs privately and open a focused issue/PR containing
+only the source/binary SHA, exact check/command, actual result, possible committed/remote effects
+and minimal sanitized reproduction. The [bug template](development/bug-report-template.md)
+distinguishes hypotheses from observations and requires an observed retest before closing a fix.

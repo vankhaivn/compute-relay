@@ -129,6 +129,6 @@ reviewed asset change only, update hashes with `python runner/check.py --lock` a
 Never refresh the lock to conceal an unexpected source difference.
 
 The locked client/CI Python is 3.11.16. Native control-plane checks on macOS/Windows do not
-mean the remote runner supports those hosts. Record operator/provider results in the
-[validation ledger](../docs/development/validation-results.md), not in this guide.
-Design constraints are in [ADR-0007](../docs/decisions/0007-finite-remote-runner.md).
+mean the remote runner supports those hosts. Keep full operator/provider run records outside this
+guide; put only support-changing sanitized evidence in a focused issue/PR. Design constraints are
+in [ADR-0007](../docs/decisions/0007-finite-remote-runner.md).

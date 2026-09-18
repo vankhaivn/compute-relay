@@ -22,5 +22,6 @@ window, remote exactly-once count or the full M1 timeout/fault/cleanup checklist
 must still retain those unknowns. Local timeout does not cancel remote work; private resources can
 remain because no cleanup apply is supplied. Preserve state, binary and original account.
 
-Use the [runbook](../providers/kaggle-acceptance.md) and
-[validation ledger](../development/validation-results.md). Offline synthetic success is never live evidence.
+Use the [runbook](../providers/kaggle-acceptance.md) for repeat qualification. Keep full operator
+run records private and attach only minimal sanitized evidence to a focused issue/PR when support
+claims change. Offline synthetic success is never live evidence.

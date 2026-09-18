@@ -6,8 +6,9 @@ applications do not need the Kaggle SDK or provider credentials.
 
 **Pre-release:** the local server supports uploads, durable job admission, controls and
 verified downloads of published artifacts. It does **not** start compute or collection
-workers. Kaggle execution is currently available through a separate, fixed GPU acceptance
-experiment; real-provider acceptance has not yet been recorded.
+workers. Kaggle execution is also available through a separate, fixed GPU acceptance
+experiment whose scoped private-staging, Tesla T4 execution, separate-process recovery and
+artifact-publication path has been qualified live. This does not enable normal-server dispatch.
 
 ## Build and start locally
 
@@ -53,7 +54,7 @@ automatically. Stop `serve` before any further local administration.
 | Upload, validate, submit and inspect jobs | [Application CLI](docs/application-cli.md) |
 | List and download already published results | [Artifact delivery](docs/artifact-delivery.md) |
 | Test your account with a bounded, real GPU job | [Operator validation checklist](docs/development/validation-checklist.md) |
-| Hand test results or a reproducible failure to another agent | [Validation results](docs/development/validation-results.md) |
+| Report a reproducible provider failure | [Bug report template](docs/development/bug-report-template.md) in a focused issue/PR |
 | Understand what is implemented and what remains | [Current status](docs/status.md) |
 | Develop the runtime | [Contributing](CONTRIBUTING.md) and [documentation map](docs/README.md) |
 

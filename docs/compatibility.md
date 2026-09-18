@@ -24,8 +24,8 @@ Do not assume a successful local import proves GPU availability or compatible re
 Go CI runs native tests/builds on Linux, macOS and Windows; the client workflow separately
 checks its locked environment on those operating systems. Check the actual job log for runner
 architecture. Cross-compilation or one OS job does not qualify every amd64/arm64 combination.
-Record the exact OS/architecture, filesystem and tool versions in
-[validation results](development/validation-results.md).
+Record the exact OS/architecture, filesystem and tool versions in the private operator record;
+share only the minimal sanitized values needed by a focused issue/PR.
 
 | Boundary | Requirement / limitation |
 |---|---|
@@ -44,13 +44,15 @@ See [local runtime](local-runtime.md), [artifact delivery](artifact-delivery.md)
 
 Preflight, private staging, one-shot execution, quota/log snapshots and selected artifact
 retrieval have offline implementations. The fixed GPU harness composes them for an explicit
-operator experiment; the general server still starts no provider workers. No current live
-qualification is recorded in the repository's validation-results template.
+operator experiment; its private-staging, Tesla T4 execution, separate-process recovery and
+complete artifact-publication path has been qualified live. The general server still starts no
+provider workers.
 
 Cancellation remains manual-required without a verified session target. Provider timeout
 enforcement, same-version rerun identity and exact hardware release cannot be inferred from
-local clocks or successful output. Signed downloads accept only the reviewed storage host;
-other CDNs fail closed. SDK private transport-layout dependencies and source reconstruction
+local clocks or successful output. Signed kernel-output downloads accept only the reviewed
+`storage.googleapis.com` and `www.kaggleusercontent.com` hosts (optional 443); other
+destinations fail closed. SDK private transport-layout dependencies and source reconstruction
 across binary changes remain explicit limits in the [provider guides](providers/README.md).
 
 ## Qualification and upgrades
@@ -62,5 +64,6 @@ not automatically close every M1 gate or qualify arbitrary jobs/accounts.
 
 Toolchain, SDK or managed-environment changes require source/license review, updated fixtures,
 offline regressions and live re-verification of affected claims. Do not silently relax identity,
-TLS, privacy, timeout or retry constraints to accommodate a changed response. Record failures
-and blockers in the results ledger; keep credentials and private state out of Git.
+TLS, privacy, timeout or retry constraints to accommodate a changed response. Put reproducible
+failures or changed support conclusions in a focused issue/PR; keep credentials and private state
+out of Git.

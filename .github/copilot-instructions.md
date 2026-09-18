@@ -4,10 +4,10 @@ Follow [AGENTS.md](../AGENTS.md). Start with [current status](../docs/status.md)
 for the requested task. Consult the [approved proposal](../docs/proposal.md), requirement IDs
 and relevant ADRs for design or scope changes, not as mandatory onboarding for routine usage.
 
-For operator validation, use [the checklist](../docs/development/validation-checklist.md) and
-[results and bugs](../docs/development/validation-results.md). Record actual commands, evidence,
-failures and retests without secrets; never infer a pass from a test name or previous CI run.
-Preserve uncertain submissions and their original state instead of resetting or resubmitting.
+For operator validation, use [the checklist](../docs/development/validation-checklist.md) and any
+focused issue/PR evidence linked by the task. Keep full run records private; never infer a pass
+from a test name or previous CI run. Preserve uncertain submissions and their original state
+instead of resetting or resubmitting.
 
 Keep public contracts provider-neutral, unknown evidence explicit and live effects separately
 authorized. No automatic compute retry, provider/CPU/paid fallback or credential disclosure.

@@ -30,10 +30,10 @@ Use [toolchain guidance](docs/development/go-toolchain.md) and narrow component 
 implementation. PR descriptions should state behavior changed, exact checks/limits and external
 effects. Fake-provider/SDK fixtures are not live acceptance.
 
-For a real installation/account run, follow the [operator checklist](docs/development/validation-checklist.md),
-update [results](docs/development/validation-results.md) and use the
-[bug template](docs/development/bug-report-template.md). Only sanitized reports enter Git.
-Credentials, binaries, private raw logs, inputs and runtime databases stay on the operator host.
+For a real installation/account run, follow the [operator checklist](docs/development/validation-checklist.md)
+and use the [bug template](docs/development/bug-report-template.md) for a focused issue/PR when a
+failure or support conclusion must be shared. Full run reports, credentials, binaries, private raw
+logs, inputs and runtime databases stay on the operator host.
 
 ## Keep docs useful
 

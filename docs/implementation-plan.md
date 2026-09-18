@@ -7,27 +7,27 @@ This plan retains task IDs for future work; completed implementation history liv
 ## Current boundary
 
 Portable core and durable components are implemented offline. Kaggle components and the fixed
-acceptance harness are implemented, but live acceptance is unverified. The main binary supplies
-local operator commands, admission profiles, application requests and delivery of published
-artifacts. Normal `serve` remains admission-only with no provider or collection workers.
+acceptance harness are implemented, and the scoped private-staging/Tesla-T4/restart/artifact path
+has been qualified live. The main binary supplies local operator commands, admission profiles,
+application requests and delivery of published artifacts. Normal `serve` remains admission-only
+with no provider or collection workers.
 
-## Operator evidence still required
+## Remaining provider capability boundaries
 
-| Task | Required evidence | Current state |
-|---|---|---|
-| M1-02 | Authorized authentication and account/quota reads, including missing/invalid credential behavior. | Not run live. |
-| M1-03 | Private staging, original bytes, readiness and exact resource ownership. | Not run live. |
-| M1-04 | Bounded GPU computation, not device listing alone. | Not run live. |
-| M1-05 | Lifecycle, logs and complete identified output retrieval with verified hashes. | Not run live; pagination needs a case large enough to exercise multiple pages. |
-| M1-06 | Controlled timeout and cancellation capability/target conclusion. | Separate procedure/authorization required; current batch cancellation is manual. |
-| M1-07 | Deliberately lost/ambiguous provider response followed by safe recovery with no new submission. | Separate fault procedure required; ordinary restart is insufficient. |
-| M1-08 | Review evidence and record a provider go/blocked decision and capability mapping. | Blocked on evidence or precisely documented unsupported capabilities. |
-| M4-06 live | Fixed private GPU experiment, verified results and distinct-process resume. | Harness available; no live qualifying report recorded. |
+The fixed live experiment has closed the scoped private-staging, actual-GPU, lifecycle/result and
+separate-process acceptance path. The rows below remain product/capability limits rather than open
+bugs in that qualified path.
 
-Record outcomes and evidence IDs in [validation results](development/validation-results.md),
-not in a growing narrative here. A fixed GPU pass may supply evidence to several rows, but
-cannot automatically close all of them. Credential authorization never implies authorization
-for GPU use, destructive cleanup, public data or paid capacity.
+| Task | Remaining work / conclusion |
+|---|---|
+| M1-02 | Authentication and quota reads work for the qualified account; quota remains an observation rather than a reservation or universal entitlement. |
+| M1-06 | Provider timeout enforcement and a verified cancellation target need a separate supported capability/procedure; current batch cancellation remains manual-required. |
+| M1-07 | Deliberately lost provider acknowledgement is a distinct fault qualification; normal restart/reconciliation does not claim to induce that ambiguity. |
+| M1-08 | Record the provider support/blocked capability mapping when general worker integration is ready for a release decision. |
+
+Large multi-page output, exact hardware release and remote cleanup apply remain explicit limits in
+the provider guides. Credential authorization never implies authorization for GPU use, destructive
+cleanup, public data or paid capacity.
 
 ## M5 — Product integration
 
@@ -63,6 +63,6 @@ execution/result safety failures block provider go rather than trigger an unappr
 
 Implement one focused slice per PR, push reviewable checkpoints, keep code and documentation
 commits separate, record checks in the PR and stop for owner merge. Do not append finished
-slice narratives here. A validation-only PR updates the results/bug ledger, not implementation
-status by inference. No automatic compute retry, provider fallback or live side effect is
+slice narratives here. A validation-only PR records only the focused evidence needed for its task; it does not change
+implementation status by inference. No automatic compute retry, provider fallback or live side effect is
 permitted merely because a plan row exists.

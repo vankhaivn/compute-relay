@@ -15,7 +15,7 @@ for clarity does not constitute a new upstream or live review.
 | [Kernel commands](https://github.com/Kaggle/kaggle-cli/blob/v2.2.4/docs/kernels.md) and [metadata](https://github.com/Kaggle/kaggle-cli/blob/v2.2.4/docs/kernels_metadata.md) | Submission, accelerator/time settings, private/internet flags and data sources; ordinary CLI observations describe latest-run behavior. |
 | [Dataset commands](https://github.com/Kaggle/kaggle-cli/blob/v2.2.4/docs/datasets.md) and [metadata](https://github.com/Kaggle/kaggle-cli/blob/v2.2.4/docs/datasets_metadata.md) | Private creation, readiness/status and file operations; one license label, including ownership-preserving choices. |
 | [Output formatting](https://github.com/Kaggle/kaggle-cli/blob/v2.2.4/docs/output_format.md) and [changelog](https://github.com/Kaggle/kaggle-cli/blob/v2.2.4/CHANGELOG.md) | JSON availability is command-specific; logs/follow and quota surfaces exist but do not prove live timing or account allowance. |
-| [SDK kernel service](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/services/kernels_api_service.py) and [types](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/types/kernels_api_service.py) | Structured save/read, explicit-version status/output and cancellation-target types used in component reviews. |
+| [SDK kernel service](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/services/kernels_api_service.py) and [types](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/types/kernels_api_service.py) | Structured save/read, status/output and cancellation-target types used in component reviews; live requests are validated against the narrower project contract. |
 | [SDK transport](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kaggle_http_client.py) and [decoding](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kaggle_object.py) | Private session-layout dependency, ambient defaults and raw-field checks that must be reviewed on upgrade. |
 | [Managed environment source](https://github.com/Kaggle/docker-python/tree/1ed8d43599a7faa1b630baeba82c57def3a8e33b) | Environment provenance reviewed at this commit, not the image/device actually assigned to an operator run. |
 
@@ -48,16 +48,17 @@ The project uses bounded versioned snapshots and exact raw durations/reservation
 conservative quota. Missing values/reset times are not invented. See
 [operational mappings](../providers/kaggle-operations.md).
 
-**Artifacts.** Use complete explicit-version listing and file downloads rather than arbitrary
+**Artifacts.** Use complete current-session output listing and explicit version-number file downloads rather than arbitrary
 listing URLs or bulk ZIP extraction. The manifest selects candidates; independently verified
 bytes and final acknowledgement must precede local publication. See
 [artifact retrieval](../providers/kaggle-artifacts.md).
 
-## Unverified conclusions
+## Evidence boundaries
 
-Source and mocked-HTTP tests do not prove account eligibility, private mounting, actual GPU
+Source and mocked-HTTP tests alone do not prove account eligibility, private mounting, actual GPU
 use, provider timeout behavior, live log availability or ownership-safe remote cleanup. The
-[K-01–K-16 ledger](kaggle-feasibility.md) maps those questions. Use the
-[validation checklist](../development/validation-checklist.md) for current commands and
-record sanitized observations in [validation results](../development/validation-results.md).
-Do not duplicate a second live-test sequence or promote a source review to `passed-live`.
+[K-01–K-16 support matrix](kaggle-feasibility.md) separates the fixed path that has been qualified
+live from provider guarantees that remain unsupported or unobservable. Use the
+[validation checklist](../development/validation-checklist.md) for re-qualification after relevant
+provider/toolchain changes; keep complete run records private and do not promote source review
+alone into a live-support claim.

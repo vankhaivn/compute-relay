@@ -36,6 +36,6 @@ IDs are stable so validation failures can reference the affected invariant.
 
 Design authority belongs to the [proposal](proposal.md) and [ADRs](decisions/README.md), not
 a duplicate decision table. Review this register when evidence, dependency/provider versions,
-public contracts or operational boundaries change. Record an actual failed check in
-[validation results](development/validation-results.md) with a linked
-[bug report](development/bug-report-template.md); do not append development diaries here.
+public contracts or operational boundaries change. Put an actual failed check in a focused
+issue/PR using the [bug report template](development/bug-report-template.md); do not append
+development diaries here.
