@@ -15,8 +15,9 @@ application authorization, the durable queue or permission to retry ambiguous co
 
 Use the [operator checklist](../validation-checklist.md) for re-qualification.
 Keep full operator run records private and use focused issues/PRs for sanitized failures or
-support-changing evidence. Source/fixture evidence is not live account support. The normal server
-remains [admission-only](../../status.md).
+support-changing evidence. Source/fixture evidence is not live account support. The normal runtime
+is admission-only by default and can enable bounded Kaggle workers only through the explicit
+[user runbook](../../kaggle-runtime.md).
 
 
 ## Normal runtime integration
