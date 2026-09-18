@@ -34,4 +34,4 @@ not run
 
 - [ ] The PR title follows Conventional Commits.
 - [ ] Commits are focused and follow the repository convention.
-- [ ] The change preserves the invariants in `AGENTS.md` and `docs/proposal.md`.
+- [ ] The change preserves the invariants in `AGENTS.md` and `docs/development/proposal.md`.

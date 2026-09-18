@@ -99,5 +99,5 @@ This checks a regular bounded job file against schema/semantics only, with `admi
 admitting work.
 
 Use the [operator checklist](development/validation-checklist.md) for a reproducible host test,
-[storage](storage.md) for coordinated recovery and [artifact delivery](artifact-delivery.md)
+[storage](development/storage.md) for coordinated recovery and [artifact delivery](artifact-delivery.md)
 for result reads. Local serving does not qualify live compute.

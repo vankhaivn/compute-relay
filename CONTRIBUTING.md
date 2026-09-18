@@ -1,7 +1,7 @@
 # Contributing
 
-Read [AGENTS.md](AGENTS.md), [current status](docs/status.md) and the relevant
-[component guide](docs/README.md). Use the approved proposal and requirement IDs for design
+Read [AGENTS.md](AGENTS.md), [current status](docs/status.md) and the
+[development documentation map](docs/development/README.md). Use the approved proposal and requirement IDs for design
 constraints, not as proof that a proposed command or provider capability exists.
 
 ## Change workflow

@@ -1,55 +1,38 @@
-# Documentation map
+# Using Compute Relay
 
-Start with the [repository README](../README.md). These documents describe how the software
-works now; the approved product brief describes the intended product, not implemented commands.
+This directory is the user/operator documentation. If you cloned the repository because you want
+to understand or run Compute Relay, stay here; architecture history, ADRs, provider research,
+validation procedures and implementation planning are under [development](development/README.md).
 
-## Use and verify
+## Start here
 
-| Document | Purpose |
+| I want to... | Read |
 |---|---|
-| [Current status](status.md) | Available behavior, missing integration and unverified live capabilities. |
-| [Local runtime](local-runtime.md) | Build, initialize, manage access and run the loopback server. |
-| [Application CLI](application-cli.md) | Configure admission profiles and use upload/job/control commands. |
-| [Artifact delivery](artifact-delivery.md) | Read committed results and verify create-only downloads. |
-| [Recovery](recovery.md) | Interpret uncertainty and choose safe recovery without resubmitting compute. |
-| [Operator validation checklist](development/validation-checklist.md) | Values, commands, authorization and pass/fail criteria for a local agent. |
-| [Bug report template](development/bug-report-template.md) | Minimum sanitized evidence for a fix and a retest. |
+| Understand what the project does and its current limit | [Current status](status.md) |
+| Set it up from a fresh clone | **[Getting started](getting-started.md)** |
+| Operate an existing installation | **[Operator runbook](runbook.md)** |
+| Manage the local runtime, workspaces and tokens | [Local runtime](local-runtime.md) |
+| Package/upload code and inputs | [Bundles and import](packaging-and-import.md) |
+| Configure profiles, validate/admit jobs and issue controls | [Application CLI](application-cli.md) |
+| Read or download already published results | [Artifact delivery](artifact-delivery.md) |
+| Recover safely after an uncertain response/state | [Recovery](recovery.md) |
+| Check supported toolchains, hosts and filesystem assumptions | [Compatibility](compatibility.md) |
 
-## Contributor references
+## The important current boundary
 
-[Contributing](../CONTRIBUTING.md) and [AGENTS.md](../AGENTS.md) define workflow.
-[Toolchain and checks](development/go-toolchain.md),
-[commit convention](development/commit-convention.md) and
-[repository workflow](development/repository-workflow.md) cover development mechanics.
-[Implementation plan](implementation-plan.md) contains remaining work;
-[roadmap](roadmap.md) describes release outcomes, not a completed-task diary.
+The normal server is **local-admission-only**. It authenticates applications, stores immutable
+objects, validates/admit jobs, records explicit controls, and serves already published artifacts.
+It does **not** start provider/scheduler/dispatch/collection workers, so an admitted job does not
+automatically execute remotely.
 
-The [approved proposal](proposal.md) and [requirement IDs](scope-and-requirements.md) remain
-the product authority. Their proposed examples are not a substitute for current usage guides.
-[Architecture](architecture.md), [domain model](domain-model.md) and
-[architecture decisions](decisions/README.md) explain current design constraints.
+The repository also contains a fixed Kaggle GPU acceptance utility that has been live-qualified
+for a bounded provider workflow. That is a maintainer/operator qualification path, not the normal
+application runbook. Its documentation is under
+[development/provider docs](development/providers/README.md).
 
-## Component references
+## For contributors and maintainers
 
-- Inputs and access: [auth/objects](auth-and-objects.md),
-  [packaging/import](packaging-and-import.md), [HTTPS ingestion](https-ingestion.md).
-- Durable work: [storage](storage.md), [admission](admission.md),
-  [scheduler](scheduler.md), [dispatch](dispatch.md), [controls](operations.md).
-- Results: [collection](collection.md), [retention](retention.md),
-  [offline fault matrix](fault-matrix.md).
-- Interfaces: [API contracts](../api/README.md), [provider contract](providers/contract.md),
-  [remote runner](../runner/README.md).
-- Kaggle: [preflight](providers/kaggle-preflight.md), [staging](providers/kaggle-staging.md),
-  [execution](providers/kaggle-execution.md), [operations](providers/kaggle-operations.md),
-  [artifacts](providers/kaggle-artifacts.md), [fixed acceptance experiment](providers/kaggle-acceptance.md).
-
-[Compatibility](compatibility.md), [current risks](risk-register.md) and
-[provider research](research/README.md) retain evidence boundaries and version-pinned sources.
-
-## Keep this structure usable
-
-Usage belongs in usage guides; current constraints belong in component references. Keep full
-operator run records outside main; attach only minimal sanitized evidence to a focused issue/PR
-when it changes a support claim or reports a reproducible failure. Do not append commit lists,
-local sandbox stories, CI run transcripts, owner prompts or completed implementation audits here.
-Preserve requirements, safety constraints and relevant dated source evidence when editing.
+Use [Development documentation](development/README.md) for architecture, component contracts,
+ADRs, provider internals, research, requirements, validation, roadmap and remaining implementation
+work. Start contribution work with [CONTRIBUTING.md](../CONTRIBUTING.md) and
+[AGENTS.md](../AGENTS.md).

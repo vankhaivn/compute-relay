@@ -58,7 +58,7 @@ metadata without importing/authenticating the provider client.
 ## Authenticated use is separate
 
 Use the absolute `.venv/bin/python` path on POSIX or `.venv/Scripts/python.exe` on Windows
-in [preflight configuration](../../docs/providers/kaggle-preflight.md). Local preflight checks
+in [preflight configuration](../../docs/development/providers/kaggle-preflight.md). Local preflight checks
 pins without reading tokens. Authenticated account reads require explicit opt-in; private
 staging and GPU execution require their own authorization. Never pass a token as a flag,
 commit credential values, or use a CI credential for operator acceptance.
@@ -66,5 +66,5 @@ commit credential values, or use a CI credential for operator acceptance.
 The SDK tests mock HTTP, so passing them is not account eligibility, provider compatibility
 or a live CUDA result. Follow the [operator validation checklist](../../docs/development/validation-checklist.md)
 for re-qualification and keep full operator records private; share only minimal sanitized evidence
-in a focused issue/PR when support changes. See [ADR-0001](../../docs/decisions/0001-official-kaggle-client-boundary.md)
+in a focused issue/PR when support changes. See [ADR-0001](../../docs/development/decisions/0001-official-kaggle-client-boundary.md)
 for the client isolation boundary and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency notices.

@@ -46,7 +46,7 @@ go run ./cmd/devtool check
 go run ./cmd/devtool test-race
 ```
 
-The [fault matrix](../fault-matrix.md) owns scenario/test traceability and evidence limits.
+The [fault matrix](fault-matrix.md) owns scenario/test traceability and evidence limits.
 Its result is not a coverage percentage or a live-provider qualification. Do not rewrite
 locks, weaken tests or replace the approved scenario list to obtain a green run.
 
@@ -60,7 +60,7 @@ submitted user workload, allocate GPU or qualify a production service.
 `go.mod`/`go.sum` are authoritative. Direct dependencies are kin-openapi `v0.149.0`,
 jsonschema/v6 `v6.0.3` and modernc SQLite `v1.58.0`; the driver requires the pinned libc
 `v1.75.6`. Keep driver/libc compatible and preserve distribution licenses. See
-[ADR-0008](../decisions/0008-sqlite-durability-and-backup.md) for source references.
+[ADR-0008](decisions/0008-sqlite-durability-and-backup.md) for source references.
 Review migrations, locking, backup and native tests when changing the storage stack.
 
 Existing Go CI runs checks/race on Linux and native tests/CGo-free builds on Linux, macOS
@@ -81,4 +81,4 @@ github.com/vankhaivn/compute-relay/internal/buildinfo.BuiltAt
 
 Defaults are `dev`, `unknown`, `unknown`; they are not release provenance. For the multi-process
 GPU acceptance procedure, build its separate executable once and retain its exact bytes as
-specified in [the acceptance guide](../providers/kaggle-acceptance.md).
+specified in [the acceptance guide](providers/kaggle-acceptance.md).

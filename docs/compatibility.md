@@ -38,7 +38,7 @@ share only the minimal sanitized values needed by a focused issue/PR.
 | Storage durability | Database-only backup excludes blobs. Shared/network filesystems and arbitrary power-loss guarantees are unverified. |
 
 See [local runtime](local-runtime.md), [artifact delivery](artifact-delivery.md),
-[storage](storage.md) and [runner](../runner/README.md) for the corresponding procedures.
+[storage](development/storage.md) and [runner](../runner/README.md) for the corresponding procedures.
 
 ## Provider support is evidence-scoped
 
@@ -53,7 +53,7 @@ enforcement, same-version rerun identity and exact hardware release cannot be in
 local clocks or successful output. Signed kernel-output downloads accept only the reviewed
 `storage.googleapis.com` and `www.kaggleusercontent.com` hosts (optional 443); other
 destinations fail closed. SDK private transport-layout dependencies and source reconstruction
-across binary changes remain explicit limits in the [provider guides](providers/README.md).
+across binary changes remain explicit limits in the [provider guides](development/providers/README.md).
 
 ## Qualification and upgrades
 

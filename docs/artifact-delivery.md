@@ -2,7 +2,7 @@
 
 Deliver results already committed by the collector, with current workspace authority and
 end-to-end byte verification. These commands/routes do not fetch from Kaggle, start collection
-or make a queued job produce results. See [collection](collection.md) for publication semantics.
+or make a queued job produce results. See [collection](development/collection.md) for publication semantics.
 
 ## Commands
 

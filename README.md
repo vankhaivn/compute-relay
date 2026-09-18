@@ -1,19 +1,37 @@
 # Compute Relay
 
-A self-hosted runtime for finite compute jobs, with a provider-neutral HTTP/JSON API.
-Run it on your own machine with your own provider account. Kaggle is the first provider;
-applications do not need the Kaggle SDK or provider credentials.
+Compute Relay is a self-hosted control plane for **finite compute jobs**. Applications talk to a
+local HTTP/JSON API instead of embedding provider SDKs or credentials. The runtime gives jobs a
+durable identity, preserves attempts and recovery state, and verifies published result bytes.
+Kaggle is the first provider adapter.
 
-**Pre-release:** the local server supports uploads, durable job admission, controls and
-verified downloads of published artifacts. It does **not** start compute or collection
-workers. Kaggle execution is also available through a separate, fixed GPU acceptance
-experiment whose scoped private-staging, Tesla T4 execution, separate-process recovery and
-artifact-publication path has been qualified live. This does not enable normal-server dispatch.
+> **Pre-release status:** the normal `compute-relay serve` path is currently
+> **local-admission-only**. It can authenticate applications, accept immutable inputs/jobs,
+> record controls, and serve already published artifacts, but it does **not** start provider,
+> scheduler, dispatch, or collection workers. A separate fixed Kaggle GPU acceptance utility has
+> been live-qualified for private staging, Tesla T4 execution, restart/reconciliation, and result
+> publication. That utility is provider qualification, not general server dispatch.
+>
+> Read [current status](docs/status.md) before depending on a capability.
 
-## Build and start locally
+## What you can use today
 
-Use the toolchain required by [`go.mod`](go.mod). No local GPU or Docker is required for
-the control plane. Build from the repository root:
+| Goal | Available now? | Start here |
+|---|---:|---|
+| Build a private local runtime | Yes | [Getting started](docs/getting-started.md) |
+| Create workspaces and scoped application tokens | Yes | [Local runtime](docs/local-runtime.md) |
+| Package code and upload immutable objects | Yes | [Bundles and import](docs/packaging-and-import.md) |
+| Validate and admit provider-neutral jobs | Yes | [Application CLI](docs/application-cli.md) |
+| Recover an original receipt after an uncertain response | Yes | [Recovery](docs/recovery.md) |
+| Download an already published artifact with end-to-end verification | Yes | [Artifact delivery](docs/artifact-delivery.md) |
+| Run an arbitrary admitted job through normal `serve` | **No** | [Current status](docs/status.md) |
+| Re-run the fixed Kaggle GPU qualification path | Maintainer/operator workflow | [Development docs](docs/development/README.md) |
+
+A successful upload or `202 Accepted` job receipt is **not** evidence that remote compute started.
+
+## Quick start
+
+Requirements: Git plus the Go version pinned in [`go.mod`](go.mod) (currently Go 1.27.1).
 
 ```sh
 git clone https://github.com/vankhaivn/compute-relay.git
@@ -22,57 +40,48 @@ go build -trimpath -o compute-relay ./cmd/compute-relay
 ./compute-relay help
 ```
 
-On Windows, build `compute-relay.exe` and use absolute Windows paths in the commands below.
-Installation and token directories must be private and outside the source checkout. Replace
-`/absolute/private` with an existing directory you control; `runtime` must not exist yet.
+For the first complete walkthrough — initialize a runtime, create a workspace/token, apply an
+admission profile, start the server, package code, upload it, and admit a job — follow
+**[Getting started](docs/getting-started.md)**.
 
-```sh
-./compute-relay init --root /absolute/private/runtime
-./compute-relay workspace create --root /absolute/private/runtime --id app
-./compute-relay token issue --root /absolute/private/runtime --workspace app --scope read --scope write --scope operate --ttl 24h --output /absolute/private/runtime/app-token
-```
+For repeat operation after the first setup, use the **[Operator runbook](docs/runbook.md)**.
 
-The token is delivered to the new private file, not printed. To admit jobs, first apply an
-admission profile and grant it to the workspace using [application commands](docs/application-cli.md).
-Do that before starting the server; local profile/token/workspace administration requires the
-installation lock. Uploads alone do not require a profile.
+## Documentation
 
-```sh
-./compute-relay serve --root /absolute/private/runtime --listen 127.0.0.1:7331
-```
+The top level of [`docs/`](docs/README.md) is intentionally for people **using or operating**
+Compute Relay:
 
-`serve` runs in the foreground and reports `local-admission-only` with `dispatch_enabled=false`.
-Use a second terminal for application HTTP commands: upload a bundle, validate and submit a job.
-**A successful admission is not remote execution.** New installations do not generate artifacts
-automatically. Stop `serve` before any further local administration.
+- [Getting started](docs/getting-started.md) — one fresh-clone walkthrough.
+- [Operator runbook](docs/runbook.md) — task-oriented commands for an existing installation.
+- [Local runtime](docs/local-runtime.md) — installation, workspace/token administration, serving.
+- [Application CLI](docs/application-cli.md) — profiles, uploads, validation, admission and controls.
+- [Bundles and import](docs/packaging-and-import.md) — safe source packaging.
+- [Artifact delivery](docs/artifact-delivery.md) — verified reads/downloads of published results.
+- [Recovery](docs/recovery.md) — what to do after uncertain responses or state.
+- [Compatibility](docs/compatibility.md) — pinned environments and host/filesystem constraints.
+- [Current status](docs/status.md) — exact implementation and support boundary.
 
-## Choose your next step
+If you are changing the product, provider adapter, architecture, tests, or release process, start
+with **[Development documentation](docs/development/README.md)**. Architecture, ADRs, research,
+provider qualification, validation procedures, requirements, and implementation planning live
+there so they do not obscure the normal usage path.
 
-| Goal | Guide |
-|---|---|
-| Set up the local server and manage access | [Local runtime](docs/local-runtime.md) |
-| Upload, validate, submit and inspect jobs | [Application CLI](docs/application-cli.md) |
-| List and download already published results | [Artifact delivery](docs/artifact-delivery.md) |
-| Test your account with a bounded, real GPU job | [Operator validation checklist](docs/development/validation-checklist.md) |
-| Report a reproducible provider failure | [Bug report template](docs/development/bug-report-template.md) in a focused issue/PR |
-| Understand what is implemented and what remains | [Current status](docs/status.md) |
-| Develop the runtime | [Contributing](CONTRIBUTING.md) and [documentation map](docs/README.md) |
+## Operating model
 
-## Safety and recovery
+Compute Relay is local and operator-controlled. Provider credentials stay behind provider
+configuration and are never application tokens. There is no automatic provider/account/CPU/paid
+fallback, and ambiguous submission is recovered by observing the original attempt rather than
+silently resubmitting it.
 
-Provider credentials stay on the operator's machine. Never commit tokens, runtime databases,
-private inputs or raw provider responses. Live tests require explicit authorization and
-finite budgets; they can leave private staging and execution resources on the account.
+Normal `serve` listens only on an explicit loopback address. It is not a hosted service or public
+multi-tenant gateway. Keep runtime state, tokens, private inputs, raw provider responses and signed
+artifact URLs outside the source checkout.
 
-Unknown submission outcomes are recovered by observing the original attempt, not submitting
-again. Cancellation intent is not proof that remote compute stopped. Use the
-[recovery guide](docs/recovery.md) instead of deleting state or resetting an uncertain job.
+## Project status
 
-The reference workflow requires no paid connector service or mandatory paid infrastructure.
-Provider allowances, eligibility and terms are the operator's responsibility; no unlimited
-GPU, immediate allocation or automatic paid fallback is promised.
+There is no public release yet. General provider registration/worker lifecycle, remaining
+log/cleanup surfaces, strict runtime configuration, doctor/client examples, installation packaging,
+and release hardening remain. See [current status](docs/status.md) for what exists now.
 
-## License
-
-[Apache-2.0](LICENSE). Third-party services, data, models and dependencies retain their own
-terms. See [Security](SECURITY.md) for private reporting and [Support](SUPPORT.md) for help.
+Compute Relay is licensed under [Apache-2.0](LICENSE). Provider services, uploaded data, models and
+third-party dependencies retain their own terms and licenses.

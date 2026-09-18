@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Read docs/proposal.md before proposing scope. Retained sessions, dashboards, and additional providers are future work, not automatic MVP requirements.
+        Read docs/development/proposal.md before proposing scope. Retained sessions, dashboards, and additional providers are future work, not automatic MVP requirements.
   - type: textarea
     id: problem
     attributes:

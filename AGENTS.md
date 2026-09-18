@@ -7,8 +7,8 @@ Do not change approved product scope as a routine implementation preference.
 ## Start with the task, not the development history
 
 Read [current status](docs/status.md) and the relevant guide from [docs](docs/README.md).
-For a substantial design change, consult the [approved proposal](docs/proposal.md),
-[requirement IDs](docs/scope-and-requirements.md), applicable ADRs and source/tests.
+For a substantial design change, consult the [approved proposal](docs/development/proposal.md),
+[requirement IDs](docs/development/scope-and-requirements.md), applicable ADRs and source/tests.
 The proposal defines intended scope; current guides/code define available commands.
 Do not make a new user read all completed PR audits before using the repository.
 
@@ -47,7 +47,7 @@ Keep PR-specific checks and sanitized operator evidence in the relevant PR or is
 a growing run ledger on main. Preserve stable requirement IDs, essential safety semantics, exact
 test traceability and dated primary-source evidence; brevity is not permission to invent support.
 
-The [proposal](docs/proposal.md) and requirement definitions are the approved product record.
+The [proposal](docs/development/proposal.md) and requirement definitions are the approved product record.
 Do not silently rewrite them or the numbered fault scenarios to satisfy a test. ADRs should
 state decisions, reasons and consequences; completed implementation/CI diaries are not ADRs.
 The changelog describes a few user-visible unreleased features until an actual release exists.

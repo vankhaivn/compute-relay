@@ -2,7 +2,7 @@
 
 Follow [AGENTS.md](AGENTS.md), the canonical repository instructions. Start with
 [current status](docs/status.md) and the guide for the requested task. Consult the
-[approved proposal](docs/proposal.md), requirement IDs and relevant ADRs when changing design
+[approved proposal](docs/development/proposal.md), requirement IDs and relevant ADRs when changing design
 or scope; ordinary usage and validation do not require reading completed development history.
 
 For operator testing, read [the validation checklist](docs/development/validation-checklist.md)

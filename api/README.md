@@ -72,7 +72,7 @@ Parsers reject duplicate keys, invalid Unicode, null/case-alias/unknown fields w
 trailing values and bounds violations before ambiguous data is lost by ordinary decoding.
 Contextual validation also checks budgets, reserved environment names, workspace ownership,
 profile policy and path collisions. Result validation binds nonce/input hashes, required outputs
-and GPU/phase consistency before [publication](../docs/collection.md).
+and GPU/phase consistency before [publication](../docs/development/collection.md).
 
 ## Changing a contract
 

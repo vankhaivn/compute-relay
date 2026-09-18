@@ -241,7 +241,7 @@ application end-to-end pass. Manual arbitrary-job → published-artifact testing
 ### V07 — Pinned environment and negative credential setup
 
 After locked client installation, create `CR_CONFIG` privately using
-[preflight configuration](../providers/kaggle-preflight.md). It must contain the actual account,
+[preflight configuration](providers/kaggle-preflight.md). It must contain the actual account,
 `credential_ref: "env:CR_KAGGLE_TOKEN"`, and the absolute locked Python executable. No token value
 belongs in the file. The operator provisions that variable securely; do not print its contents.
 

@@ -73,5 +73,5 @@ file path or explicit bundle includes, never an unrestricted host directory.
 
 An optional `sha256` binds the final raw file/bundle. Authority and transfer admission precede
 source discovery. Rooted no-follow/link/reparse checks and stream completion protect the input
-boundary; verified bytes commit through [object storage](auth-and-objects.md). Later edits never
+boundary; verified bytes commit through [object storage](development/auth-and-objects.md). Later edits never
 update an existing object. The optional component is not a shipped TOML/serve enablement path.
