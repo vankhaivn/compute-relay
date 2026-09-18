@@ -21,6 +21,15 @@ server:       http://127.0.0.1:7331
 Keep credentials, runtime databases, private inputs, raw provider responses and signed URLs
 outside the repository.
 
+**First-time initialization:** the path passed to `compute-relay init --root ...` must not exist
+yet. Create only the parent directory; do not pre-create the runtime root because `init` uses
+exclusive creation.
+
+```sh
+mkdir -p /absolute/private
+./compute-relay init --root /absolute/private/runtime
+```
+
 ## Start and stop the runtime
 
 Start:
