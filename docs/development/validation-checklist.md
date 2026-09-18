@@ -199,9 +199,10 @@ receipt. This is intentional idempotency validation, not an automatic retry loop
 "$CR_BIN" job status --workspace app --token-file "$CR_ROOT/app-token" --id "$CR_JOB_ID"
 ```
 
-Expected: local queued admission; server reports `dispatch_enabled=false`. Do not wait for GPU
-or results: no worker runs in this server. Mark attempts to test that absent feature as
-`blocked-implementation`, not as a runtime bug.
+Expected for the default command: local queued admission; server reports
+`dispatch_enabled=false`. Do not wait for GPU or results in this mode. Provider-enabled serve is
+a separate explicitly authorized check using [the Kaggle runtime runbook](../kaggle-runtime.md);
+never infer provider authorization from the existence of an admission profile.
 
 ### V05 — Conflict, reopen and authority
 
@@ -371,11 +372,12 @@ SQLite, both blob roots and identity/process markers, quiesce writers, and activ
 There is no general backup CLI yet: review the library-level procedure before testing, not an
 ad-hoc copy of a live `runtime.db`. Raw databases do not belong in Git or the bug report.
 
-**V17 — Product/release gaps.** General worker/provider registration, remaining log/cleanup
-surfaces, strict TOML, doctor, thin client/LLM examples, packaging and full release hardening are
-not completed by this checklist. Mark their application E2E cases `blocked-implementation`.
-After code exists, add exact clean-install, concurrency, shutdown, full recovery and platform
-procedures before promoting support. A documentation edit cannot close these rows.
+**V17 — Product/release gaps.** Normal-server Kaggle registration plus bounded
+dispatch/collection workers are implemented, but their arbitrary-workload/account live
+qualification is not established by offline CI. Public provider log/quota/cleanup surfaces,
+strict TOML, doctor, thin client/LLM examples, packaging and full release hardening remain.
+Add clean-install, bounded provider-mode, shutdown/restart and recovery evidence before promoting
+broader support; implementation alone is not live acceptance.
 
 **V18 — Review.** Map evidence to M1-02…M1-08, the scoped M4-06 experiment and M5/M6 requirements.
 List unresolved failures and unsupported capabilities. Record reviewer, UTC date and exact evidence
