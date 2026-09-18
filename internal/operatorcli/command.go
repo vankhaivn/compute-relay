@@ -15,8 +15,8 @@ var ErrArguments = errors.New("invalid operator arguments")
 var ErrHelp = errors.New("operator help requested")
 
 type Request struct {
-	Command             string
-	Action              string
+	Command              string
+	Action               string
 	Root                 string
 	ID                   string
 	Workspace            string
@@ -28,9 +28,9 @@ type Request struct {
 	ProviderMachineShape string
 	MaxProviderAttempts  int
 	AllowPrivateStaging  bool
-	AllowGPU              bool
-	Scopes                []string
-	TTL                   time.Duration
+	AllowGPU             bool
+	Scopes               []string
+	TTL                  time.Duration
 }
 
 const Usage = `Local runtime commands:
