@@ -103,7 +103,7 @@ func NewRuntimeAdapter(
 		config: c, binding: binding, policy: policy, allow: allowMutations,
 		maxAttempts: maxAttempts, load: load, clock: clock, preflight: preflight,
 		stager: stager, monitor: monitor, authorized: make(map[provider.Identity]bool),
-		components: make(map[provider.Identity]*runtimeComponents),
+		components:   make(map[provider.Identity]*runtimeComponents),
 		makeExecutor: NewExecutor, makeArtifacts: NewArtifactReader,
 	}, nil
 }
