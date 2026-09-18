@@ -37,11 +37,14 @@ timeout, HTTP/receipt error, nonzero exit or lost acknowledgement after a possib
 submission-unknown. Reconciliation sends original identity/source digest, not another save.
 Observation additionally checks the first-pinned numeric ID.
 
-Validate raw metadata rather than SDK defaults, read version 1 explicitly, read its status and
-recheck current metadata. `GetKernelSessionStatus` intentionally sends only account username and
-kernel slug because the live Kaggle endpoint rejects `versionLabel`; version-1 identity remains
-verified by the surrounding `GetKernel` reads. The same status-request contract is used by logs
-and artifact collection. New source/version/account/privacy/ID or additional sources fail closed.
+Validate raw metadata rather than SDK defaults and recheck current metadata around status/log/
+artifact reads. Live `GetKernel`, `GetKernelSessionStatus` and `ListKernelSessionOutput` calls
+send account username and kernel slug without `versionLabel`; version-1 identity is instead
+required from raw `GetKernel.metadata.currentVersionNumber`. Empty repeated source fields omitted
+or returned as null by ProtoJSON are canonicalized to empty lists only when the frozen expectation
+is also empty; non-empty or wrong-typed values still fail closed. DownloadKernelOutput keeps its
+explicit numeric version 1 pin. New source/version/account/privacy/ID or additional sources fail
+closed.
 
 | Raw state | Execution / activity |
 |---|---|

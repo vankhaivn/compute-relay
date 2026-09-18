@@ -80,8 +80,8 @@ def missing_kernel_error(exc):
 
 
 def kernel_status_request(request_type, owner, slug):
-    # Live GetKernelSessionStatus rejects a versionLabel field. Version identity
-    # is enforced separately by the explicit GetKernel(version 1) readback.
+    # Live kernel status reads reject versionLabel. Version identity is enforced
+    # separately by check_kernel on current GetKernel metadata.
     request = request_type()
     request.user_name, request.kernel_slug = owner, slug
     return request
@@ -202,7 +202,12 @@ def check_kernel(raw, r, expected_id=""):
                 "enableInternet": r["internet"], "datasetDataSources": [r["dataset"]],
                 "kernelDataSources": [], "competitionDataSources": [], "modelDataSources": []}
     for key, value in expected.items():
-        if type(metadata.get(key)) is not type(value) or metadata[key] != value:
+        actual = metadata.get(key)
+        # ProtoJSON may omit/null empty repeated fields. Canonicalize only that
+        # exact representation; non-empty or wrong-typed values still fail closed.
+        if value == [] and actual is None:
+            actual = []
+        if type(actual) is not type(value) or actual != value:
             raise IdentityMismatch("kernel metadata mismatch")
     if expected_id and kernel_id != expected_id:
         raise IdentityMismatch("kernel replacement")
@@ -242,16 +247,14 @@ def operate(r, token, mode):
                 return outcome("rejected" if mode == "submit" else "unknown")
             api = client.kernels.kernels_api_client
 
-            def get(version, expected_id=""):
+            def get(expected_id=""):
                 query = ApiGetKernelRequest()
                 query.user_name, query.kernel_slug = r["owner"], r["slug"]
-                if version:
-                    query.version_label = version
                 guard.call("get", api.get_kernel, query)
                 return check_kernel(guard.last, r, expected_id)
 
             try:
-                current_id = get("", r["kernel_id"])
+                current_id = get(r["kernel_id"])
             except requests.exceptions.HTTPError as exc:
                 # Kaggle reports an absent kernel as either 404 or one precise
                 # kernels.get PERMISSION_DENIED payload. Other 403s remain failures.
@@ -288,14 +291,14 @@ def operate(r, token, mode):
                     return outcome("unknown")
                 current_id = identifier(receipt.get("kernelId"))
             # An already-existing exact kernel is observed, never updated/saved.
-            get("1", current_id)
+            get(current_id)
             status = kernel_status_request(ApiGetKernelSessionStatusRequest, r["owner"], r["slug"])
             try:
                 guard.call("status", api.get_kernel_session_status, status)
                 raw_state = normalize_status(guard.last)
             except Exception:
                 raw_state = "UNKNOWN"
-            get("", current_id)  # a manual rerun/replacement during the poll cannot pass
+            get(current_id)  # a manual rerun/replacement during the poll cannot pass
             return dict(outcome("found"), kernel_id=current_id,
                         reference=r["owner"] + "/" + r["slug"], version=1,
                         source_sha256=r["source_sha256"], raw_state=raw_state)

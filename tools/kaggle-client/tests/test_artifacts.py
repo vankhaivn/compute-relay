@@ -103,6 +103,7 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
         if op == bridge.KERNEL + "GetKernel":
             self.assertEqual(body["userName"], self.r["execution"]["owner"])
             self.assertEqual(body["kernelSlug"], self.r["execution"]["slug"])
+            self.assertNotIn("versionLabel", body)
             if self.target_path in self.downloads and self.change_after:
                 if self.change_after == "source":
                     self.kernel["blob"]["source"] += "# changed"
@@ -117,7 +118,7 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
             self.assertNotIn("versionLabel", body)
             return response(json.dumps(dict(status=self.status)).encode())
         if op == bridge.KERNEL + "ListKernelSessionOutput":
-            self.assertEqual(body["versionLabel"], "1")
+            self.assertNotIn("versionLabel", body)
             self.assertEqual(body["pageSize"], 100)
             cursor = body.get("pageToken", "")
             offset = int(cursor) if cursor else 0
