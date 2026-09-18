@@ -5,12 +5,13 @@ local HTTP/JSON API instead of embedding provider SDKs or credentials. The runti
 durable identity, preserves attempts and recovery state, and verifies published result bytes.
 Kaggle is the first provider adapter.
 
-> **Pre-release status:** the normal `compute-relay serve` path is currently
-> **local-admission-only**. It can authenticate applications, accept immutable inputs/jobs,
-> record controls, and serve already published artifacts, but it does **not** start provider,
-> scheduler, dispatch, or collection workers. A separate fixed Kaggle GPU acceptance utility has
-> been live-qualified for private staging, Tesla T4 execution, restart/reconciliation, and result
-> publication. That utility is provider qualification, not general server dispatch.
+> **Pre-release status:** `compute-relay serve` keeps a safe **local-admission-only** default,
+> but it can now be started with an explicit immutable Kaggle profile, GPU authorization and a
+> finite per-process attempt budget. In that mode the normal runtime dispatches admitted jobs,
+> reconciles the original attempt after uncertainty/restart, collects provider output and publishes
+> verified artifacts. The fixed Kaggle acceptance workflow remains the live-qualified evidence
+> path; the integrated normal-server path still needs operator re-qualification on each claimed
+> environment/account.
 >
 > Read [current status](docs/status.md) before depending on a capability.
 
@@ -26,12 +27,13 @@ flowchart TB
 
     App --> Relay
     Relay --> Local
-    Local -. "execution path<br/>not enabled in normal serve yet" .-> Provider
+    Local -->|"explicit provider mode"| Provider
+    Provider -->|"verified results"| Local
 ```
 
-For normal use today, Compute Relay provides the local API and durable job state. Provider execution
-is a separate path; the fixed Kaggle workflow has been qualified, but normal `serve` does not
-dispatch admitted jobs yet. See [current status](docs/status.md) for the exact boundary.
+Without provider flags, `serve` stops at the durable local runtime. With the explicit Kaggle
+runtime configuration and finite authorization budget, the same server runs dispatch and collection
+workers. See [Kaggle runtime](docs/kaggle-runtime.md) for the end-to-end path.
 
 ## What you can use today
 
@@ -43,10 +45,13 @@ dispatch admitted jobs yet. See [current status](docs/status.md) for the exact b
 | Validate and admit provider-neutral jobs | Yes | [Application CLI](docs/application-cli.md) |
 | Recover an original receipt after an uncertain response | Yes | [Recovery](docs/recovery.md) |
 | Download an already published artifact with end-to-end verification | Yes | [Artifact delivery](docs/artifact-delivery.md) |
-| Run an arbitrary admitted job through normal `serve` | **No** | [Current status](docs/status.md) |
+| Run a bounded GPU job through provider-enabled `serve` | **Yes, pre-release** | [Kaggle runtime](docs/kaggle-runtime.md) |
+| Keep `serve` local-only with no provider effects | Yes, default | [Local runtime](docs/local-runtime.md) |
 | Re-run the fixed Kaggle GPU qualification path | Maintainer/operator workflow | [Development docs](docs/development/README.md) |
 
-A successful upload or `202 Accepted` job receipt is **not** evidence that remote compute started.
+A `202 Accepted` receipt means durable admission. In provider mode, use job status and the
+published artifact receipt as execution/result evidence; never infer remote success from admission
+alone.
 
 ## Quick start
 
@@ -63,7 +68,8 @@ For the first complete walkthrough — initialize a runtime, create a workspace/
 admission profile, start the server, package code, upload it, and admit a job — follow
 **[Getting started](docs/getting-started.md)**.
 
-For repeat operation after the first setup, use the **[Operator runbook](docs/runbook.md)**.
+To run GPU work through Kaggle, continue with **[Kaggle runtime](docs/kaggle-runtime.md)**.
+For repeat operation after setup, use the **[Operator runbook](docs/runbook.md)**.
 
 ## Documentation
 
@@ -72,6 +78,7 @@ Compute Relay:
 
 - [Getting started](docs/getting-started.md) — one fresh-clone walkthrough.
 - [Operator runbook](docs/runbook.md) — task-oriented commands for an existing installation.
+- [Kaggle runtime](docs/kaggle-runtime.md) — provider setup, bounded GPU serve, submit and collect.
 - [Local runtime](docs/local-runtime.md) — installation, workspace/token administration, serving.
 - [Application CLI](docs/application-cli.md) — profiles, uploads, validation, admission and controls.
 - [Bundles and import](docs/packaging-and-import.md) — safe source packaging.
@@ -98,9 +105,9 @@ artifact URLs outside the source checkout.
 
 ## Project status
 
-There is no public release yet. General provider registration/worker lifecycle, remaining
-log/cleanup surfaces, strict runtime configuration, doctor/client examples, installation packaging,
-and release hardening remain. See [current status](docs/status.md) for what exists now.
+There is no public release yet. The normal runtime now has explicit Kaggle provider registration
+plus bounded dispatch/collection workers. Public provider log/cleanup surfaces, strict runtime
+configuration, doctor/client examples, installation packaging, and release hardening remain. See [current status](docs/status.md) for what exists now.
 
 Compute Relay is licensed under [Apache-2.0](LICENSE). Provider services, uploaded data, models and
 third-party dependencies retain their own terms and licenses.
