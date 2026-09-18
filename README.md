@@ -14,6 +14,30 @@ Kaggle is the first provider adapter.
 >
 > Read [current status](docs/status.md) before depending on a capability.
 
+
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+    App["Applications<br/>Node.js · Python · Go · CLI"] -->|"HTTP/JSON + uploads"| API["Compute Relay<br/>loopback API"]
+    API --> Core["Durable local core<br/>auth · objects · jobs · attempts · receipts"]
+    Core --> Store[("SQLite + input/result stores")]
+
+    Core -. "general worker lifecycle<br/>not wired into normal serve yet" .-> Workers["Scheduler · dispatch · collection"]
+    Accept["Fixed Kaggle GPU<br/>acceptance utility"] --> Workers
+
+    Workers --> Adapter["Provider adapter"]
+    Adapter --> Kaggle["Kaggle"]
+    Kaggle --> Runner["Finite remote runner"]
+    Runner -->|"verified result files"| Publish["Artifact verification<br/>and publication"]
+    Publish --> Store
+    Store -->|"published artifacts"| API
+```
+
+The normal server stops at the durable local control-plane boundary; it does not follow the dashed
+worker path yet. The separate fixed Kaggle acceptance utility composes that worker/provider path
+for the bounded live-qualified experiment.
+
 ## What you can use today
 
 | Goal | Available now? | Start here |
