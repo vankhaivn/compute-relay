@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -14,30 +15,40 @@ var ErrArguments = errors.New("invalid operator arguments")
 var ErrHelp = errors.New("operator help requested")
 
 type Request struct {
-	Command   string
-	Action    string
-	Root      string
-	ID        string
-	Workspace string
-	Output    string
-	File      string
-	Listen    string
-	Scopes    []string
-	TTL       time.Duration
+	Command             string
+	Action              string
+	Root                 string
+	ID                   string
+	Workspace            string
+	Output               string
+	File                 string
+	Listen               string
+	ProviderConfig       string
+	ProviderProfile      string
+	ProviderMachineShape string
+	MaxProviderAttempts  int
+	AllowPrivateStaging  bool
+	AllowGPU              bool
+	Scopes                []string
+	TTL                   time.Duration
 }
 
-const Usage = `Local runtime commands (M5-01, no provider workers):
+const Usage = `Local runtime commands:
   compute-relay init --root DIR
   compute-relay state --root DIR
   compute-relay serve --root DIR [--listen 127.0.0.1:7331]
+  compute-relay serve --root DIR --provider-config PRIVATE_JSON --provider-profile PROFILE \
+    --provider-machine-shape NvidiaTeslaT4 --max-provider-attempts N --allow-private-staging --allow-gpu
   compute-relay workspace create|show|enable|disable --root DIR --id ID
   compute-relay token issue --root DIR --workspace ID --scope read [--scope write] --ttl 24h --output NEW_PRIVATE_FILE
   compute-relay token revoke --root DIR --id TOKEN_ID
   compute-relay validate --file JOB_JSON
 
 Stop serve before local administration. Secrets are never printed; token output
-requires a new file in an existing private directory. No profiles or workers are
-configured automatically. Validation is local schema validation, not admission.
+requires a new file in an existing private directory. Provider workers are disabled
+unless every explicit provider flag is supplied. The per-process attempt budget is
+finite; local shutdown is not remote cancellation. Validation is local schema
+validation, not admission.
 ` + "\n" + ProfileUsage
 
 type Action func(context.Context, Request, io.Writer) error
@@ -58,7 +69,7 @@ func Run(ctx context.Context, args []string, out, diagnostic io.Writer, perform 
 		return 1
 	}
 	if err := perform(ctx, request, out); err != nil {
-		_, _ = io.WriteString(diagnostic, "Local command did not complete. Preserve state and inspect any receipt; an error does not undo committed changes. No provider dispatch was enabled.\n")
+		_, _ = io.WriteString(diagnostic, "Local command did not complete. Preserve state and inspect any receipt; an error does not undo committed changes or prove remote work stopped.\n")
 		return 1
 	}
 	return 0
@@ -118,6 +129,23 @@ func Parse(args []string) (Request, error) {
 	add("output", &r.Output)
 	add("file", &r.File)
 	add("listen", &r.Listen)
+	add("provider-config", &r.ProviderConfig)
+	add("provider-profile", &r.ProviderProfile)
+	add("provider-machine-shape", &r.ProviderMachineShape)
+	fs.BoolVar(&r.AllowPrivateStaging, "allow-private-staging", false, "")
+	fs.BoolVar(&r.AllowGPU, "allow-gpu", false, "")
+	fs.Func("max-provider-attempts", "", func(value string) error {
+		if seen["max-provider-attempts"] {
+			return ErrArguments
+		}
+		seen["max-provider-attempts"] = true
+		var n int
+		if _, err := fmt.Sscanf(value, "%d", &n); err != nil || n < 1 || n > 64 || fmt.Sprintf("%d", n) != value {
+			return ErrArguments
+		}
+		r.MaxProviderAttempts = n
+		return nil
+	})
 	fs.Func("ttl", "", func(value string) error {
 		if seen["ttl"] {
 			return ErrArguments
@@ -144,13 +172,20 @@ func Parse(args []string) (Request, error) {
 		}
 		return r, ErrArguments
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "allow-private-staging" || f.Name == "allow-gpu" {
+			seen[f.Name] = true
+		}
+	})
 	if fs.NArg() != 0 {
 		return r, ErrArguments
 	}
 	allowed := map[string]bool{"root": true}
 	switch r.Command {
 	case "serve":
-		allowed["listen"] = true
+		for _, k := range []string{"listen", "provider-config", "provider-profile", "provider-machine-shape", "max-provider-attempts", "allow-private-staging", "allow-gpu"} {
+			allowed[k] = true
+		}
 	case "workspace":
 		allowed["id"] = true
 	case "token":
@@ -176,6 +211,15 @@ func Parse(args []string) (Request, error) {
 	} else if r.Root == "" {
 		return r, ErrArguments
 	}
+	if r.Command == "serve" {
+		providerFlags := seen["provider-config"] || seen["provider-profile"] || seen["provider-machine-shape"] ||
+			seen["max-provider-attempts"] || seen["allow-private-staging"] || seen["allow-gpu"]
+		if providerFlags && (r.ProviderConfig == "" || r.ProviderProfile == "" ||
+			(r.ProviderMachineShape != "NvidiaTeslaT4" && r.ProviderMachineShape != "NvidiaTeslaP100") ||
+			r.MaxProviderAttempts < 1 || !r.AllowPrivateStaging || !r.AllowGPU) {
+			return r, ErrArguments
+		}
+	}
 	if r.Command == "workspace" || r.Command == "token" && r.Action == "revoke" {
 		if r.ID == "" {
 			return r, ErrArguments
@@ -193,7 +237,7 @@ func Parse(args []string) (Request, error) {
 			used[s] = true
 		}
 	}
-	for _, v := range []string{r.Root, r.Output, r.File, r.ID, r.Workspace, r.Listen} {
+	for _, v := range []string{r.Root, r.Output, r.File, r.ID, r.Workspace, r.Listen, r.ProviderConfig, r.ProviderProfile, r.ProviderMachineShape} {
 		if strings.ContainsRune(v, 0) {
 			return r, ErrArguments
 		}
