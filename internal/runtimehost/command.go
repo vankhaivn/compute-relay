@@ -14,10 +14,12 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operatorcli"
+	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
 )
 
 // Command is the main executable's local composition boundary. Non-serve commands
-// are finite. It never uses environment credentials, provider packages or a shell.
+// are finite. Provider credentials are resolved only when serve is explicitly
+// configured with the complete provider authorization flag set.
 func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err error) {
 	ctx := parent
 	if r.Command != "serve" {
@@ -72,7 +74,23 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 		}
 		return encoder.Encode(result)
 	case "serve":
-		return h.Serve(ctx, r.Listen, func(result Listening) error { return encoder.Encode(result) })
+		serve := ServeConfig{Address: r.Listen}
+		if r.ProviderConfig != "" {
+			raw, err := readPrivate(r.ProviderConfig, 8192)
+			if err != nil {
+				return ErrRequest
+			}
+			config, err := kaggle.ParseConfig(raw)
+			clear(raw)
+			if err != nil {
+				return ErrRequest
+			}
+			serve.Kaggle = &KaggleServeConfig{
+				Config: config, Profile: r.ProviderProfile,
+				MachineShape: r.ProviderMachineShape, MaxAttempts: r.MaxProviderAttempts,
+			}
+		}
+		return h.ServeConfigured(ctx, serve, func(result Listening) error { return encoder.Encode(result) })
 	case "workspace":
 		var result WorkspaceView
 		switch r.Action {
