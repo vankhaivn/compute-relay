@@ -79,14 +79,6 @@ func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dis
 		return nil, nil, noSettings, ErrState
 	}
 
-	settings := scheduler.DefaultSettings()
-	settings.Paused = false
-	settings.MaxWorkers = 1
-	settings.MaxActivePerAccount = 1
-	if err = h.store.ConfigureScheduler(ctx, settings); err != nil {
-		return nil, nil, noSettings, ErrState
-	}
-
 	dispatchConfig := dispatch.DefaultConfig()
 	dispatchConfig.Workers = 1
 	dispatchConfig.PollDelay = time.Second
@@ -99,6 +91,17 @@ func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dis
 	collectionConfig.Workers = 1
 	collector, err := collection.New(h.store, registry, h.results, clock{}, collectionConfig)
 	if err != nil {
+		return nil, nil, noSettings, ErrState
+	}
+
+	// Persist worker admission only after the complete composition exists. A
+	// constructor failure must not leave a future process observing an unpaused
+	// scheduler without an active owner.
+	settings := scheduler.DefaultSettings()
+	settings.Paused = false
+	settings.MaxWorkers = 1
+	settings.MaxActivePerAccount = 1
+	if err = h.store.ConfigureScheduler(ctx, settings); err != nil {
 		return nil, nil, noSettings, ErrState
 	}
 	return dispatcher, collector, settings, nil
