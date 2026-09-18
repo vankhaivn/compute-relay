@@ -51,8 +51,9 @@ guarantee is supplied.
 The isolated fixed helper allowlists only account, metadata/status, output listing and exact-file
 read RPCs, one armed send each. The private SDK session seam remains version-bound. Verified TLS,
 identity encoding, strict bounded JSON and no ambient proxies/cookies/retries apply. One validated
-signed download redirect may use HTTPS `storage.googleapis.com` (optional 443), with no account
-Authorization/Cookie and no subsequent redirect. Raw signed URLs/diagnostics are not exposed.
+signed download redirect may use exact HTTPS `storage.googleapis.com` or
+`www.kaggleusercontent.com` (optional 443), with no account Authorization/Cookie and no
+subsequent redirect. Raw signed URLs/diagnostics are not exposed.
 
 Defaults: 10,004 selected files, 4 GiB selected bytes and ten-minute invocation, configurable down
 and within one-second–thirty-minute bounds. Listing permits 20,000 names/256 pages; helper at most

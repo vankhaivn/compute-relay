@@ -77,11 +77,18 @@ class ArtifactContractTests(unittest.TestCase):
         for url in ("http://storage.googleapis.com/a", "https://storage.googleapis.com.evil/a",
                     "https://user@storage.googleapis.com/a", "https://127.0.0.1/a",
                     "https://storage.googleapis.com/a#secret", "https://storage.googleapis.com:444/a",
-                    "https://storage.googleapis.com/a\n", "https://storage.googleapis.com/\\x"):
+                    "https://storage.googleapis.com/a\n", "https://storage.googleapis.com/\\x",
+                    "http://www.kaggleusercontent.com/kf/a", "https://www.kaggleusercontent.com.evil/kf/a",
+                    "https://user@www.kaggleusercontent.com/kf/a", "https://www.kaggleusercontent.com:444/kf/a",
+                    "https://www.kaggleusercontent.com/kf/a#secret", "https://www.kaggleusercontent.com/kf/a\n",
+                    "https://www.kaggleusercontent.com/\\x"):
             with self.assertRaises(ValueError):
                 contract.signed_url(url)
-        self.assertEqual(contract.signed_url("https://storage.googleapis.com/bucket/file?signature=x"),
-                         "https://storage.googleapis.com/bucket/file?signature=x")
+        for url in ("https://storage.googleapis.com/bucket/file?signature=x",
+                    "https://storage.googleapis.com:443/bucket/file?signature=x",
+                    "https://www.kaggleusercontent.com/kf/output/file?signature=x",
+                    "https://www.kaggleusercontent.com:443/kf/output/file?signature=x"):
+            self.assertEqual(contract.signed_url(url), url)
         for raw in (b'{"x":1,"x":2}', b'{"x":NaN}', b'[]', b'{"x":"\xff"}'):
             with self.assertRaises((ValueError, UnicodeError)):
                 contract.strict_json(raw)
