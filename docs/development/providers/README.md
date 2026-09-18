@@ -17,3 +17,14 @@ Use the [operator checklist](../validation-checklist.md) for re-qualification.
 Keep full operator run records private and use focused issues/PRs for sanitized failures or
 support-changing evidence. Source/fixture evidence is not live account support. The normal server
 remains [admission-only](../../status.md).
+
+
+## Normal runtime integration
+
+The normal runtime can now compose the Kaggle adapter with durable dispatch and collection workers
+when the operator supplies an exact immutable profile/provider binding, explicit staging/GPU
+authorization and a finite process attempt budget. The safe default remains admission-only.
+
+This integrated path reuses the components documented here; it does not replace the fixed
+acceptance utility as live evidence. See [user runbook](../../kaggle-runtime.md) and
+[ADR-0024](../decisions/0024-explicit-bounded-provider-workers.md).
