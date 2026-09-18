@@ -3,8 +3,9 @@
 Use this page after the initial installation is configured. It is a task-oriented runbook for the
 normal local runtime; detailed semantics live in the linked reference guides.
 
-Normal `serve` is currently **local-admission-only**. It does not dispatch provider compute.
-See [current status](status.md) whenever that distinction matters.
+`serve` is **local-admission-only by default**. For bounded GPU execution through the normal
+runtime, use the explicit [Kaggle runtime](kaggle-runtime.md) startup instead. See
+[current status](status.md) for the current support boundary.
 
 ## Before every session
 
@@ -28,7 +29,9 @@ Start:
 ./compute-relay serve --root /absolute/private/runtime --listen 127.0.0.1:7331
 ```
 
-Expected mode is `local-admission-only` and `dispatch_enabled=false`.
+For this default command, expected mode is `local-admission-only` and
+`dispatch_enabled=false`. Provider-enabled startup is documented separately in
+[Kaggle runtime](kaggle-runtime.md).
 
 Stop with the foreground process's interrupt/SIGTERM. Let graceful shutdown complete. Do not
 delete lock files to make another command run.
