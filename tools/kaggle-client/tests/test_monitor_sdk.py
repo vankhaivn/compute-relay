@@ -51,7 +51,7 @@ class MonitorPinnedSDKTests(unittest.TestCase):
         if operation == execution.OPERATIONS["get"]:
             self.assertEqual(body["userName"], self.execution["owner"])
             self.assertEqual(body["kernelSlug"], self.execution["slug"])
-            self.assertIn(body.get("versionLabel", ""), ("", "1"))
+            self.assertNotIn("versionLabel", body)
             if self.log_seen and self.fault == "final-read":
                 return response(b'{}', 503)
             return response(json.dumps(self.kernel).encode())
@@ -63,7 +63,7 @@ class MonitorPinnedSDKTests(unittest.TestCase):
                 return response(b'{}', 503)
             return response(json.dumps(self.status).encode())
         if operation == execution.OPERATIONS["logs"]:
-            self.assertEqual(body["versionLabel"], "1")
+            self.assertNotIn("versionLabel", body)
             self.assertEqual(body["pageSize"], 1)
             self.assertNotIn("pageToken", body)
             self.log_seen = True
@@ -135,14 +135,14 @@ class MonitorPinnedSDKTests(unittest.TestCase):
                 self.assertEqual(result, monitor.empty("unavailable", "read_unavailable"))
                 self.assertEqual(len(self.calls), 1 if fault in ("wrong-account", "auth") else 2)
 
-    def test_logs_use_version_and_recheck_identity_without_artifact_download(self):
+    def test_logs_use_current_kernel_and_recheck_identity_without_artifact_download(self):
         result = self.invoke("logs")
         self.assertEqual(base64.b64decode(result["text_b64"]), b"one\n[REDACTED]\nthree")
         self.assertEqual(result["availability"], "after_completion")
         self.assertFalse(result["truncated"])
         self.assertNotIn("artifact-page", json.dumps(result))
         self.assertEqual(len(self.calls), 6)
-        self.assertEqual([body.get("versionLabel", "") for op, body in self.calls if op == execution.OPERATIONS["get"]], ["", "1", ""])
+        self.assertTrue(all("versionLabel" not in body for op, body in self.calls if op == execution.OPERATIONS["get"]))
         for status in ({"status": "RUNNING"}, {}, {"status": "FUTURE_STATE"}):
             self.status = status
             self.assertEqual(self.invoke("logs")["availability"], "delayed")

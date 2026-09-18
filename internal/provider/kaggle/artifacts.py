@@ -170,11 +170,9 @@ def operate(r, token, mode, sink):
                 raise ValueError("account identity not verified")
             api = client.kernels.kernels_api_client
 
-            def check(version):
+            def check():
                 query = ApiGetKernelRequest()
                 query.user_name, query.kernel_slug = execution["owner"], execution["slug"]
-                if version:
-                    query.version_label = version
                 guard.call(KERNEL + "GetKernel", api.get_kernel, query)
                 core.check_kernel(guard.last, execution, execution["kernel_id"])
 
@@ -210,13 +208,13 @@ def operate(r, token, mode, sink):
                     response.close()
                 return contract.entry(path, size, digest.hexdigest())
 
-            check("")
-            check("1")
+            check()
+            check()
             terminal()
             listed, cursors, cursor = set(), set(), ""
             for _ in range(contract.MAX_PAGES):
                 query = ApiListKernelSessionOutputRequest()
-                query.user_name, query.kernel_slug, query.version_label = execution["owner"], execution["slug"], "1"
+                query.user_name, query.kernel_slug = execution["owner"], execution["slug"]
                 query.page_size = 100
                 if cursor:
                     query.page_token = cursor
@@ -277,7 +275,7 @@ def operate(r, token, mode, sink):
                         raise ValueError("artifact differs from pinned bytes")
                 result = None
             terminal()
-            check("")
+            check()
             return result
         finally:
             guard.close()

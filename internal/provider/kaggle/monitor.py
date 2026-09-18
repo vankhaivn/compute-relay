@@ -115,15 +115,13 @@ def operate(request, token, mode):
                 guard.call("quota", api.get_accelerator_quota_statistics, ApiGetAcceleratorQuotaStatisticsRequest())
                 return quota_result(guard.last)
             r = request["execution"]
-            def check(version):
+            def check():
                 query = ApiGetKernelRequest()
                 query.user_name, query.kernel_slug = r["owner"], r["slug"]
-                if version:
-                    query.version_label = version
                 guard.call("get", api.get_kernel, query)
                 core.check_kernel(guard.last, r, r["kernel_id"])
-            check("")
-            check("1")
+            check()
+            check()
             status = core.kernel_status_request(ApiGetKernelSessionStatusRequest, r["owner"], r["slug"])
             try:
                 guard.call("status", api.get_kernel_session_status, status)
@@ -131,11 +129,11 @@ def operate(request, token, mode):
             except Exception:
                 state = "UNKNOWN"
             query = ApiListKernelSessionOutputRequest()
-            query.user_name, query.kernel_slug, query.version_label = r["owner"], r["slug"], "1"
+            query.user_name, query.kernel_slug = r["owner"], r["slug"]
             query.page_size = 1
             guard.call("logs", api.list_kernel_session_output, query)
             result = log_result(guard.last, state, token)
-            check("")  # never release log bytes after a resource/source/privacy change
+            check()  # never release log bytes after a resource/source/privacy change
             return result
     except core.IdentityMismatch:
         return empty("invalid", "identity_mismatch")

@@ -70,6 +70,19 @@ class ExecutionProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.check_kernel(good, r), "42")
         good["metadata"]["author"] = "Another Human Display Name"
         self.assertEqual(bridge.check_kernel(good, r), "42")
+        for field in ("kernelDataSources", "competitionDataSources", "modelDataSources"):
+            with self.subTest(empty_repeated_field=field):
+                raw = kernel_fixture(r)
+                raw["metadata"].pop(field)
+                self.assertEqual(bridge.check_kernel(raw, r), "42")
+                raw = kernel_fixture(r)
+                raw["metadata"][field] = None
+                self.assertEqual(bridge.check_kernel(raw, r), "42")
+                for invalid in (["foreign/source"], {}, ""):
+                    raw = kernel_fixture(r)
+                    raw["metadata"][field] = invalid
+                    with self.assertRaises(bridge.IdentityMismatch):
+                        bridge.check_kernel(raw, r)
         for field in ("id", "ref", "slug", "currentVersionNumber", "isPrivate", "enableGpu", "enableTpu", "enableInternet", "datasetDataSources"):
             with self.subTest(field=field):
                 raw = kernel_fixture(r)
@@ -177,7 +190,7 @@ class ExecutionPinnedSDKTests(unittest.TestCase):
         if operation == bridge.OPERATIONS["get"]:
             self.assertEqual(body["userName"], self.r["owner"])
             self.assertEqual(body["kernelSlug"], self.r["slug"])
-            self.assertIn(body.get("versionLabel", ""), ("", "1"))
+            self.assertNotIn("versionLabel", body)
             if self.get_fault == "error-body":
                 return response(b'{"error":"not found"}')
             if self.get_fault == "unreachable":
@@ -233,7 +246,7 @@ class ExecutionPinnedSDKTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_TOKEN", json.dumps(result))
         return result
 
-    def test_private_save_readback_and_explicit_version_observation(self):
+    def test_private_save_readback_and_current_version_observation(self):
         result = self.invoke("submit")
         self.assertEqual(result["status"], "found")
         self.assertEqual(result["kernel_id"], "42")
