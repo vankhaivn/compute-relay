@@ -13,6 +13,15 @@ Tesla-T4, restart/reconciliation and artifact-publication components. The integr
 path is implemented and covered by offline/native CI, but it still requires operator
 re-qualification before making a new environment/account support claim.
 
+> **Fresh runtime root:** when creating a runtime for the first time, the path passed to
+> `compute-relay init --root ...` must **not already exist**. Create only its parent directory;
+> `init` uses exclusive creation for the runtime root. For example, create
+> `/absolute/private`, but do not `mkdir /absolute/private/runtime` before:
+>
+> ```sh
+> ./compute-relay init --root /absolute/private/runtime
+> ```
+
 ## 1. Install the locked Kaggle client
 
 From the repository root, install `uv` 0.12.13 and create/check the repository-owned client
@@ -132,15 +141,20 @@ For a minimal smoke workload, create `gpu-job/main.py`:
 ```python
 from pathlib import Path
 import json
+import os
 import torch
 
 x = torch.tensor([6, 7], device="cuda")
 answer = int((x[0] * x[1]).item())
-Path("answer.json").write_text(
+Path(os.environ.get('CC_OUTPUT_DIR', '.'), 'answer.json').write_text(
     json.dumps({"answer": answer}) + "\n",
     encoding="utf-8",
 )
 ```
+
+Declared outputs must be written under `CC_OUTPUT_DIR`. The runner executes code from its code
+working directory but collects declared artifacts from the separate output directory; writing
+`answer.json` only to the current working directory will result in `ARTIFACT_MISSING`.
 
 Package and upload it while provider-enabled `serve` is running:
 
