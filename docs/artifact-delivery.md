@@ -72,7 +72,8 @@ owned temporary names; a crash can leave them for private investigation.
 HTTP/1.1 trailer preservation and same-filesystem hard-link support are requirements. Byte-range
 resume, transparent proxy/HTTP/2/browser interoperability, secure erasure and hostile-host or
 arbitrary power-loss guarantees are not supplied. Transfer budgets are finite, not throughput
-promises. The current normal server serves existing results only; it runs no workers.
+promises. Admission-only serve reads existing publications only; provider-enabled serve may also
+publish newly collected results through the same verified local result boundary.
 
 Use the [operator checklist](development/validation-checklist.md) for host verification and
 [recovery](recovery.md) for uncertainty. File/stream tests are offline evidence until an actual
