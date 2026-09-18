@@ -9,11 +9,14 @@ feature set, not individual commits, audits or CI runs.
   and immutable admission profiles.
 - Immutable input uploads, safe code bundles and provider-neutral job contracts.
 - SQLite-backed jobs, attempts, idempotent receipts, recovery and explicit job controls.
-- Verified artifact collection, authorized downloads, retention rules and local byte cleanup
-  components.
-- Kaggle preflight, private staging, one-shot execution, quota/log snapshots and versioned
-  result retrieval components, plus an explicitly authorized GPU acceptance experiment.
+- Verified artifact collection, authorized downloads, retention rules and local byte cleanup.
+- Kaggle preflight, private staging, one-shot execution, quota/log snapshots and selected
+  artifact transfer, plus a fixed live-qualified GPU acceptance experiment.
+- Explicit Kaggle-enabled normal `serve` composition with exact frozen binding verification,
+  a finite provider-attempt authorization budget, durable dispatch/reconciliation and verified
+  artifact collection; admission-only mode remains the default.
 
-**Not yet a complete production compute service:** the normal server is admission-only;
-general provider/worker integration and live acceptance remain unfinished. See
-[current status](docs/status.md) and the [remaining plan](docs/development/implementation-plan.md).
+**Pre-release:** public provider log/cleanup surfaces, strict runtime configuration, doctor/client
+examples, installation packaging and full release hardening remain. The integrated normal-server
+path requires scoped operator re-qualification before new live support claims. See
+[current status](docs/status.md).
