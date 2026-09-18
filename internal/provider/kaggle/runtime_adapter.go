@@ -220,6 +220,15 @@ func (p *RuntimeAdapter) authorize(id provider.Identity) error {
 	return nil
 }
 
+func (p *RuntimeAdapter) BudgetExhausted() bool {
+	if p == nil || !p.allow {
+		return true
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.authorized) >= p.maxAttempts
+}
+
 func (p *RuntimeAdapter) validPlan(ctx context.Context, plan provider.Plan) error {
 	expected, err := p.Validate(ctx, plan.Job)
 	if err != nil || expected.Digest() != plan.Digest() {
