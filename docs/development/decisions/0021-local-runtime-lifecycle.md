@@ -2,6 +2,10 @@
 
 Status: accepted. Requirements: API-01/03, DX-01; preserves SEC-02 and durable ownership.
 
+The admission-only lifecycle remains the default. The optional provider-worker composition is
+extended by [ADR-0024](0024-explicit-bounded-provider-workers.md); this record preserves the
+original local-only decision and its safety rationale.
+
 ## Decision
 
 Expose local initialization, workspace/token administration and schema validation through the
