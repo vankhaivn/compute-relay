@@ -13,6 +13,10 @@ MAX_BYTES = 4 << 30
 MAX_LIST_FILES = 20000
 MAX_PAGES = 256
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+SIGNED_STORAGE_NETLOCS = (
+    "storage.googleapis.com", "storage.googleapis.com:443",
+    "www.kaggleusercontent.com", "www.kaggleusercontent.com:443",
+)
 
 
 def strict_json(raw):
@@ -62,7 +66,7 @@ def signed_url(url):
     if type(url) is not str or not 1 <= len(url) <= 16384 or any(ord(c) < 33 or ord(c) > 126 for c in url) or "\\" in url:
         raise ValueError("invalid storage URL")
     parsed = urlsplit(url)
-    if (parsed.scheme != "https" or parsed.netloc not in ("storage.googleapis.com", "storage.googleapis.com:443")
+    if (parsed.scheme != "https" or parsed.netloc not in SIGNED_STORAGE_NETLOCS
             or not parsed.path.startswith("/") or parsed.fragment):
         raise ValueError("unapproved storage destination")
     return url

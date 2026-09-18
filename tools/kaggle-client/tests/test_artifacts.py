@@ -70,13 +70,14 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
         self.data = {contract.MANIFEST: json.dumps(self.manifest).encode(), "outputs/answer.txt": b"yes",
                      "control/stdout.log": b"payload log\n", "control/environment.json": b"{}",
                      "scratch/private.bin": b"NEVER_DOWNLOAD", "code/main.py": b"NEVER_DOWNLOAD"}
-        self.calls, self.downloads, self.cloud_calls = [], [], []
+        self.calls, self.downloads, self.cloud_calls, self.cloud_hosts = [], [], [], []
         self.list_fault = ""
         self.read_fault = ""
         self.change_after = ""
         self.wrong_account = False
         self.status = "COMPLETE"
         self.redirect = False
+        self.redirect_base = "https://storage.googleapis.com/fixture/"
         self.target_path = "outputs/answer.txt"
         self.listed = [contract.PREFIX + path for path in self.data]
 
@@ -85,12 +86,17 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
         self.assertTrue(kwargs["verify"])
         self.assertEqual(kwargs["proxies"], {})
         self.assertEqual(kwargs["timeout"], (5, 30))
-        if request.url.startswith("https://storage.googleapis.com/"):
-            self.assertEqual(request.method, "GET")
+        parsed = urlsplit(request.url)
+        if request.method == "GET" and parsed.hostname in ("storage.googleapis.com", "www.kaggleusercontent.com"):
+            self.assertEqual(parsed.scheme, "https")
+            self.assertIn(parsed.netloc, contract.SIGNED_STORAGE_NETLOCS)
             self.assertNotIn("Authorization", request.headers)
             self.assertNotIn("Cookie", request.headers)
-            path = unquote(urlsplit(request.url).path[len("/fixture/"):])
+            prefix = "/kf/fixture/" if parsed.hostname == "www.kaggleusercontent.com" else "/fixture/"
+            self.assertTrue(parsed.path.startswith(prefix))
+            path = unquote(parsed.path[len(prefix):])
             self.cloud_calls.append(path)
+            self.cloud_hosts.append(parsed.hostname)
             return self.raw_response(path)
         self.assertEqual(request.method, "POST")
         self.assertEqual(request.headers["Authorization"], "Bearer SYNTHETIC_TOKEN")
@@ -144,7 +150,7 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
             self.assertNotIn(path.split("/", 1)[0], ("scratch", "code", "inputs"))
             self.downloads.append(path)
             if self.redirect:
-                r = response(b"NEVER_READ_REDIRECT_BODY", 302, {"Location": "https://storage.googleapis.com/fixture/" + quote(path, safe="")})
+                r = response(b"NEVER_READ_REDIRECT_BODY", 302, {"Location": self.redirect_base + quote(path, safe="")})
                 r.raw = mock.Mock(wraps=r.raw)
                 r.raw.read.side_effect = AssertionError("redirect body consumed")
                 return r
@@ -197,12 +203,17 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
 
     def test_stream_uses_exact_file_version_and_credential_free_signed_storage(self):
         self.redirect = True
-        for path in (contract.MANIFEST, "outputs/answer.txt", "control/stdout.log"):
-            self.pin(path)
-            sink = io.BytesIO()
-            self.assertIsNone(self.invoke("fetch", sink))
-            self.assertEqual(sink.getvalue(), self.data[path])
+        for origin in ("https://storage.googleapis.com/fixture/",
+                       "https://www.kaggleusercontent.com:443/kf/fixture/"):
+            self.redirect_base = origin
+            for path in (contract.MANIFEST, "outputs/answer.txt", "control/stdout.log"):
+                self.pin(path)
+                sink = io.BytesIO()
+                self.assertIsNone(self.invoke("fetch", sink))
+                self.assertEqual(sink.getvalue(), self.data[path])
         self.assertIn("outputs/answer.txt", self.cloud_calls)
+        self.assertIn("storage.googleapis.com", self.cloud_hosts)
+        self.assertIn("www.kaggleusercontent.com", self.cloud_hosts)
         self.assertTrue(all(op in bridge.ALLOWED for op, _ in self.calls))
 
     def test_pagination_identity_and_missing_results_never_authorize_bytes(self):
