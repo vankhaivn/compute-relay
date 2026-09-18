@@ -1,8 +1,9 @@
 # Private staging and readiness
 
 The Stager prepares one attempt's original bytes and separately verifies private readiness.
-It is not a general Provider or a new journal. The fixed [acceptance utility](kaggle-acceptance.md)
-composes it; the normal server does not activate it.
+It is not a journal and never owns durable mutation authority. Both the fixed
+[acceptance utility](kaggle-acceptance.md) and the explicitly configured normal
+[Kaggle runtime](../../kaggle-runtime.md) compose it behind the durable dispatch gate.
 
 ## Authority and frozen identity
 

@@ -1,8 +1,8 @@
 # Local runtime
 
-Build and operate a private installation. The normal server is **admission-only**: it handles
-local access, objects, jobs, controls and already published results, not provider/compute work.
-See [current status](status.md) before using it as an application backend.
+Build and operate a private installation. `serve` is admission-only by default; an explicitly
+configured [Kaggle runtime](kaggle-runtime.md) can additionally start bounded provider dispatch and
+collection workers. See [current status](status.md) before depending on a capability.
 
 ## Build and initialize
 
@@ -33,10 +33,11 @@ before starting the server. Initialization does not create a default profile or 
 ./compute-relay serve --root /absolute/private/runtime --listen 127.0.0.1:7331
 ```
 
-The server stays in the foreground and reports `local-admission-only`, `dispatch_enabled=false`.
-The default is literal loopback `127.0.0.1:7331`; port 0 requests an assigned port. DNS names,
-wildcard/remote/private-network listeners and ambiguous aliases are rejected. No flag enables
-remote exposure, provider workers or a TLS bypass.
+Without provider flags the server stays in the foreground and reports `local-admission-only`,
+`dispatch_enabled=false`. The default is literal loopback `127.0.0.1:7331`; port 0 requests an
+assigned port. DNS names, wildcard/remote/private-network listeners and ambiguous aliases are
+rejected. Provider workers require the complete explicit flag set in
+[Kaggle runtime](kaggle-runtime.md); no flag enables remote HTTP exposure or a TLS bypass.
 
 Application HTTP commands can run concurrently with serve. **Stop serve before local
 administration**, including `state` and profile changes, because all acquire the installation's
@@ -78,9 +79,10 @@ Only `/healthz` is public. Readiness/info and application routes use authenticat
 Host/Origin, body/rate/concurrency and idempotency guards. The host's optional local-import and
 HTTPS-ingestion services remain disabled. See [API contracts](../api/README.md).
 
-`/readyz` establishes local dependency readiness, not account/GPU availability. A `202` means
-local admission/control committed. No scheduler, dispatcher, collector, input fetcher or retention
-sweeper starts. Artifact routes expose only committed publications; queued jobs have no results.
+`/readyz` establishes local HTTP/storage readiness, not proof of GPU allocation or job success.
+A `202` means local admission/control committed. Admission-only serve starts no provider workers.
+Provider-enabled serve starts the configured bounded dispatcher/collector after its read-only
+account check; artifact routes still expose only committed publications.
 
 Interrupt/SIGTERM stops new handlers, allows ten seconds for graceful completion, then closes
 connections on timeout and reports failure. Store closure and lock release still wait for all

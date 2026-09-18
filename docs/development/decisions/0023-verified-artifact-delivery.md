@@ -23,5 +23,6 @@ stdout failure retains `download_may_be_published`; unsupported linking fails cl
 Fixed-length or prefix success loses post-byte failures and permission changes. Final acknowledgement
 protects delivery but cannot recall bytes already sent. Trailer-preserving HTTP/1.1 and hard links
 are requirements; transparent proxy/HTTP/2/browser use, Range resume, secure erasure and hostile-host
-proof are not supplied. Normal serve remains admission-only. See [delivery](../../artifact-delivery.md)
-and [API contracts](../../../api/README.md).
+proof are not supplied. Admission-only serve remains the default; provider-enabled serve uses the
+same publication/delivery boundary after collection. See [delivery](../../artifact-delivery.md),
+[API contracts](../../../api/README.md) and [ADR-0024](0024-explicit-bounded-provider-workers.md).

@@ -21,8 +21,10 @@ verified file bytes or proof that a planned endpoint is enabled.
 
 ## Current handler inventory
 
-There are eighteen composable operations. The local host enables all except the optional import
-and HTTPS-ingestion components, and starts no provider/collection workers.
+There are eighteen composable HTTP operations. The local host enables all except the optional
+import and HTTPS-ingestion components. Admission-only serve starts no provider workers;
+provider-enabled serve may run separate durable dispatch/collection workers, but HTTP handlers
+still never invoke providers directly.
 
 ```text
 GET  /healthz

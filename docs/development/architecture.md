@@ -20,14 +20,18 @@ queue or edit arbitrary database rows. The composition root decides which servic
 
 ## Available compositions
 
-The normal `runtimehost` serves uploads, admission/status/control and reads of published results
-with SQLite and separate input/result stores. It creates no provider, scheduler, dispatcher,
-collector, input-fetch worker or sweeper. A local `202` is a receipt, not remote execution.
+The normal `runtimehost` always serves uploads, admission/status/control and reads of published
+results with SQLite and separate input/result stores. With no provider flags it creates no provider
+workers and remains local-admission-only. With an exact configured Kaggle profile plus explicit
+private-staging/GPU authorization and a finite attempt budget, it additionally composes one durable
+dispatch worker and one collector against the frozen provider snapshot. A local `202` remains an
+admission receipt, not remote-success evidence.
 
-The separate fixed Kaggle acceptance utility composes the real provider components and durable
-engines for one authorized experiment. It is not general multi-job production registration.
-It has a different state format and explicit submission/read-only modes; do not interchange its
-root with a normal runtime installation. See [acceptance](providers/kaggle-acceptance.md).
+The separate fixed Kaggle acceptance utility remains the narrower live-qualification workflow. It
+uses the same reviewed provider components but a different state format and explicit
+submission/read-only modes; do not interchange its root with a normal runtime installation. See
+[acceptance](providers/kaggle-acceptance.md) and
+[ADR-0024](decisions/0024-explicit-bounded-provider-workers.md).
 
 ## Responsibility map
 

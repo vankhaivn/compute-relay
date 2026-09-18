@@ -9,8 +9,9 @@ This plan retains task IDs for future work; completed implementation history liv
 Portable core and durable components are implemented offline. Kaggle components and the fixed
 acceptance harness are implemented, and the scoped private-staging/Tesla-T4/restart/artifact path
 has been qualified live. The main binary supplies local operator commands, admission profiles,
-application requests and delivery of published artifacts. Normal `serve` remains admission-only
-with no provider or collection workers.
+application requests and delivery of published artifacts. Normal `serve` is admission-only by
+default and now also has an explicit bounded Kaggle composition with exact provider binding,
+durable dispatch/recovery and collection workers.
 
 ## Remaining provider capability boundaries
 
@@ -33,17 +34,18 @@ cleanup, public data or paid capacity.
 
 | Task | Work remaining / acceptance |
 |---|---|
-| M5-01 | Complete general provider registration, bounded worker lifecycle and remaining log/cleanup surfaces. Preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
+| M5-01 | Kaggle provider registration and bounded dispatch/collection lifecycle are implemented behind explicit finite authorization. Remaining work is public provider log/quota/cleanup surfaces and broader product hardening; preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
 | M5-02 | Strict TOML runtime configuration, precedence, paths, safe defaults and validated examples; exclude secret values. Depends on M4-01/M5-01 interfaces. |
 | M5-03 | Doctor with separate local/read-only/explicit-compute modes. Depends on M4-01/M5-02. |
 | M5-04 | Verify and document GPU smoke plus a small pinned open-access LLM batch example. Depends on M4-06 and verified environment/model terms. |
 | M5-05 | Thin Node.js, Python and Go HTTP clients handling receipts, unknown states, explicit controls and checked downloads. Depends on M5-01/M5-04. |
 | M5-06 | Clean-install/build guide, optional unprivileged container and platform packaging. Depends on M5-01–M5-05. |
 
-M5-01a local lifecycle, M5-01b profile/application commands and M5-01c artifact delivery are
-implemented. They do not satisfy the remaining parent M5-01 worker/runtime requirements.
-Do not invent an enable-dispatch flag, map an acceptance directory into a normal installation,
-seed production SQL, or advertise a queued job as running to bridge that gap.
+M5-01a local lifecycle, M5-01b profile/application commands, M5-01c artifact delivery and the
+bounded Kaggle worker composition are implemented. Provider mode requires an exact configured
+profile plus explicit staging/GPU flags and a finite attempt budget; the default remains
+admission-only. Do not map an acceptance directory into a normal installation, seed production SQL,
+or treat admission as execution evidence.
 
 ## M6 — Release acceptance
 

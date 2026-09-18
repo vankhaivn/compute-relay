@@ -4,8 +4,9 @@ This walkthrough takes a fresh clone to a working **local admission runtime**. A
 have built the binary, initialized private state, created a workspace/token, applied an admission
 profile, started the loopback server, packaged/uploaded code, and admitted one job.
 
-**This walkthrough does not run remote compute.** Normal `serve` currently has no provider or
-worker lifecycle. See [current status](status.md) for the exact implementation boundary.
+**This walkthrough intentionally uses the safe admission-only mode.** It does not consume provider
+quota or run remote compute. After you understand the local flow, continue with
+[Kaggle runtime](kaggle-runtime.md) to enable bounded GPU dispatch explicitly.
 
 ## 1. Build the binary
 
@@ -176,8 +177,8 @@ Copy the returned job/attempt IDs and inspect the job:
   --id job_ACTUAL_RECEIPT_ID
 ```
 
-The job is durably admitted, but normal `serve` does not execute it. Do not interpret
-`202 Accepted`, a queued attempt, or a control receipt as remote execution.
+The job is durably admitted, but this admission-only `serve` process does not execute it. Do not
+interpret `202 Accepted`, a queued attempt, or a control receipt as remote execution.
 
 ## 9. What to do next
 
@@ -185,6 +186,7 @@ For day-to-day commands use the [Operator runbook](runbook.md). Detailed referen
 [Local runtime](local-runtime.md), [Application CLI](application-cli.md),
 [Artifact delivery](artifact-delivery.md), and [Recovery](recovery.md).
 
-If your goal is to work on provider integration or repeat the bounded Kaggle qualification path,
-that is a development/maintainer workflow. Start with
-[Development documentation](development/README.md), not this user runbook.
+To run an application job on Kaggle, continue with the user-facing
+[Kaggle runtime](kaggle-runtime.md). Contributors changing provider internals or repeating the
+fixed qualification experiment should instead start with
+[Development documentation](development/README.md).

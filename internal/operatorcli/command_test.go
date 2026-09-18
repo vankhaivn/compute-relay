@@ -13,6 +13,7 @@ import (
 func TestOperatorParserAcceptsOnlyExplicitCommandFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"init", "--root", "run"}, {"state", "--root", "run"}, {"serve", "--root", "run", "--listen", "127.0.0.1:0"},
+		{"serve", "--root", "run", "--provider-config", "provider.json", "--provider-profile", "kaggle-t4", "--provider-machine-shape", "NvidiaTeslaT4", "--max-provider-attempts", "2", "--allow-private-staging", "--allow-gpu"},
 		{"workspace", "create", "--root", "run", "--id", "app"}, {"workspace", "disable", "--root", "run", "--id", "app"},
 		{"token", "issue", "--root", "run", "--workspace", "app", "--scope", "read", "--scope", "write", "--output", "private-token", "--ttl", "2h"},
 		{"token", "revoke", "--root", "run", "--id", "tok_id"}, {"validate", "--file", "job.json"},
@@ -31,6 +32,8 @@ func TestOperatorInvalidAndHelpNeverPerformAnActionOrEchoInput(t *testing.T) {
 	for _, args := range [][]string{
 		nil, {"unknown-SYNTHETIC_SECRET"}, {"init"}, {"init", "--root", "a", "--root", "b"},
 		{"state", "--root", "run", "--scope", "read"}, {"serve", "--root", "run", "--allow-gpu=false"},
+		{"serve", "--root", "run", "--provider-config", "provider.json"},
+		{"serve", "--root", "run", "--provider-config", "provider.json", "--provider-profile", "kaggle-t4", "--provider-machine-shape", "NvidiaTeslaT4", "--max-provider-attempts", "0", "--allow-private-staging", "--allow-gpu"},
 		{"workspace", "missing", "--root", "run"}, {"token", "issue", "--root", "run", "--workspace", "app", "--scope", "read", "--scope", "read", "--output", "token"},
 		{"token", "issue", "--root", "run", "--workspace", "app", "--scope", "admin", "--output", "token"},
 		{"token", "issue", "--root", "run", "--workspace", "app", "--scope", "read", "--output", "token", "--ttl", "0s"},

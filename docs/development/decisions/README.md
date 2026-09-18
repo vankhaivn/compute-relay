@@ -32,6 +32,7 @@ new choice requires a superseding ADR. Historical wording and review discussion 
 | [0021](0021-local-runtime-lifecycle.md) | Private local operator commands and admission-only HTTP lifecycle. |
 | [0022](0022-immutable-profiles-and-application-client.md) | Immutable admission profiles and non-replaying application CLI. |
 | [0023](0023-verified-artifact-delivery.md) | Current-authority downloads with final acknowledgement and create-only files. |
+| [0024](0024-explicit-bounded-provider-workers.md) | Explicit finite provider authorization and durable workers in normal serve. |
 
 ## Add or revise a decision
 

@@ -94,7 +94,9 @@ Save a complete job after replacing the upload ID:
 
 Local validate checks schema only. Contextual `job validate` also checks profile authority/policy
 and object ownership; neither admits work or proves provider availability. Submit commits local
-job/attempt/receipt metadata. **Normal serve has no workers: accepted jobs remain local.**
+job/attempt/receipt metadata. With admission-only serve the job remains local; with the explicitly
+configured [Kaggle runtime](kaggle-runtime.md), background workers may then stage/dispatch the
+durably admitted attempt.
 
 Keep the original request and explicit key (8–256 printable non-whitespace ASCII bytes).
 Repeating the identical submit recovers the original receipt; changed content with the same key
@@ -118,7 +120,8 @@ Eligibility is enforced, so these are command references, not a sequence to run 
 Retry requires a nonblank non-secret reason and returns `kind=retry_compute`, source `attempt_id`
 and a distinct `new_attempt_id`. Do not retry successful compute just to retrieve missing results.
 Cancellation intent is not termination; reconcile is observational; collect is transfer-only.
-No handler starts a provider or collector. See [controls](development/operations.md) and [recovery](recovery.md).
+HTTP handlers themselves never call providers; provider-enabled serve runs separate durable
+workers. See [controls](development/operations.md) and [recovery](recovery.md).
 
 ### Retrieve published results
 

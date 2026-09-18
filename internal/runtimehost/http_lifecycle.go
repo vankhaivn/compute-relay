@@ -23,6 +23,7 @@ func ValidListen(address string) bool {
 
 type requestDrain struct {
 	next     http.Handler
+	mode     string
 	mu       sync.Mutex
 	stopping bool
 	requests sync.WaitGroup
@@ -39,7 +40,7 @@ func (d *requestDrain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d.requests.Add(1)
 	d.mu.Unlock()
 	defer d.requests.Done()
-	w.Header().Set("X-Compute-Relay-Mode", "local-admission-only")
+	w.Header().Set("X-Compute-Relay-Mode", d.mode)
 	d.next.ServeHTTP(w, r)
 }
 func (d *requestDrain) stop() { d.mu.Lock(); d.stopping = true; d.mu.Unlock() }
@@ -48,7 +49,14 @@ func (d *requestDrain) stop() { d.mu.Lock(); d.stopping = true; d.mu.Unlock() }
 // handlers have exited after forced close. Keep ownership until the drain joins.
 // Existing handlers do not hijack connections and must honor context/body closure.
 func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener, grace time.Duration, announce func() error) error {
-	drain := &requestDrain{next: server.Handler}
+	return serveHTTPMode(ctx, server, listener, grace, "local-admission-only", announce)
+}
+
+func serveHTTPMode(ctx context.Context, server *http.Server, listener net.Listener, grace time.Duration, mode string, announce func() error) error {
+	if mode == "" {
+		return ErrRequest
+	}
+	drain := &requestDrain{next: server.Handler, mode: mode}
 	server.Handler = drain
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
