@@ -1,0 +1,5 @@
+{
+  "max_remote_wall_seconds": 600,
+  "authorize_compute": true,
+  "authorize_private_staging": true
+}

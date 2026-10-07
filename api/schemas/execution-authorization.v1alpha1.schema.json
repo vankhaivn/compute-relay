@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay execution-authorization v1alpha1",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id",
+        "max_remote_wall_seconds",
+        "authorize_private_staging",
+        "authorize_compute"
+      ],
+      "properties": {
+        "attempt_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+        },
+        "max_remote_wall_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "authorize_private_staging": {
+          "const": true
+        },
+        "authorize_compute": {
+          "const": true
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_id",
+        "workspace_id",
+        "job_id",
+        "attempt_id",
+        "status",
+        "max_remote_wall_seconds",
+        "created_at",
+        "consumed_at",
+        "replay"
+      ],
+      "properties": {
+        "authorization_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+        },
+        "workspace_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+        },
+        "job_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+        },
+        "attempt_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+        },
+        "status": {
+          "enum": [
+            "granted",
+            "consumed",
+            "revoked"
+          ]
+        },
+        "max_remote_wall_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "created_at": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+        },
+        "consumed_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+            }
+          ]
+        },
+        "replay": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "consumed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "consumed_at": {
+                "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "consumed_at": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/receipt"
+    }
+  ]
+}

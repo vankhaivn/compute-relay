@@ -1,0 +1,8 @@
+{
+  "provider_type": "fixture",
+  "label": "Example connection",
+  "credentials": {
+    "api_token": "fixture-token-not-a-real-credential"
+  },
+  "automatic_rotation": true
+}

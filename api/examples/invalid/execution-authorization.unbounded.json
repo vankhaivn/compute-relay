@@ -1,0 +1,6 @@
+{
+  "attempt_id": "attempt_fixture",
+  "max_remote_wall_seconds": 0,
+  "authorize_private_staging": true,
+  "authorize_compute": true
+}

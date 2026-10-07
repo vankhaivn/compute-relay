@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay connection v1alpha1",
+  "$defs": {
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connection_id",
+        "workspace_id",
+        "revision",
+        "provider_type",
+        "label",
+        "authentication",
+        "credential_present",
+        "new_work",
+        "account_id",
+        "selection",
+        "quotas",
+        "active_attempts",
+        "updated_at"
+      ],
+      "properties": {
+        "connection_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+        },
+        "workspace_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "provider_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authentication": {
+          "enum": [
+            "pending",
+            "verified",
+            "rejected",
+            "unavailable"
+          ]
+        },
+        "credential_present": {
+          "type": "boolean"
+        },
+        "new_work": {
+          "enum": [
+            "enabled",
+            "disabled",
+            "removed"
+          ]
+        },
+        "account_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+            }
+          ]
+        },
+        "selection": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "profile",
+                "configuration_revision",
+                "max_remote_wall_seconds",
+                "allow_remote_internet"
+              ],
+              "properties": {
+                "profile": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$"
+                },
+                "configuration_revision": {
+                  "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+                },
+                "max_remote_wall_seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 86400
+                },
+                "allow_remote_internet": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "quotas": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "resource",
+              "unit",
+              "remaining",
+              "observed_at",
+              "precision"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "known",
+                  "unknown",
+                  "stale"
+                ]
+              },
+              "resource": {
+                "enum": [
+                  "cpu",
+                  "gpu",
+                  "tpu"
+                ]
+              },
+              "unit": {
+                "const": "seconds"
+              },
+              "remaining": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                ]
+              },
+              "observed_at": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+                  }
+                ]
+              },
+              "precision": {
+                "enum": [
+                  "lower_bound",
+                  "unknown"
+                ]
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "known"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "remaining": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "observed_at": {
+                      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+                    },
+                    "precision": {
+                      "const": "lower_bound"
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "remaining": {
+                      "type": "null"
+                    },
+                    "precision": {
+                      "const": "unknown"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "active_attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updated_at": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "new_work": {
+                "enum": [
+                  "disabled",
+                  "removed"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "selection": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "selection": {
+                "type": "object"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "authentication": {
+                "const": "verified"
+              },
+              "credential_present": {
+                "const": true
+              },
+              "account_id": {
+                "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connections"
+      ],
+      "properties": {
+        "connections": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/connection"
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/connection"
+    },
+    {
+      "$ref": "#/$defs/page"
+    }
+  ]
+}

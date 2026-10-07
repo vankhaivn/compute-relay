@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay connection-request v1alpha1",
+  "$defs": {
+    "create": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_type",
+        "label",
+        "credentials"
+      ],
+      "properties": {
+        "provider_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "credentials": {
+          "type": "object",
+          "writeOnly": true,
+          "minProperties": 1,
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true
+          }
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "expected_revision"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "check",
+            "replace_credential",
+            "disable",
+            "enable",
+            "remove"
+          ]
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "credentials": {
+          "type": "object",
+          "writeOnly": true,
+          "minProperties": 1,
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "replace_credential"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "credentials"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "credentials"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/create"
+    },
+    {
+      "$ref": "#/$defs/action"
+    }
+  ]
+}

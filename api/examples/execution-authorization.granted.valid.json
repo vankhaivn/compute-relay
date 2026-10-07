@@ -1,0 +1,11 @@
+{
+  "authorization_id": "authorization_fixture",
+  "workspace_id": "ws_fixture",
+  "job_id": "job_fixture",
+  "attempt_id": "attempt_fixture",
+  "status": "granted",
+  "max_remote_wall_seconds": 600,
+  "created_at": "2026-10-07T00:00:00Z",
+  "consumed_at": null,
+  "replay": false
+}

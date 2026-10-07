@@ -1,0 +1,29 @@
+{
+  "connection_id": "con_fixture",
+  "workspace_id": "ws_fixture",
+  "revision": 1,
+  "provider_type": "fixture",
+  "label": "Example connection",
+  "authentication": "verified",
+  "credential_present": true,
+  "new_work": "enabled",
+  "account_id": "account_fixture",
+  "selection": {
+    "profile": "con_fixture_r1",
+    "configuration_revision": "r1",
+    "max_remote_wall_seconds": 600,
+    "allow_remote_internet": false
+  },
+  "quotas": [
+    {
+      "status": "known",
+      "resource": "gpu",
+      "unit": "seconds",
+      "remaining": 600,
+      "observed_at": "2026-10-07T00:00:00Z",
+      "precision": "lower_bound"
+    }
+  ],
+  "active_attempts": 0,
+  "updated_at": "2026-10-07T00:00:00Z"
+}
