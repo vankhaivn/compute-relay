@@ -14,6 +14,7 @@ No public release is available. Passing offline tests alone is not evidence of l
 | Default `serve` | Authenticated loopback uploads, admission/status/control receipts and reads of already published artifacts. It reports `local-admission-only`, `dispatch_enabled=false`. |
 | Kaggle-enabled `serve` | With complete explicit provider flags, an exact enabled `free_allowance` profile, successful read-only account verification and a finite attempt budget, starts one durable dispatch worker and one collector and reports `kaggle-workers`, `dispatch_enabled=true`. |
 | Managed `serve` | With `--managed-python`, exposes connection descriptors/operations, Relay-owned macOS Keychain credentials and durable per-attempt grants. Workers resolve multiple frozen account bindings; startup performs no account check and grants no compute. |
+| Native companion | Reproducible macOS arm64 candidate bundle with independent locked Python/client dependencies, checksum-verified create-new installation and relocation discovery. No checkout or developer toolchain is required at runtime. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation/submission intents, restart reconciliation, explicit controls and verified collection/publication. |
 | Artifact delivery | Explicit-attempt listing/metadata/content and create-only CLI downloads, with current authority, expiry and end-of-stream verification. |
 | Kaggle components | Credential-scoped preflight, private staging, exact-identity execution, quota/log snapshots and selected artifact transfer. |
@@ -48,7 +49,7 @@ The new managed mode has offline/native evidence only, not additional live Kaggl
 ## Remaining product work
 
 Public provider log/quota/cleanup surfaces, strict runtime TOML configuration, doctor, thin client
-and LLM examples, installation packaging, backup/restore qualification and release hardening
+and LLM examples, distribution beyond the native macOS arm64 candidate, backup/restore qualification and release hardening
 remain. See the [implementation plan](development/implementation-plan.md).
 
 ## Evidence hygiene

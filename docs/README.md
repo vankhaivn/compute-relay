@@ -10,6 +10,7 @@ validation procedures and implementation planning are under [development](develo
 |---|---|
 | Understand what the project does and its current limit | [Current status](status.md) |
 | Set it up from a fresh clone | **[Getting started](getting-started.md)** |
+| Install a native companion without a checkout | [Companion distribution](companion-distribution.md) |
 | Run bounded GPU jobs through Kaggle | **[Kaggle runtime](kaggle-runtime.md)** |
 | Manage connections from a local application | **[Managed connections](managed-connections.md)** |
 | Operate an existing installation | **[Operator runbook](runbook.md)** |
