@@ -165,6 +165,73 @@
         "examples/invalid/artifact.traversal.json",
         "examples/invalid/artifact.missing-cursor.json"
       ]
+    },
+    {
+      "schema": "schemas/connection-request.v1alpha1.schema.json",
+      "valid": [
+        "examples/connection-request.create.valid.json",
+        "examples/connection-request.check.valid.json",
+        "examples/connection-request.replace_credential.valid.json",
+        "examples/connection-request.disable.valid.json",
+        "examples/connection-request.enable.valid.json",
+        "examples/connection-request.remove.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/connection-request.caller-account.json",
+        "examples/invalid/connection-request.missing-revision.json",
+        "examples/invalid/connection-request.secret-on-check.json",
+        "examples/invalid/connection-request.replace-without-secret.json",
+        "examples/invalid/connection-request.automatic-rotation.json"
+      ]
+    },
+    {
+      "schema": "schemas/provider-descriptors.v1alpha1.schema.json",
+      "valid": [
+        "examples/provider-descriptors.fixture.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/provider-descriptors.readable-secret.json"
+      ]
+    },
+    {
+      "schema": "schemas/connection.v1alpha1.schema.json",
+      "valid": [
+        "examples/connection.ready.valid.json",
+        "examples/connection.page.valid.json",
+        "examples/connection.unknown-quota.valid.json",
+        "examples/connection.disabled.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/connection.secret-echo.json",
+        "examples/invalid/connection.unknown-balance.json",
+        "examples/invalid/connection.disabled-selection.json",
+        "examples/invalid/connection.unverified-selection.json"
+      ]
+    },
+    {
+      "schema": "schemas/connection-operation.v1alpha1.schema.json",
+      "valid": [
+        "examples/connection-operation.accepted.valid.json",
+        "examples/connection-operation.failed.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/connection-operation.failed-without-problem.json",
+        "examples/invalid/connection-operation.secret-echo.json"
+      ]
+    },
+    {
+      "schema": "schemas/execution-authorization.v1alpha1.schema.json",
+      "valid": [
+        "examples/execution-authorization.request.valid.json",
+        "examples/execution-authorization.granted.valid.json",
+        "examples/execution-authorization.consumed.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/execution-authorization.implicit-attempt.json",
+        "examples/invalid/execution-authorization.unbounded.json",
+        "examples/invalid/execution-authorization.no-consumption-time.json",
+        "examples/invalid/execution-authorization.batch-permit.json"
+      ]
     }
   ]
 }

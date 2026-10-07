@@ -31,7 +31,8 @@ validation-only work.
 - Unknown stays unknown. Cancellation intent, local timeout, cleanup, payload completion,
   artifact availability and hardware release are different facts.
 - Keep credentials out of application jobs, chat, logs, fixtures and Git. Real credentials
-  belong only in the operator's explicitly configured environment.
+  belong only in the operator's explicitly configured environment or Relay-owned protected vault;
+  managed write-only administration follows ADR-0025 and never persists secret values in SQLite.
 - No compute, quota consumption, public data, destructive cleanup, billing or deployment
   without exact authorization and a finite budget. CI is offline, never an operator runtime.
 - Preserve state and original binaries/configuration after uncertainty; do not reset or

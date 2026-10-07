@@ -211,6 +211,9 @@ func validateOpenAPI(root, relative string) error {
 		"collectJob": {}, "getOperation": {},
 		"uploadObject": {}, "getObject": {}, "importObject": {}, "ingestObject": {},
 		"listArtifacts": {}, "getArtifact": {}, "downloadArtifact": {},
+		"listProviderDescriptors": {}, "listConnections": {}, "getConnection": {},
+		"createConnection": {}, "changeConnection": {}, "getConnectionOperation": {},
+		"authorizeAttempt": {}, "getAttemptAuthorization": {},
 	}
 	observedOperations := make(map[string]struct{}, len(expectedOperations))
 	for path, pathItem := range document.Paths.Map() {

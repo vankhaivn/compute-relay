@@ -34,6 +34,8 @@ new choice requires a superseding ADR. Historical wording and review discussion 
 | [0023](0023-verified-artifact-delivery.md) | Current-authority downloads with final acknowledgement and create-only files. |
 | [0024](0024-explicit-bounded-provider-workers.md) | Explicit finite provider authorization and durable workers in normal serve. |
 
+| [0025](0025-managed-connections-and-attempt-authorization.md) | Optional managed connections, protected credentials and durable per-attempt authorization. |
+
 ## Add or revise a decision
 
 Use `NNNN-short-name.md`, never reuse numbers, and start from [template](template.md).

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay connection-operation v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "workspace_id",
+    "connection_id",
+    "action",
+    "status",
+    "connection_revision",
+    "created_at",
+    "updated_at",
+    "problem",
+    "replay"
+  ],
+  "properties": {
+    "operation_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
+    },
+    "workspace_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+    },
+    "connection_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+    },
+    "action": {
+      "enum": [
+        "create",
+        "check",
+        "replace_credential",
+        "disable",
+        "enable",
+        "remove"
+      ]
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "running",
+        "succeeded",
+        "failed"
+      ]
+    },
+    "connection_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "created_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "updated_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "problem": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "credential_rejected",
+            "credential_store_unavailable",
+            "provider_unavailable",
+            "account_changed",
+            "active_work",
+            "stale_revision",
+            "unsupported_provider"
+          ]
+        }
+      ]
+    },
+    "replay": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "problem": {
+            "not": {
+              "type": "null"
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "problem": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

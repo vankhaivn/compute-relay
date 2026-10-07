@@ -52,6 +52,14 @@ in OpenAPI. Readiness is local dependency readiness, not a GPU/profile/worker ch
 operations require an explicit `attempt_id` query parameter. No provider logs, public event
 stream, quota, cleanup or administrative HTTP service is implied by reserved schema fields.
 
+## Planned managed extension
+
+[Managed connections](../docs/development/managed-connections.md) defines the additional
+provider descriptors, connection operations and durable attempt-authorization routes marked
+`planned` in OpenAPI. These contracts do not imply that current serve composes them. They
+preserve the existing job envelope through unique immutable selection profiles and separate
+`manage`/`execute` scopes; old clients remain compatible with standalone profiles.
+
 ## Important semantics
 
 Upload/import/ingest require write scope and return 201 after verified byte/ownership commit.
