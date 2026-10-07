@@ -18,8 +18,10 @@ feature set, not individual commits, audits or CI runs.
 - Optional managed connection API with write-only protected credentials, asynchronous account
   discovery, shared account capacity and durable finite per-attempt execution authorization.
   Connection changes preserve existing immutable job bindings and recovery.
+- Reproducible macOS arm64 companion bundles with a locked independent provider interpreter,
+  complete payload checksums, create-new installation and relocation discovery.
 
 **Pre-release:** public provider log/cleanup surfaces, strict runtime configuration, doctor/client
-examples, installation packaging and full release hardening remain. The integrated normal-server
+examples, cross-platform distribution and full release hardening remain. The integrated normal-server
 path requires scoped operator re-qualification before new live support claims. See
 [current status](docs/status.md).

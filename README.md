@@ -107,7 +107,9 @@ artifact URLs outside the source checkout.
 
 There is no public release yet. The normal runtime now has explicit Kaggle provider registration
 plus bounded dispatch/collection workers. Public provider log/cleanup surfaces, strict runtime
-configuration, doctor/client examples, installation packaging, and release hardening remain. See [current status](docs/status.md) for what exists now.
+configuration, doctor/client examples, cross-platform distribution, and release hardening remain.
+The [macOS arm64 companion](docs/companion-distribution.md) installs without a checkout or developer
+toolchain; it is an unsigned candidate bundle, not a published release. See [current status](docs/status.md) for what exists now.
 
 Compute Relay is licensed under [Apache-2.0](LICENSE). Provider services, uploaded data, models and
 third-party dependencies retain their own terms and licenses.
