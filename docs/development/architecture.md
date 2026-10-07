@@ -33,6 +33,12 @@ submission/read-only modes; do not interchange its root with a normal runtime in
 [acceptance](providers/kaggle-acceptance.md) and
 [ADR-0024](decisions/0024-explicit-bounded-provider-workers.md).
 
+The accepted optional [managed-connection extension](managed-connections.md) adds separate
+administration and execution authority, protected credentials, account-bound immutable selections
+and durable per-attempt permits. Its planned composition must not be inferred from the currently
+available standalone worker flags. [ADR-0025](decisions/0025-managed-connections-and-attempt-authorization.md)
+owns this extension decision.
+
 ## Responsibility map
 
 | Boundary | Responsibility |

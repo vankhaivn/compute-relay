@@ -1344,7 +1344,7 @@ Do not allow deleting/disabling the only adapter configuration needed to reconci
 
 ### 18.3 Credential handling
 
-Provider credentials belong to the operator's runtime environment or protected credential files. Store references such as `env:NAME` or `file:/protected/path`, not plaintext secrets in job specs or SQLite.
+Provider credentials belong to the operator's explicitly configured runtime environment, protected credential files, or Relay-owned protected vault. Store references such as `env:NAME`, `file:/protected/path`, or an opaque vault slot, not plaintext secrets in job specs or SQLite. The accepted [managed-connection extension](managed-connections.md) adds write-only live administration, adapter-owned account discovery, and explicit cross-store recovery under [ADR-0025](decisions/0025-managed-connections-and-attempt-authorization.md). Ordinary application job tokens do not acquire administration or execution authority.
 
 For Kaggle, official authentication supports multiple mechanisms; the adapter should document the selected supported modes and precedence instead of scanning every host credential source indiscriminately. [S-02]
 
@@ -1356,7 +1356,7 @@ A Python bridge may receive credentials through a tightly controlled environment
 
 Generate high-entropy local API tokens. Store only token digests plus identifiers/scopes in the state database. Support revocation and workspace binding. Show newly generated secrets once through an explicit command, never in ordinary runtime logs.
 
-Use one administrative token or local administrative CLI authority for setup and separate workspace tokens for apps. A workspace token must not list another workspace's jobs or fetch its blobs by guessing IDs.
+Use local administrative CLI authority for token issuance and separate workspace tokens for apps. The managed extension uses distinct `manage` and `execute` scopes for live connection administration and durable, finite per-attempt grants; existing read/write/operate scopes imply neither. A workspace token must not list another workspace's jobs or fetch its blobs by guessing IDs.
 
 ### 18.5 Job secrets
 
