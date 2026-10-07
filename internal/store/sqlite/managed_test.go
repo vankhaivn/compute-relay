@@ -466,6 +466,18 @@ func TestManagedSecretsAbsentFromSQLiteAndPublicProjection(t *testing.T) {
 		if entry.IsDir() {
 			return nil
 		}
+		if path == filepath.Join(f.root, "runtime.lock") {
+			// Windows denies reads while the lock is held. Prove the lock has
+			// no bytes, while still scanning the live database and WAL below.
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if info.Size() != 0 {
+				t.Fatal("runtime lock contains unexpected data")
+			}
+			return nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
