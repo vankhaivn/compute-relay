@@ -23,9 +23,10 @@ The output directory must be new and outside the checkout. The builder obtains P
 exact transitive dependencies. Dependency retrieval happens only while building. It does
 not alter the system Python or install tools globally. Existing uv/Go caches may be used.
 
-The builder copies a standalone interpreter, materializes only internal links, removes
-preinstalled package managers and build-path console launchers, then installs the locked
-packages into its own `site-packages`. It never ships a virtualenv or an editable package.
+The builder copies a standalone interpreter, materializes only internal links, and replaces
+preinstalled package managers with the locked packages in its own `site-packages`. It removes
+build-path console launchers and their stale wheel RECORD entries. It never ships a virtualenv
+or an editable package.
 All archive members are regular files; the installer rejects every symbolic/hard link.
 Checked-hash Python bytecode uses relative source filenames and is built ahead of time, so
 normal isolated helper imports do not add unverified caches to the installed payload.
@@ -133,6 +134,7 @@ compute. Scratch state is retained for inspection. Move the bundle to a second a
 directory and repeat with a new scratch directory to qualify relocation independently of
 the original installation path.
 
-Source checks: `go test ./internal/companion ./cmd/companionpack`. Archive tests cover
+Source checks: `go test ./internal/companion ./cmd/companionpack` and
+`python3 -B -m unittest discover -s internal/companion -p '*_test.py'`. Archive tests cover
 determinism, checksum failure, create-new installation, relocation, payload modification,
 traversal, links, duplicate members, special files and malformed manifests.
