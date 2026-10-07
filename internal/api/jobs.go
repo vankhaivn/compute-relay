@@ -93,6 +93,8 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 		respondError(w, r, 400, domain.CodeInvalidJobSpec, domain.FailureStageValidation, "invalid job specification")
 	case errors.Is(err, admission.ErrKey):
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "one 8-256 byte printable Idempotency-Key is required")
+	case errors.Is(err, admission.ErrSelection):
+		respondError(w, r, 409, domain.CodeIllegalStateTransition, domain.FailureStageValidation, "selected profile revision is stale; choose the current connection revision explicitly")
 	case errors.Is(err, admission.ErrConflict):
 		respondError(w, r, 409, domain.CodeIdempotencyConflict, domain.FailureStageOperation, "idempotency key was used with a different request")
 	case errors.Is(err, admission.ErrInputs):

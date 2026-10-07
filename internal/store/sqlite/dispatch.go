@@ -12,6 +12,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -118,6 +119,12 @@ func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.T
 		return dispatch.Work{}, ErrCorrupt
 	}
 	if j.Plan != nil {
+		if executionauth.Managed(record.Profile) {
+			status, err := dispatchAuthorization(ctx, tx, work, now)
+			if err != nil || status != executionauth.Consumed {
+				return dispatch.Work{}, ErrCorrupt
+			}
+		}
 		if err = matchesFrozenPlan(work, *j.Plan, j.PreparationID); err != nil {
 			return dispatch.Work{}, ErrCorrupt
 		}
@@ -301,6 +308,13 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 			return err
 		}
 		if action.Kind == dispatch.BeginPreparation || action.Kind == dispatch.BeginSubmission {
+			status, err := dispatchAuthorization(ctx, tx, work, now)
+			if err != nil {
+				return err
+			}
+			if executionauth.Managed(work.Job.Profile) && status != executionauth.Consumed {
+				return dispatch.ErrPolicy
+			}
 			if err = newMutationPolicy(ctx, tx, work, now); err != nil {
 				return err
 			}

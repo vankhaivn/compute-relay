@@ -16,6 +16,7 @@ import (
 var (
 	ErrSpec         = errors.New("invalid job specification")
 	ErrKey          = errors.New("invalid idempotency key")
+	ErrSelection    = errors.New("selected immutable profile revision is no longer available for new work")
 	ErrConflict     = errors.New("idempotency key was used with a different request")
 	ErrNotFound     = errors.New("job or admission not found")
 	ErrInputs       = errors.New("referenced input is missing or not visible")

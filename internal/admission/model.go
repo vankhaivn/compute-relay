@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/ports"
 )
 
 // Profile is a non-secret, immutable local resolution revision. Provider-specific
@@ -51,6 +53,10 @@ func (p Profile) Validate() error {
 				if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c == '_' || i > 0 && c >= '0' && c <= '9') {
 					return ErrRequirements
 				}
+			}
+		case "vault":
+			if _, valid := credentials.VaultReference(ports.CredentialRef(p.CredentialRef)); !valid {
+				return ErrRequirements
 			}
 		case "file": // Explicit operator reference, never opened during admission.
 		default:

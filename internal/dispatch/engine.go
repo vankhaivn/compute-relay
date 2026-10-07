@@ -179,6 +179,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if err = ValidatedPlan(job, plan, p.Describe()); err != nil {
 			return s.fail(domain.CodeUnsupportedCapability)
 		}
+		if err = s.consumeAuthorization(); err != nil {
+			return err
+		}
 		if err = s.commit(Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prepID}); err != nil {
 			return err
 		}
@@ -297,6 +300,15 @@ func (s *session) commit(action Action) error {
 	ctx, stop := context.WithTimeout(base, 5*time.Second)
 	defer stop()
 	work, err := s.e.repo.CommitDispatch(ctx, s.current.Handle, action, s.e.clock.Now())
+	if err == nil {
+		s.current = work
+	}
+	return err
+}
+func (s *session) consumeAuthorization() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	work, err := s.e.repo.ConsumeAuthorization(s.ctx, s.current.Handle, s.e.clock.Now())
 	if err == nil {
 		s.current = work
 	}

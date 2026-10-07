@@ -38,19 +38,13 @@ func validWorkspace(w auth.Workspace) bool {
 	return true
 }
 func validToken(t auth.TokenRecord) bool {
-	if !validID(t.ID) || !t.WorkspaceID.Valid() || t.Digest == ([32]byte{}) || t.CreatedAt.IsZero() || len(t.Scopes) == 0 || len(t.Scopes) > 3 {
+	if !validID(t.ID) || !t.WorkspaceID.Valid() || t.Digest == ([32]byte{}) || t.CreatedAt.IsZero() || !auth.ValidScopes(t.Scopes) {
 		return false
 	}
 	if !t.ExpiresAt.IsZero() && !t.ExpiresAt.After(t.CreatedAt) {
 		return false
 	}
-	seen := map[auth.Scope]bool{}
-	for _, s := range t.Scopes {
-		if (s != auth.Read && s != auth.Write && s != auth.Operate) || seen[s] {
-			return false
-		}
-		seen[s] = true
-	}
+
 	return true
 }
 

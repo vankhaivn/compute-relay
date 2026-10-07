@@ -51,17 +51,25 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
-	_, validRef := credentials.EnvironmentName(c.CredentialRef)
+	_, environmentRef := credentials.EnvironmentName(c.CredentialRef)
+	_, vaultRef := credentials.VaultReference(c.CredentialRef)
 	if !idPattern.MatchString(c.InstanceID) || !idPattern.MatchString(c.Revision) ||
-		!accountPattern.MatchString(c.AccountName) || !validRef ||
-		!filepath.IsAbs(c.PythonExecutable) || strings.ContainsAny(c.PythonExecutable, "\x00\r\n\ufffd") {
-		return ErrConfig
-	}
-	switch strings.ToLower(filepath.Ext(c.PythonExecutable)) {
-	case ".cmd", ".bat", ".ps1", ".sh":
+		!accountPattern.MatchString(c.AccountName) || (!environmentRef && !vaultRef) ||
+		!validPythonExecutable(c.PythonExecutable) {
 		return ErrConfig
 	}
 	return nil
+}
+
+func validPythonExecutable(path string) bool {
+	if !filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n\ufffd") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cmd", ".bat", ".ps1", ".sh":
+		return false
+	}
+	return true
 }
 func ParseConfig(raw []byte) (Config, error) {
 	var c Config

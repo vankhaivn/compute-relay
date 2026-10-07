@@ -241,7 +241,9 @@ func validateOpenAPI(root, relative string) error {
 func operationStatus(id string) string {
 	switch id {
 	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob",
-		"cancelJob", "retryJob", "reconcileJob", "collectJob", "getOperation", "listArtifacts", "getArtifact", "downloadArtifact":
+		"cancelJob", "retryJob", "reconcileJob", "collectJob", "getOperation", "listArtifacts", "getArtifact", "downloadArtifact",
+		"listProviderDescriptors", "listConnections", "getConnection", "createConnection", "changeConnection", "getConnectionOperation",
+		"authorizeAttempt", "getAttemptAuthorization":
 		return "implemented-offline"
 	default:
 		return "planned"

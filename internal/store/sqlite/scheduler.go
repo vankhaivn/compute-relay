@@ -10,6 +10,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -22,12 +23,13 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 	rows, err := tx.QueryContext(ctx, `SELECT q.queue_seq,q.workspace_id,q.job_id,q.attempt_id,q.dispatch_barrier,q.not_before_ms,
  a.state,a.orchestration,j.active_attempt_id=q.attempt_id,w.enabled,r.snapshot,
  json_extract(j.request,'$.resources.accelerator'),json_extract(j.request,'$.timeouts.remote_wall_seconds'),
- COALESCE(l.until_ms,0),COALESCE(l.held,0)
+ COALESCE(l.until_ms,0),COALESCE(l.held,0),COALESCE(e.status IN ('granted','consumed'),0)
  FROM scheduler_queue q JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id
  JOIN workspaces w ON w.workspace_id=q.workspace_id
  JOIN profile_revisions r ON r.profile=j.profile AND r.revision=j.profile_revision
  LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
+ LEFT JOIN execution_authorizations e ON e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
  WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out') OR (l.held=1 AND l.until_ms>?)
  ORDER BY q.queue_seq LIMIT ?`, now.UnixMilli(), scheduler.ScanLimit+1)
 	if err != nil {
@@ -39,7 +41,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 		var raw, phase, profile string
 		var until, notBefore int64
 		var held bool
-		if err = rows.Scan(&c.Sequence, &c.WorkspaceID, &c.JobID, &c.AttemptID, &c.DispatchBarrier, &notBefore, &raw, &phase, &c.ActiveAttempt, &c.WorkspaceEnabled, &profile, &c.Resource, &c.WallSeconds, &until, &held); err != nil {
+		if err = rows.Scan(&c.Sequence, &c.WorkspaceID, &c.JobID, &c.AttemptID, &c.DispatchBarrier, &notBefore, &raw, &phase, &c.ActiveAttempt, &c.WorkspaceEnabled, &profile, &c.Resource, &c.WallSeconds, &until, &held, &c.AuthorizationGranted); err != nil {
 			rows.Close()
 			return nil, dbError(err)
 		}
@@ -52,6 +54,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 			rows.Close()
 			return nil, ErrCorrupt
 		}
+		c.Managed = executionauth.Managed(p)
 		c.AccountScope = p.AccountScope
 		c.ProviderInstanceID = p.Binding.ProviderInstanceID
 		c.Policy = scheduler.AccountPolicy{MaxActive: settings.MaxActivePerAccount}
@@ -87,6 +90,9 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 			}
 			policies[c.AccountScope] = c.Policy
 		}
+		if c.Managed && c.Resource == "gpu" {
+			c.Policy.StrictQuota = true
+		}
 		key := c.AccountScope + "/" + c.Resource // validated opaque account IDs cannot contain '/'.
 		if q, ok := quotas[key]; ok {
 			c.Quota = q
@@ -108,6 +114,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 		quotas[key] = q
 		c.Quota = q
 	}
+	reserveManagedQuota(result, now)
 	return result, nil
 }
 
@@ -140,6 +147,14 @@ func (s *Store) InspectScheduler(ctx context.Context, now time.Time) (scheduler.
 // SAME transaction as the claim and preparing event. It never changes attempt identity
 // or rewrites dispatching/unknown attempts back to queued.
 func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
+	return s.claimNext(ctx, owner, now, false)
+}
+
+// ClaimNextManaged uses durable attempt permits, independent of standalone budgets.
+func (s *Store) ClaimNextManaged(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
+	return s.claimNext(ctx, owner, now, true)
+}
+func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, managed bool) (scheduler.Result, error) {
 	if !domain.ObjectID(owner).Valid() {
 		return scheduler.Result{}, scheduler.ErrInvalid
 	}
@@ -157,6 +172,9 @@ func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (sch
 		rows, err := schedulerSnapshot(ctx, tx, settings, now)
 		if err != nil {
 			return err
+		}
+		for i := range rows {
+			rows[i].DispatchModeExcluded = rows[i].Managed != managed
 		}
 		index, view, err := scheduler.Select(rows, domain.WorkspaceID(last), settings, now)
 		if err != nil {
