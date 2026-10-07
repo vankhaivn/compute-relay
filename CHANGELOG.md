@@ -15,6 +15,9 @@ feature set, not individual commits, audits or CI runs.
 - Explicit Kaggle-enabled normal `serve` composition with exact frozen binding verification,
   a finite provider-attempt authorization budget, durable dispatch/reconciliation and verified
   artifact collection; admission-only mode remains the default.
+- Optional managed connection API with write-only protected credentials, asynchronous account
+  discovery, shared account capacity and durable finite per-attempt execution authorization.
+  Connection changes preserve existing immutable job bindings and recovery.
 
 **Pre-release:** public provider log/cleanup surfaces, strict runtime configuration, doctor/client
 examples, installation packaging and full release hardening remain. The integrated normal-server

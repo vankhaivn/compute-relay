@@ -15,6 +15,13 @@ import (
 // ClaimRecovery returns an observation/staging-readiness lease, never a repeat-mutation
 // permit. Pausing new dispatch does not discard the ability to observe existing work.
 func (s *Store) ClaimRecovery(ctx context.Context, owner string, now time.Time) (*scheduler.Claim, error) {
+	return s.claimRecovery(ctx, owner, now, false)
+}
+
+func (s *Store) ClaimRecoveryManaged(ctx context.Context, owner string, now time.Time) (*scheduler.Claim, error) {
+	return s.claimRecovery(ctx, owner, now, true)
+}
+func (s *Store) claimRecovery(ctx context.Context, owner string, now time.Time, managed bool) (*scheduler.Claim, error) {
 	if !domain.ObjectID(owner).Valid() {
 		return nil, scheduler.ErrInvalid
 	}
@@ -47,11 +54,13 @@ func (s *Store) ClaimRecovery(ctx context.Context, owner string, now time.Time) 
  JOIN dispatch_journals d ON d.queue_seq=q.queue_seq
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id AND j.active_attempt_id=q.attempt_id
  JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
+ JOIN profile_revisions p ON p.profile=j.profile AND p.revision=j.profile_revision
  LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
- WHERE q.dispatch_barrier=1 AND d.phase IN ('staging','ready','submitting','submitted')
+ WHERE (COALESCE(json_extract(p.snapshot,'$.credential_ref'),'') LIKE 'vault:%')=?
+ AND q.dispatch_barrier=1 AND d.phase IN ('staging','ready','submitting','submitted')
  AND a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out')
  AND q.not_before_ms<=? AND (l.held IS NULL OR l.held=0 OR l.until_ms<=?)
- ORDER BY q.not_before_ms,q.queue_seq LIMIT 1`, now.UnixMilli(), now.UnixMilli()).Scan(&sequence)
+ ORDER BY q.not_before_ms,q.queue_seq LIMIT 1`, managed, now.UnixMilli(), now.UnixMilli()).Scan(&sequence)
 		if errors.Is(err, sql.ErrNoRows) {
 			return advanceSchedulerClock(ctx, tx, now)
 		}

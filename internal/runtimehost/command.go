@@ -18,8 +18,8 @@ import (
 )
 
 // Command is the main executable's local composition boundary. Non-serve commands
-// are finite. Provider credentials are resolved only when serve is explicitly
-// configured with the complete provider authorization flag set.
+// are finite. Managed serve installs policy; credentials and per-attempt compute
+// authorization arrive through separate explicit API requests.
 func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err error) {
 	ctx := parent
 	if r.Command != "serve" {
@@ -43,11 +43,25 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 		}
 		return json.NewEncoder(out).Encode(result)
 	}
+	var managed *ManagedServeConfig
 	switch r.Command {
 	case "state":
 	case "serve":
 		if !ValidListen(r.Listen) {
 			return ErrRequest
+		}
+		if r.ManagedPython != "" || r.ManagedMachineShape != "" || r.ManagedMaxWallSeconds != 0 || r.ManagedMaxWorkers != 0 || r.ManagedAllowInternet {
+			if r.ProviderConfig != "" || r.ProviderProfile != "" || r.ProviderMachineShape != "" || r.MaxProviderAttempts != 0 || r.AllowPrivateStaging || r.AllowGPU {
+				return ErrRequest
+			}
+			managed = &ManagedServeConfig{
+				PythonExecutable: r.ManagedPython, MachineShape: r.ManagedMachineShape,
+				MaxRemoteWallSeconds: r.ManagedMaxWallSeconds, MaxWorkers: r.ManagedMaxWorkers,
+				AllowRemoteInternet: r.ManagedAllowInternet,
+			}
+			if managed.validate() != nil {
+				return ErrRequest
+			}
 		}
 	case "workspace":
 		if !domain.WorkspaceID(r.ID).Valid() || (r.Action != "create" && r.Action != "show" && r.Action != "enable" && r.Action != "disable") {
@@ -74,7 +88,7 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 		}
 		return encoder.Encode(result)
 	case "serve":
-		serve := ServeConfig{Address: r.Listen}
+		serve := ServeConfig{Address: r.Listen, Managed: managed}
 		if r.ProviderConfig != "" {
 			raw, err := readPrivate(r.ProviderConfig, 8192)
 			if err != nil {

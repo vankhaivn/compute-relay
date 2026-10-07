@@ -83,36 +83,48 @@ func (s *Store) RecordQuota(ctx context.Context, scope, resource string, q provi
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		settings, _, err := schedulerControl(ctx, tx, now)
-		if err != nil {
-			return err
+	return withTx(ctx, s.db, func(tx *sql.Tx) error { return recordQuota(ctx, tx, scope, resource, q, now) })
+}
+
+// recordQuota shares the existing monotonic observation/latch semantics with managed
+// connection publication, without a second transaction or a provider call.
+func recordQuota(ctx context.Context, tx *sql.Tx, scope, resource string, q provider.QuotaObservation, now time.Time) error {
+	if !domain.ObjectID(scope).Valid() || (resource != "cpu" && resource != "gpu") || q.Resource != resource || q.Validate() != nil || !scheduler.ValidTime(now) || !scheduler.ValidTime(q.ObservedAt) || q.ObservedAt.After(now) {
+		return scheduler.ErrInvalid
+	}
+	raw, err := json.Marshal(q)
+	if err != nil || len(raw) > 4096 {
+		return scheduler.ErrInvalid
+	}
+
+	settings, _, err := schedulerControl(ctx, tx, now)
+	if err != nil {
+		return err
+	}
+	var prior int64
+	var exhausted bool
+	var previous string
+	err = tx.QueryRowContext(ctx, "SELECT observed_ms,exhausted,observation FROM scheduler_quotas WHERE account_scope=? AND resource=?", scope, resource).Scan(&prior, &exhausted, &previous)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return dbError(err)
+	}
+	if err == nil && q.ObservedAt.UnixMilli() <= prior {
+		if q.ObservedAt.UnixMilli() == prior && previous == string(raw) {
+			return nil
 		}
-		var prior int64
-		var exhausted bool
-		var previous string
-		err = tx.QueryRowContext(ctx, "SELECT observed_ms,exhausted,observation FROM scheduler_quotas WHERE account_scope=? AND resource=?", scope, resource).Scan(&prior, &exhausted, &previous)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
+		return ErrConflict
+	}
+	seconds, known := scheduler.Seconds(q)
+	if known && (q.Status == provider.QuotaKnown || q.Status == provider.QuotaStale) {
+		if seconds == 0 {
+			exhausted = true
+		} else if q.Status == provider.QuotaKnown && now.Sub(q.ObservedAt) < settings.QuotaFreshFor {
+			exhausted = false
 		}
-		if err == nil && q.ObservedAt.UnixMilli() <= prior {
-			if q.ObservedAt.UnixMilli() == prior && previous == string(raw) {
-				return nil
-			}
-			return ErrConflict
-		}
-		seconds, known := scheduler.Seconds(q)
-		if known && (q.Status == provider.QuotaKnown || q.Status == provider.QuotaStale) {
-			if seconds == 0 {
-				exhausted = true
-			} else if q.Status == provider.QuotaKnown && now.Sub(q.ObservedAt) < settings.QuotaFreshFor {
-				exhausted = false
-			}
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO scheduler_quotas VALUES(?,?,?,?,?) ON CONFLICT(account_scope,resource) DO UPDATE SET observation=excluded.observation,observed_ms=excluded.observed_ms,exhausted=excluded.exhausted`, scope, resource, string(raw), q.ObservedAt.UnixMilli(), exhausted)
-		if err != nil {
-			return dbError(err)
-		}
-		return advanceSchedulerClock(ctx, tx, now)
-	})
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO scheduler_quotas VALUES(?,?,?,?,?) ON CONFLICT(account_scope,resource) DO UPDATE SET observation=excluded.observation,observed_ms=excluded.observed_ms,exhausted=excluded.exhausted`, scope, resource, string(raw), q.ObservedAt.UnixMilli(), exhausted)
+	if err != nil {
+		return dbError(err)
+	}
+	return advanceSchedulerClock(ctx, tx, now)
 }

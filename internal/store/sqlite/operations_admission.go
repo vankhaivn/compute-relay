@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -80,7 +81,11 @@ func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed 
 			permitted = true
 		}
 	}
-	if !permitted {
+	if strings.HasPrefix(r.Profile.CredentialRef, "vault:") {
+		if err = managedProfileOwned(ctx, tx, w, r.Profile); err != nil {
+			return result, err
+		}
+	} else if !permitted {
 		return result, auth.ErrForbidden
 	}
 	if err = operations.RetryAllowed(r.Attempt.State); err != nil {

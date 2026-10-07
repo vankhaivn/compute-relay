@@ -90,19 +90,20 @@ func ValidTime(t time.Time) bool { return !t.IsZero() && t.Year() >= 1970 && t.Y
 type Reason string
 
 const (
-	Eligible          Reason = "eligible"
-	Paused            Reason = "scheduler_paused"
-	WorkerLimit       Reason = "worker_limit"
-	AccountLimit      Reason = "account_capacity"
-	AccountDisabled   Reason = "account_disabled"
-	WorkspaceDisabled Reason = "workspace_disabled"
-	Deferred          Reason = "local_preparation_deferred"
-	QuotaUnknown      Reason = "quota_unknown"
-	QuotaStale        Reason = "quota_stale"
-	QuotaUnavailable  Reason = "quota_unavailable"
-	QuotaExhausted    Reason = "quota_exhausted"
-	QuotaInsufficient Reason = "quota_insufficient"
-	QuotaUncertain    Reason = "quota_precision_or_units_unusable"
+	Eligible              Reason = "eligible"
+	AuthorizationRequired Reason = "execution_authorization_required"
+	Paused                Reason = "scheduler_paused"
+	WorkerLimit           Reason = "worker_limit"
+	AccountLimit          Reason = "account_capacity"
+	AccountDisabled       Reason = "account_disabled"
+	WorkspaceDisabled     Reason = "workspace_disabled"
+	Deferred              Reason = "local_preparation_deferred"
+	QuotaUnknown          Reason = "quota_unknown"
+	QuotaStale            Reason = "quota_stale"
+	QuotaUnavailable      Reason = "quota_unavailable"
+	QuotaExhausted        Reason = "quota_exhausted"
+	QuotaInsufficient     Reason = "quota_insufficient"
+	QuotaUncertain        Reason = "quota_precision_or_units_unusable"
 )
 
 type QueueStatus struct {

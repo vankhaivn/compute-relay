@@ -84,16 +84,10 @@ func (h *Host) IssueToken(ctx context.Context, id domain.WorkspaceID, scopes []a
 }
 func (h *Host) issueToken(ctx context.Context, id domain.WorkspaceID, scopes []auth.Scope, ttl time.Duration, output string, publish func(string, []byte) error) (TokenReceipt, error) {
 	var receipt TokenReceipt
-	if !id.Valid() || ttl < time.Minute || ttl > 30*24*time.Hour || output == "" || len(scopes) == 0 || len(scopes) > 3 {
+	if !id.Valid() || ttl < time.Minute || ttl > 30*24*time.Hour || output == "" || !auth.ValidScopes(scopes) {
 		return receipt, ErrRequest
 	}
-	seen := map[auth.Scope]bool{}
-	for _, scope := range scopes {
-		if seen[scope] || (scope != auth.Read && scope != auth.Write && scope != auth.Operate) {
-			return receipt, ErrRequest
-		}
-		seen[scope] = true
-	}
+
 	output, err := tokenDestination(h.root.Path, output)
 	if err != nil {
 		return receipt, err

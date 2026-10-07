@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -83,16 +84,11 @@ func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID st
 		}
 	}
 	var scopes []auth.Scope
-	if len(encoded) > 100 || json.Unmarshal([]byte(encoded), &scopes) != nil || len(scopes) == 0 || len(scopes) > 3 {
+	if len(encoded) > 100 || json.Unmarshal([]byte(encoded), &scopes) != nil || !auth.ValidScopes(scopes) {
 		return nil, ErrCorrupt
 	}
 	found := false
-	seen := map[auth.Scope]bool{}
 	for _, v := range scopes {
-		if seen[v] || (v != auth.Read && v != auth.Write && v != auth.Operate) {
-			return nil, ErrCorrupt
-		}
-		seen[v] = true
 		if v == scope {
 			found = true
 		}
@@ -118,13 +114,10 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 			permitted = true
 		}
 	}
-	if !permitted {
-		return profile, nil, 0, auth.ErrForbidden
-	}
 	var raw string
 	var enabled bool
 	err := tx.QueryRowContext(ctx, `SELECT r.snapshot,p.enabled FROM profiles p JOIN profile_revisions r ON p.profile=r.profile AND p.revision=r.revision WHERE p.profile=?`, spec.Profile).Scan(&raw, &enabled)
-	if errors.Is(err, sql.ErrNoRows) || !enabled && err == nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return profile, nil, 0, auth.ErrForbidden
 	}
 	if err != nil {
@@ -132,6 +125,20 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 	}
 	if len(raw) > 8192 || json.Unmarshal([]byte(raw), &profile) != nil || profile.Validate() != nil || profile.Binding.Profile != spec.Profile {
 		return profile, nil, 0, ErrCorrupt
+	}
+	if strings.HasPrefix(profile.CredentialRef, "vault:") {
+		if err = managedProfileOwned(ctx, tx, w, profile); err != nil {
+			return profile, nil, 0, err
+		}
+		var selected bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE workspace_id=? AND current_profile=? AND new_work='enabled' AND pending_operation='')`, w, spec.Profile).Scan(&selected); err != nil {
+			return profile, nil, 0, dbError(err)
+		}
+		if !selected || !enabled {
+			return profile, nil, 0, admission.ErrSelection
+		}
+	} else if !permitted || !enabled {
+		return profile, nil, 0, auth.ErrForbidden
 	}
 	if err = profile.Check(spec); err != nil {
 		return profile, nil, 0, err

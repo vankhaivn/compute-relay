@@ -448,8 +448,8 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "7904b00f82825ee1210b70e188913bcc4944dc13c6f5a0a8d8dedac919127abe",
-      "bytes": 57880
+      "sha256": "d8590e5a01a159130dde7475757251dcb50dd81d3319da5679837a1981a082a5",
+      "bytes": 58022
     },
     {
       "path": "api/schemas/artifact.v1alpha1.schema.json",

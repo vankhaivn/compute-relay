@@ -151,3 +151,25 @@ func TestExecutableLocalLifecycleAndSignalReopen(t *testing.T) {
 	runChild(t, 0, "token", "revoke", "--root", root, "--id", issued.ID)
 	runChild(t, 0, "workspace", "disable", "--root", root, "--id", "app")
 }
+
+func TestExecutableManagedHelpAndInvalidModeFlags(t *testing.T) {
+	help := runChild(t, 0, "serve", "--help")
+	for _, required := range []string{"--managed-python ABS", "--managed-max-workers 2", "separate API execution authorization"} {
+		if !bytes.Contains(help, []byte(required)) {
+			t.Fatal("executable help omitted managed mode semantics")
+		}
+	}
+	root := filepath.Join(t.TempDir(), "must-not-create")
+	python := filepath.Join(t.TempDir(), "synthetic-python3")
+	for _, flags := range [][]string{
+		{"--managed-python", "relative-python"},
+		{"--managed-max-workers", "2"},
+		{"--managed-python", python, "--allow-gpu"},
+		{"--managed-python", python, "--managed-allow-internet", "--managed-allow-internet=false"},
+	} {
+		runChild(t, 2, append([]string{"serve", "--root", root}, flags...)...)
+		if _, err := os.Lstat(root); !os.IsNotExist(err) {
+			t.Fatal("invalid executable flags touched runtime state")
+		}
+	}
+}

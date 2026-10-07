@@ -25,6 +25,11 @@ type Candidate struct {
 	LeaseUntil         time.Time
 	NotBefore          time.Time
 	Quota              Quota
+	Managed            bool
+	// AuthorizationGranted includes a consumed permit usable by this same attempt.
+	AuthorizationGranted bool
+	// Excluded candidates still count against shared capacity.
+	DispatchModeExcluded bool
 }
 
 // LocalOnly is deliberately narrower than "not terminal". In particular an
@@ -96,7 +101,7 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 		if (live && LocalOnly(r.State)) || HoldsAccount(r.State, r.DispatchBarrier) {
 			view.AccountReservations[r.AccountScope]++
 		}
-		if !r.ActiveAttempt || live || r.DispatchBarrier || !LocalOnly(r.State) {
+		if !r.ActiveAttempt || live || r.DispatchBarrier || !LocalOnly(r.State) || r.DispatchModeExcluded {
 			continue
 		}
 		if prior, ok := heads[r.WorkspaceID]; !ok || r.Sequence < rows[prior].Sequence {
@@ -113,6 +118,8 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 		r := rows[heads[w]]
 		status := QueueStatus{Identity: r.Identity, Sequence: r.Sequence, AccountScope: r.AccountScope, Reason: Eligible, NotBefore: r.NotBefore}
 		switch {
+		case r.Managed && !r.AuthorizationGranted:
+			status.Reason = AuthorizationRequired
 		case settings.Paused:
 			status.Reason = Paused
 		case !r.WorkspaceEnabled:

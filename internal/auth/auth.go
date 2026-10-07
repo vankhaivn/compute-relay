@@ -30,6 +30,8 @@ const (
 	Read    Scope = "read"
 	Write   Scope = "write"
 	Operate Scope = "operate"
+	Manage  Scope = "manage"
+	Execute Scope = "execute"
 )
 
 // Secret requires explicit Reveal at the local token-issuance boundary. Formatting and
@@ -101,7 +103,7 @@ func New(tokens TokenRepository, spaces WorkspaceRepository, now func() time.Tim
 // Issue is a LOCAL administrative operation, never an application HTTP route. The raw
 // secret is returned only after the digest and scopes have been committed successfully.
 func (s *Service) Issue(ctx context.Context, workspace domain.WorkspaceID, scopes []Scope, expires time.Time) (Secret, TokenRecord, error) {
-	if !workspace.Valid() || !validScopes(scopes) {
+	if !workspace.Valid() || !ValidScopes(scopes) {
 		return Secret{}, TokenRecord{}, ErrForbidden
 	}
 	if err := s.enabled(ctx, workspace); err != nil {
@@ -186,7 +188,7 @@ func (s *Service) lookup(ctx context.Context, digest [sha256.Size]byte) (Princip
 		return Principal{}, ErrUnavailable
 	}
 	if subtle.ConstantTimeCompare(record.Digest[:], digest[:]) != 1 || record.Revoked ||
-		!record.WorkspaceID.Valid() || !validScopes(record.Scopes) || record.ID == "" ||
+		!record.WorkspaceID.Valid() || !ValidScopes(record.Scopes) || record.ID == "" ||
 		(!record.ExpiresAt.IsZero() && !s.now().Before(record.ExpiresAt)) {
 		return Principal{}, ErrUnauthenticated
 	}
@@ -294,13 +296,14 @@ func RequireResource(ctx context.Context, p Principal, workspace domain.Workspac
 	return nil
 }
 
-func validScopes(scopes []Scope) bool {
-	if len(scopes) == 0 || len(scopes) > 3 {
+// ValidScopes accepts explicit, non-duplicated scopes. No scope implies another.
+func ValidScopes(scopes []Scope) bool {
+	if len(scopes) == 0 || len(scopes) > 5 {
 		return false
 	}
 	seen := make(map[Scope]bool, len(scopes))
 	for _, scope := range scopes {
-		if (scope != Read && scope != Write && scope != Operate) || seen[scope] {
+		if (scope != Read && scope != Write && scope != Operate && scope != Manage && scope != Execute) || seen[scope] {
 			return false
 		}
 		seen[scope] = true

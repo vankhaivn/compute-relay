@@ -32,6 +32,7 @@ type Listening struct {
 type ServeConfig struct {
 	Address string
 	Kaggle  *KaggleServeConfig
+	Managed *ManagedServeConfig
 }
 
 // Serve preserves the safe default: HTTP admission and published-result delivery
@@ -43,7 +44,7 @@ func (h *Host) Serve(ctx context.Context, address string, announce func(Listenin
 // ServeConfigured joins HTTP handlers and any explicitly enabled provider workers
 // before returning. Local shutdown never calls provider cancellation or cleanup.
 func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce func(Listening) error) error {
-	if h == nil || announce == nil || !ValidListen(serve.Address) {
+	if h == nil || announce == nil || !ValidListen(serve.Address) || serve.Kaggle != nil && serve.Managed != nil {
 		return ErrRequest
 	}
 	if err := ctx.Err(); err != nil {
@@ -71,6 +72,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	var dispatcher *dispatch.Engine
 	var collector *collection.Engine
 	var schedulerSettings scheduler.Settings
+	var managed *managedServices
 	if serve.Kaggle != nil {
 		dispatcher, collector, schedulerSettings, err = h.kaggleWorkers(ctx, *serve.Kaggle)
 		if err != nil {
@@ -78,6 +80,20 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		}
 		mode = "kaggle-workers"
 		dispatchEnabled = true
+	}
+	if serve.Managed != nil {
+		managed, err = h.managedWorkers(ctx, *serve.Managed)
+		if err != nil {
+			return err
+		}
+		dispatcher, collector, schedulerSettings = managed.dispatcher, managed.collector, managed.settings
+		mode = "managed-connections"
+		dispatchEnabled = dispatcher != nil
+		if dispatchEnabled {
+			mode = "managed-workers"
+		}
+	}
+	if dispatchEnabled {
 		defer func() {
 			pauseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -94,6 +110,9 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	cfg := api.DefaultConfig()
 	cfg.Listen = listener.Addr().String()
 	cfg.Jobs, cfg.Operations, cfg.Results = jobs, controls, results
+	if managed != nil {
+		cfg.Connections, cfg.Authorizations = managed.connections, managed.authorizations
+	}
 	server, err := api.NewServer(cfg, h.access, objectService, h.store.Ready)
 	if err != nil {
 		return ErrState
@@ -105,7 +124,11 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 			return announce(listening)
 		})
 	}
-	return runProviderServices(ctx, server, listener, mode, listening, announce, dispatcher, collector)
+	var extra []func(context.Context) error
+	if managed != nil {
+		extra = append(extra, func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) })
+	}
+	return runProviderServices(ctx, server, listener, mode, listening, announce, dispatcher, collector, extra...)
 }
 
 func runProviderServices(
@@ -117,30 +140,39 @@ func runProviderServices(
 	announce func(Listening) error,
 	dispatcher *dispatch.Engine,
 	collector *collection.Engine,
+	extra ...func(context.Context) error,
+) error {
+	services := append([]func(context.Context) error{dispatcher.Run, collector.Run}, extra...)
+	return runRuntimeServices(ctx, server, listener, mode, listening, announce, services)
+}
+
+func runRuntimeServices(
+	ctx context.Context,
+	server *http.Server,
+	listener net.Listener,
+	mode string,
+	listening Listening,
+	announce func(Listening) error,
+	services []func(context.Context) error,
 ) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	workers := make(chan error, 2)
-	go func() {
-		err := dispatcher.Run(runCtx)
-		workers <- err
-		if err != nil && runCtx.Err() == nil {
-			cancel()
-		}
-	}()
-	go func() {
-		err := collector.Run(runCtx)
-		workers <- err
-		if err != nil && runCtx.Err() == nil {
-			cancel()
-		}
-	}()
+	workers := make(chan error, len(services))
+	for _, run := range services {
+		go func(run func(context.Context) error) {
+			err := run(runCtx)
+			workers <- err
+			if err != nil && runCtx.Err() == nil {
+				cancel()
+			}
+		}(run)
+	}
 	httpErr := serveHTTPMode(runCtx, server, listener, 10*time.Second, mode, func() error {
 		return announce(listening)
 	})
 	cancel()
 	var workerErr error
-	for i := 0; i < 2; i++ {
+	for i := 0; i < len(services); i++ {
 		err := <-workers
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			workerErr = errors.Join(workerErr, err)
