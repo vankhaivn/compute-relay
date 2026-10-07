@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import shutil
 import subprocess
@@ -86,6 +87,28 @@ def copy_python(source, destination):
     shutil.rmtree(site)
     site.mkdir()
     return site
+
+
+def remove_console_scripts(site):
+    """Omit uv's absolute-shebang launchers and only their stale wheel records."""
+    records = []
+    for record in site.glob("*.dist-info/RECORD"):
+        with record.open(newline="") as stream:
+            rows = list(csv.reader(stream))
+        if any(len(row) != 3 for row in rows):
+            raise RuntimeError("invalid installed wheel RECORD")
+        for row in rows:
+            name = row[0]
+            path = PurePosixPath(name)
+            if not name or path.is_absolute() or str(path) != name or ".." in path.parts or name == "." or any(c in name for c in "\\:\r\n\x00"):
+                raise RuntimeError("unsafe installed wheel RECORD path")
+        retained = [row for row in rows if not row[0].startswith("bin/")]
+        records.append((record, retained))
+    if (site / "bin").exists():
+        shutil.rmtree(site / "bin")
+    for record, retained in records:
+        with record.open("w", newline="") as stream:
+            csv.writer(stream, lineterminator="\n").writerows(retained)
 
 
 def download_licenses(work, share, cached):
@@ -216,8 +239,7 @@ def main():
         "--only-binary", ":all:", "--no-python-downloads", "--link-mode", "copy", "-r", requirements, env=env)
     # uv's generated console scripts embed the build interpreter. Runtime uses
     # python modules, so none of those checkout/path-specific launchers are shipped.
-    if (site / "bin").exists():
-        shutil.rmtree(site / "bin")
+    remove_console_scripts(site)
     inventory_script = project / "src/compute_relay_kaggle_probe/dependencies.py"
     inventory = json.loads(run(python, "-I", "-B", "-c",
         "import json,runpy,sys; print(json.dumps(runpy.run_path(sys.argv[1])['collect_dependency_inventory']()))", inventory_script))
