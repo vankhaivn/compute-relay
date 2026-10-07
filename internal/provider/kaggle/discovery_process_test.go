@@ -27,7 +27,11 @@ func TestDiscoveryProcessIsolationAndBoundedFailures(t *testing.T) {
 	raw, _ := json.Marshal(discoveryVerified())
 	source := `import os,sys
 assert sys.flags.isolated
-assert set(os.environ) <= {'HOME','USERPROFILE','TMPDIR','TMP','TEMP','LANG','LC_CTYPE','SystemRoot','WINDIR','__CF_USER_TEXT_ENCODING'}
+allowed = {'HOME','USERPROFILE','TMPDIR','TMP','TEMP','LANG','LC_CTYPE','__CF_USER_TEXT_ENCODING'}
+# Python normalizes Windows environment variable names to uppercase.
+if os.name == 'nt':
+    allowed |= {'SYSTEMROOT','WINDIR'}
+assert set(os.environ) <= allowed
 assert sys.stdin.buffer.read()==b'SYNTHETIC_STDIN'
 assert len(sys.argv)==1
 assert os.path.samefile(os.getcwd(),os.environ['HOME'])
