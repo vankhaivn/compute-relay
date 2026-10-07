@@ -21,8 +21,9 @@ verified file bytes or proof that a planned endpoint is enabled.
 
 ## Current handler inventory
 
-There are eighteen composable HTTP operations. The local host enables all except the optional
-import and HTTPS-ingestion components. Admission-only serve starts no provider workers;
+There are twenty-six composable HTTP operations. Ordinary local serve composes sixteen;
+two import/ingestion operations remain optional and managed mode adds eight more below.
+Admission-only serve starts no provider workers;
 provider-enabled serve may run separate durable dispatch/collection workers, but HTTP handlers
 still never invoke providers directly.
 
@@ -50,15 +51,27 @@ GET  /v1/workspaces/{w}/jobs/{j}/artifacts/{artifact_id}/content
 Only `/healthz` is public. Other operations require current workspace/token authority as defined
 in OpenAPI. Readiness is local dependency readiness, not a GPU/profile/worker check. Artifact
 operations require an explicit `attempt_id` query parameter. No provider logs, public event
-stream, quota, cleanup or administrative HTTP service is implied by reserved schema fields.
+stream or cleanup service is implied by reserved schema fields.
 
-## Planned managed extension
+## Optional managed extension
 
 [Managed connections](../docs/development/managed-connections.md) defines the additional
 provider descriptors, connection operations and durable attempt-authorization routes marked
-`planned` in OpenAPI. These contracts do not imply that current serve composes them. They
+`implemented-offline` in OpenAPI. Only `--managed-python` serve composes them and advertises
+`managed_connections` and `attempt_authorization` in authenticated runtime info. They
 preserve the existing job envelope through unique immutable selection profiles and separate
 `manage`/`execute` scopes; old clients remain compatible with standalone profiles.
+
+```text
+GET  /v1/workspaces/{w}/providers
+GET  /v1/workspaces/{w}/connections
+GET  /v1/workspaces/{w}/connections/{connection_id}
+POST /v1/workspaces/{w}/connections
+POST /v1/workspaces/{w}/connections/{connection_id}/actions
+GET  /v1/workspaces/{w}/connection-operations/{operation_id}
+POST /v1/workspaces/{w}/jobs/{j}/authorize
+GET  /v1/workspaces/{w}/jobs/{j}/authorizations/{authorization_id}
+```
 
 ## Important semantics
 

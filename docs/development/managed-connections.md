@@ -1,7 +1,7 @@
 # Managed connections and execution authorization
 
-This is the accepted extension contract for a locally managed companion. The routes remain
-**planned** until composed and advertised by the runtime. Existing environment-configured
+This is the implemented extension contract for a locally managed companion. The optional
+`--managed-python` serve composition advertises these routes; ordinary serve does not. Existing environment-configured
 profiles and the standalone finite-worker mode remain supported; a saved connection is not
 proof of authentication, capacity or a runnable provider.
 
@@ -16,7 +16,7 @@ both features instead of assuming support from the API version.
 | Method and workspace-relative path | Scope | Semantics |
 |---|---|---|
 | `GET /providers` | read | Installed adapter descriptors and credential-store availability; local only. |
-| `GET /connections` | read | At most 100 saved, sanitized connections; local only. |
+| `GET /connections` | read | At most 100 non-removed, sanitized connections; local only. |
 | `GET /connections/{id}` | read | Current revision, availability, immutable selection and cached quota. |
 | `POST /connections` | manage | Label, provider type and write-only credential fields; asynchronous account discovery. |
 | `POST /connections/{id}/actions` | manage | Explicit check, credential replacement, disable, enable or removal. |
@@ -55,6 +55,9 @@ reused or repointed. Publishing a later revision disables the earlier admission 
 same transaction; previously admitted jobs retain their frozen original profile/account.
 Admission checks alias eligibility transactionally, so a request using a stale selection
 cannot race a connection change. An exact admission replay still returns its original receipt.
+The published profile also freezes its adapter runtime configuration, including machine shape;
+changing startup defaults cannot reinterpret an existing job. Removed connections remain
+addressable by ID as sanitized tombstones and are omitted from the bounded active list.
 
 The account ID is an opaque Relay identity, not a credential or provider username. Provider
 and canonical account together define the shared quota/capacity key. Two connections for the
@@ -82,7 +85,9 @@ writing its secret. The handler stages the secret and commits a runnable operati
 acknowledging 202. A crash between those steps leaves a recoverable non-runnable intent; replay
 with the same key can finish the write, and a worker cannot verify an absent secret. A staged
 write followed by an uncertain database commit is resolved against the original operation,
-never by overwriting the active generation. A failed write retains a sanitized failed operation.
+never by overwriting the active generation. A failed write retains a sanitized operation.
+Missing-secret intents stay recoverable by exact request replay; background recovery defers them
+without inventing a secret or expiring the key.
 The protected store and SQLite do not pretend to share an atomic transaction.
 
 A worker verifies the staged generation using read-only provider calls. Only after successful
@@ -108,6 +113,8 @@ requires the exact attempt ID and a wall bound equal to the already frozen reque
 freezes workspace, job, attempt, provider binding, canonical account, input identity, granting
 token ID and time. There is at most one authorization per attempt, regardless of request keys.
 The public receipt contains none of the private credential configuration.
+The managed composition currently requires uploaded immutable objects. Unresolved HTTPS input
+sources are rejected at authorization; it never silently downloads or changes the frozen inputs.
 
 Before the first preparation mutation, the dispatcher atomically consumes the authorization
 with its fenced claim. It then uses existing write-ahead preparation/submission intents.

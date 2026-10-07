@@ -13,14 +13,15 @@ No public release is available. Passing offline tests alone is not evidence of l
 | Main binary | Local installation, workspace/token administration, immutable admission profiles, bundle tools and application HTTP commands. |
 | Default `serve` | Authenticated loopback uploads, admission/status/control receipts and reads of already published artifacts. It reports `local-admission-only`, `dispatch_enabled=false`. |
 | Kaggle-enabled `serve` | With complete explicit provider flags, an exact enabled `free_allowance` profile, successful read-only account verification and a finite attempt budget, starts one durable dispatch worker and one collector and reports `kaggle-workers`, `dispatch_enabled=true`. |
+| Managed `serve` | With `--managed-python`, exposes connection descriptors/operations, Relay-owned macOS Keychain credentials and durable per-attempt grants. Workers resolve multiple frozen account bindings; startup performs no account check and grants no compute. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation/submission intents, restart reconciliation, explicit controls and verified collection/publication. |
 | Artifact delivery | Explicit-attempt listing/metadata/content and create-only CLI downloads, with current authority, expiry and end-of-stream verification. |
 | Kaggle components | Credential-scoped preflight, private staging, exact-identity execution, quota/log snapshots and selected artifact transfer. |
 | Kaggle acceptance utility | Separate fixed CUDA experiment live-qualified for private staging, Tesla T4 execution, separate-process reconciliation and complete six-file artifact collection/publication. |
 
 Provider mode does not turn admission into success evidence. `202 Accepted` means local metadata
-committed. A new provider mutation requires the durable one-shot intent plus remaining process
-authorization budget. Once that budget is consumed, additional queued jobs remain queued while
+committed. A new provider mutation requires the durable one-shot intent plus a consumed managed
+attempt permit or the standalone process authorization budget. Once that budget is consumed, additional queued jobs remain queued while
 already-started attempts can still be observed/recovered and collected.
 
 ## Integrated Kaggle boundary
@@ -37,6 +38,12 @@ Provider timeout enforcement remains separate from local/runner deadlines. Batch
 manual-required without a verified session target, exact hardware release is not observable, and
 remote cleanup apply is not shipped. Direct HTTPS input preparation is not enabled in the current
 normal provider composition; upload immutable inputs first.
+
+[Managed connections](managed-connections.md) adds cached account-scoped quota, manual connection
+changes and restart-safe finite authorization. Distinct credentials for one account share its
+capacity. Disabling a connection preserves old recovery/collection; removal refuses dependent
+work. Existing job envelopes and explicitly configured environment credentials remain compatible.
+The new managed mode has offline/native evidence only, not additional live Kaggle qualification.
 
 ## Remaining product work
 

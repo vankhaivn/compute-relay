@@ -23,6 +23,8 @@ Windows paths. No local GPU or Docker is required.
 Token issuance writes the secret once to the private output file and prints a non-secret receipt.
 Keep the receipt's token ID for revocation. This is an application token, not a Kaggle credential.
 Issue only the scopes the application needs; `operate` is required for job controls.
+The separate `manage` and `execute` scopes enable [managed connection](managed-connections.md)
+administration and explicit per-attempt grants. Ordinary job tokens grant neither.
 
 ## Configure admission and serve
 
@@ -62,7 +64,7 @@ not recreated. Do not edit markers, rename acceptance directories into this form
 seed SQL. Opening supported state may apply existing migrations; local inspection is not a
 byte-for-byte read-only filesystem operation.
 
-Token scopes are explicit `read`, `write`, `operate`; TTL defaults to 24 hours and is bounded
+Token scopes are explicit `read`, `write`, `operate`, `manage`, `execute`; TTL defaults to 24 hours and is bounded
 from one minute to thirty days. Output requires a new file in a private, stable, same-volume
 parent outside protected state/input/result subdirectories. Database insertion and secret-file
 delivery are not one atomic transaction. A delivery failure attempts revocation and reports
@@ -83,6 +85,8 @@ HTTPS-ingestion services remain disabled. See [API contracts](../api/README.md).
 A `202` means local admission/control committed. Admission-only serve starts no provider workers.
 Provider-enabled serve starts the configured bounded dispatcher/collector after its read-only
 account check; artifact routes still expose only committed publications.
+Managed mode performs no account check at startup and uses persisted per-attempt grants instead
+of a process budget. Connection checks run only as explicit asynchronous administration work.
 
 Interrupt/SIGTERM stops new handlers, allows ten seconds for graceful completion, then closes
 connections on timeout and reports failure. Store closure and lock release still wait for all

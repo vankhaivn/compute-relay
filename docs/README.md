@@ -11,6 +11,7 @@ validation procedures and implementation planning are under [development](develo
 | Understand what the project does and its current limit | [Current status](status.md) |
 | Set it up from a fresh clone | **[Getting started](getting-started.md)** |
 | Run bounded GPU jobs through Kaggle | **[Kaggle runtime](kaggle-runtime.md)** |
+| Manage connections from a local application | **[Managed connections](managed-connections.md)** |
 | Operate an existing installation | **[Operator runbook](runbook.md)** |
 | Manage the local runtime, workspaces and tokens | [Local runtime](local-runtime.md) |
 | Package/upload code and inputs | [Bundles and import](packaging-and-import.md) |
@@ -19,7 +20,7 @@ validation procedures and implementation planning are under [development](develo
 | Recover safely after an uncertain response/state | [Recovery](recovery.md) |
 | Check supported toolchains, hosts and filesystem assumptions | [Compatibility](compatibility.md) |
 
-## Two serve modes
+## Serve modes
 
 With no provider flags, `compute-relay serve` is **local-admission-only**: it accepts immutable
 objects/jobs and serves already published artifacts without provider effects.
@@ -28,6 +29,10 @@ With the complete explicit Kaggle configuration, GPU authorization and finite pe
 budget described in [Kaggle runtime](kaggle-runtime.md), the same server starts bounded dispatch
 and collection workers. It stages and submits each authorized attempt once, reconciles the original
 identity after uncertainty/restart and publishes verified results.
+
+With `--managed-python`, [managed mode](managed-connections.md) composes live connection
+administration, protected credentials and multiple-account workers. Each new attempt needs an
+explicit durable authorization through the API; startup itself grants none.
 
 The integrated path is pre-release. The underlying fixed Kaggle acceptance workflow has live
 qualification evidence; a new account/environment/workload still requires scoped re-qualification
