@@ -54,6 +54,7 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time, man
  JOIN profile_revisions p ON p.profile=j.profile AND p.revision=j.profile_revision
  WHERE (COALESCE(json_extract(p.snapshot,'$.credential_ref'),'') LIKE 'vault:%')=?
  AND a.orchestration='collecting' AND d.phase='collectible'
+ AND COALESCE(json_extract(j.request,'$.result_collection'),'automatic')='automatic'
  AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.workspace_id=q.workspace_id AND o.job_id=q.job_id AND o.attempt_id=q.attempt_id AND o.kind='collect')
  ORDER BY q.queue_seq LIMIT 1`, managed).Scan(&w, &job, &attempt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -196,6 +197,9 @@ func (s *Store) claimCollection(ctx context.Context, now time.Time, ttl time.Dur
 		lease := collection.Lease{WorkspaceID: w, JobID: a.JobID, AttemptID: a.ID, OperationID: id, Generation: generation, Fence: fence, Until: until, AttemptRevision: a.Revision}
 		loaded, err := collectionWork(ctx, tx, lease)
 		if err != nil {
+			return err
+		}
+		if err = saveCollectionProgress(ctx, tx, lease, "discovering", initialProgress(loaded, now)); err != nil {
 			return err
 		}
 		result = &loaded
@@ -356,6 +360,9 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 		if _, err = finishControl(ctx, tx, op, domain.OperationSucceeded, operations.ResultsAvailable, nil, now); err != nil {
 			return err
 		}
+		if err = finishCollectionProgress(ctx, tx, current, "available", now); err != nil {
+			return err
+		}
 		return releaseCollection(ctx, tx, l)
 	})
 }
@@ -366,7 +373,7 @@ func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collect
 		return collection.ErrInvalid
 	}
 	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
-		_, op, a, err := checkedCollection(ctx, tx, w, now)
+		current, op, a, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
 		}
@@ -395,6 +402,9 @@ func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collect
 			return err
 		}
 		if _, err = finishControl(ctx, tx, op, domain.OperationFailed, operations.Failed, &p, now); err != nil {
+			return err
+		}
+		if err = finishCollectionProgress(ctx, tx, current, "failed", now); err != nil {
 			return err
 		}
 		return releaseCollection(ctx, tx, w.Lease)

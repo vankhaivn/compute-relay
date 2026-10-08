@@ -81,6 +81,9 @@ func jobStatus(record admission.Record) map[string]any {
 		"state": map[string]any{"orchestration": a.State.Orchestration, "execution": a.State.Execution, "result": a.State.Result, "cancellation": a.State.Cancellation, "remote_activity": a.State.RemoteActivity, "release_evidence": a.State.ReleaseEvidence, "deadline_exceeded": a.State.DeadlineExceeded},
 		"links": admission.JobLinks(record.Job.WorkspaceID, record.Job.ID),
 	}
+	if record.Collection != nil {
+		status["collection"] = record.Collection
+	}
 	if p := record.Problem; p != nil {
 		// Deliberately exclude arbitrary details and internal causes from public status.
 		status["problem"] = map[string]any{"code": p.Code, "message": p.Message, "stage": p.Stage, "safe_operation_retry": p.SafeOperationRetry, "compute_may_have_started": p.ComputeMayHaveStarted, "recommended_action": p.RecommendedAction}

@@ -116,6 +116,9 @@
           "format": "uri-reference"
         }
       }
+    },
+    "collection": {
+      "$ref": "#/$defs/collection"
     }
   },
   "$defs": {
@@ -213,6 +216,172 @@
           }
         }
       ]
+    },
+    "collection_progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "generation",
+        "bytes_completed",
+        "bytes_received",
+        "bytes_total",
+        "observed_at"
+      ],
+      "properties": {
+        "scope": {
+          "const": "selected_output_bytes"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bytes_completed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967296
+        },
+        "bytes_received": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967296
+            }
+          ]
+        },
+        "bytes_total": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967296
+            }
+          ]
+        },
+        "observed_at": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+        }
+      },
+      "description": "One fenced invocation. Completed combines rehashed outputs and the current selected stream; received counts only new selected output stream bytes and is unknown for providers without observation. Controls/protocol traffic excluded. Total is unknown before pinning. Counts do not prove verified publication.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "bytes_total": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "bytes_total"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bytes_completed": {
+                "const": 0
+              },
+              "bytes_received": {
+                "enum": [
+                  null,
+                  0
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "state",
+        "attempt_id",
+        "operation_id",
+        "progress"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "automatic",
+            "manual"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "not_ready",
+            "awaiting_request",
+            "pending",
+            "discovering",
+            "transferring",
+            "verifying",
+            "available",
+            "failed",
+            "expired",
+            "unknown"
+          ]
+        },
+        "attempt_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+        },
+        "operation_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
+            }
+          ]
+        },
+        "progress": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/collection_progress"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "awaiting_request"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mode": {
+                "const": "manual"
+              },
+              "operation_id": {
+                "type": "null"
+              },
+              "progress": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "allOf": [
@@ -292,6 +461,36 @@
             "required": [
               "cancellation"
             ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "collection": {
+            "properties": {
+              "state": {
+                "const": "available"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        },
+        "required": [
+          "collection"
+        ]
+      },
+      "then": {
+        "properties": {
+          "state": {
+            "properties": {
+              "result": {
+                "const": "available"
+              }
+            }
           }
         }
       }

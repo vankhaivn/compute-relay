@@ -38,6 +38,10 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 			return err
 		}
 		result.Problem, err = readDispatchProblem(ctx, tx, w, id, result.Attempt.ID)
+		if err != nil {
+			return err
+		}
+		result.Collection, err = readCollectionStatus(ctx, tx, result, time.Now().UTC())
 		return err
 	})
 	if err != nil {

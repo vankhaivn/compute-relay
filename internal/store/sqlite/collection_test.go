@@ -138,10 +138,14 @@ func (p *collectionProvider) counts() (int, int) {
 	}
 	return p.lists, total
 }
-func collectionFixture(t *testing.T) (*dispatchFixture, scheduler.Identity, *collectionProvider, *blobfs.Store) {
+func collectionFixture(t *testing.T, collectionMode ...string) (*dispatchFixture, scheduler.Identity, *collectionProvider, *blobfs.Store) {
+	return collectionScenarioFixture(t, fake.DefaultScenario(), collectionMode...)
+}
+
+func collectionScenarioFixture(t *testing.T, scenario fake.Scenario, collectionMode ...string) (*dispatchFixture, scheduler.Identity, *collectionProvider, *blobfs.Store) {
 	t.Helper()
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
+	f := newDispatchFixture(t, scenario)
+	id := f.seed(t, "a", 1, false, collectionMode...)
 	submittedControl(t, f, id)
 	for i := 0; i < 2; i++ {
 		if err := f.adapter.Advance(*f.journal(t, id).Remote); err != nil {

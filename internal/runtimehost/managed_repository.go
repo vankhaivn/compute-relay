@@ -141,3 +141,10 @@ func (r managedCollectionRepository) CompleteCollection(ctx context.Context, wor
 func (r managedCollectionRepository) FailCollection(ctx context.Context, work collection.Work, failure collection.Failure, now time.Time) error {
 	return retryManagedWrite(ctx, now, func(at time.Time) error { return r.managedCollectionStore.FailCollection(ctx, work, failure, at) })
 }
+
+func (r managedCollectionRepository) RecordCollectionProgress(ctx context.Context, work collection.Work, stage string, progress domain.CollectionProgress, now time.Time) error {
+	return retryManagedWrite(ctx, now, func(at time.Time) error {
+		progress.ObservedAt = at
+		return r.managedCollectionStore.RecordCollectionProgress(ctx, work, stage, progress, at)
+	})
+}

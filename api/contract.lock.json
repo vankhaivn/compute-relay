@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "ba48b778f23facb2eb97044b4d804c141ad17a919a84808ade17e412ef1cd430",
-      "bytes": 7784
+      "sha256": "1274668c3bfbbf2fe6b1a5ebe62ce94379cb9b124f77ff0c3f46e59e27b7b5b4",
+      "bytes": 8266
     },
     {
       "path": "api/examples/artifact.metadata.valid.json",
@@ -257,14 +257,34 @@
       "bytes": 423
     },
     {
+      "path": "api/examples/invalid/job-status.automatic-awaiting-request.json",
+      "sha256": "1626db34c44c2efa3ed355a802b88dd7fa4db1d13d3fa8f4d9da3482ed0fb012",
+      "bytes": 957
+    },
+    {
       "path": "api/examples/invalid/job-status.false-success.json",
       "sha256": "00d818cb96fb43b52af308694c1952a7f30d2d3a7274d35989cb0ec0642cb435",
       "bytes": 1150
     },
     {
+      "path": "api/examples/invalid/job-status.negative-progress.json",
+      "sha256": "a96abd5ea600be794d191096f8225e28caca21f8fe31a6acdc805f65088c5d13",
+      "bytes": 1158
+    },
+    {
       "path": "api/examples/invalid/job-validation.bad-verification.json",
       "sha256": "8e234f6f8afcb2feeb119c435ea4a4340ff0e07cf83eee692972739e0bce6516",
       "bytes": 204
+    },
+    {
+      "path": "api/examples/invalid/job.collection-null.json",
+      "sha256": "4559567e47a17995bd5d5552dbf99309fa4a3883805156b87223a35becc2bf54",
+      "bytes": 1188
+    },
+    {
+      "path": "api/examples/invalid/job.collection-unknown.json",
+      "sha256": "71f4067cf070432e128e37dadd786600ab163713963b74fff25f931bdb1b3f66",
+      "bytes": 1195
     },
     {
       "path": "api/examples/invalid/job.cpu-with-gpu-requirement.json",
@@ -387,6 +407,21 @@
       "bytes": 422
     },
     {
+      "path": "api/examples/job-status.awaiting-collection.valid.json",
+      "sha256": "07cd21e3e68f01db3024ecd919eb6bf68b1a0f0431282b95213541cb014825e6",
+      "bytes": 954
+    },
+    {
+      "path": "api/examples/job-status.collection-discovery.valid.json",
+      "sha256": "60c2af59f3f8c13f473449b379d09dfa15a4b1f4c9e813ab73f445ceda8f81ba",
+      "bytes": 1149
+    },
+    {
+      "path": "api/examples/job-status.collection-progress.valid.json",
+      "sha256": "f3435fefe14cbc197d1812debc4ab48aa447d983b63a6ba8e582b83e1baa4572",
+      "bytes": 1163
+    },
+    {
       "path": "api/examples/job-status.needs-attention.valid.json",
       "sha256": "75f59e596c95087d2e3f7b82c6ef083fda8ea78b07f4666887e9c9aa3482a67f",
       "bytes": 1156
@@ -395,6 +430,11 @@
       "path": "api/examples/job-validation.valid.json",
       "sha256": "5ff132954878f34a02037f83524a2ce80c372d013bbeaff88d009c041ca81ecf",
       "bytes": 312
+    },
+    {
+      "path": "api/examples/job.manual-collection.valid.json",
+      "sha256": "d991ee9922b2a87f384e3d9c64a13985938bf47060721341b8db1c77974cedad",
+      "bytes": 1192
     },
     {
       "path": "api/examples/job.valid.json",
@@ -448,8 +488,8 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "d8590e5a01a159130dde7475757251dcb50dd81d3319da5679837a1981a082a5",
-      "bytes": 58022
+      "sha256": "d84d68b6f63e58dbe54b362a9b7c4f4551b76a44a235e049c212ab788a0faebd",
+      "bytes": 58491
     },
     {
       "path": "api/schemas/artifact.v1alpha1.schema.json",
@@ -508,13 +548,13 @@
     },
     {
       "path": "api/schemas/job-spec.v1alpha1.schema.json",
-      "sha256": "fd9a1a6b4fbef3dafc0d7d000f489cee4c3ddc2e23b3a298bffd28f7b47e9817",
-      "bytes": 8127
+      "sha256": "50a4ec463ab837bbe77b8ecd91f9cc34b823ab29e39ca399f21b8a0430d34365",
+      "bytes": 8464
     },
     {
       "path": "api/schemas/job-status.v1alpha1.schema.json",
-      "sha256": "05fce7ef0421ab9831fff076735d3956f6c07573b82bd267381891edd6000af0",
-      "bytes": 6999
+      "sha256": "d01e05ae3c35ac37ce93e849e2f848f9817b052d74536b59b1f3370919547da0",
+      "bytes": 11516
     },
     {
       "path": "api/schemas/job-validation.v1alpha1.schema.json",

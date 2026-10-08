@@ -343,6 +343,15 @@
           "maximum": 3600
         }
       }
+    },
+    "result_collection": {
+      "type": "string",
+      "enum": [
+        "automatic",
+        "manual"
+      ],
+      "default": "automatic",
+      "description": "Frozen per-job result collection policy. Omission preserves automatic collection. Manual requires explicit collect for all results, including diagnostic controls."
     }
   }
 }

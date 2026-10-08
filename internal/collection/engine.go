@@ -74,6 +74,10 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 	}
 	proof, err := e.verifyFiles(ctx, src, *w)
 	if err != nil {
+		var progressErr progressWriteError
+		if errors.As(err, &progressErr) {
+			return true, progressErr.error
+		}
 		return true, e.recordFailure(ctx, *w, err)
 	}
 	// No failure write follows a possibly committed publication acknowledgement.
@@ -195,6 +199,18 @@ func (e *Engine) verifyFiles(ctx context.Context, src source, w Work) (proof Ver
 		}
 		total += file.Object.Bytes
 	}
+	progress := newProgressTracker(e, w, src)
+	defer func() {
+		var progressErr progressWriteError
+		if err != nil && ctx.Err() == nil && !errors.As(err, &progressErr) {
+			if sampleErr := progress.checkpoint(ctx, "transferring", true); sampleErr != nil {
+				err = sampleErr
+			}
+		}
+	}()
+	if err := progress.checkpoint(ctx, "transferring", true); err != nil {
+		return proof, err
+	}
 	for _, file := range snapshot.Files {
 		if ctx.Err() != nil {
 			return proof, ctx.Err()
@@ -204,6 +220,12 @@ func (e *Engine) verifyFiles(ctx context.Context, src source, w Work) (proof Ver
 			return proof, err
 		}
 		if present {
+			if file.Role == "output" {
+				progress.completed += file.Object.Bytes
+			}
+			if err := progress.checkpoint(ctx, "transferring", false); err != nil {
+				return proof, err
+			}
 			continue
 		}
 		if file.Path == ManifestPath {
@@ -211,8 +233,17 @@ func (e *Engine) verifyFiles(ctx context.Context, src source, w Work) (proof Ver
 			if err != nil || meta != file.Object {
 				return proof, ErrUnavailable
 			}
-		} else if err = e.transfer(ctx, src, w.Observation.Remote, file); err != nil {
-			return proof, err
+		} else {
+			var callback []func(int64) error
+			if file.Role == "output" && progress.observable {
+				callback = []func(int64) error{progress.stream(ctx, file.Object.Bytes)}
+			}
+			if err = e.transfer(ctx, src, w.Observation.Remote, file, callback...); err != nil {
+				return proof, err
+			}
+			if len(callback) == 1 && progress.current != file.Object.Bytes {
+				return proof, ErrInvalid
+			}
 		}
 		present, err = e.existing(ctx, file.Object)
 		if err != nil {
@@ -221,6 +252,16 @@ func (e *Engine) verifyFiles(ctx context.Context, src source, w Work) (proof Ver
 		if !present {
 			return proof, ErrUnavailable
 		}
+		if file.Role == "output" {
+			progress.completed += file.Object.Bytes
+			progress.current = 0
+		}
+		if err := progress.checkpoint(ctx, "transferring", false); err != nil {
+			return proof, err
+		}
+	}
+	if err := progress.checkpoint(ctx, "verifying", true); err != nil {
+		return proof, err
 	}
 	m, _, err := parseManifest(w, []byte(snapshot.Manifest))
 	if err != nil {
@@ -247,7 +288,7 @@ func (e *Engine) existing(ctx context.Context, m domain.ObjectMetadata) (bool, e
 	}
 	return true, nil
 }
-func (e *Engine) transfer(ctx context.Context, src source, remote provider.RemoteReference, file File) (err error) {
+func (e *Engine) transfer(ctx context.Context, src source, remote provider.RemoteReference, file File, progress ...func(int64) error) (err error) {
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
 	artifact := provider.Artifact{Remote: remote, Path: file.Path, Bytes: file.Object.Bytes, SHA256: file.Object.SHA256}
@@ -261,9 +302,19 @@ func (e *Engine) transfer(ctx context.Context, src source, remote provider.Remot
 			done <- final
 		}()
 		checked := newCheckedWriter(ctx, writer, artifact.Bytes)
-		result, err := src.FetchArtifact(ctx, remote, artifact, checked, artifact.Bytes)
+		var result provider.TransferResult
+		var err error
+		if observed, ok := src.(provider.ArtifactProgressReader); ok && len(progress) == 1 {
+			result, err = observed.FetchArtifactWithProgress(ctx, remote, artifact, checked, artifact.Bytes, progress[0])
+		} else {
+			result, err = src.FetchArtifact(ctx, remote, artifact, checked, artifact.Bytes)
+		}
 		if err != nil {
+			var progressErr progressWriteError
 			final = ErrUnavailable
+			if errors.As(err, &progressErr) {
+				final = progressErr
+			}
 			return
 		}
 		if !checked.matches(artifact, result) {

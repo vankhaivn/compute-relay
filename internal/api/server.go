@@ -53,6 +53,8 @@ type Config struct {
 	Now            func() time.Time // Clock seam for deterministic rate-limit tests.
 }
 
+const FeatureManualResultCollection = "manual_result_collection"
+
 func DefaultConfig() Config {
 	return Config{
 		Listen: "127.0.0.1:7331", MaxJSONBytes: 1 << 20, MaxUploadBytes: 2 << 30,
@@ -218,6 +220,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.config.Operations != nil {
 			features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", "operation_status")
+			if h.config.Jobs != nil {
+				features = append(features, FeatureManualResultCollection)
+			}
 		}
 		if h.config.Connections != nil {
 			features = append(features, "managed_connections")
