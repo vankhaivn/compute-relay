@@ -117,7 +117,7 @@ func TestManagedServeParserRejectsAmbiguousOrUnboundedFlags(t *testing.T) {
 		{"--managed-python", python}, {"--managed-machine-shape", "NvidiaTeslaT4", "--managed-machine-shape", "NvidiaTeslaP100"},
 		{"--managed-max-wall-seconds", "1", "--managed-max-wall-seconds", "2"}, {"--managed-max-workers", "1", "--managed-max-workers", "2"},
 		{"--managed-allow-internet", "--managed-allow-internet=false"}, {"--managed-allow-internet=not-bool"},
-		{"--managed-machine-shape", "T4"}, {"--managed-machine-shape", "cpu"}, {"--managed-machine-shape", ""},
+		{"--managed-machine-shape", "T4"}, {"--managed-machine-shape", ""},
 		{"--managed-max-wall-seconds", "0"}, {"--managed-max-wall-seconds", "86401"}, {"--managed-max-wall-seconds", "-1"}, {"--managed-max-wall-seconds", "+1"},
 		{"--managed-max-workers", "0"}, {"--managed-max-workers", "17"}, {"--managed-max-workers", "01"}, {"--managed-max-workers", "1x"},
 	} {
@@ -172,5 +172,16 @@ func TestManagedServeHelpDescribesPolicyWithoutPerformingWork(t *testing.T) {
 		if !strings.Contains(out.String(), required) {
 			t.Fatal("help omitted managed policy or authorization semantics")
 		}
+	}
+}
+
+func TestManagedServeCPUIsExplicitAndDoesNotGrantCompute(t *testing.T) {
+	python, err := filepath.Abs("synthetic-python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Parse([]string{"serve", "--root", "run", "--managed-python", python, "--managed-machine-shape", "cpu"})
+	if err != nil || r.ManagedMachineShape != "cpu" || r.AllowGPU || r.MaxProviderAttempts != 0 {
+		t.Fatal("explicit CPU managed policy rejected or granted compute", err)
 	}
 }

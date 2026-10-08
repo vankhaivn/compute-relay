@@ -59,7 +59,7 @@ workers disabled. Standalone provider mode requires every explicit provider flag
 and a finite per-process attempt budget. Managed mode requires an absolute Python
 interpreter path; each attempt needs separate API execution authorization. Its
 policy flags grant no compute consent and cannot be mixed with standalone flags.
-Managed shapes: NvidiaTeslaT4 or NvidiaTeslaP100; wall limit: 1-86400 seconds;
+Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100; wall limit: 1-86400 seconds;
 workers: 1-16; internet defaults to disabled. Local shutdown is not remote
 cancellation. Validation is local schema validation, not admission.
 ` + "\n" + ProfileUsage
@@ -259,7 +259,7 @@ func Parse(args []string) (Request, error) {
 			if !seen["managed-max-workers"] {
 				r.ManagedMaxWorkers = 2
 			}
-			if r.ManagedMachineShape != "NvidiaTeslaT4" && r.ManagedMachineShape != "NvidiaTeslaP100" {
+			if r.ManagedMachineShape != "cpu" && r.ManagedMachineShape != "NvidiaTeslaT4" && r.ManagedMachineShape != "NvidiaTeslaP100" {
 				return r, ErrArguments
 			}
 		}

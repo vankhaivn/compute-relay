@@ -72,7 +72,7 @@ func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, now time.T
 			return v, ErrCorrupt
 		}
 		if enabled {
-			v.Selection = &connections.Selection{Profile: p.Binding.Profile, ConfigurationRevision: p.Binding.ConfigurationRevision, MaxRemoteWallSeconds: p.MaxRemoteWallSeconds, AllowRemoteInternet: p.AllowRemoteInternet}
+			v.Selection = &connections.Selection{Profile: p.Binding.Profile, ConfigurationRevision: p.Binding.ConfigurationRevision, MaxRemoteWallSeconds: p.MaxRemoteWallSeconds, AllowRemoteInternet: p.AllowRemoteInternet, Accelerator: p.Accelerator}
 		}
 	}
 	if r.accountScope != "" {
@@ -85,6 +85,9 @@ func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, now time.T
 			precision = "lower_bound"
 		}
 		v.Quotas = []connections.Quota{{Status: capacity.Status, Resource: "gpu", Unit: "seconds", Remaining: capacity.RemainingSeconds, ObservedAt: capacity.ObservedAt, Precision: precision}}
+		if v.Selection != nil && v.Selection.Accelerator == "cpu" {
+			v.Quotas = append(v.Quotas, connections.Quota{Status: "unknown", Resource: "cpu", Unit: "seconds", Precision: "unknown"})
+		}
 		v.ActiveAttempts = capacity.ReservedAttempts
 	}
 	return v, nil

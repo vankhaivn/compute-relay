@@ -27,11 +27,11 @@ type managedKaggleAdapter struct {
 
 var _ connections.Adapter = (*managedKaggleAdapter)(nil)
 
-func (*managedKaggleAdapter) Descriptor() connections.Descriptor {
+func (a *managedKaggleAdapter) Descriptor() connections.Descriptor {
 	return connections.Descriptor{
 		Type: "kaggle", Label: "Kaggle",
 		Fields:       []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: credentials.MaxBytes}},
-		Capabilities: connections.Capabilities{Accelerators: []string{"gpu"}, RemoteCancel: "unsupported", Quota: "supported"},
+		Capabilities: connections.Capabilities{Accelerators: []string{a.config.accelerator()}, RemoteCancel: "unsupported", Quota: "supported"},
 	}
 }
 
@@ -63,6 +63,7 @@ func (a *managedKaggleAdapter) Profile(binding domain.ProviderBinding, accountSc
 	profile := admission.DefaultProfile(binding, accountScope)
 	profile.MaxRemoteWallSeconds = a.config.MaxRemoteWallSeconds
 	profile.AllowRemoteInternet = a.config.AllowRemoteInternet
+	profile.Accelerator = a.config.accelerator()
 	return profile
 }
 
@@ -80,7 +81,7 @@ func parseManagedKaggleRuntimeConfig(raw []byte) (managedKaggleRuntimeConfig, er
 	var config managedKaggleRuntimeConfig
 	fields, err := jsonwire.Object(raw, 8192)
 	if err != nil || jsonwire.Fields(fields, []string{"schema_version", "machine_shape"}, nil) != nil || json.Unmarshal(raw, &config) != nil ||
-		config.Version != 1 || config.MachineShape != "NvidiaTeslaT4" && config.MachineShape != "NvidiaTeslaP100" {
+		config.Version != 1 || config.MachineShape != "cpu" && config.MachineShape != "NvidiaTeslaT4" && config.MachineShape != "NvidiaTeslaP100" {
 		return managedKaggleRuntimeConfig{}, ErrRequest
 	}
 	return config, nil
