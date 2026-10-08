@@ -20,7 +20,7 @@ bridge.core, bridge.contract = core, contract
 
 
 def artifact_fixture():
-    identity, outputs, manifest, _ = fixture()
+    identity, outputs, manifest = fixture()
     execution = request_fixture()
     execution.update(source="", kernel_id="42")
     return dict(protocol=1, execution=execution, identity=identity, outputs=outputs,
@@ -35,7 +35,7 @@ class ArtifactTransportTests(unittest.TestCase):
         guard = bridge.Guard(SimpleNamespace(http_client=lambda: SimpleNamespace(_session=session)), "SYNTHETIC_TOKEN")
         self.addCleanup(guard.close)
         with mock.patch.object(requests.adapters.HTTPAdapter, "send") as send:
-            for name in ("SaveKernel", "CancelKernelSession", "DeleteKernel", "DownloadKernelOutputZip"):
+            for name in ("SaveKernel", "CancelKernelSession", "DeleteKernel", "DownloadKernelOutputZip", "ListKernelSessionOutput"):
                 with self.assertRaises(ValueError):
                     guard.call(bridge.KERNEL + name, lambda _: None, None)
             with self.assertRaises(ValueError):
@@ -71,7 +71,6 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
                      "control/stdout.log": b"payload log\n", "control/environment.json": b"{}",
                      "scratch/private.bin": b"NEVER_DOWNLOAD", "code/main.py": b"NEVER_DOWNLOAD"}
         self.calls, self.downloads, self.cloud_calls, self.cloud_hosts = [], [], [], []
-        self.list_fault = ""
         self.read_fault = ""
         self.change_after = ""
         self.wrong_account = False
@@ -79,7 +78,7 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
         self.redirect = False
         self.redirect_base = "https://storage.googleapis.com/fixture/"
         self.target_path = "outputs/answer.txt"
-        self.listed = [contract.PREFIX + path for path in self.data]
+        self.download_errors = {}
 
     def exchange(self, adapter, request, **kwargs):
         self.assertTrue(kwargs["stream"])
@@ -117,29 +116,14 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
                     self.kernel["metadata"]["isPrivate"] = False
                 elif self.change_after == "id":
                     self.kernel["metadata"]["id"] = 43
+                elif self.change_after == "version":
+                    self.kernel["metadata"]["currentVersionNumber"] = 2
             return response(json.dumps(self.kernel).encode())
         if op == bridge.KERNEL + "GetKernelSessionStatus":
             self.assertEqual(body["userName"], self.r["execution"]["owner"])
             self.assertEqual(body["kernelSlug"], self.r["execution"]["slug"])
             self.assertNotIn("versionLabel", body)
             return response(json.dumps(dict(status=self.status)).encode())
-        if op == bridge.KERNEL + "ListKernelSessionOutput":
-            self.assertNotIn("versionLabel", body)
-            self.assertEqual(body["pageSize"], 100)
-            cursor = body.get("pageToken", "")
-            offset = int(cursor) if cursor else 0
-            names = self.listed[offset:offset + 2]
-            files = [{"fileName": name, "url": "https://untrusted.invalid/DO_NOT_FOLLOW"} for name in names]
-            next_cursor = str(offset + 2) if offset + 2 < len(self.listed) else ""
-            if self.list_fault == "cycle":
-                next_cursor = "2"
-            if self.list_fault == "duplicate" and offset:
-                files[0]["fileName"] = self.listed[0]
-            if self.list_fault == "unsafe":
-                files[0]["fileName"] = "../outside"
-            if self.list_fault == "missing-field":
-                return response(b"{}")
-            return response(json.dumps(dict(files=files, nextPageToken=next_cursor)).encode())
         if op == bridge.DOWNLOAD:
             self.assertEqual(body["versionNumber"], 1)
             self.assertEqual(body["ownerSlug"], self.r["execution"]["owner"])
@@ -158,6 +142,9 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
         self.fail("unexpected operation")
 
     def raw_response(self, path):
+        status = self.download_errors.get(path, 404 if path not in self.data else 200)
+        if status != 200:
+            return response(b"{}", status)
         data = self.data[path]
         fault = self.read_fault if path == self.target_path else ""
         headers = {"Content-Type": "application/octet-stream"}
@@ -193,10 +180,11 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
     def pin(self, path):
         self.r["target"] = contract.entry(path, len(self.data[path]), hashlib.sha256(self.data[path]).hexdigest())
 
-    def test_all_pages_manifest_first_and_selected_control_only(self):
+    def test_manifest_first_selected_controls_without_scratch_enumeration(self):
+        self.data.update({f"scratch/runtime/file-{i}.bin": b"IRRELEVANT" for i in range(30000)})
         result = self.invoke()
-        self.assertEqual(self.downloads, [contract.MANIFEST, "control/stdout.log", "control/environment.json"])
-        self.assertEqual(len([x for x in self.calls if x[0].endswith("ListKernelSessionOutput")]), 3)
+        self.assertEqual(self.downloads, [contract.MANIFEST, "control/stdout.log", "control/stderr.log", "control/environment.json"])
+        self.assertFalse(any(op.endswith("ListKernelSessionOutput") for op, _ in self.calls))
         self.assertEqual([x["path"] for x in result["files"]], sorted([contract.MANIFEST, "outputs/answer.txt", "control/stdout.log", "control/environment.json"]))
         self.assertNotIn("untrusted.invalid", json.dumps(result))
         self.assertEqual(result["files"][-1]["sha256"], hashlib.sha256(b"yes").hexdigest())
@@ -216,23 +204,45 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
         self.assertIn("www.kaggleusercontent.com", self.cloud_hosts)
         self.assertTrue(all(op in bridge.ALLOWED for op, _ in self.calls))
 
-    def test_pagination_identity_and_missing_results_never_authorize_bytes(self):
-        for fault in ("cycle", "duplicate", "unsafe", "missing-field"):
-            self.list_fault = fault
-            with self.assertRaises(Exception):
-                self.invoke()
-            self.assertEqual(self.downloads, [])
-        self.list_fault = ""
+    def test_foreign_manifest_and_missing_manifest_fail_without_payload_transfer(self):
         self.manifest["attempt_nonce"] = "foreign"
         self.data[contract.MANIFEST] = json.dumps(self.manifest).encode()
         with self.assertRaises(ValueError):
             self.invoke()
         self.assertEqual(self.downloads, [contract.MANIFEST])
         self.downloads.clear()
-        self.listed.remove(contract.PREFIX + contract.MANIFEST)
+        del self.data[contract.MANIFEST]
+        with self.assertRaises(bridge.ArtifactNotFound):
+            self.invoke()
+        self.assertEqual(self.downloads, [contract.MANIFEST])
+
+    def test_optional_controls_skip_only_exact_provider_404(self):
+        result = self.invoke()
+        self.assertNotIn("control/stderr.log", [item["path"] for item in result["files"]])
+        for status in (401, 403, 429, 500):
+            with self.subTest(status=status):
+                self.download_errors["control/stderr.log"] = status
+                with self.assertRaises(requests.exceptions.HTTPError):
+                    self.invoke()
+        self.download_errors.clear()
+        self.redirect = True
+        # A storage 404 is not proof that the provider artifact is absent.
         with self.assertRaises(ValueError):
             self.invoke()
-        self.assertEqual(self.downloads, [])
+
+    def test_missing_selected_file_and_changed_manifest_pin_fail_fetch(self):
+        self.pin("outputs/answer.txt")
+        del self.data["outputs/answer.txt"]
+        with self.assertRaises(bridge.ArtifactNotFound):
+            self.invoke("fetch")
+        self.assertEqual(self.downloads, [contract.MANIFEST, "outputs/answer.txt"])
+        self.pin(contract.MANIFEST)
+        self.manifest["artifacts"][0]["media_type"] = "application/octet-stream"
+        self.data[contract.MANIFEST] = json.dumps(self.manifest).encode()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(ValueError, "pinned manifest changed"):
+            self.invoke("fetch", sink)
+        self.assertEqual(sink.getvalue(), b"")
 
     def test_full_bytes_followed_by_digest_eof_close_or_identity_error_fail(self):
         self.pin("outputs/answer.txt")
@@ -241,7 +251,7 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
             with self.subTest(fault=fault), self.assertRaises(Exception):
                 self.invoke("fetch", io.BytesIO())
         self.read_fault = ""
-        for fault in ("source", "privacy", "id"):
+        for fault in ("source", "privacy", "id", "version"):
             self.kernel = kernel_fixture(request_fixture())
             self.downloads.clear()
             self.change_after = fault
@@ -249,6 +259,22 @@ class ArtifactPinnedSDKTests(unittest.TestCase):
             with self.assertRaises(core.IdentityMismatch):
                 self.invoke("fetch", sink)
             self.assertEqual(sink.getvalue(), b"yes")
+
+    def test_changed_kernel_identity_fails_before_manifest_download(self):
+        for fault in ("source", "privacy", "id", "version"):
+            with self.subTest(fault=fault):
+                self.kernel = kernel_fixture(request_fixture())
+                if fault == "source":
+                    self.kernel["blob"]["source"] += "# changed"
+                elif fault == "privacy":
+                    self.kernel["metadata"]["isPrivate"] = False
+                elif fault == "id":
+                    self.kernel["metadata"]["id"] = 43
+                else:
+                    self.kernel["metadata"]["currentVersionNumber"] = 2
+                with self.assertRaises(core.IdentityMismatch):
+                    self.invoke()
+                self.assertEqual(self.downloads, [])
 
     def test_nonterminal_wrong_account_and_changed_pin_stop_without_fallback(self):
         for status in ("RUNNING", "QUEUED", "FUTURE_STATE", None):

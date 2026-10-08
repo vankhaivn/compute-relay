@@ -12,10 +12,13 @@ API = "https://api.kaggle.com/v1/"
 AUTH = "security.OAuthService/IntrospectToken"
 KERNEL = "kernels.KernelsApiService/"
 DOWNLOAD = KERNEL + "DownloadKernelOutput"
-ALLOWED = {AUTH, KERNEL + "GetKernel", KERNEL + "GetKernelSessionStatus",
-           KERNEL + "ListKernelSessionOutput", DOWNLOAD}
+ALLOWED = {AUTH, KERNEL + "GetKernel", KERNEL + "GetKernelSessionStatus", DOWNLOAD}
 MAX_REQUEST = 128 << 10
 MAX_RESPONSE = 3 << 20
+
+
+class ArtifactNotFound(ValueError):
+    """An exact-file provider download returned 404; no other failure is absence."""
 
 
 def chunks(response, limit):
@@ -86,6 +89,8 @@ class Guard:
             response.close()
             raise ValueError("unexpected artifact content type")
         try:
+            if download and response.status_code == 404:
+                raise ArtifactNotFound("exact artifact not found")
             if response.status_code != 200:
                 response.raise_for_status()
                 raise ValueError("redirect or unexpected HTTP result")
@@ -158,7 +163,7 @@ def operate(r, token, mode, sink):
     from kagglesdk.security.types.oauth_service import IntrospectTokenRequest
     from kagglesdk.kernels.types.kernels_api_service import (
         ApiGetKernelRequest, ApiGetKernelSessionStatusRequest,
-        ApiListKernelSessionOutputRequest, ApiDownloadKernelOutputRequest)
+        ApiDownloadKernelOutputRequest)
     execution = r["execution"]
     with KaggleClient(env=KaggleEnv.PROD, verbose=False, api_token=token) as client:
         guard = Guard(client, token)
@@ -211,58 +216,26 @@ def operate(r, token, mode, sink):
             check()
             check()
             terminal()
-            listed, cursors, cursor = set(), set(), ""
-            for _ in range(contract.MAX_PAGES):
-                query = ApiListKernelSessionOutputRequest()
-                query.user_name, query.kernel_slug = execution["owner"], execution["slug"]
-                query.page_size = 100
-                if cursor:
-                    query.page_token = cursor
-                guard.call(KERNEL + "ListKernelSessionOutput", api.list_kernel_session_output, query)
-                page = guard.last
-                files = page.get("files")
-                if type(files) is not list or len(files) > 100:
-                    raise ValueError("missing or oversized output page")
-                for f in files:
-                    if type(f) is not dict or not contract.safe_path(f.get("fileName")) or f["fileName"] in listed:
-                        raise ValueError("invalid or repeated output name")
-                    listed.add(f["fileName"])
-                    if len(listed) > contract.MAX_LIST_FILES:
-                        raise ValueError("output catalog exceeds bound")
-                cursor = page.get("nextPageToken", "")
-                if cursor is None:
-                    cursor = ""
-                if type(cursor) is not str or len(cursor) > 2048 or any(ord(c) < 32 or ord(c) > 126 for c in cursor):
-                    raise ValueError("invalid provider cursor")
-                if not cursor:
-                    break
-                if not files or cursor in cursors:
-                    raise ValueError("cyclic or empty output pagination")
-                cursors.add(cursor)
-            else:
-                raise ValueError("output page limit exceeded")
-            contract.collision_free(listed)
-            if contract.PREFIX + contract.MANIFEST not in listed:
-                raise ValueError("result manifest unavailable")
             raw = io.BytesIO()
             download(contract.MANIFEST, contract.CONTROL_LIMITS[contract.MANIFEST], raw)
             manifest = raw.getvalue()
-            selected = contract.select_manifest(manifest, r["identity"], r["outputs"], listed, r["max_bytes"], r["max_files"])
+            selected = contract.select_manifest(manifest, r["identity"], r["outputs"], r["max_bytes"], r["max_files"])
             if mode == "catalog":
                 total = sum(f["bytes"] for f in selected)
                 for path, cap in contract.CONTROL_LIMITS.items():
-                    if path == contract.MANIFEST or contract.PREFIX + path not in listed:
+                    if path == contract.MANIFEST:
+                        continue
+                    try:
+                        file = download(path, min(cap, r["max_bytes"] - total), None)
+                    except ArtifactNotFound:
                         continue
                     if len(selected) >= r["max_files"]:
                         raise ValueError("control files exceed file budget")
-                    file = download(path, min(cap, r["max_bytes"] - total), None)
                     total += file["bytes"]
                     selected.append(file)
                 result = {"protocol": 1, "files": sorted(selected, key=lambda f: f["path"])}
             else:
                 target = r["target"]
-                if contract.PREFIX + target["path"] not in listed:
-                    raise ValueError("pinned artifact missing")
                 if target["path"] == contract.MANIFEST:
                     file = contract.entry(target["path"], len(manifest), hashlib.sha256(manifest).hexdigest())
                     if file != target or sink.write(manifest) != len(manifest):
