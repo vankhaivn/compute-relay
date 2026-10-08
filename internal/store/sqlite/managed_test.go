@@ -419,6 +419,12 @@ func TestManagedDuplicateAccountsShareQuotaAndWorkspaceOwnership(t *testing.T) {
 	if len(ap.Quotas) != 1 || len(bp.Quotas) != 1 || ap.Quotas[0].Remaining == nil || bp.Quotas[0].Remaining == nil || *ap.Quotas[0].Remaining != 50 || *bp.Quotas[0].Remaining != 50 || ap.ActiveAttempts != 1 || bp.ActiveAttempts != 1 {
 		t.Fatal("duplicate accounts expose independent capacity")
 	}
+	for _, view := range []connections.Connection{ap, bp} {
+		quota := view.Quotas[0]
+		if quota.Limit == nil || *quota.Limit != 60 || quota.Used == nil || *quota.Used != 0 || quota.LocalReserved == nil || *quota.LocalReserved != 10 || quota.ResetAt != nil {
+			t.Fatal("quota presentation lost observed totals or local reservations", quota)
+		}
+	}
 	var allowed string
 	if err = f.s.db.QueryRow("SELECT allowed_profiles FROM workspaces WHERE workspace_id='a'").Scan(&allowed); err != nil {
 		t.Fatal(err)
@@ -548,5 +554,39 @@ func TestManagedConcurrentChangedPayloadPreservesOneFingerprint(t *testing.T) {
 	f.run(t)
 	if f.discovery.count() != 1 {
 		t.Fatal("multiple original requests reached verification")
+	}
+}
+
+func TestManagedQuotaPresentationPreservesUnitsFreshnessAndResetEvidence(t *testing.T) {
+	f := newManagedStateFixture(t)
+	connection := f.create(t, "a", "quota-details-key", managedStateSecret)
+	f.clock.advance(time.Second)
+	limit, used, left := 2.0001, 0.2501, 1.5
+	reset := f.clock.Now().Add(24 * time.Hour)
+	observation := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Unit: "hours", Limit: &limit, Used: &used, Remaining: &left, ResetAt: &reset, ObservedAt: f.clock.Now(), Source: "synthetic", Precision: "lower_bound"}
+	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", observation, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.discovery.count()
+	quota := f.get(t, "a", connection.ID).Quotas[0]
+	if quota.Limit == nil || *quota.Limit != 7200 || quota.Used == nil || *quota.Used != 901 || quota.Remaining == nil || *quota.Remaining != 5400 || quota.ResetAt == nil || !quota.ResetAt.Equal(reset) {
+		t.Fatal("quota metadata did not retain observed units/reset", quota)
+	}
+	f.clock.advance(6 * time.Minute)
+	quota = f.get(t, "a", connection.ID).Quotas[0]
+	if quota.Status != "stale" || quota.Remaining != nil || quota.Limit == nil || *quota.Limit != 7200 || quota.Precision != "unknown" {
+		t.Fatal("stale metadata became fresh capacity", quota)
+	}
+	f.clock.advance(time.Second)
+	unknown := provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "gpu", Unit: "seconds", ObservedAt: f.clock.Now(), Source: "synthetic", Precision: "unknown"}
+	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", unknown, f.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	quota = f.get(t, "a", connection.ID).Quotas[0]
+	if quota.Limit != nil || quota.Used != nil || quota.LocalReserved != nil || quota.ResetAt != nil || quota.Remaining != nil {
+		t.Fatal("unknown quota invented metadata", quota)
+	}
+	if f.discovery.count() != calls {
+		t.Fatal("quota reads invoked provider")
 	}
 }

@@ -78,8 +78,8 @@
     },
     {
       "path": "api/examples/connection.ready.valid.json",
-      "sha256": "27870cc3668bb312f1bef4262297db0feb6926ef70d25d94db6fe0a428a1527d",
-      "bytes": 731
+      "sha256": "8a8858e3156b792ed2d0f7eb536e90fe6b3d26d45f408cdb3dcd9651efd096a2",
+      "bytes": 823
     },
     {
       "path": "api/examples/connection.unknown-quota.valid.json",
@@ -528,8 +528,8 @@
     },
     {
       "path": "api/schemas/connection.v1alpha1.schema.json",
-      "sha256": "3917430f2710136c352d81fa7b84f86469954f17cd315fc51a7ec6961ba195be",
-      "bytes": 7209
+      "sha256": "cdbc7e496bc5780f81f084c09586da908dc3a153e8214eb681a9cd08a97a644f",
+      "bytes": 8606
     },
     {
       "path": "api/schemas/control-operation.v1alpha1.schema.json",

@@ -54,12 +54,16 @@ type Selection struct {
 	Accelerator           string `json:"accelerator,omitempty"`
 }
 type Quota struct {
-	Status     string     `json:"status"`
-	Resource   string     `json:"resource"`
-	Unit       string     `json:"unit"`
-	Remaining  *int64     `json:"remaining"`
-	ObservedAt *time.Time `json:"observed_at"`
-	Precision  string     `json:"precision"`
+	Limit         *int64     `json:"limit,omitempty"`
+	Used          *int64     `json:"used,omitempty"`
+	LocalReserved *int64     `json:"local_reserved,omitempty"`
+	ResetAt       *time.Time `json:"reset_at,omitempty"`
+	Status        string     `json:"status"`
+	Resource      string     `json:"resource"`
+	Unit          string     `json:"unit"`
+	Remaining     *int64     `json:"remaining"`
+	ObservedAt    *time.Time `json:"observed_at"`
+	Precision     string     `json:"precision"`
 }
 type Connection struct {
 	ID                string             `json:"connection_id"`

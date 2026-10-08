@@ -84,7 +84,7 @@ func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, now time.T
 		if capacity.Status == "known" {
 			precision = "lower_bound"
 		}
-		v.Quotas = []connections.Quota{{Status: capacity.Status, Resource: "gpu", Unit: "seconds", Remaining: capacity.RemainingSeconds, ObservedAt: capacity.ObservedAt, Precision: precision}}
+		v.Quotas = []connections.Quota{{Status: capacity.Status, Resource: "gpu", Unit: "seconds", Remaining: capacity.RemainingSeconds, Limit: capacity.LimitSeconds, Used: capacity.UsedSeconds, LocalReserved: capacity.LocalReservedSeconds, ResetAt: capacity.ResetAt, ObservedAt: capacity.ObservedAt, Precision: precision}}
 		if v.Selection != nil && v.Selection.Accelerator == "cpu" {
 			v.Quotas = append(v.Quotas, connections.Quota{Status: "unknown", Resource: "cpu", Unit: "seconds", Precision: "unknown"})
 		}

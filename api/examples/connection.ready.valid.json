@@ -22,7 +22,11 @@
       "unit": "seconds",
       "remaining": 600,
       "observed_at": "2026-10-07T00:00:00Z",
-      "precision": "lower_bound"
+      "precision": "lower_bound",
+      "limit": 3600,
+      "used": 3000,
+      "local_reserved": 0,
+      "reset_at": null
     }
   ],
   "active_attempts": 0,

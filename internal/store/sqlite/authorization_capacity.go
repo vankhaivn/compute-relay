@@ -13,10 +13,14 @@ import (
 )
 
 type managedCapacityView struct {
-	Status           string
-	RemainingSeconds *int64
-	ObservedAt       *time.Time
-	ReservedAttempts int
+	LimitSeconds         *int64
+	UsedSeconds          *int64
+	LocalReservedSeconds *int64
+	ResetAt              *time.Time
+	Status               string
+	RemainingSeconds     *int64
+	ObservedAt           *time.Time
+	ReservedAttempts     int
 }
 
 // managedReserved includes finite consent waiting for dispatch and work which may
@@ -67,6 +71,24 @@ func managedCapacity(ctx context.Context, tx *sql.Tx, account string, now time.T
 	}
 	if q.Status != provider.QuotaKnown && q.Status != provider.QuotaStale {
 		return result, nil
+	}
+	// Presentation metadata comes from the same validated observation. It never
+	// changes the conservative admission calculation or invents a reset schedule.
+	secondsValue := func(value *float64, round func(float64) float64) *int64 {
+		copy := q
+		copy.Remaining = value
+		seconds, ok := scheduler.Seconds(copy)
+		if !ok || seconds > float64(math.MaxInt64/2) {
+			return nil
+		}
+		result := int64(round(seconds))
+		return &result
+	}
+	result.LimitSeconds = secondsValue(q.Limit, math.Floor)
+	result.UsedSeconds = secondsValue(q.Used, math.Ceil)
+	result.LocalReservedSeconds = &reserved
+	if q.ResetAt != nil && scheduler.ValidTime(*q.ResetAt) {
+		result.ResetAt = q.ResetAt
 	}
 	freshFor := min(settings.QuotaFreshFor, 5*time.Minute)
 	if q.Status == provider.QuotaStale || now.Sub(q.ObservedAt) >= freshFor {

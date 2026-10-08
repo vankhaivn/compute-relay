@@ -63,6 +63,18 @@ dependent queued, active, uncertain or retained collection work, then deletes ex
 items before recording a tombstone. Removed IDs remain readable but disappear from the active
 list. A failed storage operation leaves a recoverable intent, not a reported success.
 
+## Read quota details
+
+Connection quota entries expose optional `limit`, `used`, `local_reserved` and `reset_at`.
+All durations are seconds: total allowance is rounded down and provider usage up.
+`remaining` retains its conservative meaning after provider and local reservations;
+`local_reserved` reports only Relay's finite GPU reservations, not provider usage.
+These figures are account-scoped and do not grant compute. Read responses make no provider calls.
+Older servers may omit every new field; missing values are unknown, not zero or unlimited.
+Stale observations may retain total/usage metadata but never expose fresh remaining capacity.
+`reset_at` is returned only from provider evidence. The current Kaggle adapter does not report
+an authoritative reset timestamp, so clients must not infer one from weekdays or elapsed time.
+
 ## Authorize one attempt
 
 Upload immutable input objects, admit the job and retain its explicit attempt ID. Admission

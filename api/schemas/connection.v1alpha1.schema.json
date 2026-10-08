@@ -103,7 +103,11 @@
                   "type": "boolean"
                 },
                 "accelerator": {
-                  "enum": ["cpu", "gpu", "tpu"],
+                  "enum": [
+                    "cpu",
+                    "gpu",
+                    "tpu"
+                  ],
                   "description": "Exact frozen resource policy. Omitted for legacy profiles; clients must not infer it from the current provider descriptor."
                 }
               }
@@ -168,6 +172,41 @@
                   "lower_bound",
                   "unknown"
                 ]
+              },
+              "limit": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Observed total allowance in seconds, rounded down; absent when unknown."
+              },
+              "used": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Observed provider usage in seconds, rounded up; not inferred from remaining capacity."
+              },
+              "local_reserved": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Finite GPU seconds reserved by Relay work for this account; provider reservations are already included in remaining and are not repeated here."
+              },
+              "reset_at": {
+                "anyOf": [
+                  {
+                    "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Provider-evidenced reset time only; absence is unknown and never grants allowance."
               }
             },
             "allOf": [
