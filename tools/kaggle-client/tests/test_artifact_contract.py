@@ -17,25 +17,23 @@ def fixture():
     outputs = [dict(path="answer.txt", kind="file", required=True, max_bytes=10)]
     manifest = dict(identity, phase="completed", artifacts=[dict(path="answer.txt", bytes=3,
                     sha256=hashlib.sha256(b"yes").hexdigest(), media_type="text/plain")])
-    listing = {contract.PREFIX + contract.MANIFEST, contract.PREFIX + "outputs/answer.txt",
-               contract.PREFIX + "scratch/private.bin", contract.PREFIX + "code/main.py"}
-    return identity, outputs, manifest, listing
+    return identity, outputs, manifest
 
 
 class ArtifactContractTests(unittest.TestCase):
     def test_only_manifest_declared_outputs_are_selected(self):
-        identity, outputs, manifest, listing = fixture()
+        identity, outputs, manifest = fixture()
         raw = json.dumps(manifest).encode()
-        result = contract.select_manifest(raw, identity, outputs, listing)
+        result = contract.select_manifest(raw, identity, outputs)
         self.assertEqual([x["path"] for x in result], [contract.MANIFEST, "outputs/answer.txt"])
         self.assertEqual(result[0]["sha256"], hashlib.sha256(raw).hexdigest())
         self.assertEqual(result[0]["bytes"], len(raw))
         self.assertNotIn("scratch", json.dumps(result))
 
     def test_identity_required_files_and_bounds_fail_closed(self):
-        for fault in ("identity", "digest", "size", "missing", "required", "undeclared", "total", "count"):
+        for fault in ("identity", "digest", "size", "required", "undeclared", "total", "count"):
             with self.subTest(fault=fault):
-                identity, outputs, manifest, listing = fixture()
+                identity, outputs, manifest = fixture()
                 kw = {}
                 if fault == "identity":
                     manifest["attempt_nonce"] = "foreign"
@@ -43,8 +41,6 @@ class ArtifactContractTests(unittest.TestCase):
                     manifest["artifacts"][0]["sha256"] = "invalid"
                 if fault == "size":
                     manifest["artifacts"][0]["bytes"] = True
-                if fault == "missing":
-                    listing.remove(contract.PREFIX + "outputs/answer.txt")
                 if fault == "required":
                     manifest["artifacts"] = []
                 if fault == "undeclared":
@@ -54,22 +50,36 @@ class ArtifactContractTests(unittest.TestCase):
                 if fault == "count":
                     kw["max_files"] = 1
                 with self.assertRaises(ValueError):
-                    contract.select_manifest(json.dumps(manifest).encode(), identity, outputs, listing, **kw)
-        identity, outputs, manifest, listing = fixture()
+                    contract.select_manifest(json.dumps(manifest).encode(), identity, outputs, **kw)
+        identity, outputs, manifest = fixture()
         manifest.update(phase="failed", artifacts=[])
-        self.assertEqual(len(contract.select_manifest(json.dumps(manifest).encode(), identity, outputs, listing)), 1)
+        self.assertEqual(len(contract.select_manifest(json.dumps(manifest).encode(), identity, outputs)), 1)
 
     def test_directory_selection_and_case_prefix_collisions(self):
-        identity, outputs, manifest, listing = fixture()
+        identity, outputs, manifest = fixture()
         outputs[0].update(path="results", kind="directory")
         manifest["artifacts"][0]["path"] = "results/a.txt"
-        listing.add(contract.PREFIX + "outputs/results/a.txt")
-        selected = contract.select_manifest(json.dumps(manifest).encode(), identity, outputs, listing)
+        selected = contract.select_manifest(json.dumps(manifest).encode(), identity, outputs)
         self.assertEqual(selected[1]["path"], "outputs/results/a.txt")
         for paths in (["A", "a"], ["foo", "foo/bar"], ["foo/a", "FOO"], ["a", "a"]):
             with self.assertRaises(ValueError):
                 contract.collision_free(paths)
         contract.collision_free(["a", "ab/c", "xyz/z"])
+
+    def test_manifest_payload_collisions_and_directory_aggregate_bounds(self):
+        for paths in (("results/A", "results/a"), ("results/foo", "results/foo/a")):
+            identity, outputs, manifest = fixture()
+            outputs[0].update(path="results", kind="directory")
+            artifact = manifest["artifacts"][0]
+            manifest["artifacts"] = [dict(artifact, path=path) for path in paths]
+            with self.assertRaisesRegex(ValueError, "conflicting output path"):
+                contract.select_manifest(json.dumps(manifest).encode(), identity, outputs)
+        identity, outputs, manifest = fixture()
+        outputs[0].update(path="results", kind="directory", max_bytes=5)
+        artifact = manifest["artifacts"][0]
+        manifest["artifacts"] = [dict(artifact, path=path) for path in ("results/a", "results/b")]
+        with self.assertRaisesRegex(ValueError, "output exceeds frozen bound"):
+            contract.select_manifest(json.dumps(manifest).encode(), identity, outputs)
 
     def test_paths_urls_and_json_are_not_normalized_into_authority(self):
         for path in ("", "/abs", "../a", "a/../b", "a//b", "a\\b", "C:/x", "a%2fb", "a\n", "CON.txt", "a.", "a ", "nul/x", "a" * 513):
@@ -94,7 +104,7 @@ class ArtifactContractTests(unittest.TestCase):
                 contract.strict_json(raw)
 
     def test_output_declarations_are_closed_and_disjoint(self):
-        _, outputs, _, _ = fixture()
+        _, outputs, _ = fixture()
         contract.declarations_valid(outputs)
         for extra in (dict(outputs[0]), dict(outputs[0], path="answer.txt/nested")):
             with self.assertRaises(ValueError):

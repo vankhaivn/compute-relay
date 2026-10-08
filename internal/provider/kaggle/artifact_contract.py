@@ -10,8 +10,6 @@ CONTROL_LIMITS = {MANIFEST: 1 << 20, "control/stdout.log": 20 << 20,
                   "control/stderr.log": 20 << 20, "control/environment.json": 1 << 20}
 MAX_FILES = 10004
 MAX_BYTES = 4 << 30
-MAX_LIST_FILES = 20000
-MAX_PAGES = 256
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 SIGNED_STORAGE_NETLOCS = (
     "storage.googleapis.com", "storage.googleapis.com:443",
@@ -90,7 +88,7 @@ def declarations_valid(outputs):
     collision_free([item["path"] for item in outputs])
 
 
-def select_manifest(raw, identity, outputs, listed, max_bytes=MAX_BYTES, max_files=MAX_FILES):
+def select_manifest(raw, identity, outputs, max_bytes=MAX_BYTES, max_files=MAX_FILES):
     """Candidate metadata only; M3 performs full schema/phase and byte verification."""
     if len(raw) > CONTROL_LIMITS[MANIFEST]:
         raise ValueError("result manifest too large")
@@ -112,8 +110,8 @@ def select_manifest(raw, identity, outputs, listed, max_bytes=MAX_BYTES, max_fil
         match = next((i for i, d in enumerate(outputs) if
                       d["kind"] == "file" and f["path"] == d["path"] or
                       d["kind"] == "directory" and f["path"].startswith(d["path"] + "/")), None)
-        if match is None or PREFIX + candidate["path"] not in listed:
-            raise ValueError("undeclared or missing result")
+        if match is None:
+            raise ValueError("undeclared result")
         counts[match] += 1
         sizes[match] += f["bytes"]
         if outputs[match]["max_bytes"] and sizes[match] > outputs[match]["max_bytes"]:
@@ -121,7 +119,7 @@ def select_manifest(raw, identity, outputs, listed, max_bytes=MAX_BYTES, max_fil
         total += f["bytes"]
         selected.append(candidate)
     collision_free([f["path"] for f in selected])
-    if total > max_bytes or len(selected) > max_files or PREFIX + MANIFEST not in listed:
+    if total > max_bytes or len(selected) > max_files:
         raise ValueError("incomplete or excessive result")
     if m.get("phase") == "completed" and any(d["required"] and not counts[i] for i, d in enumerate(outputs)):
         raise ValueError("required output absent")
