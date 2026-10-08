@@ -220,7 +220,9 @@ func finishObservedOperations(ctx context.Context, tx *sql.Tx, work *dispatch.Wo
 		} else if work.Journal.Phase == dispatch.Attention {
 			status, effect = domain.OperationManualRequired, operations.ManualRequired
 			p = controlProblem(domain.CodeRemoteExecutionUnresolved, true)
-		} else if !(kind == dispatch.SubmissionSeen && work.Journal.Remote != nil) && !(kind == dispatch.ObservationSeen && work.Journal.Observation != nil && work.Journal.Observation.Execution != domain.ExecutionUnknown) {
+		} else if !(kind == dispatch.PreparationSeen && !work.Journal.SubmitStarted && work.Journal.Prepared != nil) &&
+			!(kind == dispatch.SubmissionSeen && work.Journal.Remote != nil) &&
+			!(kind == dispatch.ObservationSeen && work.Journal.Observation != nil && work.Journal.Observation.Execution != domain.ExecutionUnknown) {
 			continue
 		}
 		if _, err = finishControl(ctx, tx, r, status, effect, p, now); err != nil {

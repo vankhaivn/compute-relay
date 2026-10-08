@@ -84,15 +84,15 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 	if e.used.Swap(true) {
 		return unknownExecution()
 	}
-	ctx, cancel := context.WithTimeout(parent, e.policy.Timeout)
-	defer cancel()
+	// Staging byte verification has its own bounded preparation budget. Do not
+	// charge it to the shorter SDK-call timeout before submission can begin.
 	// Recheck complete remote staging without creating anything. Equality includes
 	// the first-pinned numeric dataset ID, version, marker, privacy and readiness.
-	stage, err := e.stager.ReconcilePreparation(ctx, e.plan, e.prepared.PreparationID)
+	stage, err := e.stager.ReconcilePreparation(parent, e.plan, e.prepared.PreparationID)
 	if err != nil || stage.Status != provider.ReconciliationFound || stage.Prepared == nil || *stage.Prepared != e.prepared {
 		return rejectedExecution()
 	}
-	r, invoked, err := e.call(ctx, "submit", "")
+	r, invoked, err := e.call(parent, "submit", "")
 	if err != nil {
 		if !invoked {
 			return rejectedExecution()

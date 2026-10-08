@@ -17,7 +17,7 @@ confirmed running/activity evidence.
 | Lost admission/control response | Explicitly replay the identical request and original key under current authority; then read current state. Do not generate a new key automatically. |
 | Failed before an intent committed | No external permit exists; inspect the actual transaction outcome before retrying local work. |
 | Intent committed, acknowledgement lost or external call uncertain | Reload the journal and observe original identity only, even if a lookup returns not found. |
-| Staging pending/private status unknown | Observe original preparation. Do not recreate/upload/version it automatically. |
+| Staging pending or exhausted observation failures before submission | Explicitly reconcile the original attempt. This resumes staging observation with its original preparation ID and frozen plan, without another upload/create call or attempt grant. Privacy or identity mismatch still requires intervention. |
 | Remote active/unknown | Retain account capacity and recovery material; inspect/reconcile the recorded resource. |
 | Cancellation unsupported or target missing | Keep manual-required/unknown termination. Never delete resources or substitute IDs to pretend cancellation. |
 | Terminal execution, results missing | Collect for the same attempt, not compute retry. |
@@ -28,6 +28,11 @@ confirmed running/activity evidence.
 | Download receipt failed after local linking | Respect `download_may_be_published`; inspect the chosen file, never overwrite/delete it automatically. |
 | Result expired | Preserve history. Do not refetch inputs or rerun compute to resurrect expired results. |
 | Identity/source/version/root mismatch | Stop and retain evidence; do not adopt a replacement or rewrite markers to bypass the check. |
+
+Staging readiness can require verification of every original input byte. Staging observation
+and submission preparation use the finite preparation budget, constrained by any shorter parent
+deadline. Short provider control calls retain their separate control timeout; a staging timeout
+does not authorize another upload, creation or submission.
 
 Use [application controls](application-cli.md), [artifact delivery](artifact-delivery.md) and
 [collection](development/collection.md) for available commands/contracts. Normal serve cannot run missing

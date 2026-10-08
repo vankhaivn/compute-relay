@@ -37,12 +37,27 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
 		event = domain.EventCancellationRequested
 	case RequestReconciliation:
-		if !old.SubmitStarted || state.Execution.Terminal() || state.Orchestration.Terminal() || (old.Phase != Attention && old.Phase != Submitting && old.Phase != Submitted) || old.Problem != nil && (old.Problem.Code == domain.CodeRemoteIdentityMismatch || old.Problem.Code == domain.CodePrivateStagingUnavailable) {
+		if state.Execution.Terminal() || state.Orchestration.Terminal() || old.Problem != nil && (old.Problem.Code == domain.CodeRemoteIdentityMismatch || old.Problem.Code == domain.CodePrivateStagingUnavailable) {
 			return Journal{}, state, "", ErrConflict
 		}
-		j.Phase = Submitting
-		if j.Remote != nil {
-			j.Phase = Submitted
+		if !old.SubmitStarted {
+			if (old.Phase != Attention && old.Phase != Staging && old.Phase != Ready) ||
+				state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted ||
+				state.Cancellation != domain.CancellationNotRequested || state.DeadlineExceeded ||
+				(state.Orchestration != domain.OrchestrationNeedsAttention && state.Orchestration != domain.OrchestrationPreparing && state.Orchestration != domain.OrchestrationReconciling) {
+				return Journal{}, state, "", ErrConflict
+			}
+			// Re-enter the observer path with the original preparation intent. Local
+			// preparation and its mutation permit are never rearmed by this control.
+			j.Phase = Staging
+		} else {
+			if old.Phase != Attention && old.Phase != Submitting && old.Phase != Submitted {
+				return Journal{}, state, "", ErrConflict
+			}
+			j.Phase = Submitting
+			if j.Remote != nil {
+				j.Phase = Submitted
+			}
 		}
 		j.Failures = 0
 		j.Problem = nil

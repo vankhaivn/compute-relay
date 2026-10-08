@@ -198,7 +198,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return s.fail(domain.CodeConfigurationInvalid)
 		}
 		journal := work.Journal
-		seen, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.PreparationObservation, error) {
+		seen, err := control(ctx, e.config.PreparationTimeout, func(c context.Context) (provider.PreparationObservation, error) {
 			return observer.ReconcilePreparation(c, journal.Plan.Clone(), journal.PreparationID)
 		})
 		if err != nil {
@@ -216,7 +216,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return err
 		}
 		prepared := *s.work().Journal.Prepared
-		outcome, callErr := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.SubmissionOutcome, error) { return p.Submit(c, prepared), nil })
+		outcome, callErr := control(ctx, e.config.PreparationTimeout, func(c context.Context) (provider.SubmissionOutcome, error) { return p.Submit(c, prepared), nil })
 		if callErr != nil || outcome.Validate(prepared.Identity) != nil {
 			outcome = provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: problem(domain.CodeProviderSubmissionUnknown, true)}
 		}
