@@ -98,6 +98,12 @@ job/attempt/receipt metadata. With admission-only serve the job remains local; w
 configured [Kaggle runtime](kaggle-runtime.md), background workers may then stage/dispatch the
 durably admitted attempt.
 
+New jobs may add `"result_collection": "manual"` to wait for an explicit `job collect` after
+remote completion. Check `/v1/info` for `manual_result_collection` before opting in. Omission
+or `"automatic"` keeps automatic collection. The accepted policy is immutable and also applies
+to failed-job diagnostics. Status polling/reopening does not request collection or new compute.
+`collection.state=awaiting_request` means terminal execution with no local publication yet.
+
 Keep the original request and explicit key (8–256 printable non-whitespace ASCII bytes).
 Repeating the identical submit recovers the original receipt; changed content with the same key
 conflicts. Later profile remapping/disablement or grant removal does not rewrite the original
@@ -120,6 +126,12 @@ Eligibility is enforced, so these are command references, not a sequence to run 
 Retry requires a nonblank non-secret reason and returns `kind=retry_compute`, source `attempt_id`
 and a distinct `new_attempt_id`. Do not retry successful compute just to retrieve missing results.
 Cancellation intent is not termination; reconcile is observational; collect is transfer-only.
+For manual jobs, `collect` is the explicit provider-to-Relay transfer request. Replay its saved
+key after a missing response; concurrent pending keys share an operation. Available results
+are acknowledged without refetching. A committed collection failure needs a new explicit
+collect key for the same attempt. After `collection.state=available`, use artifact download
+for the separate verified local delivery. `collection.progress` reports selected output work;
+full byte counts still await verification/publication.
 HTTP handlers themselves never call providers; provider-enabled serve runs separate durable
 workers. See [controls](development/operations.md) and [recovery](recovery.md).
 

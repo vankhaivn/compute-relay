@@ -1158,7 +1158,9 @@ Do not expose provider URLs as the only artifact retrieval mechanism. The runtim
 
 Wait until the provider exposes a stable collectible result, enumerate all relevant pages, download to temporary storage, verify identity and digests, and only then publish artifacts atomically.
 
-Always collect the runner result manifest and bounded logs when available, including failure cases. Prefer declared outputs to indiscriminate download of the entire remote filesystem.
+By default, collect the runner result manifest and bounded logs when available, including failure cases.
+An immutable per-job manual collection policy postpones all result retrieval until an explicit
+collect request; status observation and reopening never imply that request. Prefer declared outputs to indiscriminate download of the entire remote filesystem.
 
 A required output missing after confirmed completion prevents job success. Optional outputs can be absent. A provider success flag alone is not enough to prove that the business command succeeded and all outputs arrived.
 
@@ -1182,7 +1184,10 @@ Bound log size, line size, and retrieval page size. Record explicit truncation m
 
 ### 16.5 Progress
 
-Core progress should use phases: preparing, submitting, remote queued, running, collecting, complete. Do not invent a percentage based only on elapsed time.
+Core progress should use phases: preparing, submitting, remote queued, running, collecting, complete.
+Collection additionally distinguishes awaiting an explicit request, transfer, verification and
+publication. Selected-output byte progress records verified cached completion separately from
+new provider stream bytes; totals remain unknown before the bounded result pin. Do not invent a percentage based only on elapsed time.
 
 Optionally allow a documented JSON-lines progress file or structured stdout convention from cooperating jobs. Progress should include source, timestamp, optional completed/total units, and message. Treat it as untrusted informational data, not control-plane instructions.
 

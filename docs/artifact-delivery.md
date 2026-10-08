@@ -2,7 +2,10 @@
 
 Deliver results already committed by the collector, with current workspace authority and
 end-to-end byte verification. These commands/routes do not fetch from Kaggle, start collection
-or make a queued job produce results. See [collection](development/collection.md) for publication semantics.
+or make a queued job produce results. A job admitted with `result_collection=manual` first needs
+an explicit `job collect` for its original terminal attempt; poll additive `collection` status
+until verified publication is available. Its progress describes selected provider output work,
+separately from these local content reads. See [collection](development/collection.md) for publication semantics.
 
 ## Commands
 

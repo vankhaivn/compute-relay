@@ -45,6 +45,12 @@ Writer short/invalid writes, errors or panic cancel the producer. A nonzero exit
 after all bytes returns no successful transfer receipt. M3 withholds successful blob EOF until
 this whole call succeeds, then independently reopens/hashes before atomic publication.
 
+The optional fetch-progress port reports absolute selected target bytes after writes of the
+existing exact-file helper stream into Relay. Collection counts only output-role streams;
+repeated manifest and control traffic is excluded. Progress callback failure stops transfer
+without bypassing final verification. Cached local blobs are accounted separately by collection.
+No additional Python progress channel, provider URL or application callback is exposed.
+
 A committed collection failure needs explicit transfer-only retry, not compute retry. Lost
 pin/publication acknowledgement is read from committed state. Repeated per-file identity/manifest
 checks favor safety over throughput; no range resume, persistent signed-URL cache or performance

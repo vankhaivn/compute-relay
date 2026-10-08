@@ -20,6 +20,7 @@ confirmed running/activity evidence.
 | Staging pending or exhausted observation failures before submission | Explicitly reconcile the original attempt. This resumes staging observation with its original preparation ID and frozen plan, without another upload/create call or attempt grant. Privacy or identity mismatch still requires intervention. |
 | Remote active/unknown | Retain account capacity and recovery material; inspect/reconcile the recorded resource. |
 | Cancellation unsupported or target missing | Keep manual-required/unknown termination. Never delete resources or substitute IDs to pretend cancellation. |
+| Manual terminal job, `collection.state=awaiting_request` | Wait until results are wanted, then collect explicitly for the original attempt. Polling/reopening is read-only. |
 | Terminal execution, results missing | Collect for the same attempt, not compute retry. |
 | Interrupted accepted collection | Reclaim after the transfer lease under normal fencing; reuse the original result pin. |
 | Committed failed collection | One explicit new collect request/key for the same attempt; old-key replay remains the old receipt. |

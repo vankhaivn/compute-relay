@@ -85,7 +85,11 @@ Control POSTs require operate scope, an explicit attempt and the same key rules.
 a nonblank non-secret reason. The `/retry` operation is `retry_compute`, preserving the source
 attempt and returning a distinct `new_attempt_id`. Control replay uses `replay=true` and the
 original receipt; GET reads current state. Cancellation is intent, reconcile observes, collect
-requests transfer-only work. Handlers never call providers.
+requests transfer-only work. Optional JobSpec `result_collection=manual` freezes explicit result
+collection; omission keeps automatic behavior. Check the runtime's `manual_result_collection`
+feature before admitting manual jobs. Additive status `collection` separates terminal waiting,
+pending/active transfer, verification and published availability; [collection](../docs/development/collection.md)
+defines dated output-byte progress and restart generations. Handlers never call providers.
 
 Artifact metadata/pages describe a historical publication. Binary content requires exact bytes
 and the final `X-Compute-Relay-Verified` trailer; see [delivery](../docs/artifact-delivery.md).
