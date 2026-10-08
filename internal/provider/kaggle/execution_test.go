@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
@@ -234,5 +235,30 @@ func TestExecutionSourceContainsValidatedOriginalRunnerManifest(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err != nil || strings.TrimSpace(string(output)) != "validated-not-executed" {
 		t.Fatal("generated manifest differs from runner contract", err, string(output))
+	}
+}
+
+func TestExecutorStagesUnderPreparationBudgetBeforeBoundedSubmissionCall(t *testing.T) {
+	e := newExecutionFixture(t)
+	e.policy.Timeout = time.Second
+	e.stager.policy.Timeout = 5 * time.Second
+	e.stager.run = func(ctx context.Context, _ Config, mode string, _ []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
+		deadline, ok := ctx.Deadline()
+		if mode != "observe" || !ok || time.Until(deadline) < 3*time.Second || time.Until(deadline) > 5*time.Second {
+			t.Fatal("staging verification inherited the shorter SDK-call budget")
+		}
+		return stageResponse(p, "ready"), nil
+	}
+	calls := 0
+	e.run = func(ctx context.Context, _ Config, mode string, _ []byte, r executionRequest) (executionResponse, error) {
+		deadline, ok := ctx.Deadline()
+		if mode != "submit" || !ok || time.Until(deadline) <= 0 || time.Until(deadline) > time.Second {
+			t.Fatal("submission call lost its own finite SDK budget")
+		}
+		calls++
+		return executionFound(r, "QUEUED"), nil
+	}
+	if result := e.Submit(context.Background(), e.prepared); result.Status != provider.SubmissionAccepted || calls != 1 {
+		t.Fatal("verified staging did not reach exactly one submission")
 	}
 }
