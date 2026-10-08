@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,6 +25,8 @@ type Profile struct {
 	MaxRemoteWallSeconds int64                  `json:"max_remote_wall_seconds"`
 	MaxBundleBytes       int64                  `json:"max_bundle_bytes"`
 	MaxInputBytes        int64                  `json:"max_input_bytes"`
+	// Omitted legacy profiles retain their existing provider-validated resource policy.
+	Accelerator string `json:"accelerator,omitempty"`
 }
 
 func DefaultProfile(binding domain.ProviderBinding, accountScope string) Profile {
@@ -40,6 +43,9 @@ func (p Profile) Validate() error {
 		}
 	}
 	if !domain.ObjectID(p.Binding.ConfigurationRevision).Valid() {
+		return ErrRequirements
+	}
+	if !slices.Contains([]string{"", "cpu", "gpu", "tpu"}, p.Accelerator) {
 		return ErrRequirements
 	}
 	if p.CredentialRef != "" {
@@ -66,7 +72,7 @@ func (p Profile) Validate() error {
 	return nil
 }
 func (p Profile) Check(s Spec) error {
-	if p.Validate() != nil || p.Binding.Profile != s.Profile || s.Timeouts.RemoteWallSeconds > p.MaxRemoteWallSeconds || s.Network.RemoteInternet == "required" && !p.AllowRemoteInternet {
+	if p.Validate() != nil || p.Binding.Profile != s.Profile || s.Timeouts.RemoteWallSeconds > p.MaxRemoteWallSeconds || s.Network.RemoteInternet == "required" && !p.AllowRemoteInternet || p.Accelerator != "" && p.Accelerator != s.Resources.Accelerator {
 		return ErrRequirements
 	}
 	return nil

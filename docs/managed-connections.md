@@ -20,10 +20,14 @@ compute-relay serve --root /absolute/private/runtime \
   --managed-python /absolute/provider-runtime/bin/python3
 ```
 
-Optional policy flags are `--managed-machine-shape NvidiaTeslaT4|NvidiaTeslaP100`,
+Optional policy flags are `--managed-machine-shape cpu|NvidiaTeslaT4|NvidiaTeslaP100`,
 `--managed-max-wall-seconds 1..86400`, `--managed-max-workers 1..16`, and
 `--managed-allow-internet`. Defaults are T4, 1800 seconds, two workers and internet disabled.
 They configure future profiles; each verified connection revision freezes its own policy.
+Use `--managed-machine-shape cpu` for CPU-only execution. It sends GPU disabled and no GPU
+machine shape to Kaggle. This is an explicit configuration, never a fallback from an unavailable
+GPU. Changing the service flag does not rewrite saved connections or jobs; explicitly check a
+connection to publish a new selection under that configuration.
 Managed flags cannot be mixed with standalone Kaggle flags. No flag grants an attempt permit.
 
 Check authenticated `/v1/info` for `managed_connections` and `attempt_authorization`, then
@@ -45,8 +49,11 @@ Use a fresh non-secret idempotency key per intended operation and preserve its r
 the returned connection-operation URI for the current outcome; repeating a POST returns its
 original receipt. All provider verification happens asynchronously outside the HTTP handler.
 
-A verified connection returns an exact `selection.profile`. Use that value in the existing job
-specification. A later connection change can invalidate an old selection for new admission;
+A newly verified connection returns an exact `selection.profile` and `selection.accelerator`.
+Use both in the existing job specification; admission rejects a different resource. The optional
+accelerator field is absent from legacy profiles. A resource-selecting client must request a
+connection check rather than infer old resource policy from the current provider descriptor.
+A later connection change can invalidate an old selection for new admission;
 refresh explicitly after a conflict. Previously admitted jobs keep their frozen provider/account
 binding. Credential replacement must verify the same account; a different account needs a new
 connection. Two credentials for one account share capacity and do not create extra quota.
@@ -72,8 +79,11 @@ does not authorize provider staging or execution. After an owner approves that e
 ```
 
 The wall bound must equal the frozen job request. New GPU work requires known, fresh, sufficient
-cached quota after existing reservations. Unresolved HTTPS inputs are not enabled here. Unknown
-or stale quota requires an explicit connection check; there is no account fallback or rotation.
+cached quota after existing reservations. Unknown or stale GPU quota requires an explicit
+connection check. Explicit CPU work does not require or reserve GPU seconds. Its unquantified
+CPU allowance remains unknown and produces a scheduling warning; known CPU exhaustion still
+blocks execution. All resources share the same account concurrency limit and finite consent.
+Unresolved HTTPS inputs are not enabled here; there is no account fallback or rotation.
 
 The permit is consumed durably before provider mutations. Restarting or changing startup flags
 cannot create another permit. Recovery and collection use the original binding. An explicit

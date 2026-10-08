@@ -101,6 +101,10 @@
                 },
                 "allow_remote_internet": {
                   "type": "boolean"
+                },
+                "accelerator": {
+                  "enum": ["cpu", "gpu", "tpu"],
+                  "description": "Exact frozen resource policy. Omitted for legacy profiles; clients must not infer it from the current provider descriptor."
                 }
               }
             }

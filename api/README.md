@@ -60,7 +60,9 @@ provider descriptors, connection operations and durable attempt-authorization ro
 `implemented-offline` in OpenAPI. Only `--managed-python` serve composes them and advertises
 `managed_connections` and `attempt_authorization` in authenticated runtime info. They
 preserve the existing job envelope through unique immutable selection profiles and separate
-`manage`/`execute` scopes; old clients remain compatible with standalone profiles.
+`manage`/`execute` scopes; old clients remain compatible with standalone profiles. The optional
+`selection.accelerator` records the exact resource of a newly verified managed profile. Its absence
+on an older selection means unreported, not the current descriptor's default.
 
 ```text
 GET  /v1/workspaces/{w}/providers

@@ -32,7 +32,7 @@ type ManagedServeConfig struct {
 }
 
 func (c ManagedServeConfig) validate() error {
-	if c.MachineShape != "NvidiaTeslaT4" && c.MachineShape != "NvidiaTeslaP100" ||
+	if c.MachineShape != "cpu" && c.MachineShape != "NvidiaTeslaT4" && c.MachineShape != "NvidiaTeslaP100" ||
 		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
 		return ErrRequest
 	}
@@ -45,6 +45,13 @@ func (c ManagedServeConfig) validate() error {
 		return ErrRequest
 	}
 	return nil
+}
+
+func (c ManagedServeConfig) accelerator() string {
+	if c.MachineShape == "cpu" {
+		return "cpu"
+	}
+	return "gpu"
 }
 
 type managedServices struct {
@@ -132,6 +139,14 @@ func (h *Host) managedProvider(config ManagedServeConfig, resolver ports.Credent
 		AccountName: binding.CanonicalAccount, CredentialRef: ports.CredentialRef(profile.CredentialRef), PythonExecutable: config.PythonExecutable}
 	policy := kaggle.DefaultExecutionPolicy()
 	policy.MachineShape, policy.AllowInternet, policy.MaxWallSeconds = frozen.MachineShape, profile.AllowRemoteInternet, profile.MaxRemoteWallSeconds
+	accelerator := "gpu"
+	if frozen.MachineShape == "cpu" {
+		policy.MachineShape = ""
+		accelerator = "cpu"
+	}
+	if profile.Accelerator != "" && profile.Accelerator != accelerator {
+		return nil, ErrRequest
+	}
 	// One resolver invocation belongs to one dispatch/collection step. A fresh
 	// adapter's one-attempt budget cannot admit work: the managed repository alone
 	// claims durable permits and consumes them before preparation intents.

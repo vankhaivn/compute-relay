@@ -29,6 +29,9 @@ func TestExecutionPlanBindsSourceWithoutRenamingAnExistingIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if one.GPU || one.MachineShape != "" {
+		t.Fatal("CPU request allocated an accelerator")
+	}
 	two, err := buildExecutionRequest(c, DefaultStagingPolicy(), DefaultExecutionPolicy(), plan.Clone(), prepared)
 	if err != nil || one != two || one.SourceSHA256 != provider.Digest([]byte(one.Source)) || !strings.HasPrefix(one.Slug, "cre-") {
 		t.Fatal("unstable source identity", err)

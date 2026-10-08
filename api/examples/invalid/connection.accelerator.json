@@ -13,7 +13,7 @@
     "configuration_revision": "r1",
     "max_remote_wall_seconds": 600,
     "allow_remote_internet": false,
-    "accelerator": "gpu"
+    "accelerator": "auto"
   },
   "quotas": [
     {
@@ -23,6 +23,14 @@
       "remaining": 600,
       "observed_at": "2026-10-07T00:00:00Z",
       "precision": "lower_bound"
+    },
+    {
+      "status": "unknown",
+      "resource": "cpu",
+      "unit": "seconds",
+      "remaining": null,
+      "observed_at": null,
+      "precision": "unknown"
     }
   ],
   "active_attempts": 0,

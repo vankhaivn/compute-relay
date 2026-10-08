@@ -77,7 +77,7 @@ func TestManagedKaggleRuntimePolicyIsClosedAndContainsNoLocalInterpreter(t *test
 	}
 	for _, invalid := range []string{
 		"", `{}`, `null`, `{"schema_version":2,"machine_shape":"NvidiaTeslaT4"}`,
-		`{"schema_version":1,"machine_shape":"cpu"}`,
+		`{"schema_version":1,"machine_shape":""}`,
 		`{"schema_version":1,"Machine_Shape":"NvidiaTeslaT4"}`,
 		`{"schema_version":1,"machine_shape":"NvidiaTeslaT4","machine_shape":"NvidiaTeslaP100"}`,
 		`{"schema_version":1,"machine_shape":null}`,

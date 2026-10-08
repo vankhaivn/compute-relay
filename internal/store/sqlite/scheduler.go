@@ -90,8 +90,10 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 			}
 			policies[c.AccountScope] = c.Policy
 		}
-		if c.Managed && c.Resource == "gpu" {
-			c.Policy.StrictQuota = true
+		if c.Managed {
+			// Explicit CPU work retains unknown-quota warnings and known
+			// exhaustion checks; only GPU work requires a positive allowance.
+			c.Policy.StrictQuota = c.Resource != "cpu"
 		}
 		key := c.AccountScope + "/" + c.Resource // validated opaque account IDs cannot contain '/'.
 		if q, ok := quotas[key]; ok {

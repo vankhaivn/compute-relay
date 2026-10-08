@@ -59,7 +59,8 @@ func (v *managedTestVault) Delete(_ context.Context, key string) error {
 
 type managedTestAdapter struct {
 	*managedKaggleAdapter
-	checks int
+	checks         int
+	quotaRemaining *float64
 }
 
 func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connections.Verification, error) {
@@ -73,6 +74,10 @@ func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connection
 		return connections.Verification{}, connections.ErrCredentialRejected
 	}
 	limit, used, remaining := 3600.0, 0.0, 3600.0
+	if a.quotaRemaining != nil {
+		remaining = *a.quotaRemaining
+		used = limit - remaining
+	}
 	return connections.Verification{CanonicalAccount: account, Quota: provider.QuotaObservation{
 		Status: provider.QuotaKnown, Resource: "gpu", Unit: "seconds", Limit: &limit, Used: &used, Remaining: &remaining,
 		ObservedAt: time.Now().UTC(), Source: "offline-fixture", Precision: "lower_bound",

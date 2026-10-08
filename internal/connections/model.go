@@ -51,6 +51,7 @@ type Selection struct {
 	ConfigurationRevision string `json:"configuration_revision"`
 	MaxRemoteWallSeconds  int64  `json:"max_remote_wall_seconds"`
 	AllowRemoteInternet   bool   `json:"allow_remote_internet"`
+	Accelerator           string `json:"accelerator,omitempty"`
 }
 type Quota struct {
 	Status     string     `json:"status"`
