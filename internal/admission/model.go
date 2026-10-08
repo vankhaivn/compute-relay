@@ -121,7 +121,8 @@ type Record struct {
 	Objects      []FrozenObject
 	PendingHTTPS int
 	// Problem is a sanitized cached orchestration condition, never an upstream dump.
-	Problem *domain.Problem
+	Problem    *domain.Problem
+	Collection *domain.CollectionStatus
 }
 
 type Requirement struct {

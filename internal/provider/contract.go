@@ -157,6 +157,13 @@ type TransferResult struct {
 	SHA256 domain.SHA256Digest
 }
 
+// ArtifactProgressReader optionally reports absolute bytes received in the exact
+// selected target stream, after destination writes. No cache/protocol overhead is
+// counted. Callback errors must stop transfer; progress is not verification.
+type ArtifactProgressReader interface {
+	FetchArtifactWithProgress(context.Context, RemoteReference, Artifact, io.Writer, int64, func(int64) error) (TransferResult, error)
+}
+
 // Cleanup requires an exact persisted ownership ledger entry and an explicit mode.
 // ResultsCollected is a caller attestation from local durable state, not proof furnished
 // by the provider. The adapter must also verify remote identity and terminal state.

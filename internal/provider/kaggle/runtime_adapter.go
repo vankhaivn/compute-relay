@@ -45,12 +45,13 @@ type runtimeComponents struct {
 }
 
 var (
-	_ provider.Provider            = (*RuntimeAdapter)(nil)
-	_ provider.BindingVerifier     = (*RuntimeAdapter)(nil)
-	_ provider.PreparationObserver = (*RuntimeAdapter)(nil)
-	_ provider.QuotaReader         = (*RuntimeAdapter)(nil)
-	_ provider.LogReader           = (*RuntimeAdapter)(nil)
-	_ provider.Canceller           = (*RuntimeAdapter)(nil)
+	_ provider.Provider               = (*RuntimeAdapter)(nil)
+	_ provider.ArtifactProgressReader = (*RuntimeAdapter)(nil)
+	_ provider.BindingVerifier        = (*RuntimeAdapter)(nil)
+	_ provider.PreparationObserver    = (*RuntimeAdapter)(nil)
+	_ provider.QuotaReader            = (*RuntimeAdapter)(nil)
+	_ provider.LogReader              = (*RuntimeAdapter)(nil)
+	_ provider.Canceller              = (*RuntimeAdapter)(nil)
 
 	ErrRuntimeBinding = errors.New("runtime provider binding does not match the configured immutable profile")
 	ErrRuntimeBudget  = errors.New("runtime provider mutation budget exhausted; restart only with explicit authorization after resolving uncertain attempts")
@@ -334,6 +335,14 @@ func (p *RuntimeAdapter) FetchArtifact(ctx context.Context, ref provider.RemoteR
 		return provider.TransferResult{}, err
 	}
 	return c.artifacts.FetchArtifact(ctx, ref, file, dst, limit)
+}
+
+func (p *RuntimeAdapter) FetchArtifactWithProgress(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+	c, err := p.attempt(ctx, ref.Identity)
+	if err != nil {
+		return provider.TransferResult{}, err
+	}
+	return c.artifacts.FetchArtifactWithProgress(ctx, ref, file, dst, limit, progress)
 }
 
 func (p *RuntimeAdapter) ReadQuota(ctx context.Context) (provider.QuotaObservation, error) {

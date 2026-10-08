@@ -10,6 +10,7 @@ feature set, not individual commits, audits or CI runs.
 - Immutable input uploads, safe code bundles and provider-neutral job contracts.
 - SQLite-backed jobs, attempts, idempotent receipts, recovery and explicit job controls.
 - Verified artifact collection, authorized downloads, retention rules and local byte cleanup.
+- Optional manual result collection with durable explicit transfer requests and observed selected-output byte progress.
 - Kaggle preflight, private staging, one-shot execution, quota/log snapshots and selected
   artifact transfer, plus a fixed live-qualified GPU acceptance experiment.
 - Explicit Kaggle-enabled normal `serve` composition with exact frozen binding verification,

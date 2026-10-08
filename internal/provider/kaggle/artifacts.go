@@ -272,6 +272,10 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 // EOF/Close, digest, final identity check or process exit is still an error. M3's
 // transfer pipe sends successful EOF only after this entire method succeeds.
 func (a *ArtifactReader) FetchArtifact(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
+	return a.FetchArtifactWithProgress(parent, ref, file, dst, limit, nil)
+}
+
+func (a *ArtifactReader) FetchArtifactWithProgress(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	var none provider.TransferResult
 	if a == nil || dst == nil || file.Validate(ref) != nil || !a.allowed(file.Path) || limit < file.Bytes || file.Bytes > a.policy.MaxBytes {
 		return none, ErrArtifactTransfer
@@ -289,12 +293,45 @@ func (a *ArtifactReader) FetchArtifact(parent context.Context, ref provider.Remo
 	defer leave()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var observer *artifactProgressWriter
+	if progress != nil {
+		observer = &artifactProgressWriter{dst: dst, progress: progress}
+		dst = observer
+	}
 	checked := &artifactWriter{ctx: ctx, dst: dst, limit: file.Bytes, hash: sha256.New(), cancel: cancel}
 	_, err = a.call(ctx, "fetch", ref, &artifactEntry{file.Path, file.Bytes, file.SHA256}, checked)
+	if observer != nil && observer.err != nil {
+		return none, observer.err
+	}
 	if err != nil || checked.failed || checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
 		return none, ErrArtifactTransfer
 	}
 	return provider.TransferResult{Bytes: file.Bytes, SHA256: file.SHA256}, nil
+}
+
+type artifactProgressWriter struct {
+	dst      io.Writer
+	progress func(int64) error
+	n        int64
+	err      error
+}
+
+func (w *artifactProgressWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.dst.Write(p)
+	if n < 0 || n > len(p) {
+		return 0, ErrArtifactTransfer
+	}
+	w.n += int64(n)
+	if err == nil && n == len(p) {
+		w.err = w.progress(w.n)
+		if w.err != nil {
+			return n, w.err
+		}
+	}
+	return n, err
 }
 func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.RemoteReference, target *artifactEntry, dst io.Writer) (raw []byte, err error) {
 	defer func() {

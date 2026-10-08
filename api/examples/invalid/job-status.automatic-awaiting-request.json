@@ -1,0 +1,32 @@
+{
+  "api_version": "compute-connector/v1alpha1",
+  "job_id": "job_01",
+  "workspace_id": "workspace_01",
+  "name": "small-llm-batch",
+  "active_attempt_id": "attempt_01",
+  "state": {
+    "orchestration": "collecting",
+    "execution": "succeeded",
+    "result": "not_available",
+    "cancellation": "manual_required",
+    "remote_activity": "inactive",
+    "release_evidence": "unknown",
+    "deadline_exceeded": false
+  },
+  "revision": 7,
+  "created_at": "2026-09-13T13:00:00Z",
+  "updated_at": "2026-09-13T13:05:00Z",
+  "links": {
+    "self": "/v1/workspaces/workspace_01/jobs/job_01",
+    "events": "/v1/workspaces/workspace_01/jobs/job_01/events",
+    "attempts": "/v1/workspaces/workspace_01/jobs/job_01/attempts",
+    "artifacts": "/v1/workspaces/workspace_01/jobs/job_01/artifacts"
+  },
+  "collection": {
+    "mode": "automatic",
+    "state": "awaiting_request",
+    "attempt_id": "attempt_01",
+    "operation_id": null,
+    "progress": null
+  }
+}

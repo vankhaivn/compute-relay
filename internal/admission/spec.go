@@ -43,11 +43,12 @@ type Output struct {
 	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
 type Spec struct {
-	APIVersion string            `json:"api_version"`
-	Name       string            `json:"name"`
-	Profile    string            `json:"profile"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	Bundle     struct {
+	ResultCollection string            `json:"result_collection,omitempty"`
+	APIVersion       string            `json:"api_version"`
+	Name             string            `json:"name"`
+	Profile          string            `json:"profile"`
+	Labels           map[string]string `json:"labels,omitempty"`
+	Bundle           struct {
 		ObjectID domain.ObjectID `json:"object_id"`
 	} `json:"bundle"`
 	Execution struct {
@@ -75,6 +76,14 @@ type Spec struct {
 		SetupSeconds             int64 `json:"setup_seconds"`
 		FinalizationGraceSeconds int64 `json:"finalization_grace_seconds"`
 	} `json:"timeouts"`
+}
+
+// CollectionMode interprets omission without changing accepted canonical bytes.
+func (s Spec) CollectionMode() string {
+	if s.ResultCollection == "" {
+		return "automatic"
+	}
+	return s.ResultCollection
 }
 
 // Request is constructed only after strict schema and semantic validation. Keep bytes

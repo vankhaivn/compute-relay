@@ -63,4 +63,12 @@ func TestControlHTTPResponsesSatisfyPublishedContracts(t *testing.T) {
 	validate(errorSchema, raw)
 	_, raw = f.call(t, "GET", "/v1/info", "a", "", "", 200)
 	validate(info, raw)
+	if !strings.Contains(string(raw), `"manual_result_collection"`) {
+		t.Fatal("missing collection feature")
+	}
+	_, raw = f.call(t, "GET", job.Links.Self, "a", "", "", 200)
+	validate(transportControlSchema(t, "schemas/job-status.v1alpha1.schema.json", ""), raw)
+	if !strings.Contains(string(raw), `"collection"`) {
+		t.Fatal("missing additive collection status")
+	}
 }

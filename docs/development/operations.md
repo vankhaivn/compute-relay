@@ -1,8 +1,8 @@
 # Explicit attempt controls
 
 The control service commits intent and immutable receipts; workers perform permitted effects
-separately. HTTP handlers do not call providers or stream collection bytes. Normal serve starts
-no provider/collection worker. See [application CLI](../application-cli.md) for command syntax.
+separately. HTTP handlers do not call providers or stream collection bytes. Admission-only serve
+starts no provider/collection worker; explicitly configured provider modes do. See [application CLI](../application-cli.md) for command syntax.
 
 ## Request and receipt contract
 
@@ -42,7 +42,9 @@ Successful execution with missing artifacts uses collect, not compute retry.
 
 ## Collection and recovery
 
-Accepted collect means transfer requested, not available artifacts. [Collection](collection.md)
+Accepted collect means transfer requested, not available artifacts. Manual jobs require this
+request for all results, including failure diagnostics; automatic collection remains the default.
+Distinct pending keys coalesce, and already available results are acknowledged without refetching. [Collection](collection.md)
 pins one result snapshot and publishes only after every selected file is independently verified.
 An interrupted accepted ticket can resume after its lease; a committed failed ticket needs an
 explicit new collect request/key. Original replay stays the original receipt. Neither path reruns

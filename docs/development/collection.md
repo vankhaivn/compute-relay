@@ -1,8 +1,38 @@
 # Verified collection and publication
 
 The collection engine consumes transfer-only work for an exact terminal attempt. It does not
-execute compute, refresh inputs or switch profiles. Normal `serve` exposes existing results
-but does not start this engine. The fixed acceptance utility composes it explicitly.
+execute compute, refresh inputs or switch profiles. Admission-only `serve` exposes existing
+results; explicitly configured provider workers compose this engine.
+
+## Explicit collection policy and status
+
+The optional immutable JobSpec `result_collection` is `automatic` or `manual`; omission keeps
+automatic behavior and historical canonical request bytes. Manual jobs never create automatic
+tickets, including failure diagnostics. Existing explicit tickets remain recoverable. The
+attempt-scoped `/collect` control is the request boundary; it grants no compute. Terminal
+execution with `collection.state=awaiting_request` leaves result availability unchanged.
+
+Status distinguishes `not_ready`, `awaiting_request`, `pending`, `discovering`, `transferring`,
+`verifying`, `available`, `failed`, `expired` and `unknown`. An expired lease projects as pending
+recovery. Recorded active stages are dated observations, not continuous socket/hardware evidence.
+The existing attempt orchestration `collecting` covers the entire result workflow; applications
+use the additive collection state to distinguish waiting from transfer.
+
+`collection.progress.scope=selected_output_bytes` excludes all control/manifest/provenance and
+protocol/TCP overhead. `bytes_total` sums pinned output lengths and is null before discovery.
+`bytes_completed` combines rehashed complete output objects with the current unverified selected
+stream. `bytes_received` counts only new selected output stream bytes in this generation;
+reused local objects never increase it. It is null for providers without stream observation.
+`generation` identifies the fenced lease invocation; retry/reclaim resets received counts and
+rehashes cached completion. Partial files are not resumable verified objects.
+
+Samples persist at most once per second during streaming, plus claim/pin/failure/publication
+boundaries. `observed_at` is independent of attempt revision. Full counts can precede digest,
+Close, helper-exit or publication failure; only available results are readable. No elapsed-time
+percentage is supplied. A diagnostic-only result may have a known zero output total.
+
+See the [status examples](../../api/examples/job-status.collection-progress.valid.json) and
+[ADR-0026](decisions/0026-explicit-result-collection.md).
 
 ## Stages
 

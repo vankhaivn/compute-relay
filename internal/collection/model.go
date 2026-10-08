@@ -121,6 +121,7 @@ type Repository interface {
 	PinCollection(context.Context, Work, Snapshot, time.Time) error
 	CompleteCollection(context.Context, Work, Verified, time.Time) error
 	FailCollection(context.Context, Work, Failure, time.Time) error
+	RecordCollectionProgress(context.Context, Work, string, domain.CollectionProgress, time.Time) error
 }
 type BlobStore interface {
 	Put(context.Context, domain.ObjectMetadata, io.Reader) (domain.ObjectMetadata, error)

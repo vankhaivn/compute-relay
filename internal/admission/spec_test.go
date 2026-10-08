@@ -39,6 +39,27 @@ func TestStrictSpecAndCanonicalIdentity(t *testing.T) {
 		t.Fatal("field presence lost")
 	}
 }
+
+func TestCollectionPolicyDoesNotNormalizeHistoricalRequests(t *testing.T) {
+	old, err := Parse([]byte(validJob))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Spec().CollectionMode() != "automatic" || strings.Contains(string(old.Canonical()), "result_collection") {
+		t.Fatal("historical canonical bytes gained a default")
+	}
+	for _, mode := range []string{"automatic", "manual"} {
+		r, err := Parse([]byte(strings.Replace(validJob, `"name":"unit"`, `"name":"unit","result_collection":"`+mode+`"`, 1)))
+		if err != nil || r.Spec().CollectionMode() != mode || r.Hash() == old.Hash() {
+			t.Fatal(mode, err)
+		}
+	}
+	for _, value := range []string{`null`, `true`, `"on-demand"`, `{}`} {
+		if _, err := Parse([]byte(strings.Replace(validJob, `"name":"unit"`, `"name":"unit","result_collection":`+value, 1))); err == nil {
+			t.Fatal("accepted invalid policy", value)
+		}
+	}
+}
 func TestSpecRejectsInvalidAndContradictoryData(t *testing.T) {
 	changes := [][2]string{
 		{`"name":"unit"`, `"name":"unit","Name":"alias"`},
