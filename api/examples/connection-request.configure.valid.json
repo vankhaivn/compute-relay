@@ -1,0 +1,7 @@
+{
+  "action": "configure",
+  "expected_revision": 3,
+  "configuration": {
+    "max_remote_wall_seconds": 2400
+  }
+}

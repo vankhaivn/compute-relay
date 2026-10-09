@@ -1,0 +1,10 @@
+{
+  "provider_type": "fixture",
+  "label": "Example connection",
+  "credentials": {
+    "api_token": "fixture-token-not-a-real-credential"
+  },
+  "configuration": {
+    "max_remote_wall_seconds": 1800
+  }
+}

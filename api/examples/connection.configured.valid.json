@@ -1,0 +1,37 @@
+{
+  "connection_id": "con_fixture",
+  "workspace_id": "ws_fixture",
+  "revision": 4,
+  "provider_type": "fixture",
+  "label": "Example connection",
+  "authentication": "verified",
+  "credential_present": true,
+  "new_work": "enabled",
+  "account_id": "account_fixture",
+  "configuration": {
+    "max_remote_wall_seconds": 2400
+  },
+  "selection": {
+    "profile": "con_fixture_r4",
+    "configuration_revision": "r4",
+    "max_remote_wall_seconds": 2400,
+    "allow_remote_internet": false,
+    "accelerator": "gpu"
+  },
+  "quotas": [
+    {
+      "status": "known",
+      "resource": "gpu",
+      "unit": "seconds",
+      "remaining": 600,
+      "observed_at": "2026-10-07T00:00:00Z",
+      "precision": "lower_bound",
+      "limit": 3600,
+      "used": 3000,
+      "local_reserved": 0,
+      "reset_at": null
+    }
+  ],
+  "active_attempts": 0,
+  "updated_at": "2026-10-07T00:00:00Z"
+}

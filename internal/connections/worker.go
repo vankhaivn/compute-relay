@@ -157,6 +157,9 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	}
 	profile := adapter.Profile(ProfileBinding(op.ConnectionID, op.ConnectionRevision), AccountScope(record.ProviderType, verified.CanonicalAccount))
 	profile.CredentialRef = "vault:" + op.ConnectionID
+	if record.Configuration != nil {
+		profile.MaxRemoteWallSeconds = record.Configuration.MaxRemoteWallSeconds
+	}
 	if profile.Validate() != nil {
 		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())
 	}

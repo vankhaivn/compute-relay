@@ -182,14 +182,22 @@
         "examples/connection-request.replace_credential.valid.json",
         "examples/connection-request.disable.valid.json",
         "examples/connection-request.enable.valid.json",
-        "examples/connection-request.remove.valid.json"
+        "examples/connection-request.remove.valid.json",
+        "examples/connection-request.create-configured.valid.json",
+        "examples/connection-request.configure.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection-request.caller-account.json",
         "examples/invalid/connection-request.missing-revision.json",
         "examples/invalid/connection-request.secret-on-check.json",
         "examples/invalid/connection-request.replace-without-secret.json",
-        "examples/invalid/connection-request.automatic-rotation.json"
+        "examples/invalid/connection-request.automatic-rotation.json",
+        "examples/invalid/connection-request.configure-missing-configuration.json",
+        "examples/invalid/connection-request.configure-zero.json",
+        "examples/invalid/connection-request.configure-overmaximum.json",
+        "examples/invalid/connection-request.configure-fractional.json",
+        "examples/invalid/connection-request.configure-unknown-field.json",
+        "examples/invalid/connection-request.check-with-configuration.json"
       ]
     },
     {
@@ -207,7 +215,8 @@
         "examples/connection.ready.valid.json",
         "examples/connection.page.valid.json",
         "examples/connection.unknown-quota.valid.json",
-        "examples/connection.disabled.valid.json"
+        "examples/connection.disabled.valid.json",
+        "examples/connection.configured.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection.secret-echo.json",
@@ -220,7 +229,8 @@
       "schema": "schemas/connection-operation.v1alpha1.schema.json",
       "valid": [
         "examples/connection-operation.accepted.valid.json",
-        "examples/connection-operation.failed.valid.json"
+        "examples/connection-operation.failed.valid.json",
+        "examples/connection-operation.configure-succeeded.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection-operation.failed-without-problem.json",

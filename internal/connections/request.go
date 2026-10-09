@@ -12,11 +12,12 @@ import (
 )
 
 type request struct {
-	ProviderType string            `json:"provider_type,omitempty"`
-	Label        string            `json:"label,omitempty"`
-	Credentials  map[string]string `json:"credentials,omitempty"`
-	Action       string            `json:"action,omitempty"`
-	Revision     int64             `json:"expected_revision,omitempty"`
+	ProviderType  string            `json:"provider_type,omitempty"`
+	Label         string            `json:"label,omitempty"`
+	Credentials   map[string]string `json:"credentials,omitempty"`
+	Action        string            `json:"action,omitempty"`
+	Revision      int64             `json:"expected_revision,omitempty"`
+	Configuration *Configuration    `json:"configuration,omitempty"`
 }
 
 func (request) String() string   { return "[connection request redacted]" }

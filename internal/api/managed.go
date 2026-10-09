@@ -283,7 +283,7 @@ func validConnectionOperation(operation connections.Operation, workspace domain.
 		return false
 	}
 	switch operation.Action {
-	case "create", "check", "replace_credential", "disable", "enable", "remove":
+	case "create", "check", "replace_credential", "disable", "enable", "remove", "configure":
 	default:
 		return false
 	}

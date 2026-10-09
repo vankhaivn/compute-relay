@@ -53,6 +53,20 @@ type Selection struct {
 	AllowRemoteInternet   bool   `json:"allow_remote_internet"`
 	Accelerator           string `json:"accelerator,omitempty"`
 }
+
+// Configuration is a persisted, non-secret policy override for future selections.
+// Omission preserves the adapter's configured startup default.
+type Configuration struct {
+	MaxRemoteWallSeconds int64 `json:"max_remote_wall_seconds"`
+}
+
+func (c Configuration) Validate() error {
+	if c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 {
+		return ErrRequest
+	}
+	return nil
+}
+
 type Quota struct {
 	Limit         *int64     `json:"limit,omitempty"`
 	Used          *int64     `json:"used,omitempty"`
@@ -76,6 +90,7 @@ type Connection struct {
 	NewWork           string             `json:"new_work"`
 	AccountID         *string            `json:"account_id"`
 	Selection         *Selection         `json:"selection"`
+	Configuration     *Configuration     `json:"configuration,omitempty"`
 	Quotas            []Quota            `json:"quotas"`
 	ActiveAttempts    int                `json:"active_attempts"`
 	UpdatedAt         time.Time          `json:"updated_at"`
@@ -119,6 +134,7 @@ type Record struct {
 	CredentialKey       string
 	ActiveCredentialKey string
 	ActorTokenID        string
+	Configuration       *Configuration
 }
 type Accept struct {
 	Workspace        domain.WorkspaceID
@@ -131,6 +147,7 @@ type Accept struct {
 	Label            string
 	Action           string
 	Secret           bool
+	Configuration    *Configuration
 	Now              time.Time
 }
 type Completion struct {
