@@ -32,7 +32,8 @@
         "replace_credential",
         "disable",
         "enable",
-        "remove"
+        "remove",
+        "configure"
       ]
     },
     "status": {

@@ -1,0 +1,12 @@
+{
+  "operation_id": "op_fixture_configure",
+  "workspace_id": "ws_fixture",
+  "connection_id": "con_fixture",
+  "action": "configure",
+  "status": "succeeded",
+  "connection_revision": 4,
+  "created_at": "2026-10-07T00:00:00Z",
+  "updated_at": "2026-10-07T00:00:00Z",
+  "problem": null,
+  "replay": false
+}

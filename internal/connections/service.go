@@ -128,7 +128,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	// delayed replay must not recreate a generation that removal already erased.
 	s.secretMu.Lock()
 	defer s.secretMu.Unlock()
-	input := Accept{Workspace: w, TokenID: p.TokenID(), KeyHash: string(keyHash), Fingerprint: fingerprint, ConnectionID: connection, ExpectedRevision: req.Revision, ProviderType: req.ProviderType, Label: req.Label, Action: req.Action, Secret: req.Credentials != nil, Now: s.now().UTC()}
+	input := Accept{Workspace: w, TokenID: p.TokenID(), KeyHash: string(keyHash), Fingerprint: fingerprint, ConnectionID: connection, ExpectedRevision: req.Revision, ProviderType: req.ProviderType, Label: req.Label, Action: req.Action, Secret: req.Credentials != nil, Configuration: req.Configuration, Now: s.now().UTC()}
 	record, replay, err := s.repo.ReplayConnection(ctx, input)
 	if err != nil {
 		return Operation{}, err

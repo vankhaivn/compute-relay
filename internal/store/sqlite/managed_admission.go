@@ -17,6 +17,9 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 	if !in.Workspace.Valid() || !validID(in.TokenID) || !domain.SHA256Digest(in.KeyHash).Valid() || !domain.SHA256Digest(in.Fingerprint).Valid() || in.Now.IsZero() {
 		return result, connections.ErrRequest
 	}
+	if in.Configuration != nil && (in.Configuration.Validate() != nil || in.Action != "create" && in.Action != "configure") || in.Action == "configure" && in.Configuration == nil {
+		return result, connections.ErrRequest
+	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return result, err
@@ -64,7 +67,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			if err != nil {
 				return err
 			}
-		case "check", "replace_credential", "disable", "enable", "remove":
+		case "check", "replace_credential", "disable", "enable", "remove", "configure":
 			prior, err = loadManaged(ctx, tx, in.Workspace, id)
 			if err != nil {
 				return err
@@ -90,7 +93,11 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		}
 		stamp := in.Now.UTC().Format(time.RFC3339Nano)
 		if in.Action == "create" {
-			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at) VALUES(?,?,?,?,?,'pending','enabled',?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp)
+			var wall any
+			if in.Configuration != nil {
+				wall = in.Configuration.MaxRemoteWallSeconds
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at,max_remote_wall_seconds) VALUES(?,?,?,?,?,'pending','enabled',?,?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp, wall)
 		} else {
 			newWork := prior.view.NewWork
 			authentication := prior.view.Authentication
@@ -111,11 +118,22 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			return dbError(err)
 		}
 		op := connections.Operation{ID: domain.OperationID(operationID), Workspace: in.Workspace, ConnectionID: id, Action: in.Action, Status: "accepted", ConnectionRevision: revision, CreatedAt: in.Now.UTC(), UpdatedAt: in.Now.UTC()}
+		if in.Action == "configure" {
+			// Configuration has no remote or credential mutation. Commit its new alias,
+			// saved override and terminal receipt atomically with the revision change.
+			if err = configureManaged(ctx, tx, prior, op, *in.Configuration); err != nil {
+				return err
+			}
+			op.Status = "succeeded"
+		}
 		receiptBytes, err := json.Marshal(op)
 		if err != nil {
 			return ErrInvalid
 		}
 		stage := "ready"
+		if in.Action == "configure" {
+			stage = "done"
+		}
 		credentialKey := prior.credential
 		if in.Secret {
 			stage = "waiting_secret"
@@ -124,7 +142,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 				return dbError(err)
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'accepted',?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, in.Fingerprint, stage, credentialKey, string(receiptBytes), stamp, stamp)
+		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, in.Fingerprint, stage, op.Status, credentialKey, string(receiptBytes), stamp, stamp)
 		if err != nil {
 			return dbError(err)
 		}

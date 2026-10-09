@@ -18,8 +18,9 @@ feature set, not individual commits, audits or CI runs.
   artifact collection; admission-only mode remains the default.
 - Optional managed connection API with write-only protected credentials, asynchronous account
   discovery, shared account capacity and durable finite per-attempt execution authorization.
-  Explicit managed CPU/GPU selection keeps CPU work independent of GPU allowance. Connection
-  changes preserve existing immutable job bindings and recovery.
+  Optional per-connection wall-time configuration applies to future admissions; configure saves
+  local policy with a durable receipt and preserves existing immutable job bindings and recovery.
+  Explicit managed CPU/GPU selection keeps CPU work independent of GPU allowance.
 - Reproducible macOS arm64 companion bundles with a locked independent provider interpreter,
   complete payload checksums, create-new installation and relocation discovery.
 

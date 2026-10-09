@@ -225,7 +225,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if h.config.Connections != nil {
-			features = append(features, "managed_connections")
+			features = append(features, "managed_connections", "connection_configuration")
 		}
 		if h.config.Authorizations != nil {
 			features = append(features, "attempt_authorization")

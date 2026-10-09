@@ -30,7 +30,8 @@ GPU. Changing the service flag does not rewrite saved connections or jobs; expli
 connection to publish a new selection under that configuration.
 Managed flags cannot be mixed with standalone Kaggle flags. No flag grants an attempt permit.
 
-Check authenticated `/v1/info` for `managed_connections` and `attempt_authorization`, then
+Check authenticated `/v1/info` for `managed_connections`, `connection_configuration` and
+`attempt_authorization`, then
 `GET /v1/workspaces/{w}/providers` for installed descriptors and protected-store availability.
 Unsupported storage is reported explicitly; it never falls back to plaintext. A supported
 backend can still deny an actual operation. Local readiness is not provider authentication.
@@ -42,12 +43,38 @@ surface. Send credential JSON only in an authenticated POST body; never place it
 command argument, diagnostic output or job bundle. The initial Kaggle descriptor takes a token
 and discovers the account itself. The application does not need to ask for a provider username.
 
-`POST /connections` accepts `provider_type`, `label` and `credentials`. Under the same workspace
-prefix, `POST /connections/{id}/actions` accepts an `expected_revision` plus `check`,
-`replace_credential`, `disable`, `enable` or `remove`. Only replacement accepts credentials.
-Use a fresh non-secret idempotency key per intended operation and preserve its receipt. Poll
-the returned connection-operation URI for the current outcome; repeating a POST returns its
-original receipt. All provider verification happens asynchronously outside the HTTP handler.
+`POST /connections` accepts `provider_type`, `label` and `credentials`, with an optional
+`configuration` containing `max_remote_wall_seconds` from 1 through 86400. If omitted, the
+managed adapter's existing startup default applies. Creation still discovers and verifies the
+account asynchronously.
+
+Under the same workspace prefix, `POST /connections/{id}/actions` accepts an `expected_revision`
+plus `check`, `replace_credential`, `configure`, `disable`, `enable` or `remove`. Only replacement
+accepts credentials. `configure` requires a `configuration` object with the same bounded field;
+for example:
+
+```json
+{
+  "action": "configure",
+  "expected_revision": 2,
+  "configuration": {
+    "max_remote_wall_seconds": 7200
+  }
+}
+```
+
+Use a fresh non-secret idempotency key per intended operation and preserve its receipt. Configure
+saves the local policy atomically and returns a durable `succeeded` receipt in the response; it
+makes no provider call and needs no restart. It does not authenticate or enable a connection.
+Disabled or unverified connections may save an override, but have no selection until verification
+succeeds with new work enabled. An already pending operation must finish before configuration changes. Check, credential replacement, disable and enable retain the saved
+override. When a selection exists, configure publishes a new immutable profile for future job
+admissions with the new wall bound and the existing profile's runtime settings. Existing profiles,
+runtime settings, jobs, attempts and authorization grants keep their original values. Omitting
+configuration on creation continues to use the managed startup default.
+
+Provider session or capacity limits remain independent of this local wall-time bound. Other
+provider verification happens asynchronously outside the HTTP handler.
 
 A newly verified connection returns an exact `selection.profile` and `selection.accelerator`.
 Use both in the existing job specification; admission rejects a different resource. The optional

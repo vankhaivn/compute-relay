@@ -87,7 +87,15 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		if _, err := tx.Exec("DELETE FROM " + quote(name)); err != nil {
 			t.Fatal("clear fixture table", name, err)
 		}
-		if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT * FROM fixture_source." + quote(name)); err != nil {
+		columns := "*"
+		if name == "managed_connections" && version < 13 {
+			var configured int
+			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connections WHERE max_remote_wall_seconds IS NOT NULL").Scan(&configured); err != nil || configured != 0 {
+				t.Fatal("legacy fixture cannot represent configured wall-time overrides", err)
+			}
+			columns = "connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at"
+		}
+		if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT " + columns + " FROM fixture_source." + quote(name)); err != nil {
 			t.Fatal("copy fixture table", name, err)
 		}
 	}

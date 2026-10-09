@@ -1,7 +1,8 @@
 # Managed connections and execution authorization
 
 This is the implemented extension contract for a locally managed companion. The optional
-`--managed-python` serve composition advertises these routes; ordinary serve does not. Existing environment-configured
+`--managed-python` serve composition advertises these routes and the `managed_connections` and
+`connection_configuration` features; ordinary serve does not. Existing environment-configured
 profiles and the standalone finite-worker mode remain supported; a saved connection is not
 proof of authentication, capacity or a runnable provider.
 
@@ -9,17 +10,18 @@ proof of authentication, capacity or a runnable provider.
 
 All routes use the existing authenticated literal-loopback transport, workspace isolation,
 strict JSON parsing, request limits and sanitized error envelope. No provider work occurs in
-an HTTP handler. The optional management composition advertises `managed_connections`; the
-optional durable-permit composition advertises `attempt_authorization`. Clients must check
-both features instead of assuming support from the API version.
+an HTTP handler. The optional management composition advertises `managed_connections` and
+`connection_configuration`; the optional durable-permit composition advertises
+`attempt_authorization`. Clients must check the features they use instead of assuming support
+from the API version.
 
 | Method and workspace-relative path | Scope | Semantics |
 |---|---|---|
 | `GET /providers` | read | Installed adapter descriptors and credential-store availability; local only. |
 | `GET /connections` | read | At most 100 non-removed, sanitized connections; local only. |
 | `GET /connections/{id}` | read | Current revision, availability, immutable selection and cached quota. |
-| `POST /connections` | manage | Label, provider type and write-only credential fields; asynchronous account discovery. |
-| `POST /connections/{id}/actions` | manage | Explicit check, credential replacement, disable, enable or removal. |
+| `POST /connections` | manage | Label, provider type and write-only credential fields; optional wall-time override; asynchronous account discovery. |
+| `POST /connections/{id}/actions` | manage | Explicit check, credential replacement, configure, disable, enable or removal. |
 | `GET /connection-operations/{id}` | manage | Current durable administration status; no secret/reference or raw provider error. |
 | `POST /jobs/{id}/authorize` | execute | Authorize exactly the explicit frozen attempt and wall-time bound. |
 | `GET /jobs/{id}/authorizations/{id}` | execute | Read current durable authorization state. |
@@ -37,6 +39,16 @@ returns 409 and never silently refreshes its target. Duplicate JSON keys, case a
 values for non-nullable fields and unknown fields are rejected. Credential-bearing requests
 are bounded to 64 KiB overall, at most 16 fields and 16 KiB per field, with smaller adapter
 limits allowed. Request bodies, raw helper output and credential values are never logged.
+
+Creation may include `configuration.max_remote_wall_seconds`, an integer from 1 through 86400.
+Omission preserves the managed adapter's configured startup default. An action with
+`"action":"configure"` requires both `expected_revision` and a `configuration` object with that
+field; other actions reject `configuration`, and credential replacement remains the only action
+that accepts credentials. Configure commits the new local policy, revision and terminal
+`succeeded` receipt in one SQLite transaction. It makes no provider call, does not authenticate
+or enable the connection, and needs no process restart. It works while a connection is disabled
+or unverified, but rejects while another operation is pending. Such a connection still has no
+admission selection until verification succeeds with new work enabled.
 
 ## Descriptors, verification and immutable selection
 
@@ -58,6 +70,17 @@ cannot race a connection change. An exact admission replay still returns its ori
 The published profile also freezes its adapter runtime configuration, including machine shape;
 changing startup defaults cannot reinterpret an existing job. Removed connections remain
 addressable by ID as sanitized tombstones and are omitted from the bounded active list.
+
+The optional connection wall-time override is persisted separately from the frozen profile. A
+configure action publishes a new immutable selection for future admissions when the connection
+currently has one, preserving the existing adapter runtime configuration and every prior profile.
+Existing jobs, attempts and authorization grants keep their original frozen profile and bound.
+Create, check, credential replacement, disable and enable retain the saved override. The
+sanitized connection projection returns the optional `configuration` object; its omission means
+the managed adapter's startup default. Provider session and capacity restrictions still apply
+independently of the local wall-time maximum. The additive SQLite migration leaves existing rows
+without an override, preserving their startup default, and copies existing operation receipts
+and replay keys unchanged.
 
 The account ID is an opaque Relay identity, not a credential or provider username. Provider
 and canonical account together define the shared quota/capacity key. Two connections for the
