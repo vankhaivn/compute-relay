@@ -22,7 +22,7 @@ type migration struct {
 var migrations = loadMigrations()
 
 func loadMigrations() []migration {
-	names := []string{"0001_identity.sql", "0002_workspace_objects.sql", "0003_admission.sql", "0004_scheduler.sql", "0005_dispatch.sql", "0006_operations.sql", "0007_collection.sql", "0008_retention.sql", "0009_retention_roots.sql", "0010_managed_connections.sql", "0011_execution_authorization.sql", "0012_collection_progress.sql", "0013_connection_configuration.sql"}
+	names := []string{"0001_identity.sql", "0002_workspace_objects.sql", "0003_admission.sql", "0004_scheduler.sql", "0005_dispatch.sql", "0006_operations.sql", "0007_collection.sql", "0008_retention.sql", "0009_retention_roots.sql", "0010_managed_connections.sql", "0011_execution_authorization.sql", "0012_collection_progress.sql", "0013_connection_configuration.sql", "0014_preparation_progress.sql"}
 	result := make([]migration, 0, len(names))
 	for i, name := range names {
 		data, err := migrationFiles.ReadFile("migrations/" + name)

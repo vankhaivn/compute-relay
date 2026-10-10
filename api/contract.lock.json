@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "09ae6767104d86082c263f3a6dd6d89608bf6b84a4ede8bf739920e24525e8e1",
-      "bytes": 8970
+      "sha256": "9920ade92e99a1ec97c2ecf603023789cbe2535848384c722d1862d0605b9280",
+      "bytes": 9107
     },
     {
       "path": "api/examples/artifact.metadata.valid.json",
@@ -327,6 +327,11 @@
       "bytes": 1150
     },
     {
+      "path": "api/examples/invalid/job-status.negative-preparation-progress.json",
+      "sha256": "e852c830ff39bbfdbdf2e72dde99e0f70d825283ad900191b1d4db859180ff92",
+      "bytes": 1015
+    },
+    {
       "path": "api/examples/invalid/job-status.negative-progress.json",
       "sha256": "a96abd5ea600be794d191096f8225e28caca21f8fe31a6acdc805f65088c5d13",
       "bytes": 1158
@@ -487,6 +492,11 @@
       "bytes": 1156
     },
     {
+      "path": "api/examples/job-status.preparation-progress.valid.json",
+      "sha256": "25703a68f62e6ab0441a8673ccac03d28b6aa07739804efb9f0bbe81a85475e8",
+      "bytes": 1022
+    },
+    {
       "path": "api/examples/job-validation.valid.json",
       "sha256": "5ff132954878f34a02037f83524a2ce80c372d013bbeaff88d009c041ca81ecf",
       "bytes": 312
@@ -613,8 +623,8 @@
     },
     {
       "path": "api/schemas/job-status.v1alpha1.schema.json",
-      "sha256": "d01e05ae3c35ac37ce93e849e2f848f9817b052d74536b59b1f3370919547da0",
-      "bytes": 11516
+      "sha256": "b75d93f1ad368c6a910a05d226aabf2eb5b10e810dd0136f6c8861e90f0216e5",
+      "bytes": 12756
     },
     {
       "path": "api/schemas/job-validation.v1alpha1.schema.json",

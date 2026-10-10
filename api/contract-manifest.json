@@ -46,11 +46,13 @@
         "examples/job-status.needs-attention.valid.json",
         "examples/job-status.awaiting-collection.valid.json",
         "examples/job-status.collection-progress.valid.json",
-        "examples/job-status.collection-discovery.valid.json"
+        "examples/job-status.collection-discovery.valid.json",
+        "examples/job-status.preparation-progress.valid.json"
       ],
       "invalid": [
         "examples/invalid/job-status.false-success.json",
         "examples/invalid/job-status.negative-progress.json",
+        "examples/invalid/job-status.negative-preparation-progress.json",
         "examples/invalid/job-status.automatic-awaiting-request.json"
       ]
     },

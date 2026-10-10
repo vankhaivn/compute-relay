@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 func TestStagingBodyRejectsBoundaryAndCloseFailures(t *testing.T) {
@@ -132,5 +134,35 @@ func TestStagingTrailerRequiresFinalPayloadCloseAndEOF(t *testing.T) {
 				t.Fatal("failed final payload issued a create trailer", err)
 			}
 		})
+	}
+}
+
+func TestStagingBodyReportsHandedOffInputBytes(t *testing.T) {
+	s, plan, b, _ := newTestStager(t, false)
+	p, err := buildStagingPlan(s.config, s.policy, plan, "prep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen [][2]int64
+	ctx := provider.WithPreparationProgress(context.Background(), func(completed, total int64) {
+		seen = append(seen, [2]int64{completed, total})
+	})
+	r := &stagingBody{ctx: ctx, blobs: b, plan: p, total: 17}
+	defer r.Close()
+	buffer := make([]byte, 4)
+	for {
+		if _, err = r.Read(buffer); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(seen) == 0 || seen[len(seen)-1] != [2]int64{17, 17} {
+		t.Fatalf("final staged bytes not reported: %v", seen)
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i][0] <= seen[i-1][0] {
+			t.Fatalf("progress did not grow: %v", seen)
+		}
 	}
 }

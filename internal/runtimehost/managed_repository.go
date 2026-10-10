@@ -115,6 +115,12 @@ func (r managedDispatchRepository) RenewDispatch(ctx context.Context, handle dis
 		return r.managedDispatchStore.RenewDispatch(ctx, handle, at)
 	})
 }
+func (r managedDispatchRepository) RecordPreparationProgress(ctx context.Context, handle dispatch.Handle, progress domain.PreparationProgress, now time.Time) error {
+	return retryManagedWrite(ctx, now, func(at time.Time) error {
+		progress.ObservedAt = at
+		return r.managedDispatchStore.RecordPreparationProgress(ctx, handle, progress, at)
+	})
+}
 func (r managedDispatchRepository) YieldDispatch(ctx context.Context, handle dispatch.Handle, now time.Time, delay time.Duration) error {
 	return retryManagedWrite(ctx, now, func(at time.Time) error { return r.managedDispatchStore.YieldDispatch(ctx, handle, at, delay) })
 }

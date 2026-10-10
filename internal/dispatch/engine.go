@@ -187,7 +187,8 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		// This invocation alone received the successful new intent commit. Restart paths
 		// enter Staging below and cannot call Prepare, even if no resource is found.
-		prepared, err := control(ctx, e.config.PreparationTimeout, func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
+		observed := provider.WithPreparationProgress(ctx, s.progress)
+		prepared, err := control(observed, e.config.PreparationTimeout, func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
 		if err != nil {
 			return s.fail(domain.CodeStagingFailed)
 		}
@@ -287,6 +288,7 @@ type session struct {
 	current Work
 	ctx     context.Context
 	cancel  context.CancelFunc
+	sampled time.Time
 }
 
 func (s *session) work() Work { s.mu.Lock(); defer s.mu.Unlock(); return s.current }
@@ -331,6 +333,24 @@ func (s *session) fail(code domain.ErrorCode) error {
 		return err
 	}
 	return s.work().Journal.Problem
+}
+
+// progress records at most one staging sample per second plus the final one. It is best
+// effort: a rejected or failed write never changes the preparation outcome.
+func (s *session) progress(completed, total int64) {
+	now := s.e.clock.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if completed < total && !s.sampled.IsZero() && now.Sub(s.sampled) < time.Second {
+		return
+	}
+	s.sampled = now
+	h := s.current.Handle
+	sample := domain.PreparationProgress{Scope: "staged_input_bytes", Generation: h.Claim.Generation,
+		BytesCompleted: completed, BytesTotal: total, ObservedAt: now}
+	ctx, stop := context.WithTimeout(s.ctx, 5*time.Second)
+	defer stop()
+	_ = s.e.repo.RecordPreparationProgress(ctx, h, sample, now)
 }
 func (s *session) heartbeat(done chan struct{}) {
 	defer close(done)
