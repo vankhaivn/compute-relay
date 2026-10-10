@@ -26,8 +26,10 @@ type StagingPolicy struct {
 	Timeout  time.Duration
 }
 
+// The default budget fits the staging limit on a 10 Mbit/s uplink, so the one-shot upload is not
+// cut before creation merely because the inputs are large.
 func DefaultStagingPolicy() StagingPolicy {
-	return StagingPolicy{License: "other", MaxBytes: maxStagingBytes, Timeout: 5 * time.Minute}
+	return StagingPolicy{License: "other", MaxBytes: maxStagingBytes, Timeout: time.Hour}
 }
 func (p StagingPolicy) valid() bool {
 	return (p.License == "other" || p.License == "unknown") &&

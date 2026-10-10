@@ -14,6 +14,7 @@ import (
 type stagingDeadlineProbe struct {
 	*probeProvider
 	bindingDeadline time.Time
+	prepareDeadline time.Time
 	stagingDeadline time.Time
 	submitDeadline  time.Time
 }
@@ -21,6 +22,11 @@ type stagingDeadlineProbe struct {
 func (p *stagingDeadlineProbe) VerifyBinding(ctx context.Context, binding provider.BindingSnapshot) error {
 	p.bindingDeadline, _ = ctx.Deadline()
 	return p.probeProvider.VerifyBinding(ctx, binding)
+}
+
+func (p *stagingDeadlineProbe) Prepare(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.Prepared, error) {
+	p.prepareDeadline, _ = ctx.Deadline()
+	return p.probeProvider.Prepare(ctx, plan, id)
 }
 
 func (p *stagingDeadlineProbe) ReconcilePreparation(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.PreparationObservation, error) {
@@ -90,5 +96,29 @@ func TestStagingObservationAndSubmissionKeepPreparationBudgetAndParentDeadline(t
 				t.Fatalf("deadline handling repeated original preparation/submission: %+v", stats)
 			}
 		})
+	}
+}
+
+func TestOriginalPreparationOutlastsTheFormerFiveMinuteBudget(t *testing.T) {
+	f := newDispatchFixture(t, fake.DefaultScenario())
+	f.seed(t, "a", 1, false)
+	probe := &stagingDeadlineProbe{probeProvider: f.adapter}
+	registry := provider.NewSnapshotRegistry()
+	if err := registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, probe); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := dispatch.New(f.s, registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if worked, err := engine.RunOnce(context.Background(), "upload-worker"); err != nil || !worked {
+		t.Fatal("original preparation failed", err)
+	}
+	if budget := probe.prepareDeadline.Sub(start); budget < 55*time.Minute || budget > time.Hour+5*time.Second {
+		t.Fatalf("original upload/creation budget is %s", budget)
+	}
+	if stats := f.backend.Stats(); stats.PrepareCalls != 1 {
+		t.Fatalf("preparation repeated: %+v", stats)
 	}
 }

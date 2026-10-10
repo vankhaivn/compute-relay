@@ -49,7 +49,8 @@ for recovery instead of resetting them.
 
 ## Limits and provider boundaries
 
-Default staging budget is five minutes, up to 4 GiB inputs, 100 MiB bundle and 64 KiB marker;
+Default staging budget is one hour, enough for the 4 GiB input limit at about 10 Mbit/s upload;
+limits are up to 4 GiB inputs, 100 MiB bundle and 64 KiB marker;
 at most 64 inputs plus code/marker. Smaller limits apply, with invocation policy bounded from
 one second to one hour. These are ceilings, not upload throughput promises.
 
