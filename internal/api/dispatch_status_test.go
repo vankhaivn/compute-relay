@@ -68,3 +68,45 @@ func TestDispatchProblemWireShapeAndRedaction(t *testing.T) {
 		t.Fatal("absent problem was fabricated")
 	}
 }
+
+func TestPreparationProgressWireShape(t *testing.T) {
+	at := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	a, err := domain.NewAttempt("attempt", "job", 1, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.State.Orchestration = domain.OrchestrationPreparing
+	record := admission.Record{
+		Job:     domain.Job{ID: "job", WorkspaceID: "workspace", Name: "fixture", SpecificationVersion: "compute-connector/v1alpha1", CreatedAt: at},
+		Attempt: a,
+		Preparation: &domain.PreparationStatus{Progress: &domain.PreparationProgress{
+			Scope: "staged_input_bytes", Generation: 2, BytesCompleted: 512, BytesTotal: 2048, ObservedAt: at}},
+	}
+	encoded, err := json.Marshal(jobStatus(record))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err = json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	_, source, _, _ := runtime.Caller(0)
+	compiler := jsonschema.NewCompiler()
+	compiler.DefaultDraft(jsonschema.Draft2020)
+	compiler.AssertFormat()
+	schema, err := compiler.Compile(filepath.Join(filepath.Dir(source), "..", "..", "api", "schemas", "job-status.v1alpha1.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = schema.Validate(wire); err != nil {
+		t.Fatal("preparation progress failed the status schema", err)
+	}
+	progress := wire["preparation"].(map[string]any)["progress"].(map[string]any)
+	if progress["bytes_completed"] != float64(512) || progress["bytes_total"] != float64(2048) {
+		t.Fatalf("wrong wire progress: %v", progress)
+	}
+	record.Preparation = nil
+	if _, exists := jobStatus(record)["preparation"]; exists {
+		t.Fatal("absent preparation progress was fabricated")
+	}
+}

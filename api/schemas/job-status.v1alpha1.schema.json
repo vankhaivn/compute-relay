@@ -119,6 +119,9 @@
     },
     "collection": {
       "$ref": "#/$defs/collection"
+    },
+    "preparation": {
+      "$ref": "#/$defs/preparation"
     }
   },
   "$defs": {
@@ -382,6 +385,52 @@
           }
         }
       ]
+    },
+    "preparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "progress"
+      ],
+      "description": "Present only while the active attempt is preparing and its adapter reported staged input bytes. Observational; not provider readiness.",
+      "properties": {
+        "progress": {
+          "$ref": "#/$defs/preparation_progress"
+        }
+      }
+    },
+    "preparation_progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "generation",
+        "bytes_completed",
+        "bytes_total",
+        "observed_at"
+      ],
+      "properties": {
+        "scope": {
+          "const": "staged_input_bytes"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bytes_completed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5368709120
+        },
+        "bytes_total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5368709120
+        },
+        "observed_at": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+        }
+      }
     }
   },
   "allOf": [

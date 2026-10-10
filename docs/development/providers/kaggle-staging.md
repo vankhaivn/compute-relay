@@ -40,7 +40,9 @@ visibility-pending signal; Go performs bounded read-only observation polling and
 upload tickets or dataset creation. Once visible, require exact positive dataset ID, owner/slug,
 version 1, marker/license and explicit privacy; READY state; all bounded listing pages; marker
 hash first, then every original payload's size/hash/EOF/Close. Recheck metadata/state afterward.
-Incomplete, changed or oversized evidence fails closed. A discovered public resource stays
+Incomplete, changed or oversized evidence fails closed. During creation, bytes handed to the
+helper's upload stream are reported as preparation progress; pipe buffering keeps that count
+slightly ahead of provider receipt. A discovered public resource stays
 private-false/not-ready attention evidence, not something to repair by publishing.
 
 M3 pins the first discovered reference and rejects later replacement at the same name. Read-only

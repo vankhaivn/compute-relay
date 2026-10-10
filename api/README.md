@@ -91,7 +91,10 @@ requests transfer-only work. Optional JobSpec `result_collection=manual` freezes
 collection; omission keeps automatic behavior. Check the runtime's `manual_result_collection`
 feature before admitting manual jobs. Additive status `collection` separates terminal waiting,
 pending/active transfer, verification and published availability; [collection](../docs/development/collection.md)
-defines dated output-byte progress and restart generations. Handlers never call providers.
+defines dated output-byte progress and restart generations. While the active attempt is
+`preparing`, additive status `preparation.progress` reports frozen input bytes an adapter has
+handed to its provider upload (`staged_input_bytes`); it is absent when the adapter cannot observe
+its upload and never means provider readiness. Handlers never call providers.
 
 Artifact metadata/pages describe a historical publication. Binary content requires exact bytes
 and the final `X-Compute-Relay-Verified` trailer; see [delivery](../docs/artifact-delivery.md).

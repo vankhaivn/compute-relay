@@ -136,6 +136,8 @@ type Repository interface {
 	CommitDispatch(context.Context, Handle, Action, time.Time) (Work, error)
 	RenewDispatch(context.Context, Handle, time.Time) (Handle, error)
 	YieldDispatch(context.Context, Handle, time.Time, time.Duration) error
+	// RecordPreparationProgress stores an observational staging sample for the lease owner.
+	RecordPreparationProgress(context.Context, Handle, domain.PreparationProgress, time.Time) error
 }
 type Resolver interface {
 	Resolve(provider.BindingSnapshot) (provider.Provider, error)

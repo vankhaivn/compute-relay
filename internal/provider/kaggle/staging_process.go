@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 //go:embed staging.py
@@ -67,10 +69,14 @@ func runStagingSource(parent context.Context, c Config, mode string, secret []by
 	prefix = append(prefix, '\n')
 	defer clear(prefix)
 	body := &stagingBody{ctx: ctx, blobs: blobs, plan: p}
+	for _, m := range p.objects {
+		body.total += m.Bytes
+	}
 	defer body.Close()
 	cmd.Stdin = bytes.NewReader(prefix)
 	if mode == "create" {
 		cmd.Stdin = stagingCreateInput(prefix, p.marker, body)
+		provider.ReportPreparationProgress(ctx, 0, body.total)
 	}
 	out := &boundedOutput{cancel: cancel}
 	diagnostic := &boundedOutput{cancel: cancel, discard: true}
@@ -99,6 +105,8 @@ type stagingBody struct {
 	index     int
 	current   io.ReadCloser
 	remaining int64
+	// Bytes handed to the helper's upload stream; pipe buffering keeps this slightly ahead.
+	sent, total int64
 }
 
 func (r *stagingBody) Close() error {
@@ -143,6 +151,10 @@ func (r *stagingBody) Read(b []byte) (int, error) {
 		}
 		n, err := r.current.Read(b)
 		r.remaining -= int64(n)
+		if n > 0 {
+			r.sent += int64(n)
+			provider.ReportPreparationProgress(r.ctx, r.sent, r.total)
+		}
 		if err == io.EOF && r.remaining == 0 {
 			err = nil
 		}
