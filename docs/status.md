@@ -16,6 +16,7 @@ No public release is available. Passing offline tests alone is not evidence of l
 | Managed `serve` | With `--managed-python`, exposes connection descriptors/operations, Relay-owned macOS Keychain credentials and durable per-attempt grants. An explicit CPU or GPU configuration freezes each selection resource; workers resolve multiple account bindings. Startup performs no account check and grants no compute. |
 | Native companion | Reproducible macOS arm64 candidate bundle with independent locked Python/client dependencies, checksum-verified create-new installation and relocation discovery. No checkout or developer toolchain is required at runtime. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation/submission intents, restart reconciliation, explicit controls and verified collection/publication. |
+| Preparation progress | While an attempt is `preparing`, status reports dated, lease-fenced input bytes handed to the provider staging upload; Kaggle staging reports them. Observational only. |
 | Explicit result collection | Optional immutable manual policy waits for `/collect`; dated selected-output stream progress and restart-safe ticket recovery have offline evidence. Automatic remains the default. |
 | Artifact delivery | Explicit-attempt listing/metadata/content and create-only CLI downloads, with current authority, expiry and end-of-stream verification. |
 | Kaggle components | Credential-scoped preflight, private staging, exact-identity execution, quota/log snapshots and selected artifact transfer. |
