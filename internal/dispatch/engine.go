@@ -17,8 +17,10 @@ type Config struct {
 	ControlTimeout, PreparationTimeout, PollDelay time.Duration
 }
 
+// DefaultConfig gives one provider preparation the full hour ceiling: staging can upload every
+// frozen input before creating its resource, and that upload is never repeated after a timeout.
 func DefaultConfig() Config {
-	return Config{Workers: 4, ControlTimeout: time.Minute, PreparationTimeout: 5 * time.Minute, PollDelay: 15 * time.Second}
+	return Config{Workers: 4, ControlTimeout: time.Minute, PreparationTimeout: time.Hour, PollDelay: 15 * time.Second}
 }
 func (c Config) Valid() bool {
 	return c.Workers > 0 && c.Workers <= 64 && c.ControlTimeout > 0 && c.ControlTimeout <= 5*time.Minute && c.PreparationTimeout >= c.ControlTimeout && c.PreparationTimeout <= time.Hour && c.PollDelay >= time.Millisecond && c.PollDelay <= 5*time.Minute

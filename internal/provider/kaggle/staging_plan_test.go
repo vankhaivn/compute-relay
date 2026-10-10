@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
@@ -86,5 +88,16 @@ func TestStagingPlanRejectsIncompleteOrRemappedInputs(t *testing.T) {
 				t.Fatal("unsafe plan accepted")
 			}
 		})
+	}
+}
+
+func TestDefaultStagingBudgetFitsLimitOnOrdinaryUplink(t *testing.T) {
+	policy := DefaultStagingPolicy()
+	upload := time.Duration(policy.MaxBytes*8/10_000_000) * time.Second // 10 Mbit/s
+	if !policy.valid() || policy.Timeout < upload {
+		t.Fatalf("staging budget %s cannot upload the %d-byte limit in %s", policy.Timeout, policy.MaxBytes, upload)
+	}
+	if dispatch.DefaultConfig().PreparationTimeout < policy.Timeout {
+		t.Fatal("dispatch preparation budget cuts staging before its own policy timeout")
 	}
 }
