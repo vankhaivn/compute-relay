@@ -1,0 +1,733 @@
+{
+  "token": "cr1_g4mJXu8ps_lboZUFa2l6ZD7HEwyuBZQyesLVZC46yrI",
+  "requests": [
+    {
+      "name": "awaiting-download status",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8",
+      "status": 200,
+      "response": {
+        "active_attempt_id": "att_585b0865d17faefd9cbfe595fa48d92c",
+        "api_version": "compute-connector/v1alpha1",
+        "collection": {
+          "mode": "manual",
+          "state": "awaiting_request",
+          "attempt_id": "att_585b0865d17faefd9cbfe595fa48d92c",
+          "operation_id": null,
+          "progress": null
+        },
+        "created_at": "2026-10-11T10:18:02.356305Z",
+        "job_id": "job_132e9dcca9bd47ceb565c6b75ccd69a8",
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8",
+          "events": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/events",
+          "attempts": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/artifacts"
+        },
+        "name": "dispatch-fixture",
+        "revision": 6,
+        "state": {
+          "cancellation": "not_requested",
+          "deadline_exceeded": false,
+          "execution": "succeeded",
+          "orchestration": "collecting",
+          "release_evidence": "not_observable",
+          "remote_activity": "inactive",
+          "result": "not_available"
+        },
+        "updated_at": "2026-10-11T10:58:03.281Z",
+        "workspace_id": "a"
+      }
+    },
+    {
+      "name": "awaiting-download admission replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs",
+      "idempotency_key": "admit-awaiting-download",
+      "body": {
+        "api_version": "compute-connector/v1alpha1",
+        "name": "dispatch-fixture",
+        "result_collection": "manual",
+        "profile": "fixture",
+        "bundle": {
+          "object_id": "code"
+        },
+        "execution": {
+          "kind": "python",
+          "command": [
+            "python",
+            "never-executed.py"
+          ]
+        },
+        "inputs": [
+          {
+            "name": "data",
+            "source": {
+              "kind": "object",
+              "object_id": "data"
+            },
+            "target": "data.txt"
+          }
+        ],
+        "outputs": [
+          {
+            "path": "answer.json",
+            "required": true
+          }
+        ],
+        "resources": {
+          "accelerator": "cpu"
+        },
+        "network": {
+          "remote_internet": "disabled"
+        },
+        "timeouts": {
+          "remote_wall_seconds": 10,
+          "setup_seconds": 2,
+          "finalization_grace_seconds": 2
+        }
+      },
+      "status": 202,
+      "response": {
+        "job_id": "job_132e9dcca9bd47ceb565c6b75ccd69a8",
+        "attempt_id": "att_585b0865d17faefd9cbfe595fa48d92c",
+        "status": "queued",
+        "created_at": "2026-10-11T10:18:02.356305Z",
+        "idempotency_replay": true,
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8",
+          "events": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/events",
+          "attempts": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/artifacts"
+        }
+      }
+    },
+    {
+      "name": "awaiting-download authorization",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/authorizations/grant_e90d7d53ea0d26bee27daafd50bb0e67",
+      "status": 200,
+      "response": {
+        "authorization_id": "grant_e90d7d53ea0d26bee27daafd50bb0e67",
+        "workspace_id": "a",
+        "job_id": "job_132e9dcca9bd47ceb565c6b75ccd69a8",
+        "attempt_id": "att_585b0865d17faefd9cbfe595fa48d92c",
+        "status": "consumed",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T10:18:03.281Z",
+        "consumed_at": "2026-10-11T10:28:03.281Z",
+        "replay": false
+      }
+    },
+    {
+      "name": "awaiting-download authorization replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs/job_132e9dcca9bd47ceb565c6b75ccd69a8/authorize",
+      "idempotency_key": "grant-awaiting-download",
+      "body": {
+        "attempt_id": "att_585b0865d17faefd9cbfe595fa48d92c",
+        "max_remote_wall_seconds": 10,
+        "authorize_private_staging": true,
+        "authorize_compute": true
+      },
+      "status": 202,
+      "response": {
+        "authorization_id": "grant_e90d7d53ea0d26bee27daafd50bb0e67",
+        "workspace_id": "a",
+        "job_id": "job_132e9dcca9bd47ceb565c6b75ccd69a8",
+        "attempt_id": "att_585b0865d17faefd9cbfe595fa48d92c",
+        "status": "granted",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T10:18:03.281Z",
+        "consumed_at": null,
+        "replay": true
+      }
+    },
+    {
+      "name": "collected status",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72",
+      "status": 200,
+      "response": {
+        "active_attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "api_version": "compute-connector/v1alpha1",
+        "collection": {
+          "mode": "manual",
+          "state": "available",
+          "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+          "operation_id": "op_e1ee6a4403c68db69453c3531dd973b6",
+          "progress": {
+            "scope": "selected_output_bytes",
+            "generation": 1,
+            "bytes_completed": 57344,
+            "bytes_received": null,
+            "bytes_total": 57344,
+            "observed_at": "2026-10-11T11:38:03.281Z"
+          }
+        },
+        "created_at": "2026-10-11T10:18:02.370125Z",
+        "job_id": "job_03c160d230d6f5d739e5bcde0246ed72",
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72",
+          "events": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/events",
+          "attempts": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/artifacts"
+        },
+        "name": "dispatch-fixture",
+        "revision": 8,
+        "state": {
+          "cancellation": "not_requested",
+          "deadline_exceeded": false,
+          "execution": "succeeded",
+          "orchestration": "succeeded",
+          "release_evidence": "not_observable",
+          "remote_activity": "inactive",
+          "result": "available"
+        },
+        "updated_at": "2026-10-11T11:38:03.281Z",
+        "workspace_id": "a"
+      }
+    },
+    {
+      "name": "collected admission replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs",
+      "idempotency_key": "admit-collected",
+      "body": {
+        "api_version": "compute-connector/v1alpha1",
+        "name": "dispatch-fixture",
+        "result_collection": "manual",
+        "profile": "fixture",
+        "bundle": {
+          "object_id": "code"
+        },
+        "execution": {
+          "kind": "python",
+          "command": [
+            "python",
+            "never-executed.py"
+          ]
+        },
+        "inputs": [
+          {
+            "name": "data",
+            "source": {
+              "kind": "object",
+              "object_id": "data"
+            },
+            "target": "data.txt"
+          }
+        ],
+        "outputs": [
+          {
+            "path": "answer.json",
+            "required": true
+          }
+        ],
+        "resources": {
+          "accelerator": "cpu"
+        },
+        "network": {
+          "remote_internet": "disabled"
+        },
+        "timeouts": {
+          "remote_wall_seconds": 10,
+          "setup_seconds": 2,
+          "finalization_grace_seconds": 2
+        }
+      },
+      "status": 202,
+      "response": {
+        "job_id": "job_03c160d230d6f5d739e5bcde0246ed72",
+        "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "status": "queued",
+        "created_at": "2026-10-11T10:18:02.370125Z",
+        "idempotency_replay": true,
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72",
+          "events": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/events",
+          "attempts": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/artifacts"
+        }
+      }
+    },
+    {
+      "name": "collected authorization",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/authorizations/grant_f974e549ac2cf966c075cce40251f23c",
+      "status": 200,
+      "response": {
+        "authorization_id": "grant_f974e549ac2cf966c075cce40251f23c",
+        "workspace_id": "a",
+        "job_id": "job_03c160d230d6f5d739e5bcde0246ed72",
+        "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "status": "consumed",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T10:58:03.281Z",
+        "consumed_at": "2026-10-11T11:08:03.281Z",
+        "replay": false
+      }
+    },
+    {
+      "name": "collected authorization replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/authorize",
+      "idempotency_key": "grant-collected",
+      "body": {
+        "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "max_remote_wall_seconds": 10,
+        "authorize_private_staging": true,
+        "authorize_compute": true
+      },
+      "status": 202,
+      "response": {
+        "authorization_id": "grant_f974e549ac2cf966c075cce40251f23c",
+        "workspace_id": "a",
+        "job_id": "job_03c160d230d6f5d739e5bcde0246ed72",
+        "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "status": "granted",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T10:58:03.281Z",
+        "consumed_at": null,
+        "replay": true
+      }
+    },
+    {
+      "name": "collected collect replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72/collect",
+      "idempotency_key": "collect-collected",
+      "body": {
+        "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "reason": "explicit operator request"
+      },
+      "status": 202,
+      "response": {
+        "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "created_at": "2026-10-11T11:38:03.281Z",
+        "effect": "collection_requested",
+        "job_id": "job_03c160d230d6f5d739e5bcde0246ed72",
+        "kind": "collect",
+        "links": {
+          "job": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72",
+          "self": "/v1/workspaces/a/operations/op_e1ee6a4403c68db69453c3531dd973b6"
+        },
+        "operation_id": "op_e1ee6a4403c68db69453c3531dd973b6",
+        "problem": null,
+        "remote_termination_confirmed": false,
+        "replay": true,
+        "revision": 1,
+        "status": "accepted",
+        "updated_at": "2026-10-11T11:38:03.281Z",
+        "workspace_id": "a"
+      }
+    },
+    {
+      "name": "collected operation",
+      "method": "GET",
+      "path": "/v1/workspaces/a/operations/op_e1ee6a4403c68db69453c3531dd973b6",
+      "status": 200,
+      "response": {
+        "attempt_id": "att_5678e00c6c79e0e6532b2d637070e517",
+        "created_at": "2026-10-11T11:38:03.281Z",
+        "effect": "results_available",
+        "job_id": "job_03c160d230d6f5d739e5bcde0246ed72",
+        "kind": "collect",
+        "links": {
+          "job": "/v1/workspaces/a/jobs/job_03c160d230d6f5d739e5bcde0246ed72",
+          "self": "/v1/workspaces/a/operations/op_e1ee6a4403c68db69453c3531dd973b6"
+        },
+        "operation_id": "op_e1ee6a4403c68db69453c3531dd973b6",
+        "problem": null,
+        "remote_termination_confirmed": false,
+        "replay": false,
+        "revision": 2,
+        "status": "succeeded",
+        "updated_at": "2026-10-11T11:38:03.281Z",
+        "workspace_id": "a"
+      }
+    },
+    {
+      "name": "running status",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac",
+      "status": 200,
+      "response": {
+        "active_attempt_id": "att_d7fe2350489b2e53495917c979b67000",
+        "api_version": "compute-connector/v1alpha1",
+        "collection": {
+          "mode": "automatic",
+          "state": "not_ready",
+          "attempt_id": "att_d7fe2350489b2e53495917c979b67000",
+          "operation_id": null,
+          "progress": null
+        },
+        "created_at": "2026-10-11T10:18:02.46838Z",
+        "job_id": "job_7884ae4ec28b505245fa2b45708828ac",
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac",
+          "events": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/events",
+          "attempts": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/artifacts"
+        },
+        "name": "dispatch-fixture",
+        "revision": 5,
+        "state": {
+          "cancellation": "not_requested",
+          "deadline_exceeded": false,
+          "execution": "running",
+          "orchestration": "running",
+          "release_evidence": "not_observable",
+          "remote_activity": "active",
+          "result": "not_available"
+        },
+        "updated_at": "2026-10-11T12:08:03.281Z",
+        "workspace_id": "a"
+      }
+    },
+    {
+      "name": "running admission replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs",
+      "idempotency_key": "admit-running",
+      "body": {
+        "api_version": "compute-connector/v1alpha1",
+        "name": "dispatch-fixture",
+        "profile": "fixture",
+        "bundle": {
+          "object_id": "code"
+        },
+        "execution": {
+          "kind": "python",
+          "command": [
+            "python",
+            "never-executed.py"
+          ]
+        },
+        "inputs": [
+          {
+            "name": "data",
+            "source": {
+              "kind": "object",
+              "object_id": "data"
+            },
+            "target": "data.txt"
+          }
+        ],
+        "outputs": [
+          {
+            "path": "answer.json",
+            "required": true
+          }
+        ],
+        "resources": {
+          "accelerator": "cpu"
+        },
+        "network": {
+          "remote_internet": "disabled"
+        },
+        "timeouts": {
+          "remote_wall_seconds": 10,
+          "setup_seconds": 2,
+          "finalization_grace_seconds": 2
+        }
+      },
+      "status": 202,
+      "response": {
+        "job_id": "job_7884ae4ec28b505245fa2b45708828ac",
+        "attempt_id": "att_d7fe2350489b2e53495917c979b67000",
+        "status": "queued",
+        "created_at": "2026-10-11T10:18:02.46838Z",
+        "idempotency_replay": true,
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac",
+          "events": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/events",
+          "attempts": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/artifacts"
+        }
+      }
+    },
+    {
+      "name": "running authorization",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/authorizations/grant_7b6cfa8bc6a0b45207db50809e537d87",
+      "status": 200,
+      "response": {
+        "authorization_id": "grant_7b6cfa8bc6a0b45207db50809e537d87",
+        "workspace_id": "a",
+        "job_id": "job_7884ae4ec28b505245fa2b45708828ac",
+        "attempt_id": "att_d7fe2350489b2e53495917c979b67000",
+        "status": "consumed",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T11:38:03.281Z",
+        "consumed_at": "2026-10-11T11:48:03.281Z",
+        "replay": false
+      }
+    },
+    {
+      "name": "running authorization replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs/job_7884ae4ec28b505245fa2b45708828ac/authorize",
+      "idempotency_key": "grant-running",
+      "body": {
+        "attempt_id": "att_d7fe2350489b2e53495917c979b67000",
+        "max_remote_wall_seconds": 10,
+        "authorize_private_staging": true,
+        "authorize_compute": true
+      },
+      "status": 202,
+      "response": {
+        "authorization_id": "grant_7b6cfa8bc6a0b45207db50809e537d87",
+        "workspace_id": "a",
+        "job_id": "job_7884ae4ec28b505245fa2b45708828ac",
+        "attempt_id": "att_d7fe2350489b2e53495917c979b67000",
+        "status": "granted",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T11:38:03.281Z",
+        "consumed_at": null,
+        "replay": true
+      }
+    },
+    {
+      "name": "granted status",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894",
+      "status": 200,
+      "response": {
+        "active_attempt_id": "att_a7f95c8c3e5758857732d9f018cf86f1",
+        "api_version": "compute-connector/v1alpha1",
+        "collection": {
+          "mode": "automatic",
+          "state": "not_ready",
+          "attempt_id": "att_a7f95c8c3e5758857732d9f018cf86f1",
+          "operation_id": null,
+          "progress": null
+        },
+        "created_at": "2026-10-11T10:18:02.478176Z",
+        "job_id": "job_d2af39fe387717f3f98bc53ce4c9b894",
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894",
+          "events": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/events",
+          "attempts": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/artifacts"
+        },
+        "name": "dispatch-fixture",
+        "revision": 1,
+        "state": {
+          "cancellation": "not_requested",
+          "deadline_exceeded": false,
+          "execution": "not_submitted",
+          "orchestration": "queued",
+          "release_evidence": "unknown",
+          "remote_activity": "not_started",
+          "result": "not_available"
+        },
+        "updated_at": "2026-10-11T10:18:02.478176Z",
+        "workspace_id": "a"
+      }
+    },
+    {
+      "name": "granted admission replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs",
+      "idempotency_key": "admit-granted",
+      "body": {
+        "api_version": "compute-connector/v1alpha1",
+        "name": "dispatch-fixture",
+        "profile": "fixture",
+        "bundle": {
+          "object_id": "code"
+        },
+        "execution": {
+          "kind": "python",
+          "command": [
+            "python",
+            "never-executed.py"
+          ]
+        },
+        "inputs": [
+          {
+            "name": "data",
+            "source": {
+              "kind": "object",
+              "object_id": "data"
+            },
+            "target": "data.txt"
+          }
+        ],
+        "outputs": [
+          {
+            "path": "answer.json",
+            "required": true
+          }
+        ],
+        "resources": {
+          "accelerator": "cpu"
+        },
+        "network": {
+          "remote_internet": "disabled"
+        },
+        "timeouts": {
+          "remote_wall_seconds": 10,
+          "setup_seconds": 2,
+          "finalization_grace_seconds": 2
+        }
+      },
+      "status": 202,
+      "response": {
+        "job_id": "job_d2af39fe387717f3f98bc53ce4c9b894",
+        "attempt_id": "att_a7f95c8c3e5758857732d9f018cf86f1",
+        "status": "queued",
+        "created_at": "2026-10-11T10:18:02.478176Z",
+        "idempotency_replay": true,
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894",
+          "events": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/events",
+          "attempts": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/artifacts"
+        }
+      }
+    },
+    {
+      "name": "granted authorization",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/authorizations/grant_ba146ad33a44a762d361f1b61be6a3e3",
+      "status": 200,
+      "response": {
+        "authorization_id": "grant_ba146ad33a44a762d361f1b61be6a3e3",
+        "workspace_id": "a",
+        "job_id": "job_d2af39fe387717f3f98bc53ce4c9b894",
+        "attempt_id": "att_a7f95c8c3e5758857732d9f018cf86f1",
+        "status": "granted",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T12:08:03.281Z",
+        "consumed_at": null,
+        "replay": false
+      }
+    },
+    {
+      "name": "granted authorization replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs/job_d2af39fe387717f3f98bc53ce4c9b894/authorize",
+      "idempotency_key": "grant-granted",
+      "body": {
+        "attempt_id": "att_a7f95c8c3e5758857732d9f018cf86f1",
+        "max_remote_wall_seconds": 10,
+        "authorize_private_staging": true,
+        "authorize_compute": true
+      },
+      "status": 202,
+      "response": {
+        "authorization_id": "grant_ba146ad33a44a762d361f1b61be6a3e3",
+        "workspace_id": "a",
+        "job_id": "job_d2af39fe387717f3f98bc53ce4c9b894",
+        "attempt_id": "att_a7f95c8c3e5758857732d9f018cf86f1",
+        "status": "granted",
+        "max_remote_wall_seconds": 10,
+        "created_at": "2026-10-11T12:08:03.281Z",
+        "consumed_at": null,
+        "replay": true
+      }
+    },
+    {
+      "name": "queued status",
+      "method": "GET",
+      "path": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d",
+      "status": 200,
+      "response": {
+        "active_attempt_id": "att_9adb393ddb6bd27735629a75b301a242",
+        "api_version": "compute-connector/v1alpha1",
+        "collection": {
+          "mode": "automatic",
+          "state": "not_ready",
+          "attempt_id": "att_9adb393ddb6bd27735629a75b301a242",
+          "operation_id": null,
+          "progress": null
+        },
+        "created_at": "2026-10-11T10:18:02.479089Z",
+        "job_id": "job_5163a75c8a92e190527bcff3a82afd9d",
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d",
+          "events": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d/events",
+          "attempts": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d/artifacts"
+        },
+        "name": "dispatch-fixture",
+        "revision": 1,
+        "state": {
+          "cancellation": "not_requested",
+          "deadline_exceeded": false,
+          "execution": "not_submitted",
+          "orchestration": "queued",
+          "release_evidence": "unknown",
+          "remote_activity": "not_started",
+          "result": "not_available"
+        },
+        "updated_at": "2026-10-11T10:18:02.479089Z",
+        "workspace_id": "a"
+      }
+    },
+    {
+      "name": "queued admission replay",
+      "method": "POST",
+      "path": "/v1/workspaces/a/jobs",
+      "idempotency_key": "admit-queued",
+      "body": {
+        "api_version": "compute-connector/v1alpha1",
+        "name": "dispatch-fixture",
+        "profile": "fixture",
+        "bundle": {
+          "object_id": "code"
+        },
+        "execution": {
+          "kind": "python",
+          "command": [
+            "python",
+            "never-executed.py"
+          ]
+        },
+        "inputs": [
+          {
+            "name": "data",
+            "source": {
+              "kind": "object",
+              "object_id": "data"
+            },
+            "target": "data.txt"
+          }
+        ],
+        "outputs": [
+          {
+            "path": "answer.json",
+            "required": true
+          }
+        ],
+        "resources": {
+          "accelerator": "cpu"
+        },
+        "network": {
+          "remote_internet": "disabled"
+        },
+        "timeouts": {
+          "remote_wall_seconds": 10,
+          "setup_seconds": 2,
+          "finalization_grace_seconds": 2
+        }
+      },
+      "status": 202,
+      "response": {
+        "job_id": "job_5163a75c8a92e190527bcff3a82afd9d",
+        "attempt_id": "att_9adb393ddb6bd27735629a75b301a242",
+        "status": "queued",
+        "created_at": "2026-10-11T10:18:02.479089Z",
+        "idempotency_replay": true,
+        "links": {
+          "self": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d",
+          "events": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d/events",
+          "attempts": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d/attempts",
+          "artifacts": "/v1/workspaces/a/jobs/job_5163a75c8a92e190527bcff3a82afd9d/artifacts"
+        }
+      }
+    }
+  ]
+}

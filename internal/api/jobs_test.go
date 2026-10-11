@@ -190,6 +190,7 @@ func TestDurableAdmissionHTTPContractAndAuthorization(t *testing.T) {
 		t.Fatal("invalid new receipt")
 	}
 	_, b = f.call(t, "POST", path, "a", "request-0001", jobBody, 202)
+	wireSchema(t, "job-admission", b) // A replay still reports status queued.
 	var replay admission.Receipt
 	_ = json.Unmarshal(b, &replay)
 	if !replay.Replay || replay.JobID != first.JobID || replay.AttemptID != first.AttemptID {
