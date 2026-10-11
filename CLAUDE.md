@@ -66,6 +66,12 @@ force push or shared-history rewrite without task-specific authorization, and no
 authors or co-authors. Each commit is one complete logical change: a fix or capability with its
 direct regression tests, not a monolithic bundle of subsystems and not artificial micro-commits.
 
+Conventional Commit subjects apply to commits and PR titles, not issues. An issue title is a plain
+sentence without a type prefix or labels: a bug states the observed symptom, a feature starts with
+an imperative verb. The body states the problem with its concrete mechanism or measurement, then
+the proposed change, then `Acceptance:` with bullets for observable behavior and required checks,
+and optionally a closing paragraph of boundaries. Use headings only for large multi-part issues.
+
 Before reporting completion, run relevant format/tests/contracts/link checks that are available,
 inspect the final diff for secrets and unrelated changes, and report exact commands and limits.
 Distinguish offline component tests, current-host checks and live-provider evidence. Never lower
