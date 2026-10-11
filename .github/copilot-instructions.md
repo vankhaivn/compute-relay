@@ -1,6 +1,6 @@
 # Copilot repository instructions
 
-Follow [AGENTS.md](../AGENTS.md). Start with [current status](../docs/status.md) and the guide
+Follow [CLAUDE.md](../CLAUDE.md). Start with [current status](../docs/status.md) and the guide
 for the requested task. Consult the [approved proposal](../docs/development/proposal.md), requirement IDs
 and relevant ADRs for design or scope changes, not as mandatory onboarding for routine usage.
 

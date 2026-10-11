@@ -5,7 +5,7 @@ For contributors and maintainers. To use or operate Compute Relay, start with
 
 ## Contributor workflow
 
-- [Repository instructions](../../AGENTS.md) and [contributing](../../CONTRIBUTING.md)
+- [Repository instructions](../../CLAUDE.md) and [contributing](../../CONTRIBUTING.md)
 - [Go toolchain and checks](go-toolchain.md)
 - [Commit convention](commit-convention.md)
 - [Validation checklist](validation-checklist.md) and [bug report template](bug-report-template.md)

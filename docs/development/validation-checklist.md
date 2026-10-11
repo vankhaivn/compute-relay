@@ -9,7 +9,7 @@ sanitized commit, configuration, command and observation needed to reproduce it.
 
 ## 1. Rules
 
-- Read [current status](../status.md), [AGENTS.md](../../AGENTS.md), this checklist and any
+- Read [current status](../status.md), [CLAUDE.md](../../CLAUDE.md), this checklist and any
   issue/PR evidence linked by the task. Record the source commit and any dirty diff before the
   first check; a different binary or configuration is a different evidence context.
 - Run one check at a time and record its actual result. An unexpected failure blocks its

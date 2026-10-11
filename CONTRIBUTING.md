@@ -1,6 +1,6 @@
 # Contributing
 
-Read [AGENTS.md](AGENTS.md), [current status](docs/status.md) and the guide for the task in the
+Read [CLAUDE.md](CLAUDE.md), [current status](docs/status.md) and the guide for the task in the
 [development documentation](docs/development/README.md). Use the approved proposal and requirement
 IDs for design constraints, not as proof that a proposed command or provider capability exists.
 
