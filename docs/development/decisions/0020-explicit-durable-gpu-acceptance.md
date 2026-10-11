@@ -1,6 +1,8 @@
 # ADR-0020: Explicit fixed GPU acceptance with separate-process recovery
 
-Status: accepted. Requirements: PRD-04, VER-03; preserves DUR-03 and immutable results.
+Status: deprecated. The fixed acceptance utility was removed once the explicit and managed serve
+modes composed the same reviewed components. Its 2026-09 result remains recorded in
+[Kaggle feasibility](../research/kaggle-feasibility.md). Requirements: PRD-04, VER-03.
 
 ## Decision
 
@@ -21,7 +23,3 @@ handoff. The fixed run offers bounded reproducibility but not hostile-host attes
 window, remote exactly-once count or the full M1 timeout/fault/cleanup checklist. A scoped live pass
 must still retain those unknowns. Local timeout does not cancel remote work; private resources can
 remain because no cleanup apply is supplied. Preserve state, binary and original account.
-
-Use the [runbook](../providers/kaggle-acceptance.md) for repeat qualification. Keep full operator
-run records private and attach only minimal sanitized evidence to a focused issue/PR when support
-claims change. Offline synthetic success is never live evidence.

@@ -1,8 +1,8 @@
 # One-shot Kaggle execution
 
 The per-attempt Executor packages original inputs into fixed remote source, submits once under
-durable authority and observes exact identity. The [acceptance utility](kaggle-acceptance.md)
-composes it for one experiment; general worker/provider registration remains unfinished.
+durable authority and observes exact identity. The explicit and managed serve modes compose it
+behind the durable dispatch gate.
 
 ## Source and authority
 
@@ -84,8 +84,9 @@ GPU requires explicit T4/P100 shape; no CPU upgrade or GPU fallback. New GPU sav
 pay-to-scale flag in the returned GPU quota object: omitted scalar false and explicit false are
 equivalent under the [pinned quota schema](kaggle-operations.md#quota). Missing quota objects,
 explicit true, null or non-booleans block save. This is a free-policy recheck, not numeric quota
-scheduling or a reservation; the acceptance harness separately requires known remaining time.
-Policy bounds are 1–86,400 wall seconds and one second–five minutes per invocation.
+scheduling or a reservation; the runtime adapter separately requires known remaining GPU quota
+covering the requested wall time. Policy bounds are 1–86,400 wall seconds and one second–five
+minutes per invocation.
 
 Source/payload/request bounds are 2 MiB/1 MiB/3 MiB; token 8 KiB, each output stream 16 KiB.
 The fixed isolated leaf has exact RPC allowlisting, at most ten armed calls, no retries/redirects/

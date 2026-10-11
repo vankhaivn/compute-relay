@@ -39,14 +39,6 @@ Use [application controls](application-cli.md), [artifact delivery](artifact-del
 [collection](development/collection.md) for available commands/contracts. Normal serve cannot run missing
 workers. A queued job there is not a live-provider outage.
 
-## Fixed Kaggle experiment
-
-Use its original acceptance binary/root/configuration. After `resume-required`, start a new
-process with `resume --allow-read-only`; the utility never grants another submission on resume.
-A failed transfer uses its explicit collect mode. Do not point normal serve at that directory.
-Missing process records or changed executable bytes cannot be repaired from plausible artifacts.
-See the [acceptance runbook](development/providers/kaggle-acceptance.md).
-
 Source/version/nonce checks reduce accidental mixups, not malicious-host attestation or proof that
 a provider never reran the same version. Upstream upsert and mount limits remain. Do not infer an
 exact remote execution count, provider timeout enforcement or hardware release without evidence.

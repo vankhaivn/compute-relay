@@ -64,23 +64,15 @@ for example:
 ```
 
 Use a fresh non-secret idempotency key per intended operation and preserve its receipt. Configure
-saves the local policy atomically and returns a durable `succeeded` receipt in the response; it
-makes no provider call and needs no restart. It does not authenticate or enable a connection.
-Disabled or unverified connections may save an override, but have no selection until verification
-succeeds with new work enabled. An already pending operation must finish before configuration changes. Check, credential replacement, disable and enable retain the saved
-override. When a selection exists, configure publishes a new immutable profile for future job
-admissions with the new wall bound and the existing profile's runtime settings. Existing profiles,
-runtime settings, jobs, attempts and authorization grants keep their original values. Omitting
-configuration on creation continues to use the managed startup default.
-
-Provider session or capacity limits remain independent of this local wall-time bound. Other
-provider verification happens asynchronously outside the HTTP handler.
+returns a durable `succeeded` receipt without a provider call or restart; it does not authenticate
+or enable a connection, and it is rejected while another operation is pending. When a selection
+exists, it publishes a new immutable profile for future admissions; existing jobs, attempts and
+grants keep their original values. Provider session and capacity limits still apply independently.
 
 A newly verified connection returns an exact `selection.profile` and `selection.accelerator`.
-Use both in the existing job specification; admission rejects a different resource. The optional
-accelerator field is absent from legacy profiles. A resource-selecting client must request a
-connection check rather than infer old resource policy from the current provider descriptor.
-A later connection change can invalidate an old selection for new admission;
+Use both in the existing job specification; admission rejects a different resource. Legacy
+profiles omit the accelerator; request a connection check rather than inferring it. A later
+connection change can invalidate an old selection for new admission;
 refresh explicitly after a conflict. Previously admitted jobs keep their frozen provider/account
 binding. Credential replacement must verify the same account; a different account needs a new
 connection. Two credentials for one account share capacity and do not create extra quota.
@@ -130,5 +122,5 @@ retry creates a new attempt that needs its own authorization. Current authority,
 one-shot intent guards still apply after a permit is granted.
 
 See the [wire and recovery contract](development/managed-connections.md) and
-[OpenAPI](../api/openapi.json) for exact schemas, revisions and error semantics. Offline/native
-tests qualify local behavior; this mode has no new live-provider qualification claim.
+[OpenAPI](../api/openapi.json) for exact schemas, revisions and error semantics, and
+[current status](status.md) for live evidence.

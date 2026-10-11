@@ -20,24 +20,19 @@ queue or edit arbitrary database rows. The composition root decides which servic
 
 ## Available compositions
 
-The normal `runtimehost` always serves uploads, admission/status/control and reads of published
-results with SQLite and separate input/result stores. With no provider flags it creates no provider
-workers and remains local-admission-only. With an exact configured Kaggle profile plus explicit
-private-staging/GPU authorization and a finite attempt budget, it additionally composes one durable
-dispatch worker and one collector against the frozen provider snapshot. A local `202` remains an
-admission receipt, not remote-success evidence.
+The `runtimehost` always serves uploads, admission/status/control and reads of published results
+with SQLite and separate input/result stores. The serve mode decides which workers run:
 
-The separate fixed Kaggle acceptance utility remains the narrower live-qualification workflow. It
-uses the same reviewed provider components but a different state format and explicit
-submission/read-only modes; do not interchange its root with a normal runtime installation. See
-[acceptance](providers/kaggle-acceptance.md) and
-[ADR-0024](decisions/0024-explicit-bounded-provider-workers.md).
+- Without provider flags it starts no provider workers and stays local-admission-only.
+- Explicit Kaggle mode adds one durable dispatch worker and one collector against the frozen
+  provider snapshot, bounded by an exact profile, private-staging/GPU authorization and a finite
+  attempt budget ([ADR-0024](decisions/0024-explicit-bounded-provider-workers.md)).
+- Managed mode adds separate administration and execution authority, protected credentials,
+  account-bound immutable selections and durable per-attempt permits
+  ([managed connections](managed-connections.md),
+  [ADR-0025](decisions/0025-managed-connections-and-attempt-authorization.md)).
 
-The accepted optional [managed-connection extension](managed-connections.md) adds separate
-administration and execution authority, protected credentials, account-bound immutable selections
-and durable per-attempt permits. Its planned composition must not be inferred from the currently
-available standalone worker flags. [ADR-0025](decisions/0025-managed-connections-and-attempt-authorization.md)
-owns this extension decision.
+A local `202` remains an admission receipt, not remote-success evidence.
 
 ## Responsibility map
 
@@ -46,8 +41,7 @@ owns this extension decision.
 | [Auth and objects](auth-and-objects.md) | Current workspace authority, verified immutable bytes and separately committed ownership. |
 | [Admission](admission.md) | Strict request identity, frozen profile/input references and original job/attempt receipt. |
 | [Storage](storage.md) | Short atomic transactions, installation identity, migrations, OS locks and database-only backup. |
-| [Scheduler](scheduler.md) | Fair queue selection, account/worker capacity and fenced local claims. |
-| [Dispatch](dispatch.md) | Freeze inputs; commit preparation/submission intents before one permitted mutation; recover by observation. |
+| [Dispatch](dispatch.md) | Fair selection and fenced claims; freeze inputs; commit preparation/submission intents before one permitted mutation; recover by observation. |
 | [Controls](operations.md) | Explicit attempt-scoped cancel/retry/reconcile/collect receipts and current operation state. |
 | [Collection](collection.md) | Immutable result pin, selected byte verification and atomic publication. |
 | [Retention](retention.md) | Recovery pins, irreversible expiry, exact local deletion and remote dry-run limits. |

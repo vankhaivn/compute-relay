@@ -1,30 +1,17 @@
 # Changelog
 
-The project has not published a release. This section summarizes the current pre-release
-feature set, not individual commits, audits or CI runs.
+No release has been published. This summarizes the current pre-release feature set.
 
 ## Unreleased
 
-- Local HTTP runtime and CLI with private installations, workspace access, expiring tokens
-  and immutable admission profiles.
-- Immutable input uploads, safe code bundles and provider-neutral job contracts.
-- SQLite-backed jobs, attempts, idempotent receipts, recovery and explicit job controls.
-- Verified artifact collection, authorized downloads, retention rules and local byte cleanup.
-- Optional manual result collection with durable explicit transfer requests and observed selected-output byte progress.
-- Kaggle preflight, private staging, one-shot execution, quota/log snapshots and selected
-  artifact transfer, plus a fixed live-qualified GPU acceptance experiment.
-- Explicit Kaggle-enabled normal `serve` composition with exact frozen binding verification,
-  a finite provider-attempt authorization budget, durable dispatch/reconciliation and verified
-  artifact collection; admission-only mode remains the default.
-- Optional managed connection API with write-only protected credentials, asynchronous account
-  discovery, shared account capacity and durable finite per-attempt execution authorization.
-  Optional per-connection wall-time configuration applies to future admissions; configure saves
-  local policy with a durable receipt and preserves existing immutable job bindings and recovery.
-  Explicit managed CPU/GPU selection keeps CPU work independent of GPU allowance.
-- Reproducible macOS arm64 companion bundles with a locked independent provider interpreter,
-  complete payload checksums, create-new installation and relocation discovery.
+- Local HTTP runtime and CLI with private installations, workspace tokens and immutable
+  admission profiles.
+- Immutable uploads, safe code bundles and provider-neutral job contracts.
+- Durable jobs, attempts, idempotent receipts, recovery and explicit job controls.
+- Verified artifact collection and downloads, with optional manual collection and byte progress.
+- Kaggle provider adapter behind an explicit, finitely authorized `serve` mode.
+- Managed connections with write-only protected credentials, shared account capacity and durable
+  per-attempt execution authorization.
+- Reproducible macOS arm64 companion bundles.
 
-**Pre-release:** live-log qualification, public provider cleanup surfaces, strict runtime configuration, doctor/client
-examples, cross-platform distribution and full release hardening remain. The integrated normal-server
-path requires scoped operator re-qualification before new live support claims. See
-[current status](docs/status.md).
+See [current status](docs/status.md) for limits.

@@ -5,8 +5,8 @@ review at **2026-09-13** used CLI 2.2.4; current component references also pin S
 The [interface review](kaggle-interface-review.md) links the exact sources. Current shipped
 behavior and limitations belong in [current status](../../status.md); this page is not a run diary.
 
-The fixed authorized acceptance path has live-qualified private staging, actual Tesla T4 CUDA
-execution, separate-process reconciliation, terminal observation, bounded logs and complete
+A fixed, explicitly authorized 2026-09 experiment live-qualified private staging, actual Tesla T4
+CUDA execution, separate-process reconciliation, terminal observation, bounded logs and complete
 artifact collection/publication for its tested account and workload. That does not imply universal
 quota, timeout, cancellation, release, cleanup or arbitrary-workload support.
 
@@ -19,7 +19,7 @@ quota, timeout, cancellation, release, cleanup or arbitrary-workload support.
 | K-05 | Is execution bound to the intended attempt? | Qualified for the fixed path through exact kernel ID/source/nonce checks and separate-process reconciliation; remote exactly-once and same-version external reruns remain unobservable. |
 | K-06 | Are observed raw states interpreted truthfully? | Terminal COMPLETE behavior is qualified; unknown/new provider values still fail closed by contract. |
 | K-07 | Are correct-attempt results retrieved? | Qualified for complete six-file selected output publication with exact hashes; large live pagination is not claimed. |
-| K-08 | What logs are available and when? | Bounded provider/log and retained control-log behavior is available for the fixed path; no live SSE product is claimed. |
+| K-08 | What logs are available and when? | Bounded attempt log pages are available; a finite CPU probe on the native companion qualified running delivery, original-cursor reconnect and ordered replay. Delivery stays best effort and no live SSE product is claimed. |
 | K-09 | Is the requested remote timeout enforced? | Not established as a provider guarantee; local/runner/provider budgets remain distinct. |
 | K-10 | What termination/release evidence exists? | Terminal execution can be observed; exact hardware/accounting release remains unobservable. |
 | K-11 | Is a cancellable session target verifiable? | No; current batch cancellation remains manual-required without a verified session target. |
@@ -31,9 +31,9 @@ quota, timeout, cancellation, release, cleanup or arbitrary-workload support.
 
 ## Support decision
 
-The fixed Kaggle path is supported only within the boundaries above and the provider component
-guides. General server workers, arbitrary-job provider registration and release readiness remain
-separate product work. Missing optional capabilities stay explicitly unsupported rather than being
+Kaggle support is limited to the boundaries above and the provider component guides. The explicit
+and managed serve modes reuse the qualified components; another account or workload needs its own
+qualification, and release readiness remains separate product work. Missing optional capabilities stay explicitly unsupported rather than being
 replaced by browser automation, hidden retries, CPU/paid fallback or unsafe cleanup.
 
 Use the [validation checklist](../validation-checklist.md) when a fresh host/account or

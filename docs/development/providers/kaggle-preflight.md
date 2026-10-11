@@ -1,8 +1,7 @@
-# Kaggle setup and preflight
+# Kaggle client configuration and account check
 
-Check a selected local environment, then explicitly authorize account reads. Preflight is not
-a dispatch permit. Use the [operator checklist](../validation-checklist.md) to record
-a real installation/account result rather than treating installed packages as live support.
+The explicit serve mode reads this configuration through `--provider-config` and performs the
+read-only account check below before it starts workers. A passing check is not a dispatch permit.
 
 ## Locked client environment
 
@@ -29,7 +28,7 @@ All five fields are required. Adapt paths/account; keep this regular JSON file o
 Windows uses an absolute JSON-escaped path to `.venv\\Scripts\\python.exe`. Configuration is
 bounded to 8 KiB, closed against unknown/duplicate/case-alias/null fields and immutable after
 construction. The account parser is a conservative lowercase ASCII subset, not every possible
-upstream username. This is not the main runtime's unfinished TOML configuration.
+upstream username.
 
 Provision the selected environment variable securely. Only explicit allowlisted `env:NAME`
 references and opaque API tokens are resolved by this component. Values are 1–8192 printable
@@ -37,26 +36,14 @@ ASCII bytes with no whitespace/newline or `Bearer ` prefix. No home search, cred
 legacy username/key, OAuth/browser, `.env` loading or automatic fallback exists. Every authorized
 call reads a fresh value and still requires the same account.
 
-## Local default and read-only opt-in
+## Read-only account check
 
-```sh
-go build -trimpath -o kagglepreflight ./cmd/kagglepreflight
-./kagglepreflight --config /absolute/private/kaggle-preflight.json
-```
-
-Local mode checks installed metadata before any credential access; it does not import the
-authenticated client or contact Kaggle. After explicit authorization for account/quota reads:
-
-```sh
-./kagglepreflight --config /absolute/private/kaggle-preflight.json --allow-read-only
-```
-
-The fixed helper introspects the token and compares the server-returned account before quota.
-Mismatch stops without fallback. Reports omit raw account/token/path/exception data and separate
+Installed metadata is checked before any credential access, without importing the authenticated
+client or contacting Kaggle. The fixed helper then introspects the token and compares the
+server-returned account before reading quota. Mismatch stops without fallback. Reports omit raw account/token/path/exception data and separate
 local readiness, authentication, account match and quota-data availability. `quota=available`
-means an object was supplied, not positive remaining capacity; absent data stays unknown.
-`batch_ready` is always false. `problem=none` yields exit 0; diagnostic/configuration/process
-failures are nonzero. An unknown quota is not invented allowance.
+means an object was supplied, not positive remaining capacity; absent data stays unknown and is
+never invented allowance.
 
 ## Process and transport boundaries
 
@@ -70,5 +57,5 @@ Bounds are 64 KiB responses, 16 KiB stdout/stderr, 5/10-second connect/read, a 3
 child deadline, independent 25-second watchdog and a serialized 60-second service budget.
 The fixed leaf helper is not a general process-tree supervisor. Buffer clearing does not erase
 all immutable strings, OS copies or retained user data. Never share full private configuration
-or environment dumps. See [ADR-0015](../decisions/0015-read-only-kaggle-preflight.md),
-[research](../research/kaggle-interface-review.md) and [acceptance](kaggle-acceptance.md).
+or environment dumps. See [ADR-0015](../decisions/0015-read-only-kaggle-preflight.md) and
+[research](../research/kaggle-interface-review.md).

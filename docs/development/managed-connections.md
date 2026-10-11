@@ -1,19 +1,16 @@
 # Managed connections and execution authorization
 
-This is the implemented extension contract for a locally managed companion. The optional
-`--managed-python` serve composition advertises these routes and the `managed_connections` and
-`connection_configuration` features; ordinary serve does not. Existing environment-configured
-profiles and the standalone finite-worker mode remain supported; a saved connection is not
-proof of authentication, capacity or a runnable provider.
+The extension contract for a locally managed companion. Only the `--managed-python` serve
+composition advertises these routes and the `managed_connections`, `connection_configuration`
+and `attempt_authorization` features; clients check the features they use instead of assuming
+support from the API version. A saved connection is not proof of authentication, capacity or a
+runnable provider.
 
 ## Authority and API
 
 All routes use the existing authenticated literal-loopback transport, workspace isolation,
 strict JSON parsing, request limits and sanitized error envelope. No provider work occurs in
-an HTTP handler. The optional management composition advertises `managed_connections` and
-`connection_configuration`; the optional durable-permit composition advertises
-`attempt_authorization`. Clients must check the features they use instead of assuming support
-from the API version.
+an HTTP handler.
 
 | Method and workspace-relative path | Scope | Semantics |
 |---|---|---|
@@ -40,15 +37,12 @@ values for non-nullable fields and unknown fields are rejected. Credential-beari
 are bounded to 64 KiB overall, at most 16 fields and 16 KiB per field, with smaller adapter
 limits allowed. Request bodies, raw helper output and credential values are never logged.
 
-Creation may include `configuration.max_remote_wall_seconds`, an integer from 1 through 86400.
-Omission preserves the managed adapter's configured startup default. An action with
-`"action":"configure"` requires both `expected_revision` and a `configuration` object with that
-field; other actions reject `configuration`, and credential replacement remains the only action
-that accepts credentials. Configure commits the new local policy, revision and terminal
-`succeeded` receipt in one SQLite transaction. It makes no provider call, does not authenticate
-or enable the connection, and needs no process restart. It works while a connection is disabled
-or unverified, but rejects while another operation is pending. Such a connection still has no
-admission selection until verification succeeds with new work enabled.
+Creation may include `configuration.max_remote_wall_seconds` (1–86400); omission keeps the
+startup default. `"action":"configure"` requires `expected_revision` and that `configuration`
+object; other actions reject `configuration`, and only credential replacement accepts credentials.
+Configure commits the new policy, revision and a terminal `succeeded` receipt in one transaction,
+without a provider call, authentication, enablement or restart. It is rejected while another
+operation is pending, and an unverified connection still has no admission selection.
 
 ## Descriptors, verification and immutable selection
 
@@ -71,16 +65,11 @@ The published profile also freezes its adapter runtime configuration, including 
 changing startup defaults cannot reinterpret an existing job. Removed connections remain
 addressable by ID as sanitized tombstones and are omitted from the bounded active list.
 
-The optional connection wall-time override is persisted separately from the frozen profile. A
-configure action publishes a new immutable selection for future admissions when the connection
-currently has one, preserving the existing adapter runtime configuration and every prior profile.
-Existing jobs, attempts and authorization grants keep their original frozen profile and bound.
-Create, check, credential replacement, disable and enable retain the saved override. The
-sanitized connection projection returns the optional `configuration` object; its omission means
-the managed adapter's startup default. Provider session and capacity restrictions still apply
-independently of the local wall-time maximum. The additive SQLite migration leaves existing rows
-without an override, preserving their startup default, and copies existing operation receipts
-and replay keys unchanged.
+The wall-time override is persisted separately from the frozen profile and survives every other
+action. Configure publishes a new immutable selection for future admissions when the connection
+has one; existing jobs, attempts and grants keep their original profile and bound. The connection
+projection returns the optional `configuration` object, omitted when the startup default applies.
+Provider session and capacity limits still apply independently.
 
 The account ID is an opaque Relay identity, not a credential or provider username. Provider
 and canonical account together define the shared quota/capacity key. Two connections for the
@@ -153,18 +142,3 @@ The explicit retry control creates a distinct attempt without a permit; `execute
 must grant that attempt separately. A new selected connection cannot retarget an old attempt.
 Standalone explicitly configured process-budget workers remain a separate compatibility mode;
 they cannot claim profiles owned by managed connections.
-
-## Verification obligations
-
-| Boundary | Required offline/native evidence |
-|---|---|
-| Contracts | Every semantic request has valid/invalid fixtures; old job examples still pass unchanged. |
-| Authority | Ordinary tokens cannot manage or authorize; cross-workspace IDs remain inaccessible. |
-| Replay/revision | Concurrent same/different payloads, stale selection and lost acknowledgement preserve one receipt. |
-| Vault | Denial, stage/commit crashes, failed replacement, same-account rotation, canary scans and native Keychain qualification. |
-| Capacity | Two distinct accounts coexist; duplicate-account connections share capacity; stale/unknown quota stays blocked. |
-| Dispatch | Restart before/after consumption, lost provider response and explicit retry never duplicate compute. |
-| Lifecycle | Disable preserves old recovery/collection; removal refuses dependent work; restart makes no account calls. |
-
-Schema validation proves wire shape only. Runtime transactional/fault tests and native credential
-storage qualification are independent gates; fixture providers are not live-provider evidence.

@@ -41,7 +41,7 @@ manifest validation does not replace full schema, required-output, phase and GPU
 Cleanup is not cancellation. Port requests need an explicit mode, exact resource/creation
 operation and actual verified ownership/retention evidence. A syntactically valid ledger ID
 or prefix is insufficient. Current production-facing [retention](../retention.md) previews are
-dry-run-only; the acceptance adapter cannot apply cleanup. Never infer deletion from a preview.
+dry-run-only; no adapter applies cleanup. Never infer deletion from a preview.
 
 ## Infrastructure and verification
 
@@ -51,6 +51,5 @@ not arbitrary paths. CredentialResolver scopes explicit transient values to a ca
 provider secret belongs in a job or diagnostic. Callbacks must cooperate with cancellation.
 
 `internal/provider/providertest` and fake fixtures exercise contract/fault behavior offline.
-`go run ./cmd/provider-smoke` runs one finite synthetic lifecycle with no workload/provider network.
 Use [validation](../validation-checklist.md) for live evidence, never point fake/contract
 fixtures at an operator account. Current component composition is in [architecture](../architecture.md).

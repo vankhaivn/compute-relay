@@ -60,8 +60,7 @@ authority affects subsequent authorized work; it is not remote cancellation.
 
 The installation binds SQLite and separate input/result stores with private identity markers.
 Only `init` creates a new installation. Missing/corrupt/swapped stores or markers are rejected,
-not recreated. Do not edit markers, rename acceptance directories into this format, or manually
-seed SQL. Opening supported state may apply existing migrations; local inspection is not a
+not recreated. Do not edit markers or manually seed SQL. Opening supported state may apply existing migrations; local inspection is not a
 byte-for-byte read-only filesystem operation.
 
 Token scopes are explicit `read`, `write`, `operate`, `manage`, `execute`; TTL defaults to 24 hours and is bounded
@@ -81,12 +80,9 @@ Only `/healthz` is public. Readiness/info and application routes use authenticat
 Host/Origin, body/rate/concurrency and idempotency guards. The host's optional local-import and
 HTTPS-ingestion services remain disabled. See [API contracts](../api/README.md).
 
-`/readyz` establishes local HTTP/storage readiness, not proof of GPU allocation or job success.
-A `202` means local admission/control committed. Admission-only serve starts no provider workers.
-Provider-enabled serve starts the configured bounded dispatcher/collector after its read-only
-account check; artifact routes still expose only committed publications.
-Managed mode performs no account check at startup and uses persisted per-attempt grants instead
-of a process budget. Connection checks run only as explicit asynchronous administration work.
+`/readyz` establishes local HTTP/storage readiness, not proof of GPU allocation or job success,
+and a `202` means local admission/control committed. Which workers start depends on the
+[serve mode](status.md#serve-modes); artifact routes expose only committed publications.
 
 Interrupt/SIGTERM stops new handlers, allows ten seconds for graceful completion, then closes
 connections on timeout and reports failure. Store closure and lock release still wait for all

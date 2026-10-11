@@ -1,6 +1,6 @@
 # Support
 
-Compute Relay is pre-release and currently contains project documentation and repository policy rather than a usable runtime.
+Compute Relay is pre-release. See [current status](docs/status.md) for what is available now.
 
 Use GitHub Issues for reproducible documentation defects, implementation bugs, or focused feature proposals. Search existing issues first and include the expected behavior, actual behavior, relevant commit, platform, sanitized diagnostics, and whether external provider calls were involved.
 

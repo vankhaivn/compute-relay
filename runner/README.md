@@ -75,8 +75,7 @@ Declared job environment is workload data, not a safe place for provider credent
 GPU-required jobs check existing PyTorch, device count/memory and a tiny device computation,
 then repeat resource checking after setup changes. Failure prevents payload execution.
 Device capacity is not a VRAM reservation and this probe does not prove arbitrary payload
-code used the GPU; the separate [GPU acceptance job](../docs/development/providers/kaggle-acceptance.md)
-verifies its own calculation.
+code used the GPU.
 
 The requested network mode must match the adapter's `--network-mode` declaration. The runner
 does not implement a firewall/network namespace or prove internet availability. Provider-side

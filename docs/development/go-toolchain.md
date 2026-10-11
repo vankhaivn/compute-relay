@@ -1,8 +1,7 @@
 # Go toolchain and developer commands
 
 Build and check the repository with the committed toolchain and dependency locks. For
-application usage, start with [the README](../../README.md). For operator/provider evidence,
-use the [validation checklist](validation-checklist.md), not an old CI log.
+application usage, start with [the README](../../README.md).
 
 ## Build
 
@@ -15,13 +14,8 @@ go build -trimpath -o compute-relay ./cmd/compute-relay
 ./compute-relay --help
 ```
 
-Use `compute-relay.exe` on Windows. Record a missing/unavailable pinned toolchain as an
-environment blocker; do not change `go.mod` to make an operator validation run pass.
+Use `compute-relay.exe` on Windows. Do not change `go.mod` to make a validation run pass.
 GNU Make and Docker are not prerequisites.
-
-The main executable includes local administration, loopback serving and application commands.
-Serving is still admission-only: it does not start provider or collection workers. See
-[current status](../status.md) and [local runtime](../local-runtime.md).
 
 ## Checks
 
@@ -50,11 +44,6 @@ The [fault matrix](fault-matrix.md) owns scenario/test traceability and evidence
 Its result is not a coverage percentage or a live-provider qualification. Do not rewrite
 locks, weaken tests or replace the approved scenario list to obtain a green run.
 
-Finite component smoke commands include `go run ./cmd/storesmoke`, `./cmd/admissionsmoke`,
-`./cmd/schedulersmoke` and `./cmd/dispatchsmoke` (each path is an argument to `go run`).
-They use disposable local state and synthetic provider behavior. They do not execute a
-submitted user workload, allocate GPU or qualify a production service.
-
 ## Dependency changes and CI
 
 `go.mod`/`go.sum` are authoritative. Direct dependencies are kin-openapi `v0.149.0`,
@@ -63,11 +52,9 @@ jsonschema/v6 `v6.0.3` and modernc SQLite `v1.58.0`; the driver requires the pin
 [ADR-0008](decisions/0008-sqlite-durability-and-backup.md) for source references.
 Review migrations, locking, backup and native tests when changing the storage stack.
 
-Existing Go CI runs checks/race on Linux and native tests/CGo-free builds on Linux, macOS
-and Windows. Separate workflows check the locked [Kaggle client](../../tools/kaggle-client/README.md)
-and [runner](../../runner/README.md). CI uses no live account credential or GPU. A pass
-applies to the actual runner/toolchain tested, not every architecture or filesystem.
-Put exact-head run URLs and temporary engineering-harness limitations in the PR, not here.
+Go CI runs checks/race on Linux and native tests/CGo-free builds on Linux, macOS and Windows.
+Separate workflows check the locked [Kaggle client](../../tools/kaggle-client/README.md) and
+[runner](../../runner/README.md). CI uses no live account credential or GPU.
 
 ## Build metadata
 
@@ -79,6 +66,4 @@ github.com/vankhaivn/compute-relay/internal/buildinfo.Commit
 github.com/vankhaivn/compute-relay/internal/buildinfo.BuiltAt
 ```
 
-Defaults are `dev`, `unknown`, `unknown`; they are not release provenance. For the multi-process
-GPU acceptance procedure, build its separate executable once and retain its exact bytes as
-specified in [the acceptance guide](providers/kaggle-acceptance.md).
+Defaults are `dev`, `unknown`, `unknown`; they are not release provenance.

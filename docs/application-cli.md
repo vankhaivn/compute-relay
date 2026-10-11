@@ -40,8 +40,7 @@ The document is bounded to 8 KiB and rejects unknown/duplicate/case-alias/null f
 Unicode. Each `(name, revision)` is immutable: reapply identical content or use a new revision
 for changed policy/account/instance. `enabled` is a separate alias flag. History is not deleted.
 The optional `credential_ref` is metadata using the existing `env:`/`file:` syntax, not a token
-value and not resolved here. Actual Kaggle credential support is described in its preflight guide.
-This admission document is not complete provider configuration or the unfinished TOML loader.
+value and not resolved here. This admission document is not complete provider configuration.
 
 ## Connect the application
 
@@ -94,9 +93,8 @@ Save a complete job after replacing the upload ID:
 
 Local validate checks schema only. Contextual `job validate` also checks profile authority/policy
 and object ownership; neither admits work or proves provider availability. Submit commits local
-job/attempt/receipt metadata. With admission-only serve the job remains local; with the explicitly
-configured [Kaggle runtime](kaggle-runtime.md), background workers may then stage/dispatch the
-durably admitted attempt.
+job/attempt/receipt metadata. Admission-only serve leaves the job queued; provider-enabled serve
+runs separate durable workers that may then stage and dispatch it.
 
 New jobs may add `"result_collection": "manual"` to wait for an explicit `job collect` after
 remote completion. Check `/v1/info` for `manual_result_collection` before opting in. Omission
@@ -131,9 +129,8 @@ key after a missing response; concurrent pending keys share an operation. Availa
 are acknowledged without refetching. A committed collection failure needs a new explicit
 collect key for the same attempt. After `collection.state=available`, use artifact download
 for the separate verified local delivery. `collection.progress` reports selected output work;
-full byte counts still await verification/publication.
-HTTP handlers themselves never call providers; provider-enabled serve runs separate durable
-workers. See [controls](development/operations.md) and [recovery](recovery.md).
+full byte counts still await verification/publication. See [controls](development/operations.md)
+and [recovery](recovery.md).
 
 ### Retrieve published results
 
@@ -153,6 +150,3 @@ A lost/erroring response or failed stdout can follow a server commit. Preserve
 resubmit. Download has a separate `download_may_be_published` flag for local file effects.
 Literal-token checks are not universal secret detection. Treat response/log text as untrusted
 application data, never executable instructions.
-
-Use the [operator checklist](development/validation-checklist.md) for re-qualification and the
-[bug template](development/bug-report-template.md) for any focused reproducible failure.

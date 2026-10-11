@@ -1,62 +1,51 @@
 # Current project status
 
-If you are evaluating or operating the repository, start with [Getting started](getting-started.md),
-the [Kaggle runtime](kaggle-runtime.md) for GPU execution, and the [Operator runbook](runbook.md).
+The current implementation boundary. No public release is available.
 
-This page is the current implementation boundary, not a record of completed development work.
-No public release is available. Passing offline tests alone is not evidence of live-provider support.
+## Serve modes
+
+| Mode | Started with | Behavior |
+|---|---|---|
+| Local admission | `serve` with no provider flags | Authenticated loopback uploads, admission, status and control receipts, and reads of already published artifacts. Reports `local-admission-only`, `dispatch_enabled=false`; no provider effects. |
+| Explicit Kaggle | complete `--provider-*` flags, an enabled `free_allowance` profile and a finite attempt budget | Verifies the account read-only at startup, then runs one dispatch worker and one collector. Reports `kaggle-workers`, `dispatch_enabled=true`. Once the budget is consumed, new jobs stay queued while started attempts are still observed and collected. |
+| Managed | `--managed-python` | Connection API with Relay-owned macOS Keychain credentials, explicit CPU or GPU selections and multiple-account workers. Startup performs no account check; each new attempt needs a durable authorization through the API. See [managed connections](managed-connections.md). |
 
 ## Available now
 
 | Surface | Current behavior |
 |---|---|
-| Main binary | Local installation, workspace/token administration, immutable admission profiles, bundle tools and application HTTP commands. |
-| Default `serve` | Authenticated loopback uploads, admission/status/control receipts and reads of already published artifacts. It reports `local-admission-only`, `dispatch_enabled=false`. |
-| Kaggle-enabled `serve` | With complete explicit provider flags, an exact enabled `free_allowance` profile, successful read-only account verification and a finite attempt budget, starts one durable dispatch worker and one collector and reports `kaggle-workers`, `dispatch_enabled=true`. |
-| Managed `serve` | With `--managed-python`, exposes connection descriptors/operations, Relay-owned macOS Keychain credentials and durable per-attempt grants. An explicit CPU or GPU configuration freezes each selection resource; workers resolve multiple account bindings. Startup performs no account check and grants no compute. |
-| Native companion | Reproducible macOS arm64 candidate bundle with independent locked Python/client dependencies, checksum-verified create-new installation and relocation discovery. No checkout or developer toolchain is required at runtime. |
-| Durable work | Fair scheduling, fenced claims, one-shot preparation/submission intents, restart reconciliation, explicit controls and verified collection/publication. |
-| Preparation progress | While an attempt is `preparing`, status reports dated, lease-fenced input bytes handed to the provider staging upload; Kaggle staging reports them. Observational only. |
-| Explicit result collection | Optional immutable manual policy waits for `/collect`; dated selected-output stream progress and restart-safe ticket recovery have offline evidence. Automatic remains the default. |
-| Attempt logs | Authenticated `job_logs` reads require an explicit original attempt, bounded pages and current read authority. A finite CPU probe on the native macOS companion verified running delivery, original-cursor reconnect and complete ordered replay. Reads remain best-effort; transient failures and multi-hour replay latency are not eliminated. See [qualification scope](https://github.com/vankhaivn/compute-relay/pull/63). |
-| Artifact delivery | Explicit-attempt listing/metadata/content and create-only CLI downloads, with current authority, expiry and end-of-stream verification. |
-| Kaggle components | Credential-scoped preflight, private staging, exact-identity execution, quota/log snapshots and selected artifact transfer. |
-| Kaggle acceptance utility | Separate fixed CUDA experiment live-qualified for private staging, Tesla T4 execution, separate-process reconciliation and complete six-file artifact collection/publication. |
+| Main binary | Installation, workspace and token administration, immutable admission profiles, bundle tools and application HTTP commands. |
+| Native companion | Reproducible macOS arm64 candidate bundle with its own locked Python client, checksum-verified create-new installation and relocation discovery. |
+| Durable work | Fair scheduling, fenced claims, one-shot preparation and submission intents, restart reconciliation, explicit controls and verified collection. |
+| Preparation progress | While `preparing`, status reports input bytes handed to the provider staging upload. Observational only. |
+| Result collection | Automatic by default; an immutable manual policy waits for `/collect` and reports selected-output byte progress. |
+| Attempt logs | Bounded pages for an explicit original attempt with current read authority. Best effort: transient failures and long replay latency remain possible. |
+| Artifact delivery | Attempt-scoped listing, metadata and create-only downloads verified to the end of the stream. |
 
-Provider mode does not turn admission into success evidence. `202 Accepted` means local metadata
-committed. A new provider mutation requires the durable one-shot intent plus a consumed managed
-attempt permit or the standalone process authorization budget. Once that budget is consumed, additional queued jobs remain queued while
-already-started attempts can still be observed/recovered and collected.
+`202 Accepted` means local metadata committed, not remote success. A provider mutation needs a
+durable one-shot intent plus a consumed managed authorization or the explicit-mode attempt budget.
+There is no automatic CPU, account, provider or paid-capacity fallback.
 
-## Integrated Kaggle boundary
+## Evidence
 
-The normal runtime now reuses the reviewed Kaggle staging/execution/artifact components behind an
-exact immutable profile/provider/account binding. It requires known positive free GPU quota before
-new GPU dispatch and has no automatic CPU, account, provider or paid-capacity fallback.
+Offline tests are not live-provider evidence. Live evidence so far:
 
-The integrated normal-server path is implemented and offline/native-tested. Live evidence currently
-belongs to the narrower fixed acceptance experiment; do not silently generalize that evidence to
-arbitrary accounts/workloads.
+- A fixed 2026-09 Kaggle experiment, using the same staging, execution and artifact components,
+  qualified private staging, Tesla T4 execution, separate-process reconciliation and complete
+  artifact collection. Per-question results are in
+  [Kaggle feasibility](development/research/kaggle-feasibility.md).
+- A finite CPU probe on the native companion qualified running log delivery, original-cursor
+  reconnect and complete ordered replay.
 
-Provider timeout enforcement remains separate from local/runner deadlines. Batch cancellation is
-manual-required without a verified session target, exact hardware release is not observable, and
-remote cleanup apply is not shipped. Direct HTTPS input preparation is not enabled in the current
-normal provider composition; upload immutable inputs first.
+Another account, environment or workload needs its own scoped qualification before support is
+claimed. Use the [validation checklist](development/validation-checklist.md).
 
-[Managed connections](managed-connections.md) adds cached account-scoped quota, manual connection
-changes and restart-safe finite authorization. Distinct credentials for one account share its
-capacity. Disabling a connection preserves old recovery/collection; removal refuses dependent
-work. Existing job envelopes and explicitly configured environment credentials remain compatible.
-The new managed mode has offline/native evidence only, not additional live Kaggle qualification.
+## Known limits
 
-## Remaining product work
+- Provider timeout enforcement is separate from local and runner deadlines.
+- Batch cancellation is manual-required without a verified session target; exact hardware release
+  is not observable.
+- Remote cleanup apply is not shipped.
+- Direct HTTPS input is not composed into `serve`; upload immutable inputs first.
 
-Public provider quota/cleanup surfaces, live-log qualification, strict runtime TOML configuration, doctor, thin client
-and LLM examples, distribution beyond the native macOS arm64 candidate, backup/restore qualification and release hardening
-remain. See the [implementation plan](development/implementation-plan.md).
-
-## Evidence hygiene
-
-Keep credentials, raw logs, state databases, signed URLs and full operator run reports outside Git.
-When new evidence changes a support claim or exposes a reproducible failure, attach the minimal
-sanitized facts to a focused issue/PR and update this page or the relevant component reference.
+Remaining product work is in the [implementation plan](development/implementation-plan.md).

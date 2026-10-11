@@ -23,27 +23,22 @@ The output directory must be new and outside the checkout. The builder obtains P
 exact transitive dependencies. Dependency retrieval happens only while building. It does
 not alter the system Python or install tools globally. Existing uv/Go caches may be used.
 
-The builder copies a standalone interpreter, materializes only internal links, and replaces
-preinstalled package managers with the locked packages in its own `site-packages`. It removes
-build-path console launchers and their stale wheel RECORD entries. It never ships a virtualenv
-or an editable package.
-All archive members are regular files; the installer rejects every symbolic/hard link.
-Checked-hash Python bytecode uses relative source filenames and is built ahead of time, so
-normal isolated helper imports do not add unverified caches to the installed payload.
+The bundle ships a standalone interpreter with only the locked packages in its own
+`site-packages`, never a virtualenv or editable package. All archive members are regular files,
+and checked-hash bytecode is built ahead of time so isolated helper imports add no unverified
+caches.
 
 For a bounded rebuild, `--python-install` can name the matching uv standalone directory,
 and `--python-license-archive` can name the pinned upstream full archive. The latter is
 always checked against its fixed SHA-256. Python redistribution notices come from that
 matching [upstream distribution](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901).
 
-Output includes the `.tar.gz`, its `.sha256`, a native `companionpack-darwin-arm64` installer
-and its `.sha256`. Build staging and failed attempts are retained inside the output directory.
-Archive metadata has stable ordering, ownership, permissions and timestamps. The manifest
-records HEAD, a bounded digest of compiler inputs and the packaging recipe, exact tool/runtime
-versions, and every payload file's mode, size and SHA-256. The builder refuses changing
-compiler inputs during a build. Dirty builds are explicitly named `candidate` and record
-`worktree_modified: true`; their HEAD alone is not the candidate's source identity. Build from
-the final committed revision before qualifying a distributable artifact.
+Output includes the `.tar.gz`, a native `companionpack-darwin-arm64` installer and a `.sha256`
+for each; build staging and failed attempts stay inside the output directory. Archives are
+deterministic. The manifest records HEAD, a digest of compiler inputs and the packaging recipe,
+exact tool/runtime versions and every payload file's mode, size and SHA-256. Dirty builds are
+named `candidate` and record `worktree_modified: true`; build from the final committed revision
+before qualifying a distributable artifact.
 
 ## Install and discover
 
@@ -135,6 +130,4 @@ directory and repeat with a new scratch directory to qualify relocation independ
 the original installation path.
 
 Source checks: `go test ./internal/companion ./cmd/companionpack` and
-`python3 -B -m unittest discover -s internal/companion -p '*_test.py'`. Archive tests cover
-determinism, checksum failure, create-new installation, relocation, payload modification,
-traversal, links, duplicate members, special files and malformed manifests.
+`python3 -B -m unittest discover -s internal/companion -p '*_test.py'`.

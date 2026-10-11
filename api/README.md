@@ -21,11 +21,9 @@ verified file bytes or proof that a planned endpoint is enabled.
 
 ## Current handler inventory
 
-There are twenty-seven composable HTTP operations. Ordinary local serve composes seventeen;
-two import/ingestion operations remain optional and managed mode adds eight more below.
-Admission-only serve starts no provider workers;
-provider-enabled serve may run separate durable dispatch/collection workers. Log reads use a
-bounded observational application service; they cannot dispatch or mutate provider work.
+Every serve mode composes the routes below except import and ingest, which stay disabled in the
+local host; managed mode adds the routes in the next section. Handlers never dispatch provider
+work, and log reads are observational.
 
 ```text
 GET  /healthz
@@ -56,14 +54,12 @@ cleanup service is not implied by these reads.
 
 ## Optional managed extension
 
-[Managed connections](../docs/development/managed-connections.md) defines the additional
-provider descriptors, connection operations and durable attempt-authorization routes marked
-`implemented-offline` in OpenAPI. Only `--managed-python` serve composes them and advertises
-`managed_connections` and `attempt_authorization` in authenticated runtime info. They
-preserve the existing job envelope through unique immutable selection profiles and separate
-`manage`/`execute` scopes; old clients remain compatible with standalone profiles. The optional
-`selection.accelerator` records the exact resource of a newly verified managed profile. Its absence
-on an older selection means unreported, not the current descriptor's default.
+[Managed connections](../docs/development/managed-connections.md) defines these provider
+descriptor, connection and attempt-authorization routes. Only `--managed-python` serve composes
+them and advertises `managed_connections` and `attempt_authorization` in runtime info. They keep
+the existing job envelope through immutable selection profiles and separate `manage`/`execute`
+scopes. An absent `selection.accelerator` on an older selection means unreported, not the current
+descriptor's default.
 
 ```text
 GET  /v1/workspaces/{w}/providers
@@ -122,9 +118,7 @@ HTTP 503 can report a fixed `log read unavailable: <reason>` message for operato
 authentication/kernel reads, stream timeout, HTTP status class, redirect, invalid log format or
 unavailable replay. These categories contain no provider response text, headers, URLs or secrets.
 Preserve the last verified cursor after an unavailable read; these failures do not permit another
-compute attempt.
-Kaggle uses bounded exact-reference replay internally; account-scoped live qualification remains
-pending. Local-admission-only mode returns truthful unavailable pages without provider work.
+compute attempt. Local-admission-only mode returns unavailable pages without provider work.
 
 Artifact metadata/pages describe a historical publication. Binary content requires exact bytes
 and the final `X-Compute-Relay-Verified` trailer; see [delivery](../docs/artifact-delivery.md).

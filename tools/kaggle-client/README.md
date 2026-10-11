@@ -58,10 +58,10 @@ metadata without importing/authenticating the provider client.
 ## Authenticated use is separate
 
 Use the absolute `.venv/bin/python` path on POSIX or `.venv/Scripts/python.exe` on Windows
-in [preflight configuration](../../docs/development/providers/kaggle-preflight.md). Local preflight checks
-pins without reading tokens. Authenticated account reads require explicit opt-in; private
-staging and GPU execution require their own authorization. Never pass a token as a flag,
-commit credential values, or use a CI credential for operator acceptance.
+in the [client configuration](../../docs/development/providers/kaggle-preflight.md). Local checks
+read pins without reading tokens. Authenticated account reads, private staging and GPU execution
+each require their own authorization. Never pass a token as a flag, commit credential values, or
+use a CI credential for operator validation.
 
 The SDK tests mock HTTP, so passing them is not account eligibility, provider compatibility
 or a live CUDA result. Follow the [operator validation checklist](../../docs/development/validation-checklist.md)
