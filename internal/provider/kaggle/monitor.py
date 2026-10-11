@@ -320,9 +320,16 @@ def operate(request, token, mode):
         return empty("invalid", "identity_mismatch")
     except LogUnavailable as exc:
         return empty("unavailable", exc.reason if mode == "logs" else "read_unavailable")
-    except Exception:
+    except Exception as exc:
         reason = {"auth": "auth_read_failed", "kernel": "kernel_read_failed",
                   "stream_decode": "stream_format_invalid"}.get(stage, "read_unavailable")
+        if mode == "logs" and stage in ("stream_open", "stream_decode"):
+            import requests
+            from urllib3.exceptions import TimeoutError as TransportTimeout, ProtocolError
+            if isinstance(exc, (TimeoutError, requests.exceptions.Timeout, TransportTimeout)):
+                reason = "stream_timeout"
+            elif isinstance(exc, (OSError, ProtocolError)):
+                reason = "read_unavailable"
         return empty("unavailable", reason if mode == "logs" else "read_unavailable")
 
 

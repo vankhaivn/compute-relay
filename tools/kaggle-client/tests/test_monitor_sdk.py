@@ -64,6 +64,29 @@ class MonitorPinnedSDKTests(unittest.TestCase):
             body = (b"".join(b"data: " + json.dumps(event).encode() + b"\n\n" for event in self.log)
                     if self.sse else json.dumps(self.log).encode())
             r = response(body, headers={"Content-Type": "text/event-stream" if self.sse else "application/json"})
+            if self.fault.startswith("log-body-"):
+                from urllib3.exceptions import ReadTimeoutError, ProtocolError
+                from urllib3.response import HTTPResponse
+                faults = {
+                    "log-body-requests-timeout": requests.exceptions.ReadTimeout("SYNTHETIC_TOKEN"),
+                    "log-body-urllib3-timeout": ReadTimeoutError(None, "/synthetic", "SYNTHETIC_TOKEN"),
+                    "log-body-protocol-error": ProtocolError("SYNTHETIC_TOKEN"),
+                    "log-body-os-error": OSError("SYNTHETIC_TOKEN"),
+                    "log-body-invalid": ValueError("SYNTHETIC_TOKEN"),
+                    "log-body-socket-timeout": TimeoutError("SYNTHETIC_TOKEN"),
+                }
+                class Body(io.BytesIO):
+                    reads = 0
+                    def read(inner, size=-1):
+                        self.assertGreater(size, 0)
+                        self.assertLessEqual(size, monitor.MAX_INPUT_BYTES + 1)
+                        inner.reads += 1
+                        raise faults[self.fault]
+                self.raw_body = Body()
+                r.headers["Content-Type"] = "application/json"
+                r.raw = (HTTPResponse(body=self.raw_body, headers=r.headers, status=200,
+                                      preload_content=False, decode_content=False)
+                         if self.fault == "log-body-socket-timeout" else self.raw_body)
             if self.fault in ("log-idle", "log-late", "log-malformed"):
                 class Stream(io.BytesIO):
                     reads = 0
@@ -311,3 +334,19 @@ class MonitorPinnedSDKTests(unittest.TestCase):
         self.status = {"status":"RUNNING"}
         result = self.invoke("logs", log_offset=4, log_prefix="a" * 64)
         self.assertEqual(result, monitor.empty("unavailable", "replay_unavailable"))
+
+    def test_completed_body_transport_failures_are_not_malformed_log_format(self):
+        for fault, reason in (("log-body-requests-timeout", "stream_timeout"),
+                              ("log-body-urllib3-timeout", "stream_timeout"),
+                              ("log-body-socket-timeout", "stream_timeout"),
+                              ("log-body-protocol-error", "read_unavailable"),
+                              ("log-body-os-error", "read_unavailable"),
+                              ("log-body-invalid", "stream_format_invalid")):
+            with self.subTest(fault=fault):
+                self.fault = fault
+                self.calls = []
+                result = self.invoke("logs")
+                self.assertEqual(result, monitor.empty("unavailable", reason))
+                self.assertEqual(self.raw_body.reads, 1)
+                self.assertEqual(self.calls[-1][0], "logs-stream")
+                self.assertTrue(self.raw_body.closed)
