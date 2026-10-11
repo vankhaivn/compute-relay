@@ -171,12 +171,17 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mapError(w, r, err)
 		return
 	}
-	if ok, wait := h.spaces.allow(string(principal.WorkspaceID()), h.config.Now()); !ok {
-		h.limited(w, r, wait)
-		return
-	}
 	segments := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	isUpload := len(segments) == 4 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && r.Method == http.MethodPost
+	// Upload slots and byte limits bound uploads. A rejection sent before a large body is
+	// read reaches the client only as a reset connection, so one job's inputs must not
+	// exhaust the per-workspace bucket.
+	if !isUpload {
+		if ok, wait := h.spaces.allow(string(principal.WorkspaceID()), h.config.Now()); !ok {
+			h.limited(w, r, wait)
+			return
+		}
+	}
 	isImport := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "import" && r.Method == http.MethodPost
 	isIngest := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "ingest" && r.Method == http.MethodPost
 	isDownload := isArtifact && len(segments) == 8 && r.Method == http.MethodGet
