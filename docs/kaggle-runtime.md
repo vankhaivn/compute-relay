@@ -1,7 +1,7 @@
 # Run jobs on Kaggle
 
-This is the end-to-end operator path for running bounded GPU jobs through the normal
-`compute-relay serve` process.
+The operator path for running bounded GPU jobs through `compute-relay serve` in explicit Kaggle
+mode. It assumes an installation and `app` workspace from [Getting started](getting-started.md).
 
 Provider mode is **explicit and pre-release**. With no provider flags, `serve` remains
 local-admission-only and cannot consume provider quota. With the complete provider flag set below,
@@ -10,15 +10,6 @@ dispatch worker and one collection worker.
 
 Live evidence so far is listed in [current status](status.md). Re-qualify a new environment or
 account before claiming support for it.
-
-> **Fresh runtime root:** when creating a runtime for the first time, the path passed to
-> `compute-relay init --root ...` must **not already exist**. Create only its parent directory;
-> `init` uses exclusive creation for the runtime root. For example, create
-> `/absolute/private`, but do not `mkdir /absolute/private/runtime` before:
->
-> ```sh
-> ./compute-relay init --root /absolute/private/runtime
-> ```
 
 ## 1. Install the locked Kaggle client
 
@@ -30,11 +21,8 @@ environment:
 ./scripts/kaggle-client.sh check
 ```
 
-PowerShell and CMD wrappers are documented in
-[tools/kaggle-client](../tools/kaggle-client/README.md).
-
-The provider config below must use the absolute Python executable from this locked environment.
-Do not point it at an unrelated Kaggle installation.
+PowerShell and CMD wrappers are documented in [tools/kaggle-client](../tools/kaggle-client/README.md).
+The provider config below must use the absolute Python executable from this environment.
 
 ## 2. Configure the credential outside Git
 
@@ -55,9 +43,9 @@ Create a private provider file outside the checkout, for example
 }
 ```
 
-The file contains provider identity/configuration, not the token value. The configured account,
-instance, revision and credential reference must exactly match the admission profile in the next
-step. The runtime performs an authenticated read-only account check before enabling workers.
+The configured account, instance, revision and credential reference must exactly match the
+admission profile in the next step. Field rules are in the
+[client configuration reference](development/providers/kaggle-preflight.md).
 
 ## 3. Apply the matching admission profile
 
@@ -239,12 +227,10 @@ Poll the same job identity:
   --id job_ACTUAL_RECEIPT_ID
 ```
 
-The durable engine stages private inputs once, submits once after its write-ahead intent, observes
-the exact remote identity and gives recovery priority after restart. It does not silently create a
-replacement execution after response loss.
-
-A terminal provider state is not yet the same fact as a published local result. Collection pins
-and verifies the original result set before publication.
+The runtime stages private inputs once, submits once after its write-ahead intent and observes
+the exact remote identity, including after restart; it never creates a replacement execution after
+response loss. A terminal provider state is not yet a published result: collection verifies the
+original result set first.
 
 ## 8. Download the published result
 
@@ -270,44 +256,22 @@ After the attempt has a committed publication:
 Artifact downloads are create-only and independently verify the bytes and final stream
 acknowledgement. See [Artifact delivery](artifact-delivery.md).
 
-## Recovery and uncertainty
+## Recovery and limits
 
-Preserve the runtime root, provider config/profile revision, original binary where needed,
-job/attempt IDs and idempotency keys.
+Preserve the runtime root, provider config, profile revision, job/attempt IDs and idempotency keys.
+Replay only the identical request with its original key after a lost response. Once a submission
+intent exists, restart recovery observes the original identity and never authorizes another
+submission; do not create a new root, clear intent rows or resubmit because the outcome is
+uncertain. See [Safe recovery](recovery.md).
 
-- A lost submit HTTP response may follow a committed local admission. Replay only the **identical**
-  application request with its original idempotency key to recover that receipt.
-- Once the durable provider submission intent exists, restart recovery observes/reconciles the
-  original provider identity; it does not authorize another provider submission.
-- Do not create another runtime root, clear intent rows or submit a replacement job merely because
-  the remote outcome is uncertain.
-- Cancellation remains manual-required when Kaggle does not expose a verified session target.
-  Cancellation intent, local shutdown, terminal execution and hardware/accounting release are
-  different facts.
-- Remote cleanup apply is not shipped. Preserve exact owned resources and resolve remote activity
-  before any separately authorized manual cleanup.
+This path is intentionally narrow:
 
-See [Safe recovery](recovery.md) for the general recovery model.
+- Kaggle T4/P100 machine shapes, one dispatch worker and one collection worker per process.
+- Uploaded immutable inputs only; direct HTTPS input is not enabled in this mode.
+- Attempt log pages through the `job_logs` capability ([API usage](../api/README.md#reading-attempt-logs));
+  delivery is best effort.
+- Cancellation is manual-required without a verified session target, and remote cleanup apply,
+  provider timeout enforcement and exact hardware release are not shipped or verified.
 
-## Current support boundary
-
-This integrated path is intentionally narrow:
-
-- Kaggle is the configured provider; T4/P100 are the accepted machine-shape values.
-- The normal server runs one dispatch worker and one collection worker.
-- Provider config is explicit JSON; strict runtime TOML/doctor remain future product work.
-- Direct HTTPS input preparation is not enabled in this composition; use uploaded immutable inputs.
-- Authenticated explicit-attempt log pages are available through the `job_logs` capability; see
-  [API usage](../api/README.md#reading-attempt-logs). A finite CPU probe verified running delivery,
-  original-cursor reconnect and ordered replay on the native macOS companion; see the
-  [qualification scope](https://github.com/vankhaivn/compute-relay/pull/63).
-  Delivery is best-effort, not a guarantee for every poll or multi-hour replay.
-  Failed reads return fixed diagnostic categories without provider response text.
-  Stream connect and socket reads each allow two seconds, including response headers;
-  replay and the enclosing request retain their separate finite deadlines.
-  A public provider quota HTTP API is not shipped.
-- Provider timeout enforcement beyond local/runner budgets, exact hardware release and remote
-  cleanup remain unverified or unsupported as documented in [Current status](status.md).
-
-Offline/native tests do not replace live provider evidence. Re-qualify the intended account,
-provider/toolchain version and workload boundary before promoting a new support claim.
+Offline tests do not replace live evidence. Re-qualify the intended account, toolchain and workload
+before promoting a new support claim.

@@ -80,12 +80,9 @@ Only `/healthz` is public. Readiness/info and application routes use authenticat
 Host/Origin, body/rate/concurrency and idempotency guards. The host's optional local-import and
 HTTPS-ingestion services remain disabled. See [API contracts](../api/README.md).
 
-`/readyz` establishes local HTTP/storage readiness, not proof of GPU allocation or job success.
-A `202` means local admission/control committed. Admission-only serve starts no provider workers.
-Provider-enabled serve starts the configured bounded dispatcher/collector after its read-only
-account check; artifact routes still expose only committed publications.
-Managed mode performs no account check at startup and uses persisted per-attempt grants instead
-of a process budget. Connection checks run only as explicit asynchronous administration work.
+`/readyz` establishes local HTTP/storage readiness, not proof of GPU allocation or job success,
+and a `202` means local admission/control committed. Which workers start depends on the
+[serve mode](status.md#serve-modes); artifact routes expose only committed publications.
 
 Interrupt/SIGTERM stops new handlers, allows ten seconds for graceful completion, then closes
 connections on timeout and reports failure. Store closure and lock release still wait for all

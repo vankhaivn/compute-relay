@@ -1,12 +1,8 @@
 # Getting started
 
-This walkthrough takes a fresh clone to a working **local admission runtime**. At the end you will
-have built the binary, initialized private state, created a workspace/token, applied an admission
-profile, started the loopback server, packaged/uploaded code, and admitted one job.
-
-**This walkthrough intentionally uses the safe admission-only mode.** It does not consume provider
-quota or run remote compute. After you understand the local flow, continue with
-[Kaggle runtime](kaggle-runtime.md) to enable bounded GPU dispatch explicitly.
+This walkthrough takes a fresh clone to a working **local admission runtime** and admits one job.
+It uses the safe admission-only mode, so it consumes no provider quota and runs no remote compute.
+Continue with [Kaggle runtime](kaggle-runtime.md) to enable bounded GPU dispatch explicitly.
 
 ## 1. Build the binary
 
@@ -101,8 +97,11 @@ In another terminal, create a directory such as `example-job/` with a `main.py` 
 ```python
 from pathlib import Path
 import json
+import os
 
-Path("answer.json").write_text(json.dumps({"answer": 42}) + "\n", encoding="utf-8")
+Path(os.environ["CC_OUTPUT_DIR"], "answer.json").write_text(
+    json.dumps({"answer": 42}) + "\n", encoding="utf-8"
+)
 ```
 
 Package only the file you intend to send:
@@ -183,8 +182,5 @@ interpret `202 Accepted`, a queued attempt, or a control receipt as remote execu
 ## 9. What to do next
 
 Day-to-day references are [Local runtime](local-runtime.md), [Application CLI](application-cli.md),
-[Artifact delivery](artifact-delivery.md) and [Recovery](recovery.md).
-
-To run an application job on Kaggle, continue with the user-facing
-[Kaggle runtime](kaggle-runtime.md). Contributors start with
-[Development documentation](development/README.md).
+[Artifact delivery](artifact-delivery.md) and [Recovery](recovery.md). To run jobs on Kaggle,
+continue with [Kaggle runtime](kaggle-runtime.md) or [Managed connections](managed-connections.md).
