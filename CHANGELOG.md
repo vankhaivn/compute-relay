@@ -13,6 +13,8 @@ No release has been published. This summarizes the current pre-release feature s
 - Kaggle provider adapter behind an explicit, finitely authorized `serve` mode.
 - Managed connections with write-only protected credentials, shared account capacity and durable
   per-attempt execution authorization.
+- SSH host connections that run CPU jobs in isolated Docker containers on an operator-owned
+  machine, with pinned host keys and requested remote cleanup.
 - Reproducible macOS arm64 companion bundles.
 
 See [current status](docs/status.md) for limits.

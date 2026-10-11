@@ -35,6 +35,7 @@ their outcome; a material new choice requires a superseding ADR. Historical word
 | [0024](0024-explicit-bounded-provider-workers.md) | Explicit finite provider authorization and durable workers in normal serve. |
 | [0025](0025-managed-connections-and-attempt-authorization.md) | Optional managed connections, protected credentials and durable per-attempt authorization. |
 | [0026](0026-explicit-result-collection.md) | Frozen manual collection opt-in and fenced selected-output byte progress. |
+| [0028](0028-ssh-docker-host-provider.md) | Operator-owned Docker hosts over SSH with pinned host keys and per-attempt containers. |
 
 ## Add or revise a decision
 

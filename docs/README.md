@@ -10,6 +10,7 @@ are under [development](development/README.md).
 | Install the native companion without a checkout | [Companion distribution](companion-distribution.md) |
 | Run bounded GPU jobs through Kaggle | **[Kaggle runtime](kaggle-runtime.md)** |
 | Manage connections from a local application | **[Managed connections](managed-connections.md)** |
+| Run CPU jobs in Docker on my own machine over SSH | **[SSH hosts](ssh-hosts.md)** |
 | Administer the runtime, workspaces and tokens | [Local runtime](local-runtime.md) |
 | Package code and upload inputs | [Bundles and import](packaging-and-import.md) |
 | Configure profiles, validate/admit jobs and issue controls | [Application CLI](application-cli.md) |
