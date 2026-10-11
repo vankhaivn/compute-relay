@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/vankhaivn/compute-relay/internal/domain"
 )
 
 func TestProfileResourcePolicyKeepsLegacyIdentityAndRejectsMismatch(t *testing.T) {
@@ -38,5 +40,15 @@ func TestProfileResourcePolicyKeepsLegacyIdentityAndRejectsMismatch(t *testing.T
 	p.Accelerator = "auto"
 	if p.Validate() != ErrRequirements {
 		t.Fatal("ambiguous resource policy accepted")
+	}
+}
+
+func TestProfileAcceptsOnlyFreeAllowanceOrOperatorManagedCost(t *testing.T) {
+	p := DefaultProfile(domain.ProviderBinding{Profile: "default", ProviderInstanceID: "instance", ConfigurationRevision: "r1"}, "account")
+	for class, valid := range map[string]bool{CostFreeAllowance: true, CostOperatorManaged: true, "": false, "paid": false, "Operator_Managed": false} {
+		p.CostClass = class
+		if (p.Validate() == nil) != valid {
+			t.Errorf("cost class %q valid=%v", class, !valid)
+		}
 	}
 }

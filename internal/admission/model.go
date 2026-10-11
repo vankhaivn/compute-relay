@@ -29,12 +29,19 @@ type Profile struct {
 	Accelerator string `json:"accelerator,omitempty"`
 }
 
+// Cost classes name who pays for compute. Neither is a paid-provider class: free
+// allowance is a provider's no-cost quota and operator managed is the operator's own host.
+const (
+	CostFreeAllowance   = "free_allowance"
+	CostOperatorManaged = "operator_managed"
+)
+
 func DefaultProfile(binding domain.ProviderBinding, accountScope string) Profile {
-	return Profile{Binding: binding, AccountScope: accountScope, CostClass: "free_allowance", MaxRemoteWallSeconds: 1800, MaxBundleBytes: 100 << 20, MaxInputBytes: 4 << 30}
+	return Profile{Binding: binding, AccountScope: accountScope, CostClass: CostFreeAllowance, MaxRemoteWallSeconds: 1800, MaxBundleBytes: 100 << 20, MaxInputBytes: 4 << 30}
 }
 func (p Profile) Validate() error {
 	if p.Binding.Validate() != nil || len(p.Binding.Profile) > 128 || len(p.Binding.ConfigurationRevision) > 128 || !domain.ObjectID(p.AccountScope).Valid() ||
-		p.CostClass != "free_allowance" || p.MaxRemoteWallSeconds < 1 || p.MaxRemoteWallSeconds > 86400 || p.MaxBundleBytes < 1 || p.MaxBundleBytes > 100<<20 || p.MaxInputBytes < 1 || p.MaxInputBytes > 4<<30 {
+		p.CostClass != CostFreeAllowance && p.CostClass != CostOperatorManaged || p.MaxRemoteWallSeconds < 1 || p.MaxRemoteWallSeconds > 86400 || p.MaxBundleBytes < 1 || p.MaxBundleBytes > 100<<20 || p.MaxInputBytes < 1 || p.MaxInputBytes > 4<<30 {
 		return ErrRequirements
 	}
 	for i, c := range p.Binding.Profile {
