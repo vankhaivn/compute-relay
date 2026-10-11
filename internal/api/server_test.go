@@ -296,6 +296,19 @@ func TestWorkspaceAndGlobalRateLimits(t *testing.T) {
 	assertStatus(t, r, b, 429)
 }
 
+func TestUploadsDoNotSpendTheWorkspaceRequestBucket(t *testing.T) {
+	now := time.Now()
+	f := setupHTTP(t, func(c *Config) { c.Now = func() time.Time { return now }; c.WorkspaceRate = Rate{1, 1} }, nil)
+	for i := 0; i < 3; i++ {
+		r, b := f.request(t, "POST", "/v1/workspaces/a/objects", "a", strings.NewReader(fmt.Sprintf("input-%d", i)), nil)
+		assertStatus(t, r, b, 201)
+	}
+	r, b := f.request(t, "GET", "/v1/info", "a", nil, nil)
+	assertStatus(t, r, b, 200)
+	r, b = f.request(t, "GET", "/v1/info", "a", nil, nil)
+	assertStatus(t, r, b, 429)
+}
+
 func TestConcurrentRequestLimitAndSanitizedPanic(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
