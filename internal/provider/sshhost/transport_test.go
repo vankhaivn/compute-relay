@@ -131,7 +131,15 @@ func TestRunQuotesArgumentsStreamsDataAndReportsExitStatus(t *testing.T) {
 	}
 }
 
-func TestRunRefusesShellMetacharactersBeforeSending(t *testing.T) {
+func TestShellCommandQuotesEveryPrintableArgument(t *testing.T) {
+	got, err := shellCommand(nil, []string{"echo", "it's", "$(id)", "a b", "`x`;|&"})
+	want := `'echo' 'it'\''s' '$(id)' 'a b' '` + "`x`" + `;|&'`
+	if err != nil || got != want {
+		t.Fatalf("command = %q, %v; want %q", got, err, want)
+	}
+}
+
+func TestRunRefusesUnquotableArgumentsBeforeSending(t *testing.T) {
 	server := newTestServer(t)
 	server.password = "secret"
 	client, err := Dial(context.Background(), server.target(), Credential{Password: []byte("secret")})
@@ -139,13 +147,15 @@ func TestRunRefusesShellMetacharactersBeforeSending(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	for _, argv := range [][]string{nil, {"echo", "a'b"}, {"echo", "$(id)"}, {"echo", "a b"}, {"echo", ""}} {
+	for _, argv := range [][]string{nil, {"echo", ""}, {"echo", "a\nb"}, {"echo", "tab\there"}, {"echo", "caf\u00e9"}} {
 		if _, err := client.Run(context.Background(), nil, argv, nil, nil); !errors.Is(err, ErrRequest) {
 			t.Errorf("%q: %v", argv, err)
 		}
 	}
-	if _, err := client.Run(context.Background(), map[string]string{"path": "/bin"}, []string{"true"}, nil, nil); !errors.Is(err, ErrRequest) {
-		t.Errorf("lowercase env: %v", err)
+	for _, env := range []map[string]string{{"path": "/bin"}, {"PATH": "/bin dir"}, {"PATH": "$(id)"}} {
+		if _, err := client.Run(context.Background(), env, []string{"true"}, nil, nil); !errors.Is(err, ErrRequest) {
+			t.Errorf("env %q: %v", env, err)
+		}
 	}
 	if len(server.recorded()) != 0 {
 		t.Fatalf("sent %q", server.recorded())

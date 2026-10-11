@@ -37,6 +37,7 @@ var (
 	userName    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$`)
 	fingerprint = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
 	safeArg     = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+	printable   = regexp.MustCompile(`^[\x20-\x7e]+$`)
 	envName     = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 )
 
@@ -174,8 +175,8 @@ type Result struct {
 	Stderr   []byte
 }
 
-// Run executes argv through the login shell with each argument quoted. Arguments are
-// restricted to a conservative character set so quoting is never the only defense.
+// Run executes argv through the login shell with each argument single-quoted. Arguments
+// must be non-empty printable ASCII; environment values use a conservative character set.
 // A zero exit code is not implied by a nil error; callers check ExitCode.
 func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, stdin io.Reader, stdout io.Writer) (Result, error) {
 	command, err := shellCommand(env, argv)
@@ -227,13 +228,13 @@ func shellCommand(env map[string]string, argv []string) (string, error) {
 		fmt.Fprintf(&b, "%s='%s' ", name, env[name])
 	}
 	for i, arg := range argv {
-		if !safeArg.MatchString(arg) {
+		if !printable.MatchString(arg) {
 			return "", ErrRequest
 		}
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		b.WriteString("'" + arg + "'")
+		b.WriteString("'" + strings.ReplaceAll(arg, "'", `'\''`) + "'")
 	}
 	return b.String(), nil
 }
