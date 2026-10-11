@@ -50,11 +50,6 @@ The [fault matrix](fault-matrix.md) owns scenario/test traceability and evidence
 Its result is not a coverage percentage or a live-provider qualification. Do not rewrite
 locks, weaken tests or replace the approved scenario list to obtain a green run.
 
-Finite component smoke commands include `go run ./cmd/storesmoke`, `./cmd/admissionsmoke`,
-`./cmd/schedulersmoke` and `./cmd/dispatchsmoke` (each path is an argument to `go run`).
-They use disposable local state and synthetic provider behavior. They do not execute a
-submitted user workload, allocate GPU or qualify a production service.
-
 ## Dependency changes and CI
 
 `go.mod`/`go.sum` are authoritative. Direct dependencies are kin-openapi `v0.149.0`,

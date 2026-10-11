@@ -51,6 +51,5 @@ not arbitrary paths. CredentialResolver scopes explicit transient values to a ca
 provider secret belongs in a job or diagnostic. Callbacks must cooperate with cancellation.
 
 `internal/provider/providertest` and fake fixtures exercise contract/fault behavior offline.
-`go run ./cmd/provider-smoke` runs one finite synthetic lifecycle with no workload/provider network.
 Use [validation](../validation-checklist.md) for live evidence, never point fake/contract
 fixtures at an operator account. Current component composition is in [architecture](../architecture.md).
