@@ -301,7 +301,9 @@ This integrated path is intentionally narrow:
 - Direct HTTPS input preparation is not enabled in this composition; use uploaded immutable inputs.
 - Authenticated explicit-attempt log pages are available through the `job_logs` capability; see
   [API usage](../api/README.md#reading-attempt-logs). Bounded running replay has offline evidence;
-  account-scoped live qualification remains pending. A public provider quota HTTP API is not shipped.
+  a finite live probe completed without observable log pages, so running delivery remains
+  unqualified. Failed reads return fixed diagnostic categories without provider response text.
+  A public provider quota HTTP API is not shipped.
 - Provider timeout enforcement beyond local/runner budgets, exact hardware release and remote
   cleanup remain unverified or unsupported as documented in [Current status](status.md).
 

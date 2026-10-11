@@ -76,7 +76,7 @@ func (l *LogReader) ReadLogs(ctx context.Context, ref provider.RemoteReference, 
 		return none, ErrExecutionIdentity
 	}
 	if r.Status == "unavailable" {
-		return provider.LogPage{Source: "provider", Availability: "unavailable", Lines: []string{}}, nil
+		return none, provider.LogReadFailure{Reason: r.Reason}
 	}
 	raw, err := base64.StdEncoding.Strict().DecodeString(r.TextB64)
 	if err != nil {

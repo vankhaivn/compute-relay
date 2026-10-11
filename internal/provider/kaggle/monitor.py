@@ -56,6 +56,22 @@ def quota_result(raw):
                 used_ns=str(values[1]), reserved_ns=str(values[2]))
 
 
+LOG_FAILURE_REASONS = (
+    "auth_read_failed", "kernel_read_failed", "stream_timeout", "stream_http_401",
+    "stream_http_403", "stream_http_404", "stream_http_429", "stream_http_4xx",
+    "stream_http_5xx", "stream_redirect", "stream_http_other", "stream_format_invalid",
+    "replay_unavailable", "read_unavailable",
+)
+
+
+class LogUnavailable(ValueError):
+    """Only a fixed local reason may cross the subprocess boundary."""
+
+    def __init__(self, reason):
+        self.reason = reason if type(reason) is str and reason in LOG_FAILURE_REASONS else "read_unavailable"
+        super().__init__(self.reason)
+
+
 # A separate GET transport: never arm or loosen the SDK mutation guard.
 class LogStreamGuard:
     def __init__(self, session, owner, slug):
@@ -78,11 +94,25 @@ class LogStreamGuard:
         request.headers.pop("Content-Type", None)
         if request.method != "GET" or request.url != self.url:
             raise ValueError("unexpected stream request")
-        response = self.session.get_adapter(self.url).send(
-            request, timeout=(3, 0.5), stream=True, proxies={}, verify=True, cert=None)
-        if response.status_code != 200:
+        try:
+            response = self.session.get_adapter(self.url).send(
+                request, timeout=(3, 0.5), stream=True, proxies={}, verify=True, cert=None)
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout):
+            raise LogUnavailable("stream_timeout") from None
+        status = response.status_code
+        if status != 200:
             response.close()
-            raise ValueError("stream unavailable or redirect")
+            if status in (401, 403, 404, 429):
+                reason = "stream_http_" + str(status)
+            elif 300 <= status < 400:
+                reason = "stream_redirect"
+            elif 400 <= status < 500:
+                reason = "stream_http_4xx"
+            elif 500 <= status < 600:
+                reason = "stream_http_5xx"
+            else:
+                reason = "stream_http_other"
+            raise LogUnavailable(reason)
         return response
 
 
@@ -205,7 +235,7 @@ def stream_result(response, request, state, token):
     if not matched:
         if ended:
             return empty("reset", "log_changed")
-        return empty("unavailable", "read_unavailable")
+        return empty("unavailable", "replay_unavailable")
     truncated |= total >= MAX_INPUT_BYTES or events >= 100000
     availability = "after_completion" if state in ("COMPLETE", "ERROR") else "live"
     if availability == "after_completion" and not ended and not output:
@@ -247,6 +277,7 @@ def operate(request, token, mode):
     from kagglesdk.kernels.types.kernels_api_service import (
         ApiGetAcceleratorQuotaStatisticsRequest, ApiGetKernelRequest,
         ApiGetKernelSessionStatusRequest)
+    stage = "auth"
     try:
         with KaggleClient(env=KaggleEnv.PROD, verbose=False, api_token=token) as client:
             guard = core.Guard(client, "read_only")
@@ -254,7 +285,7 @@ def operate(request, token, mode):
             auth.token = token
             identity = guard.call("auth", client.security.oauth_client.introspect_token, auth)
             if type(guard.last.get("active")) is not bool or guard.last["active"] is not True or identity.active is not True or identity.username != request["owner"]:
-                return empty("unavailable", "read_unavailable")
+                return empty("unavailable", "auth_read_failed" if mode == "logs" else "read_unavailable")
             api = client.kernels.kernels_api_client
             if mode == "quota":
                 guard.call("quota", api.get_accelerator_quota_statistics, ApiGetAcceleratorQuotaStatisticsRequest())
@@ -265,6 +296,7 @@ def operate(request, token, mode):
                 query.user_name, query.kernel_slug = r["owner"], r["slug"]
                 guard.call("get", api.get_kernel, query)
                 core.check_kernel(guard.last, r, r["kernel_id"])
+            stage = "kernel"
             check()
             status = core.kernel_status_request(ApiGetKernelSessionStatusRequest, r["owner"], r["slug"])
             try:
@@ -272,19 +304,33 @@ def operate(request, token, mode):
                 state = core.normalize_status(guard.last)
             except Exception:
                 state = "UNKNOWN"
+            stage = "stream_open"
             response = LogStreamGuard(guard.session, r["owner"], r["slug"]).open()
+            stage = "stream_decode"
             try:
                 result = stream_result(response, request, state, token)
             except core.IdentityMismatch:
                 result = empty("reset", "log_changed")
             finally:
                 response.close()
+            stage = "kernel"
             check()  # never release log bytes after a resource/source/privacy change
             return result
     except core.IdentityMismatch:
         return empty("invalid", "identity_mismatch")
-    except Exception:
-        return empty("unavailable", "read_unavailable")
+    except LogUnavailable as exc:
+        return empty("unavailable", exc.reason if mode == "logs" else "read_unavailable")
+    except Exception as exc:
+        reason = {"auth": "auth_read_failed", "kernel": "kernel_read_failed",
+                  "stream_decode": "stream_format_invalid"}.get(stage, "read_unavailable")
+        if mode == "logs" and stage in ("stream_open", "stream_decode"):
+            import requests
+            from urllib3.exceptions import TimeoutError as TransportTimeout, ProtocolError
+            if isinstance(exc, (TimeoutError, requests.exceptions.Timeout, TransportTimeout)):
+                reason = "stream_timeout"
+            elif isinstance(exc, (OSError, ProtocolError)):
+                reason = "read_unavailable"
+        return empty("unavailable", reason if mode == "logs" else "read_unavailable")
 
 
 def main():

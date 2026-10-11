@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 const maxLogSnapshot = 64 << 10
@@ -73,7 +74,8 @@ func (r monitorResponse) valid(mode string) bool {
 	case "unknown":
 		return mode == "quota" && (r.Reason == "missing_quota" || r.Reason == "paid_or_unknown") && r == blank
 	case "unavailable":
-		return (r.Reason == "read_unavailable" || mode == "logs" && r.Reason == "missing_log") && r == blank
+		failure := provider.LogReadFailure{Reason: r.Reason}
+		return (mode == "quota" && r.Reason == "read_unavailable" || mode == "logs" && failure.Valid()) && r == blank
 	case "reset":
 		return mode == "logs" && r.Reason == "log_changed" && r == blank
 	case "invalid":

@@ -118,6 +118,11 @@ explicit restart with an empty cursor and a visible continuity gap. Pagination c
 discarded output. EOF, `after_completion` and render messages do not replace job status or
 verified result publication. Reads revalidate authority before releasing bytes and cannot create,
 authorize, retry, reconcile, collect or cancel compute. Closing a reader leaves execution running.
+HTTP 503 can report a fixed `log read unavailable: <reason>` message for operator diagnosis:
+authentication/kernel reads, stream timeout, HTTP status class, redirect, invalid log format or
+unavailable replay. These categories contain no provider response text, headers, URLs or secrets.
+Preserve the last verified cursor after an unavailable read; these failures do not permit another
+compute attempt.
 Kaggle uses bounded exact-reference replay internally; account-scoped live qualification remains
 pending. Local-admission-only mode returns truthful unavailable pages without provider work.
 

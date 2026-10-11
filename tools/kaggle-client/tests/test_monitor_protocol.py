@@ -182,3 +182,11 @@ class MonitorProtocolTests(unittest.TestCase):
         with mock.patch.object(monitor, "main", side_effect=ValueError("SYNTHETIC_TOKEN")), contextlib.redirect_stdout(out):
             self.assertEqual(monitor.bounded_main(), 2)
         self.assertEqual(out.getvalue(), "")
+
+    def test_failure_reason_allowlist_never_reflects_exception_canaries(self):
+        for reason in monitor.LOG_FAILURE_REASONS:
+            failure = monitor.LogUnavailable(reason)
+            self.assertEqual((failure.reason, str(failure)), (reason, reason))
+        for reason in ("SYNTHETIC_TOKEN", "stream_timeout: SYNTHETIC_TOKEN", None, 401):
+            failure = monitor.LogUnavailable(reason)
+            self.assertEqual((failure.reason, str(failure)), ("read_unavailable", "read_unavailable"))

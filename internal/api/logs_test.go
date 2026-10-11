@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -124,6 +125,9 @@ func TestJobLogsCursorErrorsAreStableAndSanitized(t *testing.T) {
 	}{
 		{provider.ErrLogCursorInvalid, 400, "INVALID_REQUEST"},
 		{provider.ErrLogCursorReset, 409, "LOG_CURSOR_RESET"},
+		{provider.LogReadFailure{Reason: "stream_timeout"}, 503, "STATE_STORE_UNAVAILABLE"},
+		{fmt.Errorf("private-provider-canary: %w", provider.LogReadFailure{Reason: "stream_http_403"}), 503, "STATE_STORE_UNAVAILABLE"},
+		{provider.LogReadFailure{Reason: "private-provider-canary"}, 503, "STATE_STORE_UNAVAILABLE"},
 		{errors.New("private-provider-canary resource-secret"), 503, "STATE_STORE_UNAVAILABLE"},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
@@ -142,6 +146,10 @@ func TestJobLogsCursorErrorsAreStableAndSanitized(t *testing.T) {
 			var envelope ErrorEnvelope
 			if response.StatusCode != tc.status || json.Unmarshal(raw, &envelope) != nil || string(envelope.Error.Code) != tc.code || strings.Contains(string(raw), "private-provider") || strings.Contains(string(raw), "original-resource") {
 				t.Fatal(response.StatusCode, string(raw))
+			}
+			var failure provider.LogReadFailure
+			if errors.As(tc.err, &failure) && failure.Valid() && (envelope.Error.Message != failure.Error() || envelope.Error.Stage != domain.FailureStageObservation) {
+				t.Fatal("fixed read diagnostic was lost", string(raw))
 			}
 		})
 	}

@@ -100,6 +100,10 @@ func (r *Reader) Read(ctx context.Context, p auth.Principal, w domain.WorkspaceI
 				if errors.Is(err, provider.ErrLogCursorReset) {
 					return provider.LogPage{}, provider.ErrLogCursorReset
 				}
+				var failure provider.LogReadFailure
+				if errors.As(err, &failure) && failure.Valid() {
+					return provider.LogPage{}, failure
+				}
 				return provider.LogPage{}, ErrUnavailable
 			}
 		}
