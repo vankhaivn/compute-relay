@@ -11,11 +11,13 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/api"
+	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
@@ -67,6 +69,10 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	if err != nil {
 		return ErrState
 	}
+	cleanups, err := cleanup.NewService(h.access, h.store, clock{})
+	if err != nil {
+		return ErrState
+	}
 
 	mode := "local-admission-only"
 	dispatchEnabled := false
@@ -75,11 +81,18 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	var schedulerSettings scheduler.Settings
 	var managed *managedServices
 	var logResolver joblogs.Resolver
+	// Cleanup applies requests with the same repository partition and frozen-binding
+	// resolver as the collector of the active provider mode.
+	var cleanupRepo cleanup.WorkRepository
+	var cleanupResolver cleanup.Resolver
 	if serve.Kaggle != nil {
-		dispatcher, collector, schedulerSettings, logResolver, err = h.kaggleWorkers(ctx, *serve.Kaggle)
+		var registry *provider.SnapshotRegistry
+		dispatcher, collector, schedulerSettings, registry, err = h.kaggleWorkers(ctx, *serve.Kaggle)
 		if err != nil {
 			return err
 		}
+		logResolver = registry
+		cleanupRepo, cleanupResolver = h.store, registry
 		mode = "kaggle-workers"
 		dispatchEnabled = true
 	}
@@ -96,6 +109,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		dispatchEnabled = dispatcher != nil
 		if dispatchEnabled {
 			mode = "managed-workers"
+			cleanupRepo, cleanupResolver = managedCleanupRepository{h.store}, managed.resolver
 		}
 	}
 	if dispatchEnabled {
@@ -106,6 +120,12 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 			_ = h.store.ConfigureScheduler(pauseCtx, schedulerSettings)
 		}()
 	}
+	var cleaner *cleanup.Engine
+	if cleanupRepo != nil {
+		if cleaner, err = cleanupEngine(cleanupRepo, cleanupResolver); err != nil {
+			return err
+		}
+	}
 
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", serve.Address)
 	if err != nil {
@@ -114,7 +134,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	defer listener.Close()
 	cfg := api.DefaultConfig()
 	cfg.Listen = listener.Addr().String()
-	cfg.Jobs, cfg.Operations, cfg.Results = jobs, controls, results
+	cfg.Jobs, cfg.Operations, cfg.Results, cfg.Cleanup = jobs, controls, results, cleanups
 	cfg.Logs, err = joblogs.NewReader(h.access, h.store, logResolver)
 	if err != nil {
 		return ErrState
@@ -138,6 +158,9 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		return err
 	}
 	extra := []func(context.Context) error{func(ctx context.Context) error { return runRetention(ctx, sweeper, retentionInterval) }}
+	if cleaner != nil {
+		extra = append(extra, cleaner.Run)
+	}
 	if managed != nil {
 		extra = append(extra, func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) })
 	}

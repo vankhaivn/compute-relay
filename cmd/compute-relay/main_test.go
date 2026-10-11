@@ -295,7 +295,7 @@ func TestExecutableManagedCompanionClientSurface(t *testing.T) {
 		}
 	}
 	for _, required := range []string{"workspace_auth", "job_admission", "managed_connections", "attempt_authorization",
-		"manual_result_collection", "job_logs", "connection_configuration"} {
+		"manual_result_collection", "job_logs", "connection_configuration", "job_cleanup"} {
 		if !features[required] {
 			t.Fatal("managed runtime stopped advertising", required)
 		}
