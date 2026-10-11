@@ -25,11 +25,11 @@ func TestDialAuthenticatesWithKeyPasswordAndInteractivePassword(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := newTestServer(t)
-			server.password = "secret"
-			server.interactiveOnly = tc.interactive
-			server.clientPK = public
+			server.Password = "secret"
+			server.InteractiveOnly = tc.interactive
+			server.ClientKey = public
 			if name == "encrypted key" {
-				server.clientPK = encryptedPublic
+				server.ClientKey = encryptedPublic
 			}
 			client, err := Dial(context.Background(), server.target(), tc.credential)
 			if err != nil {
@@ -45,7 +45,7 @@ func TestDialAuthenticatesWithKeyPasswordAndInteractivePassword(t *testing.T) {
 
 func TestDialPinsPresentedHostKeyOnlyWhenNoneIsSupplied(t *testing.T) {
 	server := newTestServer(t)
-	server.password = "secret"
+	server.Password = "secret"
 	target := server.target()
 	pinned := target.HostKey
 	target.HostKey = ""
@@ -65,7 +65,7 @@ func TestDialPinsPresentedHostKeyOnlyWhenNoneIsSupplied(t *testing.T) {
 
 func TestDialClassifiesRejectedAndUnreachableHosts(t *testing.T) {
 	server := newTestServer(t)
-	server.password = "secret"
+	server.Password = "secret"
 	if _, err := Dial(context.Background(), server.target(), Credential{Password: []byte("wrong")}); !errors.Is(err, ErrCredentialReject) {
 		t.Fatalf("wrong password: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestDialClassifiesRejectedAndUnreachableHosts(t *testing.T) {
 		t.Fatalf("unknown key: %v", err)
 	}
 	closed := server.target()
-	_ = server.listener.Close()
+	_ = server.Close()
 	if _, err := Dial(context.Background(), closed, Credential{Password: []byte("secret")}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("closed listener: %v", err)
 	}
@@ -104,8 +104,8 @@ func TestDialRejectsAmbiguousOrMalformedRequests(t *testing.T) {
 
 func TestRunQuotesArgumentsStreamsDataAndReportsExitStatus(t *testing.T) {
 	server := newTestServer(t)
-	server.password = "secret"
-	server.handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
+	server.Password = "secret"
+	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
 		data, _ := io.ReadAll(stdin)
 		_, _ = stdout.Write(append([]byte("got:"), data...))
 		_, _ = stderr.Write([]byte("diagnostic"))
@@ -126,7 +126,7 @@ func TestRunQuotesArgumentsStreamsDataAndReportsExitStatus(t *testing.T) {
 		t.Fatalf("result=%+v stdout=%q", result, out.String())
 	}
 	want := "PATH='/usr/local/bin:/usr/bin' '/usr/local/bin/docker' 'inspect' '--format' 'json' 'relay-a1'"
-	if got := server.recorded(); len(got) != 1 || got[0] != want {
+	if got := server.Commands(); len(got) != 1 || got[0] != want {
 		t.Fatalf("commands = %q", got)
 	}
 }
@@ -141,7 +141,7 @@ func TestShellCommandQuotesEveryPrintableArgument(t *testing.T) {
 
 func TestRunRefusesUnquotableArgumentsBeforeSending(t *testing.T) {
 	server := newTestServer(t)
-	server.password = "secret"
+	server.Password = "secret"
 	client, err := Dial(context.Background(), server.target(), Credential{Password: []byte("secret")})
 	if err != nil {
 		t.Fatal(err)
@@ -157,17 +157,17 @@ func TestRunRefusesUnquotableArgumentsBeforeSending(t *testing.T) {
 			t.Errorf("env %q: %v", env, err)
 		}
 	}
-	if len(server.recorded()) != 0 {
-		t.Fatalf("sent %q", server.recorded())
+	if len(server.Commands()) != 0 {
+		t.Fatalf("sent %q", server.Commands())
 	}
 }
 
 func TestRunStopsWhenContextEnds(t *testing.T) {
 	server := newTestServer(t)
-	server.password = "secret"
+	server.Password = "secret"
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	server.handle = func(string, io.Reader, io.Writer, io.Writer) int { <-release; return 0 }
+	server.Handle = func(string, io.Reader, io.Writer, io.Writer) int { <-release; return 0 }
 	client, err := Dial(context.Background(), server.target(), Credential{Password: []byte("secret")})
 	if err != nil {
 		t.Fatal(err)

@@ -12,8 +12,8 @@ import (
 func TestVerifyHostPinsThePresentedKeyAndRequiresALinuxEngine(t *testing.T) {
 	engine := "linux"
 	server := newTestServer(t)
-	server.password = "secret"
-	server.handle = func(command string, _ io.Reader, stdout, _ io.Writer) int {
+	server.Password = "secret"
+	server.Handle = func(command string, _ io.Reader, stdout, _ io.Writer) int {
 		switch {
 		case strings.HasPrefix(command, "'test' '-x' "):
 			if command == "'test' '-x' '/usr/local/bin/docker'" {

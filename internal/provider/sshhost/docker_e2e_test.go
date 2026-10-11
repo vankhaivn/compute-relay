@@ -33,8 +33,8 @@ func TestRealDockerOverSSH(t *testing.T) {
 		environment = append(environment, "DOCKER_DEFAULT_PLATFORM="+platform)
 	}
 	server := newTestServer(t)
-	server.password = "e2e-password"
-	server.handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
+	server.Password = "e2e-password"
+	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
 		cmd := exec.Command("/bin/sh", "-c", command)
 		cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = environment, stdin, stdout, stderr
 		err := cmd.Run()
@@ -52,13 +52,13 @@ func TestRealDockerOverSSH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fields := map[string]string{FieldHost: target.Host, FieldPort: strconv.Itoa(target.Port), FieldUsername: target.User, FieldPassword: server.password}
+	fields := map[string]string{FieldHost: target.Host, FieldPort: strconv.Itoa(target.Port), FieldUsername: target.User, FieldPassword: server.Password}
 	raw, err := EncodeFields(fields)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	client, err := Dial(ctx, target, Credential{Password: []byte(server.password)})
+	client, err := Dial(ctx, target, Credential{Password: []byte(server.Password)})
 	if err != nil {
 		t.Fatal(err)
 	}
