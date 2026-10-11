@@ -159,7 +159,18 @@ func collectionScenarioFixture(t *testing.T, scenario fake.Scenario, collectionM
 	if !j.Observation.Execution.Terminal() {
 		t.Fatal("fixture needs terminal provider evidence")
 	}
-	identity := j.Remote.Identity
+	p := &collectionProvider{probeProvider: f.adapter, fetches: map[string]int{}, files: completedOutputs(t, f, j.Remote.Identity)}
+	blobs, err := blobfs.New(filepath.Join(t.TempDir(), "results"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = blobs.Close() })
+	return f, id, p, blobs
+}
+
+// completedOutputs is the remote file set of a successful runner for one attempt identity.
+func completedOutputs(t testing.TB, f *dispatchFixture, identity provider.Identity) map[string][]byte {
+	t.Helper()
 	data := bytes.Repeat([]byte("fixture bytes\n"), 4096)
 	m := map[string]any{
 		"manifest_version": "1", "runner_version": "offline-fixture", "job_id": identity.JobID,
@@ -174,17 +185,11 @@ func collectionScenarioFixture(t *testing.T, scenario fake.Scenario, collectionM
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &collectionProvider{probeProvider: f.adapter, fetches: map[string]int{}, files: map[string][]byte{
+	return map[string][]byte{
 		collection.ManifestPath: raw, "outputs/answer.json": data, "control/stdout.log": []byte("fixture output\n"),
 		"control/stderr.log": {}, "control/environment.json": []byte(`{"fixture":true}`),
 		"scratch/not-selected": []byte("do not download"),
-	}}
-	blobs, err := blobfs.New(filepath.Join(t.TempDir(), "results"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
-	if err != nil {
-		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = blobs.Close() })
-	return f, id, p, blobs
 }
 func collectionEngine(t *testing.T, f *dispatchFixture, p *collectionProvider, blobs collection.BlobStore, repo collection.Repository) *collection.Engine {
 	t.Helper()
