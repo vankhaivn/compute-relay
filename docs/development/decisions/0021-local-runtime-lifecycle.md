@@ -2,9 +2,8 @@
 
 Status: accepted. Requirements: API-01/03, DX-01; preserves SEC-02 and durable ownership.
 
-The admission-only lifecycle remains the default. The optional provider-worker composition is
-extended by [ADR-0024](0024-explicit-bounded-provider-workers.md); this record preserves the
-original local-only decision and its safety rationale.
+Admission-only serve remains the default; [ADR-0024](0024-explicit-bounded-provider-workers.md)
+and [ADR-0025](0025-managed-connections-and-attempt-authorization.md) add the provider modes.
 
 ## Decision
 
@@ -25,6 +24,5 @@ connection close. A local schema check neither admits nor checks provider availa
 ## Reason and consequences
 
 Silent state repair, memory fallbacks, leaked token output and early lock release misrepresent
-safety. The explicit local surface is useful before full worker integration but cannot execute
-queued jobs. Stop serve for administration; callbacks must cooperate. See
+safety. Stop serve for administration; callbacks must cooperate. See
 [local runtime](../../local-runtime.md), [storage](../storage.md) and [current status](../../status.md).

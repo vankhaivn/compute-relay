@@ -1,8 +1,6 @@
 # ADR-0025: Managed connections and durable attempt authorization
 
-- Status: accepted
-- Date: 2026-10-07
-- Refines: ADR-0021, ADR-0022, ADR-0024
+Status: accepted (2026-10-07). Refines ADR-0021, ADR-0022 and ADR-0024.
 
 ## Context
 
@@ -24,15 +22,9 @@ changes future admission only; old jobs retain their account and recovery access
 capacity by canonical provider/account identity, not credential count. Keep quota uncertainty
 visible and block unknown managed GPU capacity by default.
 
-Allow an optional persisted `configuration.max_remote_wall_seconds` from 1 through 86400 on
-connection creation and through a revision-checked `configure` action. Configure atomically saves
-the local override and returns a durable succeeded receipt without a provider call. If a selection
-exists, it publishes a new immutable profile for future admissions while preserving the existing
-runtime configuration; jobs, attempts and authorization grants already created keep their frozen
-policy. Omission retains the managed startup default. A disabled or unverified connection may
-save an override but receives no admission selection until a later successful enable or check
-publishes one. The additive migration leaves existing overrides absent and preserves old
-operation receipts and replay keys.
+Allow an optional per-connection wall-time override, saved without a provider call by a
+revision-checked `configure` action. It changes only future admissions through a new immutable
+profile; existing jobs, attempts and grants keep their frozen policy.
 
 For managed profiles, persist one explicit finite authorization per attempt and consume it before
 preparation mutations. Recovery can observe and collect without granting compute. A retry is a

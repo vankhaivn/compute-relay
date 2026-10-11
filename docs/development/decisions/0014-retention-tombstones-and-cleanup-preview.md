@@ -6,8 +6,7 @@ Status: accepted. Requirements: OPS-05, DUR-01, VER-02; preserves DUR-02/03 and 
 
 Separate retention assessment, irreversible expiry, local byte removal and remote dry-run
 preview. Age is not enough: all historical/shared references, manual holds, held callbacks,
-active/ambiguous execution and incomplete recovery must be safe. Default minimum windows are
-24 hours for unreferenced inputs and seven days for safely completed references/results.
+active/ambiguous execution and incomplete recovery must be safe.
 
 Expire a whole verified result with state CAS, tombstones, audit and one `result.expired` event;
 preserve execution/cancellation/release and immutable receipts/history. Reject new input use after

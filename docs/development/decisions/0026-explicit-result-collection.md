@@ -10,12 +10,10 @@ including failure diagnostics. Reuse the existing attempt-scoped collect control
 receipts, coalescing, fenced recovery and transfer-only failure retry. Collection grants no
 compute and preserves original provider/account/version identity.
 
-Expose additive collection status separately from remote execution and local publication. Persist
-bounded generation-scoped selected-output samples: completed work includes rehashed cache and
-the current unverified stream; received bytes include only new observed selected output streams.
-Controls/protocol overhead are excluded, totals are unknown until pinning, and providers without
-stream observation retain unknown received bytes. Sample no more than once per second while
-streaming, plus durable boundary updates; expiry projects pending recovery.
+Expose additive collection status separately from remote execution and local publication, with
+bounded, generation-scoped selected-output byte progress. Totals are unknown until pinning, and
+providers without stream observation report unknown received bytes. [Collection](../collection.md)
+owns the exact counters and sampling.
 
 Keep immutable result pins, independent byte/receipt verification, and atomic publication. Full
 progress counts are not availability. Local artifact delivery remains a separate verified read.

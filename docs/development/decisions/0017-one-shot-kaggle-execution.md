@@ -9,7 +9,7 @@ frozen policy/account. Package exactly the five locked runner modules as inert s
 nonce, plan/input/staging and effective GPU policy. Use a stable intent-derived name rather than
 content-derived replacement names. Never execute generated workload source on the control host.
 
-A successful new M3 BeginSubmission commit is the sole durable mutation authority. Recheck original
+A successful new BeginSubmission commit is the sole durable mutation authority. Recheck original
 staging; permit one private SaveKernel after genuine absence, observe exact existing resources
 without updating them, and retain uncertainty after a possible effect. Recovery never resaves.
 Validate raw numeric ID/version/source/account/privacy/resources around explicit-version status

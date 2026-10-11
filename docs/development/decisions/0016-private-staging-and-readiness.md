@@ -4,7 +4,7 @@ Status: accepted. Requirements: DAT-04, OPS-05, SEC-03; preserves DUR-03.
 
 ## Decision
 
-Use the existing provider Plan and M3 preparation/ownership journal, not a second staging
+Use the existing provider Plan and durable preparation/ownership journal, not a second staging
 subsystem. Only a new BeginPreparation commit grants one creation invocation. Derive resource
 names from stable attempt/operation identity and bind contents in a separate marker; changed
 contents conflict under the same name instead of selecting a new resource.
