@@ -75,6 +75,7 @@ class LogStreamGuard:
         headers.pop("Content-Type", None)
         headers["Accept"] = "text/event-stream, */*"
         request = self.session.prepare_request(requests.Request("GET", self.url, headers=headers))
+        request.headers.pop("Content-Type", None)
         if request.method != "GET" or request.url != self.url:
             raise ValueError("unexpected stream request")
         response = self.session.get_adapter(self.url).send(

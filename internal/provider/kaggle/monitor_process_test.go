@@ -1,8 +1,11 @@
 package kaggle
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,5 +61,42 @@ print(json.dumps(dict(protocol=1,status='logs',reason='none',limit_ns='',used_ns
 	_, err = runMonitorSource(ctx, c, "quota", nil, monitorRequest{}, `import time;time.sleep(60)`)
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 4*time.Second {
 		t.Fatal("read helper survived timeout", err)
+	}
+}
+
+func TestMonitorLargeTrustedHelperPreservesSourceAndCredentialFrames(t *testing.T) {
+	m := monitorFixture(t)
+	c := m.config
+	c.PythonExecutable = pythonForTest(t)
+	// A helper larger than the Windows command-line ceiling, including UTF-8
+	// source, must execute intact without consuming token/request bytes as code.
+	source := "fixture = '界'\n" + strings.Repeat("# trusted helper padding 界\n", 2000) + `
+import sys,json
+assert fixture == '界'
+assert sys.flags.isolated
+assert sys.argv == ['-c', 'quota']
+assert sys.stdin.buffer.readline() == b'SYNTHETIC_STDIN\n'
+request = json.loads(sys.stdin.buffer.readline())
+assert request == {'protocol':1,'owner':'fixture_user','execution':None}
+assert sys.stdin.buffer.read() == b''
+print(json.dumps(dict(protocol=1,status='unknown',reason='missing_quota',limit_ns='',used_ns='',reserved_ns='',text_b64='',availability='',truncated=False,replay=False,offset=0,prefix='')))
+`
+	if len(source) <= 32767 || len(monitorBootstrap) > 512 {
+		t.Fatal("fixture must exceed Windows command-line ceiling while bootstrap stays bounded")
+	}
+	r, err := runMonitorSource(context.Background(), c, "quota", []byte("SYNTHETIC_STDIN"), monitorRequest{Protocol: 1, Owner: "fixture_user"}, source)
+	if err != nil || r != (monitorResponse{Protocol: 1, Status: "unknown", Reason: "missing_quota"}) {
+		t.Fatal("large helper lost source/credential framing", r, err)
+	}
+}
+
+func TestMonitorBootstrapNeverExecutesIncompleteHelperFrame(t *testing.T) {
+	source := "print('PARTIAL_HELPER_MUST_NOT_EXECUTE')\n"
+	cmd := exec.Command(pythonForTest(t), "-I", "-X", "utf8", "-c", monitorBootstrap, strconv.Itoa(len(source)+1), "quota")
+	cmd.Stdin = strings.NewReader(source)
+	output, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 2 || !bytes.Equal(output, nil) {
+		t.Fatal("incomplete helper executed or emitted diagnostics", err, string(output))
 	}
 }

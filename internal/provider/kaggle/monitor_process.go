@@ -25,6 +25,17 @@ func monitorProgram() string {
 	return "import types\ncore=types.ModuleType('_compute_relay_read_core')\nexec(compile(" + strconv.Quote(executionSource) + ", 'compute-relay/execution-core.py', 'exec'), core.__dict__)\n" + monitorSource
 }
 
+// The composed helper exceeds Windows' command-line ceiling after argument
+// escaping. Keep only this fixed bootstrap in argv; source and credentials use
+// separate, exact stdin frames and are never written to the host filesystem.
+const monitorBootstrap = `import sys
+_relay_size = int(sys.argv.pop(1))
+_relay_helper = sys.stdin.buffer.read(_relay_size)
+if len(_relay_helper) != _relay_size:
+    raise SystemExit(2)
+exec(compile(_relay_helper, 'compute-relay/monitor.py', 'exec'))
+`
+
 func runMonitor(ctx context.Context, c Config, mode string, token []byte, r monitorRequest) (monitorResponse, error) {
 	return runMonitorSource(ctx, c, mode, token, r, monitorProgram())
 }
@@ -43,7 +54,8 @@ func runMonitorSource(parent context.Context, c Config, mode string, token []byt
 		return none, ErrProtocol
 	}
 	defer clear(header)
-	input := make([]byte, 0, len(token)+len(header)+2)
+	input := make([]byte, 0, len(source)+len(token)+len(header)+2)
+	input = append(input, source...)
 	input = append(input, token...)
 	input = append(input, '\n')
 	input = append(input, header...)
@@ -60,7 +72,7 @@ func runMonitorSource(parent context.Context, c Config, mode string, token []byt
 		return none, ErrProcess
 	}
 	defer os.RemoveAll(work)
-	cmd := exec.CommandContext(ctx, c.PythonExecutable, "-I", "-X", "utf8", "-c", source, mode)
+	cmd := exec.CommandContext(ctx, c.PythonExecutable, "-I", "-X", "utf8", "-c", monitorBootstrap, strconv.Itoa(len(source)), mode)
 	cmd.Dir = work
 	cmd.Env = []string{"HOME=" + work, "USERPROFILE=" + work, "TMPDIR=" + work, "TMP=" + work, "TEMP=" + work, "LANG=C.UTF-8"}
 	if runtime.GOOS == "windows" {
