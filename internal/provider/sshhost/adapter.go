@@ -113,7 +113,7 @@ var (
 
 func NewAdapter(config Config, binding provider.BindingSnapshot, creds ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock) (*Adapter, error) {
 	if !binding.Valid() || binding.Binding.ProviderInstanceID != config.InstanceID || binding.CredentialRef != string(config.CredentialRef) ||
-		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || !safeArg.MatchString(config.Image) {
+		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || !ValidImage(config.Image) {
 		return nil, ErrRequest
 	}
 	if _, err := HostKeyOf(config.Account); err != nil {
@@ -300,7 +300,14 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 	}
 	var prepared provider.Prepared
 	err = a.withDocker(ctx, func(d docker, endpoint Endpoint) error {
+		// The digest-pinned image is pulled once per host; the job network policy
+		// governs the container, not the engine's registry access.
 		image, found, err := d.inspectImage(ctx, a.config.Image)
+		if err == nil && !found {
+			if err = d.pull(ctx, a.config.Image); err == nil {
+				image, found, err = d.inspectImage(ctx, a.config.Image)
+			}
+		}
 		if err != nil || !found || image.OS != "linux" {
 			return ErrRemoteDocker
 		}

@@ -370,9 +370,9 @@ func TestPrepareRemovesItsOwnContainerWhenStagingFails(t *testing.T) {
 	if _, err = h.adapter.Prepare(ctx, plan, testOperation); !errors.Is(err, ErrRemoteDocker) || h.host.created != 1 {
 		t.Fatalf("missing image: %v", err)
 	}
-	h.host.image = true
-	if _, err = h.adapter.Prepare(ctx, plan, testOperation); err != nil {
-		t.Fatal(err)
+	h.host.registry = true
+	if _, err = h.adapter.Prepare(ctx, plan, testOperation); err != nil || !h.host.image {
+		t.Fatalf("pulled image: %v", err)
 	}
 	if _, err = h.adapter.Prepare(ctx, plan, testOperation); !errors.Is(err, ErrIdentity) || h.host.created != 2 {
 		t.Fatalf("second prepare: %v", err)

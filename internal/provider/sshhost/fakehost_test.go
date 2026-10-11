@@ -42,6 +42,7 @@ type fakeHost struct {
 	t          *testing.T
 	mu         sync.Mutex
 	image      bool
+	registry   bool // pull succeeds
 	containers map[string]*fakeContainer
 	calls      [][]string
 	starts     int
@@ -149,6 +150,12 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 			return noSuch("image"), nil
 		}
 		_, _ = fmt.Fprintf(stdout, `[{"Id":%q,"Os":"linux","Architecture":"amd64"}]`, fakeImageID)
+		return Result{}, nil
+	case len(args) == 3 && args[0] == "pull" && args[1] == "--quiet" && args[2] == StandardImage:
+		if !h.registry {
+			return Result{ExitCode: 1, Stderr: []byte("registry unavailable")}, nil
+		}
+		h.image = true
 		return Result{}, nil
 	case len(args) < 3 || args[0] != "container":
 		h.t.Errorf("unexpected docker command %q", args)

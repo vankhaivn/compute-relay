@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
@@ -17,6 +18,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
+	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
@@ -78,13 +80,13 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 	} else if !errors.Is(err, credentials.ErrUnsupported) {
 		return nil, ErrState
 	}
-	return h.composeManaged(ctx, config, vault, &managedKaggleAdapter{discovery: discovery, config: config})
+	return h.composeManaged(ctx, config, vault, &managedKaggleAdapter{discovery: discovery, config: config}, newManagedSSHAdapter(config))
 }
 
 // composeManaged provides the offline fixture seam. Neither it nor its concrete
 // constructors read a credential, verify an account, or create a compute permit.
-func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, vault credentials.Vault, adapter connections.Adapter) (*managedServices, error) {
-	service, err := connections.New(h.access, managedConnectionRepository{h.store}, vault, []connections.Adapter{adapter}, clock{}.Now)
+func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, vault credentials.Vault, adapters ...connections.Adapter) (*managedServices, error) {
+	service, err := connections.New(h.access, managedConnectionRepository{h.store}, vault, adapters, clock{}.Now)
 	if err != nil {
 		return nil, ErrState
 	}
@@ -124,7 +126,17 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 
 func (h *Host) managedProvider(config ManagedServeConfig, resolver ports.CredentialResolver, binding connections.RuntimeBinding) (provider.Provider, error) {
 	profile := binding.Profile
-	if binding.ProviderType != "kaggle" || profile.Validate() != nil {
+	if profile.Validate() != nil {
+		return nil, ErrRequest
+	}
+	switch binding.ProviderType {
+	case "kaggle":
+		if profile.CostClass != admission.CostFreeAllowance {
+			return nil, ErrRequest
+		}
+	case sshhost.ProviderType:
+		return h.managedSSHProvider(resolver, binding)
+	default:
 		return nil, ErrRequest
 	}
 	frozen, err := parseManagedKaggleRuntimeConfig(binding.RuntimeConfig)

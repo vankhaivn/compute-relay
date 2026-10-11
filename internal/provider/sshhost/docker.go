@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,6 +30,11 @@ var DockerCandidates = []string{
 }
 
 var ErrRemoteDocker = errors.New("remote Docker command failed")
+
+var pinnedImage = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:-]{0,200}@sha256:[0-9a-f]{64}$`)
+
+// ValidImage accepts only an image reference pinned by digest.
+func ValidImage(ref string) bool { return pinnedImage.MatchString(ref) }
 
 type executor interface {
 	Run(context.Context, map[string]string, []string, io.Reader, io.Writer) (Result, error)
@@ -86,6 +92,19 @@ func (d docker) ping(ctx context.Context) error {
 		return ErrRemoteDocker
 	}
 	return nil
+}
+
+// serverOS reports the engine's operating system; Docker Desktop on macOS reports linux.
+func (d docker) serverOS(ctx context.Context) (string, error) {
+	var out bytes.Buffer
+	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 256}, "version", "--format", "{{.Server.Os}}")
+	if err != nil {
+		return "", err
+	}
+	if result.ExitCode != 0 {
+		return "", ErrRemoteDocker
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 type imageInfo struct {

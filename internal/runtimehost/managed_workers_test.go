@@ -93,7 +93,7 @@ type managedTestFixture struct {
 	config   ManagedServeConfig
 }
 
-func newManagedTestFixture(t *testing.T, withVault bool) *managedTestFixture {
+func newManagedTestFixture(t *testing.T, withVault bool, extra ...connections.Adapter) *managedTestFixture {
 	t.Helper()
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
@@ -124,7 +124,7 @@ func newManagedTestFixture(t *testing.T, withVault bool) *managedTestFixture {
 		f.vault = &managedTestVault{entries: map[string][]byte{}}
 		vault = f.vault
 	}
-	f.services, err = h.composeManaged(ctx, config, vault, adapter)
+	f.services, err = h.composeManaged(ctx, config, vault, append([]connections.Adapter{adapter}, extra...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

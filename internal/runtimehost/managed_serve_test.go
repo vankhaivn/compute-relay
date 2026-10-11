@@ -102,8 +102,14 @@ func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *test
 	var providers struct {
 		Providers []connections.Descriptor `json:"providers"`
 	}
-	if json.Unmarshal(get("/v1/workspaces/app/providers"), &providers) != nil || len(providers.Providers) != 1 || providers.Providers[0].CredentialStorage != wantStorage {
-		t.Fatal("storage availability projection wrong")
+	if json.Unmarshal(get("/v1/workspaces/app/providers"), &providers) != nil || len(providers.Providers) != 2 ||
+		providers.Providers[0].Type != "kaggle" || providers.Providers[1].Type != "ssh" {
+		t.Fatal("managed provider types wrong")
+	}
+	for _, descriptor := range providers.Providers {
+		if descriptor.CredentialStorage != wantStorage {
+			t.Fatal("storage availability projection wrong")
+		}
 	}
 	get("/v1/workspaces/app/connections")
 	get("/v1/workspaces/app/connections/" + saved.ID)
