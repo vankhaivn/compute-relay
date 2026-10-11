@@ -28,6 +28,10 @@ ownership acknowledgement remain recovery material; speculative deletion could e
 work. Byte publication and SQLite acknowledgement are not an atomic cross-resource transaction.
 Upload has no job-idempotency-key guarantee: a deliberate second upload may create another object.
 
+Uploads are bounded by concurrent upload slots and byte limits rather than the per-workspace
+request bucket: a rejection sent before a large body is read reaches the client only as a reset
+connection, so uploading one job's inputs back to back must not exhaust that bucket.
+
 Blob roots have private permissions and exclusive OS ownership; unsafe/symlink/special-file
 layouts are rejected. They are not a hostile-host filesystem sandbox. Do not write to blob
 directories directly or reuse result storage as an input upload root.
