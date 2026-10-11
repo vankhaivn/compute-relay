@@ -300,9 +300,11 @@ This integrated path is intentionally narrow:
 - Provider config is explicit JSON; strict runtime TOML/doctor remain future product work.
 - Direct HTTPS input preparation is not enabled in this composition; use uploaded immutable inputs.
 - Authenticated explicit-attempt log pages are available through the `job_logs` capability; see
-  [API usage](../api/README.md#reading-attempt-logs). Bounded running replay has offline evidence;
-  a finite live probe completed without observable log pages, so running delivery remains
-  unqualified. Failed reads return fixed diagnostic categories without provider response text.
+  [API usage](../api/README.md#reading-attempt-logs). A finite CPU probe verified running delivery,
+  original-cursor reconnect and ordered replay on the native macOS companion; see the
+  [qualification scope](https://github.com/vankhaivn/compute-relay/pull/63).
+  Delivery is best-effort, not a guarantee for every poll or multi-hour replay.
+  Failed reads return fixed diagnostic categories without provider response text.
   Stream connect and socket reads each allow two seconds, including response headers;
   replay and the enclosing request retain their separate finite deadlines.
   A public provider quota HTTP API is not shipped.
