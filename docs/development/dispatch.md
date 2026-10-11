@@ -46,6 +46,9 @@ not rearm a potentially accepted request. Adapters must not hide mutation retrie
 | rejected / failed / attention / prevented | Do not automatically reopen mutation; inspect explicit control eligibility. |
 | collectible | Transfer-only verification/publication handoff. |
 
+A rejection journals Relay's own problem for the code. Of the adapter's problem only a closed
+`details.reason`, a short lowercase identifier, survives, and job status exposes that one detail.
+
 ## Identity and observations
 
 Pending HTTPS roles become immutable object pins through guarded ingestion. Already frozen

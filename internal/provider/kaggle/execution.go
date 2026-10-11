@@ -3,6 +3,7 @@ package kaggle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -11,9 +12,30 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
+// Closed reasons for a stop before SaveKernel is sent. They name where the attempt
+// stopped and never carry provider, URL or OS text.
+const (
+	reasonSubmissionDisabled  = "submission_disabled"
+	reasonPreparationMismatch = "preparation_mismatch"
+	reasonMutationBudget      = "mutation_budget_exhausted"
+	reasonStagingRecheck      = "staging_recheck_failed"
+	reasonStagingUnconfirmed  = "staging_not_confirmed"
+	reasonCallTimeout         = "call_timeout"
+	reasonRuntimeStopped      = "runtime_stopped"
+	reasonLocalRuntime        = "local_runtime_unavailable"
+	reasonCredential          = "credential_unavailable"
+)
+
+// helperReasons are the helper's own refusals, each before its save call.
+var helperReasons = map[string]bool{
+	"token_inactive": true, "account_mismatch": true, "gpu_quota_unverified": true,
+	"auth_read_failed": true, "kernel_read_failed": true, "quota_read_failed": true, "helper_failed": true,
+}
+
 type executionResponse struct {
 	Protocol     int                 `json:"protocol"`
 	Status       string              `json:"status"`
+	Reason       string              `json:"reason"`
 	KernelID     string              `json:"kernel_id"`
 	Reference    string              `json:"reference"`
 	Version      int                 `json:"version"`
@@ -59,8 +81,9 @@ func NewExecutor(stager *Stager, policy ExecutionPolicy, plan provider.Plan, pre
 	return &Executor{stager: stager, plan: frozen, prepared: prepared, policy: policy, request: r, allowSubmit: allowSubmit, slot: make(chan struct{}, 1), run: runExecution, now: time.Now}, nil
 }
 
-func rejectedExecution() provider.SubmissionOutcome {
-	p := provider.Problem(domain.CodeProviderRejected, domain.FailureStageSubmission, "kernel request stopped before submission; inspect configuration and staging")
+func rejectedExecution(reason string) provider.SubmissionOutcome {
+	p := provider.Problem(domain.CodeProviderRejected, domain.FailureStageSubmission, "kernel request stopped before submission; inspect configuration and staging").
+		WithDetail(domain.ReasonDetail, reason)
 	return provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &p}
 }
 func unknownExecution() provider.SubmissionOutcome {
@@ -78,8 +101,11 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 			out = unknownExecution()
 		}
 	}()
-	if e == nil || !e.allowSubmit || prepared != e.prepared {
-		return rejectedExecution()
+	if e == nil || !e.allowSubmit {
+		return rejectedExecution(reasonSubmissionDisabled)
+	}
+	if prepared != e.prepared {
+		return rejectedExecution(reasonPreparationMismatch)
 	}
 	if e.used.Swap(true) {
 		return unknownExecution()
@@ -89,18 +115,21 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 	// Recheck complete remote staging without creating anything. Equality includes
 	// the first-pinned numeric dataset ID, version, marker, privacy and readiness.
 	stage, err := e.stager.ReconcilePreparation(parent, e.plan, e.prepared.PreparationID)
-	if err != nil || stage.Status != provider.ReconciliationFound || stage.Prepared == nil || *stage.Prepared != e.prepared {
-		return rejectedExecution()
-	}
-	r, invoked, err := e.call(parent, "submit", "")
 	if err != nil {
-		if !invoked {
-			return rejectedExecution()
-		}
+		return rejectedExecution(reasonStagingRecheck)
+	}
+	if stage.Status != provider.ReconciliationFound || stage.Prepared == nil || *stage.Prepared != e.prepared {
+		return rejectedExecution(reasonStagingUnconfirmed)
+	}
+	r, stopped, err := e.call(parent, "submit", "")
+	if stopped != "" {
+		return rejectedExecution(stopped)
+	}
+	if err != nil {
 		return unknownExecution()
 	}
 	if r.Status == "rejected" {
-		return rejectedExecution()
+		return rejectedExecution(r.Reason)
 	}
 	if r.Status != "found" {
 		return unknownExecution()
@@ -201,10 +230,12 @@ func (r executionResponse) valid() bool {
 		return false
 	}
 	switch r.Status {
-	case "unknown", "not_found", "invalid", "rejected":
+	case "rejected":
+		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && helperReasons[r.Reason]
+	case "unknown", "not_found", "invalid":
 		return r == (executionResponse{Protocol: 1, Status: r.Status})
 	case "found":
-		if !positiveDecimal(r.KernelID) || r.Version != 1 || !r.SourceSHA256.Valid() {
+		if r.Reason != "" || !positiveDecimal(r.KernelID) || r.Version != 1 || !r.SourceSHA256.Valid() {
 			return false
 		}
 		switch r.RawState {
@@ -215,7 +246,9 @@ func (r executionResponse) valid() bool {
 	return false
 }
 
-func (e *Executor) call(parent context.Context, mode, kernelID string) (executionResponse, bool, error) {
+// call returns a closed stop reason when the helper was never invoked; after
+// invocation any failure is ambiguous and the reason is empty.
+func (e *Executor) call(parent context.Context, mode, kernelID string) (executionResponse, string, error) {
 	var result executionResponse
 	ctx, cancel := context.WithTimeout(parent, e.policy.Timeout)
 	defer cancel()
@@ -223,14 +256,14 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 	case e.slot <- struct{}{}:
 		defer func() { <-e.slot }()
 	case <-ctx.Done():
-		return result, false, ctx.Err()
+		return result, stopReason(ctx, ""), ctx.Err()
 	}
 	if err := ctx.Err(); err != nil {
-		return result, false, err
+		return result, stopReason(ctx, ""), err
 	}
 	local, err := e.stager.local(ctx, e.stager.config, Local, nil)
 	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return result, false, ErrProcess
+		return result, stopReason(ctx, reasonLocalRuntime), ErrProcess
 	}
 	request := e.request
 	request.KernelID = kernelID
@@ -259,14 +292,31 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 		result, err = e.run(ctx, e.stager.config, mode, secret, request)
 		return err
 	})
-	if ctx.Err() != nil {
-		return executionResponse{}, invoked, ctx.Err()
+	if !invoked {
+		if ctx.Err() != nil {
+			return executionResponse{}, stopReason(ctx, ""), ctx.Err()
+		}
+		return executionResponse{}, reasonCredential, ErrProcess
 	}
-	if err != nil || !called || !invoked {
-		return executionResponse{}, invoked, ErrProcess
+	if ctx.Err() != nil {
+		return executionResponse{}, "", ctx.Err()
+	}
+	if err != nil {
+		return executionResponse{}, "", ErrProcess
 	}
 	if !result.valid() || (mode != "submit" && result.Status == "rejected") {
-		return executionResponse{}, invoked, ErrProtocol
+		return executionResponse{}, "", ErrProtocol
 	}
-	return result, invoked, nil
+	return result, "", nil
+}
+
+// stopReason prefers an ended context, which explains any failure that follows it.
+func stopReason(ctx context.Context, reason string) string {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return reasonCallTimeout
+	case ctx.Err() != nil:
+		return reasonRuntimeStopped
+	}
+	return reason
 }

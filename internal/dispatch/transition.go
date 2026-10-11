@@ -142,6 +142,10 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 				}
 			}
 			j.Problem = problem(code, false)
+			if a.Submission.Problem != nil && j.Problem != nil {
+				// Only the adapter's closed reason survives; its message and other details do not.
+				j.Problem.Details = a.Submission.Problem.PublicDetails()
+			}
 			next.Orchestration = domain.OrchestrationFailed
 			next.Execution = domain.ExecutionNotSubmitted
 			next.RemoteActivity = domain.RemoteActivityInactive

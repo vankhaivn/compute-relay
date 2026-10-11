@@ -291,12 +291,14 @@ func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*ru
 }
 
 func (p *RuntimeAdapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	if p == nil || prepared.Identity.Validate() != nil {
-		return rejectedExecution()
+	if p == nil {
+		return rejectedExecution(reasonSubmissionDisabled)
 	}
-	if err := p.authorize(prepared.Identity); err != nil {
-		problem := provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageSubmission, "provider mutation budget is exhausted before submission")
-		return provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &problem}
+	if prepared.Identity.Validate() != nil {
+		return rejectedExecution(reasonPreparationMismatch)
+	}
+	if p.authorize(prepared.Identity) != nil {
+		return rejectedExecution(reasonMutationBudget)
 	}
 	c, err := p.attempt(ctx, prepared.Identity)
 	if err != nil || c.prepared != prepared {

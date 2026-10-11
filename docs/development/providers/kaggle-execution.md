@@ -35,6 +35,15 @@ metadata readback. Kaggle's `author` field is a human display name, so account/r
 is bound by the canonical `owner/slug` reference plus exact slug, not display-name equality. A
 timeout, HTTP/receipt error, nonzero exit or lost acknowledgement after a possible save remains
 submission-unknown. Reconciliation sends original identity/source digest, not another save.
+
+A stop before the SaveKernel wire call is a proven rejection and names one closed reason:
+`submission_disabled`, `preparation_mismatch` or `mutation_budget_exhausted` for local
+authority; `staging_recheck_failed` or `staging_not_confirmed` for the staging recheck;
+`local_runtime_unavailable`, `credential_unavailable`, `call_timeout` or `runtime_stopped` when
+the helper never ran. The helper refuses with `token_inactive`, `account_mismatch` or
+`gpu_quota_unverified`, with `auth_read_failed`, `kernel_read_failed` or `quota_read_failed` for a
+failed read, and with `helper_failed` before any request. A helper refusal without one of its
+reasons is a protocol fault and remains submission-unknown. No provider, URL or OS text is kept.
 Observation additionally checks the first-pinned numeric ID.
 
 Validate raw metadata rather than SDK defaults and recheck current metadata around status/log/

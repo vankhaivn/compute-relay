@@ -1,6 +1,7 @@
 package kaggle
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -32,6 +33,10 @@ func TestRuntimeAdapterBudgetIsPerDistinctAttemptAndFinite(t *testing.T) {
 	}
 	if err := p.authorize(runtimeBudgetIdentity("attempt-two")); !errors.Is(err, ErrRuntimeBudget) {
 		t.Fatal("second distinct attempt exceeded budget without blocking", err)
+	}
+	out := p.Submit(context.Background(), provider.Prepared{Identity: runtimeBudgetIdentity("attempt-two")})
+	if out.Status != provider.SubmissionRejected || out.Problem.Details[domain.ReasonDetail] != reasonMutationBudget {
+		t.Fatal("budget stop lost its reason", out)
 	}
 }
 

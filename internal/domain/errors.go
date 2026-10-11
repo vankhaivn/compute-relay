@@ -272,6 +272,24 @@ func (problem Problem) WithDetail(key, value string) Problem {
 	return problem
 }
 
+// ReasonDetail is the only detail that crosses a public boundary: a closed adapter reason
+// such as "staging_not_confirmed", never provider, URL or OS text.
+const ReasonDetail = "reason"
+
+// PublicDetails returns the problem's closed reason, or nil when it has none.
+func (problem Problem) PublicDetails() map[string]string {
+	reason := problem.Details[ReasonDetail]
+	if reason == "" || len(reason) > 64 || reason[0] < 'a' || reason[0] > 'z' {
+		return nil
+	}
+	for _, c := range []byte(reason) {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return nil
+		}
+	}
+	return map[string]string{ReasonDetail: reason}
+}
+
 // WithCause returns a copy that unwraps to cause without exposing it as public details.
 func (problem Problem) WithCause(cause error) Problem {
 	problem.cause = cause

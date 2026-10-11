@@ -110,6 +110,23 @@ func TestSubmissionGatesCannotBeReplayed(t *testing.T) {
 		})
 	}
 }
+func TestRejectionKeepsOnlyTheAdapterClosedReason(t *testing.T) {
+	for reason, kept := range map[string]bool{"staging_not_confirmed": true, "403 Forbidden: https://provider.invalid": false} {
+		j, s := readyFixture(t)
+		j, s = apply(t, j, s, Action{Kind: BeginSubmission})
+		// A non-whitelisted code still records PROVIDER_REJECTED, with the adapter's reason.
+		rejected := problem(domain.CodeResourceRequirementUnsatisfied, false).WithDetail(domain.ReasonDetail, reason).WithDetail("provider", "raw provider text")
+		outcome := provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &rejected}
+		j, _ = apply(t, j, s, Action{Kind: SubmissionSeen, Submission: &outcome})
+		if j.Problem == nil || j.Problem.Code != domain.CodeProviderRejected || j.Problem.ComputeMayHaveStarted {
+			t.Fatal("rejection semantics changed", j.Problem)
+		}
+		if kept != (len(j.Problem.Details) == 1 && j.Problem.Details[domain.ReasonDetail] == reason) || !kept && len(j.Problem.Details) != 0 {
+			t.Fatal("unexpected journal details", reason, j.Problem.Details)
+		}
+	}
+}
+
 func TestAmbiguityStopsWithoutInventingNonAcceptance(t *testing.T) {
 	j, s := readyFixture(t)
 	j, s = apply(t, j, s, Action{Kind: BeginSubmission})
