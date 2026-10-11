@@ -182,9 +182,8 @@ interpret `202 Accepted`, a queued attempt, or a control receipt as remote execu
 
 ## 9. What to do next
 
-For day-to-day commands use the [Operator runbook](runbook.md). Detailed references are
-[Local runtime](local-runtime.md), [Application CLI](application-cli.md),
-[Artifact delivery](artifact-delivery.md), and [Recovery](recovery.md).
+Day-to-day references are [Local runtime](local-runtime.md), [Application CLI](application-cli.md),
+[Artifact delivery](artifact-delivery.md) and [Recovery](recovery.md).
 
 To run an application job on Kaggle, continue with the user-facing
 [Kaggle runtime](kaggle-runtime.md). Contributors changing provider internals or repeating the

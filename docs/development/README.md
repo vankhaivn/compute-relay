@@ -1,8 +1,8 @@
 # Development documentation
 
 This directory is for contributors, maintainers and operator qualification work. If you cloned
-Compute Relay simply to understand or operate it, start with [Using Compute Relay](../README.md),
-[Getting started](../getting-started.md), or the [Operator runbook](../runbook.md).
+Compute Relay simply to understand or operate it, start with [Using Compute Relay](../README.md)
+or [Getting started](../getting-started.md).
 
 ## Contributor workflow
 
