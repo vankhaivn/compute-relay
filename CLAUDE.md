@@ -19,9 +19,9 @@ Start with [the validation checklist](docs/development/validation-checklist.md) 
 issue/PR evidence linked by the task. Keep raw run evidence outside the repository; put only
 minimal sanitized reproductions and changed support conclusions in focused issues/PRs. Run one
 stage at a time and inspect the actual result before proceeding. A missing implementation,
-unsupported capability or skipped test is not a pass. Preserve failures, original binaries and
-uncertain remote state. A validation request does not authorize every live effect; hand off
-reproducible bugs before changing code during validation-only work.
+unsupported capability, skipped test, test name or previous CI run is not a pass. Preserve
+failures, original binaries and uncertain remote state. A validation request does not authorize
+every live effect; hand off reproducible bugs before changing code during validation-only work.
 
 ## Product and safety invariants
 
