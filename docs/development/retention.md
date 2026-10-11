@@ -2,7 +2,8 @@
 
 Expiry, local deletion and remote cleanup are different operations. Serve modes with provider
 workers run the local sweep below with the default policy; admission-only serve does not. Remote
-apply and staging cleanup are not implemented by the current preview path.
+apply and staging cleanup are not implemented by the preview path; explicit attempt-scoped
+deletion is the separate [cleanup control](operations.md#remote-cleanup).
 
 ## Eligibility and holds
 
@@ -61,3 +62,8 @@ The execution cleanup port cannot establish safe dataset staging cleanup. Stagin
 retained with `staging_preview_unavailable`. Prefix matching never proves ownership; cleanup never
 substitutes for cancellation. Exact-target live cleanup requires a separately reviewed procedure
 and explicit authorization in the [validation checklist](validation-checklist.md).
+
+The [cleanup control](operations.md#remote-cleanup) is the only remote apply path. It is an
+explicit owner request for one attempt, never a sweep: retention neither creates nor consumes it,
+and a preview result is not an input to it. A succeeded cleanup does not expire local results or
+change their retention windows.

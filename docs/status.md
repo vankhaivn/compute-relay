@@ -46,7 +46,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 - Provider timeout enforcement is separate from local and runner deadlines.
 - Batch cancellation is manual-required without a verified session target; exact hardware release
   is not observable.
-- Remote cleanup apply is not shipped.
+- Explicit attempt-scoped remote cleanup is admitted and applied by provider-mode workers, but no
+  shipped adapter deletes yet: Kaggle cleanup requests settle as failed and preserve resources.
+  Nothing is cleaned up automatically.
 - Direct HTTPS input is not composed into `serve`; upload immutable inputs first.
 
 Remaining product work is in the [implementation plan](development/implementation-plan.md).

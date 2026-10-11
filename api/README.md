@@ -41,6 +41,7 @@ POST /v1/workspaces/{w}/jobs/{j}/cancel
 POST /v1/workspaces/{w}/jobs/{j}/retry
 POST /v1/workspaces/{w}/jobs/{j}/reconcile
 POST /v1/workspaces/{w}/jobs/{j}/collect
+POST /v1/workspaces/{w}/jobs/{j}/cleanup
 GET  /v1/workspaces/{w}/operations/{operation_id}
 GET  /v1/workspaces/{w}/jobs/{j}/artifacts
 GET  /v1/workspaces/{w}/jobs/{j}/artifacts/{artifact_id}
@@ -49,8 +50,8 @@ GET  /v1/workspaces/{w}/jobs/{j}/artifacts/{artifact_id}/content
 
 Only `/healthz` is public. Other operations require current workspace/token authority as defined
 in OpenAPI. Readiness is local dependency readiness, not a GPU/profile/worker check. Artifact
-and log operations require an explicit `attempt_id` query parameter. A public event stream or
-cleanup service is not implied by these reads.
+and log operations require an explicit `attempt_id` query parameter. A public event stream is
+not implied by these reads, and no read or preview deletes remote resources.
 
 ## Optional managed extension
 
@@ -84,7 +85,10 @@ Control POSTs require operate scope, an explicit attempt and the same key rules.
 a nonblank non-secret reason. The `/retry` operation is `retry_compute`, preserving the source
 attempt and returning a distinct `new_attempt_id`. Control replay uses `replay=true` and the
 original receipt; GET reads current state. Cancellation is intent, reconcile observes, collect
-requests transfer-only work. Optional JobSpec `result_collection=manual` freezes explicit result
+requests transfer-only work. Cleanup (feature `job_cleanup`) requests deletion of one settled
+attempt's remote resources; uncollected results need `discard_uncollected=true`. Its receipts use
+kind `cleanup` and settle as `remote_deleted`, `already_absent` or `failed` only after a provider
+worker applies them; see [controls](../docs/development/operations.md#remote-cleanup). Optional JobSpec `result_collection=manual` freezes explicit result
 collection; omission keeps automatic behavior. Check the runtime's `manual_result_collection`
 feature before admitting manual jobs. Additive status `collection` separates terminal waiting,
 pending/active transfer, verification and published availability; [collection](../docs/development/collection.md)
