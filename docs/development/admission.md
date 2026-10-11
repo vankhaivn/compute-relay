@@ -38,6 +38,6 @@ checks. Scheduler/dispatch fences cannot be bypassed by an older unfenced caller
 or uncertain commit acknowledgement are not permission to create another job/key automatically.
 
 Contextual validation reports remaining verification requirements without admitting work.
-Schema-only local validation is narrower still. Normal serve remains admission-only, so a queued
-job does not progress merely because all admission checks passed. See [scheduler](scheduler.md),
+Schema-only local validation is narrower still. Admission-only serve starts no workers, so a
+queued job does not progress merely because all admission checks passed. See
 [dispatch](dispatch.md), [controls](operations.md) and [storage](storage.md).

@@ -23,8 +23,8 @@ distinct. A commit error is not permission to replay a transaction blindly.
 
 ## Migrations and history
 
-Embedded migrations 1–9 supply the current repositories. Applied version/name/bytes are checked
-against their checksummed ledger. Add a new migration instead of changing an applied one.
+Embedded, numbered migrations supply the current repositories. Applied version/name/bytes are
+checked against their checksummed ledger. Add a new migration instead of changing an applied one.
 Reject newer/foreign/tampered/gapped state; do not reset it. Restore/open may upgrade supported
 older schemas; arbitrary downgrade is unsupported.
 

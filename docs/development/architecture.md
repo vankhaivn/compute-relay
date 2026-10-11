@@ -41,8 +41,7 @@ A local `202` remains an admission receipt, not remote-success evidence.
 | [Auth and objects](auth-and-objects.md) | Current workspace authority, verified immutable bytes and separately committed ownership. |
 | [Admission](admission.md) | Strict request identity, frozen profile/input references and original job/attempt receipt. |
 | [Storage](storage.md) | Short atomic transactions, installation identity, migrations, OS locks and database-only backup. |
-| [Scheduler](scheduler.md) | Fair queue selection, account/worker capacity and fenced local claims. |
-| [Dispatch](dispatch.md) | Freeze inputs; commit preparation/submission intents before one permitted mutation; recover by observation. |
+| [Dispatch](dispatch.md) | Fair selection and fenced claims; freeze inputs; commit preparation/submission intents before one permitted mutation; recover by observation. |
 | [Controls](operations.md) | Explicit attempt-scoped cancel/retry/reconcile/collect receipts and current operation state. |
 | [Collection](collection.md) | Immutable result pin, selected byte verification and atomic publication. |
 | [Retention](retention.md) | Recovery pins, irreversible expiry, exact local deletion and remote dry-run limits. |

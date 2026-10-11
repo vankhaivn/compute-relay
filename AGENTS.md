@@ -10,7 +10,6 @@ Read [current status](docs/status.md) and the relevant guide from [docs](docs/RE
 For a substantial design change, consult the [approved proposal](docs/development/proposal.md),
 [requirement IDs](docs/development/scope-and-requirements.md), applicable ADRs and source/tests.
 The proposal defines intended scope; current guides/code define available commands.
-Do not make a new user read all completed PR audits before using the repository.
 
 For operator verification, start with [the validation checklist](docs/development/validation-checklist.md).
 Keep raw run evidence outside the repository; put only minimal sanitized reproductions and changed
@@ -55,16 +54,11 @@ The changelog describes a few user-visible unreleased features until an actual r
 
 ## Git and validation
 
-Use a focused branch/PR. No direct `main` push, auto-merge, force push or shared-history rewrite
-without task-specific authorization. Keep commits atomic and coherent: each commit must represent
-a complete logical change or milestone. Do not bunch unrelated subsystems into a monolithic commit,
-but strictly avoid artificial micro-commit spam (e.g. splitting a single fix or feature across
-multiple single-file commits by artificially separating code and its direct unit tests). A logical
-fix or capability and its direct regression tests belong together in one self-contained commit.
-Keep large documentation updates and code in separate scoped commits when appropriate, but do
-not dilute history with redundant micro-commits. Push reviewable checkpoints and stop for owner
-merge. Follow the [commit convention](docs/development/commit-convention.md); no AI/model/agent
-authors or co-authors.
+Follow the workflow in [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[commit convention](docs/development/commit-convention.md). No direct `main` push, auto-merge, force
+push or shared-history rewrite without task-specific authorization, and no AI/model/agent authors
+or co-authors. Each commit is one complete logical change: a fix or capability with its direct
+regression tests, not a monolithic bundle of subsystems and not artificial micro-commits.
 
 Before reporting completion, run relevant format/tests/contracts/link checks that are available,
 inspect the final diff for secrets and unrelated changes, and report exact commands and limits.

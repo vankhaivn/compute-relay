@@ -11,7 +11,7 @@ go run ./cmd/devtool test-race
 
 The [catalog](../../internal/devtool/fault-matrix.json) is the source of exact file/test identities.
 It compares complete scenario text/order with [proposal section 23.2](proposal.md#232-required-fault-scenarios)
-and runs 34 distinct nominated root tests with fresh `go test -json -count=1` evidence. Missing,
+and runs every distinct nominated root test with fresh `go test -json -count=1` evidence. Missing,
 skipped or failed roots/descendants, incomplete packages, malformed output and exceeded budgets
 fail. A green package with no matching test is insufficient. Full suites cover more than the catalog.
 

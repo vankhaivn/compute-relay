@@ -19,5 +19,5 @@ is not refreshed by missing data. Workers are bounded and join cooperative callb
 In-memory fairness and time-only lease recovery lose ordering or overcommit unresolved compute
 across restart. Separate local ownership from remote activity and the later write-ahead mutation
 gate. Conservative capacity can block work until evidence resolves uncertainty; a fresh quota
-read is not an external reservation. See [scheduler](../scheduler.md), [dispatch](../dispatch.md)
-and [operational quota](../providers/kaggle-operations.md).
+read is not an external reservation. See [scheduling and dispatch](../dispatch.md) and
+[operational quota](../providers/kaggle-operations.md).

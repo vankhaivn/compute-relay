@@ -1,8 +1,26 @@
-# Preparation, dispatch and recovery
+# Scheduling, dispatch and recovery
 
-The explicitly composed dispatch engine freezes original inputs and coordinates provider work
-under durable ownership. Normal `serve` does not start it. Workload commands never run on the
-control-plane host.
+The dispatch engine selects queued work fairly, freezes original inputs and coordinates provider
+work under durable ownership. The explicit and managed serve modes start it; admission-only serve
+does not. Workload commands never run on the control-plane host.
+
+## Fair selection and fenced claims
+
+SQLite records FIFO order within workspaces, round-robin fairness across workspaces, account
+policy, quota observations and worker leases. Selection, reservations, claim, state/event and
+fairness cursor commit atomically. Account scope comes from the accepted binding, so aliases or
+multiple workspaces cannot multiply the same account capacity.
+
+Claims carry owner, generation, unpredictable fence, expiry and original queue/attempt identity.
+Reclaim is limited to safe local/recovery work, and stale owners cannot publish callbacks after
+another owner takes over. A claim is not authority to submit remote compute; leases bound
+cooperative local ownership, not remote session lifetime.
+
+Missing, unavailable, stale or lower-bound quota is an explicit observation, never invented zero
+or allowance, and a fresh positive observation is not a reservation against external account use.
+Possible, active or ambiguous remote work retains account capacity independently of lease expiry;
+only proven inactive execution evidence releases it. Kaggle rounding and reservations are in
+[operational mappings](providers/kaggle-operations.md).
 
 ## One-way gates
 
@@ -56,6 +74,7 @@ retry creates a new attempt using original frozen inputs, never resets the old j
 retry does no compute. [Retention](retention.md) preserves active/ambiguous/recovery references.
 
 Invocation deadlines/poll backoff are local budgets, not an overall provider-session watchdog.
-Bounded workers join cooperative callbacks before shutdown; stopping a local engine does not
-cancel or delete remote resources. See [recovery](../recovery.md) and
+Bounded workers run orchestration callbacks, which must cooperate with cancellation; stalled
+callbacks do not cause unbounded replacement workers. Shutdown joins them before releasing owned
+stores, and stopping a local engine does not cancel or delete remote resources. See [recovery](../recovery.md) and
 [Kaggle execution](providers/kaggle-execution.md) for safe actions and provider-specific limits.
