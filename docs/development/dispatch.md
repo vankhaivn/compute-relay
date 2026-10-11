@@ -63,7 +63,9 @@ Journal/state/events and claim-fence checks share short transactions; no transac
 provider or blob I/O. Resource ownership is recovery evidence, not unconditional deletion authority.
 Observations must match resource/version/identity and valid timing. The latest raw unknown can
 be retained while confirmed attempt state remains stronger. Stale polls cannot undo terminal facts.
-Repeated unresolved outcomes stop for attention; possible activity and capacity remain retained.
+Five consecutive unresolved outcomes stop for attention; possible activity and capacity remain
+retained. Retries double the poll delay up to two minutes. After submission they start from 30
+seconds, so the attention threshold spans about seven minutes rather than a brief outage.
 
 Terminal provider evidence opens collection with unavailable results. Only the collector validates
 manifest/declared output bytes and publishes final result availability. Hardware release remains

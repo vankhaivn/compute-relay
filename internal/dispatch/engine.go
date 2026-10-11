@@ -112,6 +112,22 @@ func (e *Engine) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// submittedRetryFloor spreads the unresolved outcomes that park a submitted attempt for
+// attention over several minutes, so a brief provider or network outage cannot exhaust them.
+const submittedRetryFloor = 30 * time.Second
+
+// retryDelay doubles the poll delay per unresolved outcome up to two minutes.
+func retryDelay(poll time.Duration, j Journal) time.Duration {
+	delay := poll
+	if j.SubmitStarted && j.Failures > 0 {
+		delay = max(delay, submittedRetryFloor)
+	}
+	for n := 0; n < j.Failures && delay < 120*time.Second; n++ {
+		delay *= 2
+	}
+	return min(delay, 120*time.Second)
+}
+
 func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultErr error) {
 	work, err := e.repo.LoadDispatch(parent, claim, e.clock.Now())
 	if err != nil {
@@ -127,13 +143,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
 		w := s.work()
-		delay := e.config.PollDelay
-		for n := 0; n < w.Journal.Failures && delay < 120*time.Second; n++ {
-			delay *= 2
-		}
-		if delay > 120*time.Second {
-			delay = 120 * time.Second
-		}
+		delay := retryDelay(e.config.PollDelay, w.Journal)
 		if errors.Is(resultErr, ErrPolicy) {
 			delay = 5 * time.Minute
 		}
