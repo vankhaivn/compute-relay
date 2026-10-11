@@ -7,6 +7,10 @@ import selectors
 import signal
 import subprocess
 import time
+import sys
+import queue
+import threading
+import codecs
 
 from .contract import BUFFER, Failure
 
@@ -14,19 +18,69 @@ MARKER = b"\n[runner: log truncated]\n"
 SECRET = re.compile(rb"cr1_[A-Za-z0-9_-]{43}|(?:gh[pousr]_[A-Za-z0-9]{20,255})|(?:authorization[=: ]+bearer[ ]+|(?:api[_-]?key|token|password|secret)[=:][ ]*)[^\s\"']{1,512}", re.I)
 
 
+class Mirror:
+    """Bounded best-effort output; a blocked notebook cannot stall child drains."""
+
+    def __init__(self, stream, limit=16 << 20):
+        self.stream, self.remaining = stream, limit
+        self.queue = queue.Queue(maxsize=8)
+        self.failed = False
+        self.thread = threading.Thread(target=self._drain, daemon=True)
+        self.thread.start()
+
+    def _drain(self):
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        text_output = False
+        try:
+            while True:
+                data = self.queue.get()
+                if data is None:
+                    return
+                target = getattr(self.stream, "buffer", self.stream)
+                try:
+                    target.write(decoder.decode(data) if text_output else data)
+                except TypeError:
+                    text_output = True
+                    target.write(decoder.decode(data))
+                target.flush()
+        except Exception:
+            self.failed = True
+
+    def feed(self, data):
+        if self.failed or not data or self.remaining <= 0:
+            return
+        data = data[:self.remaining]
+        self.remaining -= len(data)
+        # Queue occupancy bounds memory even if the output writer blocks forever.
+        for offset in range(0, len(data), 8192):
+            try:
+                self.queue.put_nowait(data[offset:offset + 8192])
+            except queue.Full:
+                return
+
+    def close(self):
+        try:
+            self.queue.put_nowait(None)
+        except queue.Full:
+            pass
+        self.thread.join(timeout=0.02)
+
+
 class Log:
     """Best-effort known-pattern redaction; arbitrary workload data is not classified."""
 
-    def __init__(self, path, limit):
+    def __init__(self, path, limit, mirror=None):
         self.file = path.open("xb")
         self.limit, self.written, self.received = limit, 0, 0
         self.truncated = False
         self.pending = b""
+        stream = sys.stderr if "stderr" in path.name else sys.stdout
+        self.mirror = Mirror(stream) if mirror is None else mirror
 
     def feed(self, raw):
         self.received += len(raw)
         self.pending += raw
-        cut = max(0, len(self.pending) - 1024)
+        cut = max(0, len(self.pending) - 1024, self.pending.rfind(b"\n") + 1)
         for match in SECRET.finditer(self.pending):
             if match.start() < cut < match.end():
                 cut = match.start()
@@ -34,6 +88,7 @@ class Log:
         self.pending = self.pending[cut:]
 
     def _write(self, data):
+        self.mirror.feed(data)
         available = max(0, self.limit - len(MARKER) - self.written)
         selected = data[:available]
         self.file.write(selected)
@@ -50,6 +105,7 @@ class Log:
         self.file.flush()
         os.fsync(self.file.fileno())
         self.file.close()
+        self.mirror.close()
         return {"bytes_seen": self.received, "bytes_stored": self.written, "truncated": self.truncated}
 
 

@@ -106,7 +106,8 @@ artifact URLs outside the source checkout.
 ## Project status
 
 There is no public release yet. The normal runtime now has explicit Kaggle provider registration
-plus bounded dispatch/collection workers. Public provider log/cleanup surfaces, strict runtime
+plus bounded dispatch/collection workers and authenticated explicit-attempt log pages. Live-log
+qualification, public provider quota/cleanup surfaces, strict runtime
 configuration, doctor/client examples, cross-platform distribution, and release hardening remain.
 The [macOS arm64 companion](docs/companion-distribution.md) installs without a checkout or developer
 toolchain; it is an unsigned candidate bundle, not a published release. See [current status](docs/status.md) for what exists now.

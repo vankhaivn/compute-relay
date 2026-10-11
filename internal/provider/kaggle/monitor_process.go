@@ -49,7 +49,11 @@ func runMonitorSource(parent context.Context, c Config, mode string, token []byt
 	input = append(input, header...)
 	input = append(input, '\n')
 	defer clear(input)
-	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	budget := 30 * time.Second
+	if mode == "logs" {
+		budget = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, budget)
 	defer cancel()
 	work, err := os.MkdirTemp("", "compute-relay-monitor-")
 	if err != nil {

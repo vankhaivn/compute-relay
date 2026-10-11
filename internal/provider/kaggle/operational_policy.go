@@ -39,10 +39,10 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 			cap.Reason = "not implemented by this finite batch adapter"
 		case domain.CapabilityLogsAfterCompletion:
 			cap.Support = domain.CapabilitySupportSupported
-			cap.Reason = "bounded version-scoped provider log snapshots; not verified payload artifacts"
+			cap.Reason = "bounded version-scoped provider log replay; not verified payload artifacts"
 			cap.Conditions = []string{"exact kernel identity and explicit log field required; live availability is unverified"}
 		case domain.CapabilityLogsWhileRunning:
-			cap.Reason = "delayed snapshots may be returned; live SSE streaming is not implemented or claimed"
+			cap.Reason = "bounded read-only SSE replay with exact identity checks; account-scoped live availability remains unverified"
 		case domain.CapabilityQuotaReporting:
 			cap.Support = domain.CapabilitySupportSupported
 			cap.Reason = "explicit account-scoped read with conservative units, reservations and freshness"

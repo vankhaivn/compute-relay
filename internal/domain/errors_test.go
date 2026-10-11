@@ -36,7 +36,7 @@ func TestErrorTaxonomyCategories(t *testing.T) {
 			CodeResourceExhausted, CodeProviderExecutionLost,
 		},
 		ErrorCategoryObservation: {
-			CodeProviderUnreachable, CodeProviderStateUnknown, CodeRemoteIdentityMismatch,
+			CodeProviderUnreachable, CodeProviderStateUnknown, CodeRemoteIdentityMismatch, CodeLogCursorReset,
 		},
 		ErrorCategoryResults: {
 			CodeResultManifestMissing, CodeArtifactMissing, CodeArtifactDigestMismatch,

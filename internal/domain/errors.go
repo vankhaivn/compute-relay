@@ -55,6 +55,7 @@ const (
 	CodeProviderExecutionLost          ErrorCode = "PROVIDER_EXECUTION_LOST"
 	CodeProviderUnreachable            ErrorCode = "PROVIDER_UNREACHABLE"
 	CodeProviderStateUnknown           ErrorCode = "PROVIDER_STATE_UNKNOWN"
+	CodeLogCursorReset                 ErrorCode = "LOG_CURSOR_RESET"
 	CodeRemoteIdentityMismatch         ErrorCode = "REMOTE_IDENTITY_MISMATCH"
 	CodeResultManifestMissing          ErrorCode = "RESULT_MANIFEST_MISSING"
 	CodeArtifactMissing                ErrorCode = "ARTIFACT_MISSING"
@@ -99,6 +100,7 @@ var errorCategories = map[ErrorCode]ErrorCategory{
 	CodeProviderExecutionLost:          ErrorCategoryExecution,
 	CodeProviderUnreachable:            ErrorCategoryObservation,
 	CodeProviderStateUnknown:           ErrorCategoryObservation,
+	CodeLogCursorReset:                 ErrorCategoryObservation,
 	CodeRemoteIdentityMismatch:         ErrorCategoryObservation,
 	CodeResultManifestMissing:          ErrorCategoryResults,
 	CodeArtifactMissing:                ErrorCategoryResults,

@@ -1,0 +1,12 @@
+{
+  "api_version": "compute-connector/v1alpha1",
+  "workspace_id": "workspace_01",
+  "job_id": "job_01",
+  "source": "payload",
+  "availability": "live",
+  "lines": [
+    "processing frame 10"
+  ],
+  "next_cursor": "opaque-attempt-bound-cursor",
+  "truncated": false
+}

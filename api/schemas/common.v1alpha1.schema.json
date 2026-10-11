@@ -253,7 +253,8 @@
         "STATE_DIRECTORY_LOCKED",
         "CONFIGURATION_INVALID",
         "INVALID_REQUEST",
-        "REQUEST_LIMIT_EXCEEDED"
+        "REQUEST_LIMIT_EXCEEDED",
+        "LOG_CURSOR_RESET"
       ]
     },
     "failure_stage": {

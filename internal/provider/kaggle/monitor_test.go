@@ -94,7 +94,7 @@ func TestMonitorResponseRejectsMalformedAndContradictoryEvidence(t *testing.T) {
 	for _, r := range []monitorResponse{
 		{Protocol: 1, Status: "unknown", Reason: "missing_quota", UsedNS: "0"},
 		{Protocol: 1, Status: "unavailable", Reason: "read_unavailable", TextB64: "c2VjcmV0"},
-		{Protocol: 1, Status: "logs", Reason: "none", Availability: "live"},
+		{Protocol: 1, Status: "logs", Reason: "none", Availability: "invented"},
 		{Protocol: 1, Status: "logs", Reason: "none", Availability: "delayed", TextB64: "/w=="},
 		{Protocol: 1, Status: "logs", Reason: "none", Availability: "delayed", TextB64: base64.StdEncoding.EncodeToString(make([]byte, maxLogSnapshot+1))},
 	} {

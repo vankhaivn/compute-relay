@@ -36,7 +36,7 @@ assert sys.stdin.buffer.readline()==b'SYNTHETIC_STDIN\n'
 r=json.loads(sys.stdin.buffer.readline())
 assert r['protocol']==1 and sys.stdin.buffer.read()==b''
 assert 'SYNTHETIC_STDIN' not in str(sys.argv)
-print(json.dumps(dict(protocol=1,status='logs',reason='none',limit_ns='',used_ns='',reserved_ns='',text_b64=base64.b64encode(b'x'*65536).decode(),availability='delayed',truncated=True)))
+print(json.dumps(dict(protocol=1,status='logs',reason='none',limit_ns='',used_ns='',reserved_ns='',text_b64=base64.b64encode(b'x'*65536).decode(),availability='delayed',truncated=True,replay=False,offset=0,prefix='')))
 `
 	r, err := runMonitorSource(context.Background(), c, "logs", []byte("SYNTHETIC_STDIN"), monitorRequest{Protocol: 1, Owner: c.AccountName}, source)
 	if err != nil || !r.valid("logs") || !r.Truncated {
@@ -46,7 +46,7 @@ print(json.dumps(dict(protocol=1,status='logs',reason='none',limit_ns='',used_ns
 		`print('SYNTHETIC_TOKEN')`,
 		`print('x'*140000)`,
 		`import sys;sys.stderr.write('x'*20000)`,
-		`import sys;print('{"protocol":1,"status":"unknown","reason":"missing_quota","limit_ns":"","used_ns":"","reserved_ns":"","text_b64":"","availability":"","truncated":false}');sys.exit(23)`,
+		`import sys;print('{"protocol":1,"status":"unknown","reason":"missing_quota","limit_ns":"","used_ns":"","reserved_ns":"","text_b64":"","availability":"","truncated":false,"replay":false,"offset":0,"prefix":""}');sys.exit(23)`,
 	} {
 		if r, err := runMonitorSource(context.Background(), c, "quota", []byte("SYNTHETIC_TOKEN"), monitorRequest{Protocol: 1, Owner: c.AccountName}, source); err == nil || r != (monitorResponse{}) || strings.Contains(err.Error(), "SYNTHETIC_TOKEN") {
 			t.Fatal("failed process returned data or a secret", err)

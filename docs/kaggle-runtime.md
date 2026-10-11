@@ -299,8 +299,9 @@ This integrated path is intentionally narrow:
 - The normal server runs one dispatch worker and one collection worker.
 - Provider config is explicit JSON; strict runtime TOML/doctor remain future product work.
 - Direct HTTPS input preparation is not enabled in this composition; use uploaded immutable inputs.
-- Provider quota/log components exist internally, but there is no public provider quota/log HTTP
-  API in the normal server yet.
+- Authenticated explicit-attempt log pages are available through the `job_logs` capability; see
+  [API usage](../api/README.md#reading-attempt-logs). Bounded running replay has offline evidence;
+  account-scoped live qualification remains pending. A public provider quota HTTP API is not shipped.
 - Provider timeout enforcement beyond local/runner budgets, exact hardware release and remote
   cleanup remain unverified or unsupported as documented in [Current status](status.md).
 

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay explicit-attempt log page v1alpha1",
+  "description": "Read-only bounded output for an original attempt, not verified artifact bytes, execution completion or resource release evidence. Live qualification is provider/account specific.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "workspace_id",
+    "job_id",
+    "attempt_id",
+    "source",
+    "availability",
+    "lines",
+    "next_cursor",
+    "truncated"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "compute-connector/v1alpha1"
+    },
+    "workspace_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+    },
+    "job_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+    },
+    "attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "source": {
+      "enum": [
+        "provider",
+        "payload"
+      ]
+    },
+    "availability": {
+      "enum": [
+        "live",
+        "delayed",
+        "after_completion",
+        "unavailable",
+        "unknown"
+      ]
+    },
+    "lines": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "description": "Untrusted diagnostic text. Runtime bounds each line to 16 KiB UTF-8 and the complete page to 256 KiB; schema string lengths count characters."
+    },
+    "next_cursor": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Opaque exact-reference continuation, bounded to 512 UTF-8 bytes by the runtime. Empty means no continuation supplied; a caught-up live page can retain a cursor."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "Some output exceeded a retention, event or page bound. Pagination cannot recover discarded bytes."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "availability": {
+            "enum": [
+              "unavailable",
+              "unknown"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "lines": {
+            "maxItems": 0
+          },
+          "next_cursor": {
+            "const": ""
+          }
+        }
+      }
+    }
+  ]
+}

@@ -100,7 +100,11 @@ Provider timeout enforcement still requires independent evidence.
 
 Stdout/stderr default to 20 MiB retained per stream, with seen/stored counts and truncation.
 Known credential-pattern redaction is best-effort hygiene, not a universal secret detector.
-There is no live-log transport here. Declared outputs are checked for containment, links,
+Redacted child output is also mirrored to notebook stdout/stderr through a bounded best-effort
+queue. A blocked writer, overflow or output failure can drop mirrored bytes without stalling
+child drains or execution; retained files remain the artifact source. The separate Relay log
+reader observes provider replay, with account-scoped live qualification still pending.
+Declared outputs are checked for containment, links,
 type, count, size and digest. Missing required output prevents success; a collection error
 does not erase an earlier payload failure.
 

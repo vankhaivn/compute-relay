@@ -53,13 +53,18 @@
     },
     {
       "path": "runner/python/relay_runner/process.py",
-      "bytes": 5018,
-      "sha256": "35605a88faf151847b56cd1d7d568a1db2033e6d09426fc16a568ed09835d179"
+      "bytes": 6937,
+      "sha256": "403a9deb0751136053c2831f89e748ee838c4808f8c4777f0a56bd1b273550ef"
     },
     {
       "path": "runner/python/run.py",
       "bytes": 180,
       "sha256": "d0f6f28d65806646ed9305a37cef0919557f29bfeb0efeabc2fed7e82ee328a8"
+    },
+    {
+      "path": "runner/tests/test_mirror.py",
+      "bytes": 1617,
+      "sha256": "6d6f6d6581f0f9fa83a2b05941332c44661be3d127414a4d0c49632e328b8644"
     },
     {
       "path": "runner/tests/test_runner.py",

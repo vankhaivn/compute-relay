@@ -34,7 +34,7 @@ cleanup, public data or paid capacity.
 
 | Task | Work remaining / acceptance |
 |---|---|
-| M5-01 | Kaggle provider registration and bounded dispatch/collection lifecycle are implemented behind explicit finite authorization. Remaining work is public provider log/quota/cleanup surfaces and broader product hardening; preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
+| M5-01 | Kaggle provider registration and bounded dispatch/collection lifecycle are implemented behind explicit finite authorization. Bounded explicit-attempt log reads are implemented offline. Remaining work is live-log qualification, public provider quota/cleanup surfaces and broader product hardening; preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
 | M5-02 | Strict TOML runtime configuration, precedence, paths, safe defaults and validated examples; exclude secret values. Depends on M4-01/M5-01 interfaces. |
 | M5-03 | Doctor with separate local/read-only/explicit-compute modes. Depends on M4-01/M5-02. |
 | M5-04 | Verify and document GPU smoke plus a small pinned open-access LLM batch example. Depends on M4-06 and verified environment/model terms. |

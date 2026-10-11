@@ -1,5 +1,5 @@
-// Package api supplies an authenticated loopback HTTP foundation. It has no scheduler,
-// provider calls, runtime deployment, or nondurable job-admission fallback.
+// Package api supplies an authenticated loopback HTTP boundary. Application services
+// own bounded provider reads; handlers cannot schedule or mutate provider work.
 package api
 
 import (
@@ -26,11 +26,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
 type Config struct {
+	Logs           *joblogs.Reader        // Explicit-attempt bounded observational output; nil disables the capability.
 	Connections    *connections.Service   // Optional live management; handlers never invoke providers.
 	Authorizations *executionauth.Service // Optional durable managed-attempt consent.
 	Results        *collection.Reader     // nil disables published artifact reads; no provider fallback.
@@ -147,7 +149,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	isArtifact := artifactPath(r.URL.Path)
-	if r.URL.RawQuery != "" && !isArtifact || len(r.URL.Path) > 2048 || r.URL.RawPath != "" || len(r.URL.RawQuery) > 512 {
+	isLogs := logPath(r.URL.Path)
+	queryLimit := 512
+	if isLogs {
+		queryLimit = 2048
+	}
+	if r.URL.RawQuery != "" && !isArtifact && !isLogs || len(r.URL.Path) > 2048 || r.URL.RawPath != "" || len(r.URL.RawQuery) > queryLimit {
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "unexpected query or encoded path")
 		return
 	}
@@ -230,6 +237,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.config.Authorizations != nil {
 			features = append(features, "attempt_authorization")
 		}
+		if h.config.Logs != nil {
+			features = append(features, "job_logs")
+		}
 		if h.config.Results != nil {
 			features = append(features, "artifact_list", "artifact_metadata", "artifact_download")
 		}
@@ -255,6 +265,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if segments[3] == "jobs" && (len(segments) == 6 && segments[5] == "authorize" || len(segments) == 7 && segments[5] == "authorizations") {
 		h.authorizations(w, r, principal, workspace, segments)
+		return
+	}
+	if isLogs {
+		h.logs(w, r, principal, workspace, segments)
 		return
 	}
 	if isArtifact {

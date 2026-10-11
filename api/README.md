@@ -21,11 +21,11 @@ verified file bytes or proof that a planned endpoint is enabled.
 
 ## Current handler inventory
 
-There are twenty-six composable HTTP operations. Ordinary local serve composes sixteen;
+There are twenty-seven composable HTTP operations. Ordinary local serve composes seventeen;
 two import/ingestion operations remain optional and managed mode adds eight more below.
 Admission-only serve starts no provider workers;
-provider-enabled serve may run separate durable dispatch/collection workers, but HTTP handlers
-still never invoke providers directly.
+provider-enabled serve may run separate durable dispatch/collection workers. Log reads use a
+bounded observational application service; they cannot dispatch or mutate provider work.
 
 ```text
 GET  /healthz
@@ -38,6 +38,7 @@ POST /v1/workspaces/{w}/objects/ingest       (optional; disabled in local host)
 POST /v1/workspaces/{w}/jobs/validate
 POST /v1/workspaces/{w}/jobs
 GET  /v1/workspaces/{w}/jobs/{j}
+GET  /v1/workspaces/{w}/jobs/{j}/logs
 POST /v1/workspaces/{w}/jobs/{j}/cancel
 POST /v1/workspaces/{w}/jobs/{j}/retry
 POST /v1/workspaces/{w}/jobs/{j}/reconcile
@@ -50,8 +51,8 @@ GET  /v1/workspaces/{w}/jobs/{j}/artifacts/{artifact_id}/content
 
 Only `/healthz` is public. Other operations require current workspace/token authority as defined
 in OpenAPI. Readiness is local dependency readiness, not a GPU/profile/worker check. Artifact
-operations require an explicit `attempt_id` query parameter. No provider logs, public event
-stream or cleanup service is implied by reserved schema fields.
+and log operations require an explicit `attempt_id` query parameter. A public event stream or
+cleanup service is not implied by these reads.
 
 ## Optional managed extension
 
@@ -94,7 +95,31 @@ pending/active transfer, verification and published availability; [collection](.
 defines dated output-byte progress and restart generations. While the active attempt is
 `preparing`, additive status `preparation.progress` reports frozen input bytes an adapter has
 handed to its provider upload (`staged_input_bytes`); it is absent when the adapter cannot observe
-its upload and never means provider readiness. Handlers never call providers.
+its upload and never means provider readiness.
+
+## Reading attempt logs
+
+Check authenticated `/v1/info` for `job_logs`, then request:
+
+```text
+GET /v1/workspaces/{w}/jobs/{j}/logs?attempt_id={original_attempt}&limit=100&cursor={opaque_cursor}
+```
+
+Use current read authority and an explicit original attempt, including historical attempts.
+Omit `cursor` on the first request; `limit` defaults to 100 and accepts 1–100. Duplicate or unknown
+query parameters and request bodies are rejected. The response contains `source`, `availability`,
+`lines`, `next_cursor` and `truncated`, alongside exact workspace/job/attempt IDs. Runtime bounds
+are 100 lines, 16 KiB per line, 256 KiB per page, a 512-byte cursor and a 10-second read deadline.
+Treat lines as untrusted text and preserve a returned cursor even on an empty live page.
+
+A legitimate pre-submit attempt or provider without log support returns `unavailable` with no
+lines or cursor. HTTP 400 rejects invalid/foreign cursors; HTTP 409 `LOG_CURSOR_RESET` requires an
+explicit restart with an empty cursor and a visible continuity gap. Pagination cannot recover
+discarded output. EOF, `after_completion` and render messages do not replace job status or
+verified result publication. Reads revalidate authority before releasing bytes and cannot create,
+authorize, retry, reconcile, collect or cancel compute. Closing a reader leaves execution running.
+Kaggle uses bounded exact-reference replay internally; account-scoped live qualification remains
+pending. Local-admission-only mode returns truthful unavailable pages without provider work.
 
 Artifact metadata/pages describe a historical publication. Binary content requires exact bytes
 and the final `X-Compute-Relay-Verified` trailer; see [delivery](../docs/artifact-delivery.md).

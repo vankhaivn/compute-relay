@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/api"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
+	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -73,8 +74,9 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	var collector *collection.Engine
 	var schedulerSettings scheduler.Settings
 	var managed *managedServices
+	var logResolver joblogs.Resolver
 	if serve.Kaggle != nil {
-		dispatcher, collector, schedulerSettings, err = h.kaggleWorkers(ctx, *serve.Kaggle)
+		dispatcher, collector, schedulerSettings, logResolver, err = h.kaggleWorkers(ctx, *serve.Kaggle)
 		if err != nil {
 			return err
 		}
@@ -87,6 +89,9 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 			return err
 		}
 		dispatcher, collector, schedulerSettings = managed.dispatcher, managed.collector, managed.settings
+		if managed.resolver != nil {
+			logResolver = managed.resolver
+		}
 		mode = "managed-connections"
 		dispatchEnabled = dispatcher != nil
 		if dispatchEnabled {
@@ -110,6 +115,10 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	cfg := api.DefaultConfig()
 	cfg.Listen = listener.Addr().String()
 	cfg.Jobs, cfg.Operations, cfg.Results = jobs, controls, results
+	cfg.Logs, err = joblogs.NewReader(h.access, h.store, logResolver)
+	if err != nil {
+		return ErrState
+	}
 	if managed != nil {
 		cfg.Connections, cfg.Authorizations = managed.connections, managed.authorizations
 	}
