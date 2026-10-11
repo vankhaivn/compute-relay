@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Compute Relay durable control receipt v1alpha1",
-  "description": "The actual HTTP control view, separate from the generic domain operation. A replayed POST preserves the original receipt; GET returns the current durable revision. Cancellation acceptance is not remote termination. Collection acceptance is not verified artifact publication.",
+  "description": "The actual HTTP control view, separate from the generic domain operation. A replayed POST preserves the original receipt; GET returns the current durable revision. Cancellation acceptance is not remote termination. Collection acceptance is not verified artifact publication. Cleanup acceptance is not remote deletion; only a succeeded cleanup reports remote_deleted or already_absent.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -38,7 +38,8 @@
         "cancel",
         "retry_compute",
         "reconcile",
-        "collect"
+        "collect",
+        "cleanup"
       ]
     },
     "status": {
@@ -66,6 +67,8 @@
         "results_available",
         "new_attempt_created",
         "manual_required",
+        "remote_deleted",
+        "already_absent",
         "failed"
       ]
     },
@@ -245,6 +248,45 @@
         },
         "effect": {
           "const": "too_late"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "cleanup"
+        },
+        "status": {
+          "const": "running"
+        },
+        "effect": {
+          "const": "pending"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "cleanup"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "remote_deleted"
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "cleanup"
+        },
+        "status": {
+          "const": "succeeded"
+        },
+        "effect": {
+          "const": "already_absent"
         }
       }
     }
