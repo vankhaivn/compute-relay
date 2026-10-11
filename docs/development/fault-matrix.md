@@ -42,7 +42,7 @@ fail. A green package with no matching test is insufficient. Full suites cover m
 | FM21 | Disk faults do not expose partial success. | Injected upload faults and actual SQLITE_FULL; not host power-loss proof. |
 | FM22 | Credential/account change cannot select a fallback. | Frozen-binding synthetic rejection/recovery. |
 | FM23 | Modified remote identity fails closed. | Injected resource/version change. |
-| FM24 | Repeated exact owned absence is safe. | Dry-run cleanup only; no remote apply/staging cleanup. |
+| FM24 | Repeated exact owned absence is safe. | Dry-run preview, plus explicit attempt-scoped apply recording `already_absent` against the synthetic provider; nothing is deleted automatically. |
 | FM25 | Nonzero CLI exit after a possible effect is not rejection. | Real repository helper with synthetic acceptance, not official live CLI. |
 
 ## Interpretation and maintenance

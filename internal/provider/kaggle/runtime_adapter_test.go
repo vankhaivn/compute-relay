@@ -46,3 +46,10 @@ func TestRuntimeAdapterReadOnlyNeverAuthorizesMutation(t *testing.T) {
 		t.Fatal("read-only adapter authorized provider mutation", err)
 	}
 }
+
+func TestRuntimeCleanupIsExplicitlyUnsupported(t *testing.T) {
+	_, err := (&RuntimeAdapter{}).Cleanup(context.Background(), provider.CleanupRequest{Mode: provider.CleanupApply})
+	if !errors.Is(err, ErrRuntimeCleanup) || !errors.Is(err, provider.ErrCleanupUnsupported) {
+		t.Fatal("runtime cleanup must report an unsupported adapter", err)
+	}
+}
