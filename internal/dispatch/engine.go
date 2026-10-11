@@ -112,13 +112,20 @@ func (e *Engine) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// submittedRetryFloor spreads the unresolved outcomes that park a submitted attempt for
-// attention over several minutes, so a brief provider or network outage cannot exhaust them.
-const submittedRetryFloor = 30 * time.Second
+// A submitted remote run is observed at most every 15 seconds; control requests still wake it
+// at once. Unresolved outcomes after submission start from 30 seconds, so the ones that park an
+// attempt for attention span several minutes rather than a brief provider or network outage.
+const (
+	submittedPollFloor  = 15 * time.Second
+	submittedRetryFloor = 30 * time.Second
+)
 
-// retryDelay doubles the poll delay per unresolved outcome up to two minutes.
-func retryDelay(poll time.Duration, j Journal) time.Duration {
+// nextPassDelay doubles the poll delay per unresolved outcome up to two minutes.
+func nextPassDelay(poll time.Duration, j Journal) time.Duration {
 	delay := poll
+	if j.Remote != nil {
+		delay = max(delay, submittedPollFloor)
+	}
 	if j.SubmitStarted && j.Failures > 0 {
 		delay = max(delay, submittedRetryFloor)
 	}
@@ -143,7 +150,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
 		w := s.work()
-		delay := retryDelay(e.config.PollDelay, w.Journal)
+		delay := nextPassDelay(e.config.PollDelay, w.Journal)
 		if errors.Is(resultErr, ErrPolicy) {
 			delay = 5 * time.Minute
 		}
