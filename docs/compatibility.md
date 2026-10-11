@@ -13,7 +13,7 @@ live-provider support promise. See [current status](status.md) for implemented f
 | Python client | 3.11.16 | `tools/kaggle-client/.python-version`, client workflow |
 | uv | 0.12.13 | Client `pyproject.toml` and wrappers |
 | Kaggle CLI / SDK | 2.2.4 / 0.1.35 | Client `pyproject.toml`, `uv.lock` |
-| Remote workload environment | Linux; actual Python/PyTorch/CUDA recorded by the run | Runner manifest and live acceptance report |
+| Remote workload environment | Linux; actual Python/PyTorch/CUDA recorded by the run | Runner manifest and live run record |
 
 These are project pins, not claims about the latest upstream release. The local client
 virtual environment does not determine the managed provider image or install remote PyTorch.
@@ -42,12 +42,9 @@ See [local runtime](local-runtime.md), [artifact delivery](artifact-delivery.md)
 
 ## Provider support is evidence-scoped
 
-Preflight, private staging, one-shot execution, quota/log snapshots and selected artifact
-retrieval have offline implementations. The fixed GPU harness composes them for an explicit
-operator experiment; its private-staging, Tesla T4 execution, separate-process recovery and
-complete artifact-publication path has been qualified live. The normal runtime can now compose
-bounded Kaggle dispatch/collection workers explicitly; that integrated path remains pre-release
-and does not inherit arbitrary-account/workload live support from the fixed experiment.
+The account check, private staging, one-shot execution, quota/log snapshots and selected
+artifact retrieval have offline implementations; the live evidence so far is listed in
+[current status](status.md). Another account or workload does not inherit that support.
 
 Cancellation remains manual-required without a verified session target. Provider timeout
 enforcement, same-version rerun identity and exact hardware release cannot be inferred from

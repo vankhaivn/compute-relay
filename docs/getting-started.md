@@ -186,6 +186,5 @@ Day-to-day references are [Local runtime](local-runtime.md), [Application CLI](a
 [Artifact delivery](artifact-delivery.md) and [Recovery](recovery.md).
 
 To run an application job on Kaggle, continue with the user-facing
-[Kaggle runtime](kaggle-runtime.md). Contributors changing provider internals or repeating the
-fixed qualification experiment should instead start with
+[Kaggle runtime](kaggle-runtime.md). Contributors start with
 [Development documentation](development/README.md).

@@ -44,8 +44,7 @@ what is actually available now.
 
 ## Provider work
 
-Provider contracts, Kaggle internals and the bounded live acceptance path are grouped under
-[providers](providers/README.md). These documents are not the normal end-user runbook.
+Provider contracts and Kaggle internals are grouped under [providers](providers/README.md).
 
 Research and source-evidence records are under [research](research/README.md).
 

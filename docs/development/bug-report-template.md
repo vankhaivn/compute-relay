@@ -10,12 +10,12 @@ belongs in the implementation blocker register instead. Report vulnerabilities p
 - **Status:** open / investigating / fix-pending-verification / verified-fixed.
 - **Check / run:** Vxx / RUN-YYYYMMDD-NN.
 - **Source SHA and dirty patch:** exact commit; explicitly state whether code was modified.
-- **Executable SHA-256:** especially the original acceptance binary; retain it unchanged.
+- **Executable SHA-256:** the original binary; retain it unchanged.
 - **Environment:** OS/architecture/filesystem and actual Go/Python/uv/client/SDK versions.
 - **Configuration:** minimal sanitized shape, relevant limits, account alias and shape; actual
   secrets, paths and complete configuration remain private.
-- **Workload/input:** minimal sanitized job specification and synthetic reproduction fixture,
-  or the fixed acceptance case ID. Record original bundle/input/pin hashes; do not attach private
+- **Workload/input:** minimal sanitized job specification and synthetic reproduction fixture.
+  Record original bundle/input/pin hashes; do not attach private
   bundles or replace frozen inputs just to reproduce the error.
 - **Authorization:** exact approved reads/mutations/budget; state which effects were attempted.
 
@@ -49,7 +49,7 @@ belongs in the implementation blocker register instead. Report vulnerabilities p
 
 List minimal sanitized excerpts and SHA-256 of retained private evidence. Redact tokens,
 Authorization/Cookie, signed URL query strings, account names, secret references when sensitive,
-private inputs and raw workload/provider logs. Do not upload a full state or acceptance archive.
+private inputs and raw workload/provider logs. Do not upload a full state archive.
 
 Record a safe read/reproduction suggestion only when justified by observed state. Do not propose
 a new submission, root reset, CPU/provider fallback or deletion to make the test green.

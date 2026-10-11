@@ -40,8 +40,7 @@ The document is bounded to 8 KiB and rejects unknown/duplicate/case-alias/null f
 Unicode. Each `(name, revision)` is immutable: reapply identical content or use a new revision
 for changed policy/account/instance. `enabled` is a separate alias flag. History is not deleted.
 The optional `credential_ref` is metadata using the existing `env:`/`file:` syntax, not a token
-value and not resolved here. Actual Kaggle credential support is described in its preflight guide.
-This admission document is not complete provider configuration or the unfinished TOML loader.
+value and not resolved here. This admission document is not complete provider configuration.
 
 ## Connect the application
 

@@ -23,5 +23,5 @@ implicit fallback can consume credentials during a supposedly local check. The e
 limits compatibility and introduces version-bound transport maintenance, not a stable public
 session-injection guarantee. Clearing owned buffers cannot erase all OS/string copies.
 
-See [setup/preflight](../providers/kaggle-preflight.md) and
+See [client configuration](../providers/kaggle-preflight.md) and
 [operator validation](../validation-checklist.md).

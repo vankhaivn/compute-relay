@@ -4,8 +4,8 @@ These records preserve accepted design choices, their reasons and consequences. 
 implementation diaries or live-run reports. Use [current status](../../status.md) for current support
 claims and focused issues/PRs for sanitized evidence that changes those claims.
 
-All decisions below are accepted. Editing for clarity does not change their outcome; a material
-new choice requires a superseding ADR. Historical wording and review discussion remain in Git.
+All decisions below are accepted unless marked otherwise. Editing for clarity does not change
+their outcome; a material new choice requires a superseding ADR. Historical wording and review discussion remain in Git.
 
 | ADR | Decision |
 |---|---|
@@ -28,18 +28,18 @@ new choice requires a superseding ADR. Historical wording and review discussion 
 | [0017](0017-one-shot-kaggle-execution.md) | Locked source and exact-identity execution under durable intent. |
 | [0018](0018-kaggle-operational-evidence.md) | Conservative quota, bounded log snapshots and manual cancellation. |
 | [0019](0019-version-scoped-kaggle-artifacts.md) | Explicit version/file reads and original-pin collection recovery. |
-| [0020](0020-explicit-durable-gpu-acceptance.md) | Fixed authorized GPU experiment with a separate resume process. |
+| [0020](0020-explicit-durable-gpu-acceptance.md) | Deprecated: fixed authorized GPU experiment with a separate resume process. |
 | [0021](0021-local-runtime-lifecycle.md) | Private local operator commands and admission-only HTTP lifecycle. |
 | [0022](0022-immutable-profiles-and-application-client.md) | Immutable admission profiles and non-replaying application CLI. |
 | [0023](0023-verified-artifact-delivery.md) | Current-authority downloads with final acknowledgement and create-only files. |
 | [0024](0024-explicit-bounded-provider-workers.md) | Explicit finite provider authorization and durable workers in normal serve. |
-
-| [0026](0026-explicit-result-collection.md) | Frozen manual collection opt-in and fenced selected-output byte progress. |
 | [0025](0025-managed-connections-and-attempt-authorization.md) | Optional managed connections, protected credentials and durable per-attempt authorization. |
+| [0026](0026-explicit-result-collection.md) | Frozen manual collection opt-in and fenced selected-output byte progress. |
 
 ## Add or revise a decision
 
 Use `NNNN-short-name.md`, never reuse numbers, and start from [template](template.md).
 Statuses are proposed, accepted, superseded by ADR-NNNN, deprecated or rejected. State the
 material decision, alternatives/reason and actual consequences. Link the current detailed guide
-rather than duplicating it. Keep tests/run outcomes in the relevant PR or issue, not a growing ADR audit. Do not create an ADR for routine formatting, naming or documentation cleanup.
+rather than duplicating it. Keep tests/run outcomes in the relevant PR or issue. Do not create an
+ADR for routine formatting, naming or documentation cleanup.

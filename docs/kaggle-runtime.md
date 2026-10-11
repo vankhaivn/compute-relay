@@ -8,10 +8,8 @@ local-admission-only and cannot consume provider quota. With the complete provid
 the server performs a read-only account check before it starts workers, then runs one durable
 dispatch worker and one collection worker.
 
-The fixed Kaggle acceptance experiment has live-qualified the underlying private-staging,
-Tesla-T4, restart/reconciliation and artifact-publication components. The integrated normal-server
-path is implemented and covered by offline/native CI, but it still requires operator
-re-qualification before making a new environment/account support claim.
+Live evidence so far is listed in [current status](status.md). Re-qualify a new environment or
+account before claiming support for it.
 
 > **Fresh runtime root:** when creating a runtime for the first time, the path passed to
 > `compute-relay init --root ...` must **not already exist**. Create only its parent directory;

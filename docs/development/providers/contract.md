@@ -41,7 +41,7 @@ manifest validation does not replace full schema, required-output, phase and GPU
 Cleanup is not cancellation. Port requests need an explicit mode, exact resource/creation
 operation and actual verified ownership/retention evidence. A syntactically valid ledger ID
 or prefix is insufficient. Current production-facing [retention](../retention.md) previews are
-dry-run-only; the acceptance adapter cannot apply cleanup. Never infer deletion from a preview.
+dry-run-only; no adapter applies cleanup. Never infer deletion from a preview.
 
 ## Infrastructure and verification
 

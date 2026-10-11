@@ -1,9 +1,8 @@
 # Private staging and readiness
 
 The Stager prepares one attempt's original bytes and separately verifies private readiness.
-It is not a journal and never owns durable mutation authority. Both the fixed
-[acceptance utility](kaggle-acceptance.md) and the explicitly configured normal
-[Kaggle runtime](../../kaggle-runtime.md) compose it behind the durable dispatch gate.
+It is not a journal and never owns durable mutation authority. The explicit and managed serve
+modes compose it behind the durable dispatch gate.
 
 ## Authority and frozen identity
 

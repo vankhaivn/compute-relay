@@ -6,26 +6,13 @@ application authorization, the durable queue or permission to retry ambiguous co
 | Reference | Purpose |
 |---|---|
 | [Provider contract](contract.md) | Required/optional ports, identity and outcome semantics. |
-| [Kaggle preflight](kaggle-preflight.md) | Locked environment, explicit credentials and local/read-only checks. |
+| [Kaggle client configuration](kaggle-preflight.md) | Locked environment, explicit credentials and the read-only account check. |
 | [Private staging](kaggle-staging.md) | One-shot preparation, exact bytes and separately observed readiness. |
 | [Execution](kaggle-execution.md) | Frozen source, submission authority and exact-version observation. |
 | [Operational mappings](kaggle-operations.md) | Quota, bounded log replay, cancellation and timeout evidence. |
 | [Artifacts](kaggle-artifacts.md) | Versioned selected-file reads and immutable collection recovery. |
-| [Acceptance runbook](kaggle-acceptance.md) | The fixed, explicitly authorized GPU experiment. |
 
-Use the [operator checklist](../validation-checklist.md) for re-qualification.
-Keep full operator run records private and use focused issues/PRs for sanitized failures or
-support-changing evidence. Source/fixture evidence is not live account support. The normal runtime
-is admission-only by default and can enable bounded Kaggle workers only through the explicit
-[user runbook](../../kaggle-runtime.md).
-
-
-## Normal runtime integration
-
-The normal runtime can now compose the Kaggle adapter with durable dispatch and collection workers
-when the operator supplies an exact immutable profile/provider binding, explicit staging/GPU
-authorization and a finite process attempt budget. The safe default remains admission-only.
-
-This integrated path reuses the components documented here; it does not replace the fixed
-acceptance utility as live evidence. See [user runbook](../../kaggle-runtime.md) and
-[ADR-0024](../decisions/0024-explicit-bounded-provider-workers.md).
+The explicit and managed serve modes compose these components behind durable dispatch and
+collection workers; see the [Kaggle runtime](../../kaggle-runtime.md) and
+[ADR-0024](../decisions/0024-explicit-bounded-provider-workers.md). Source and fixture evidence is
+not live account support; use the [validation checklist](../validation-checklist.md) to re-qualify.

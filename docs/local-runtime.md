@@ -60,8 +60,7 @@ authority affects subsequent authorized work; it is not remote cancellation.
 
 The installation binds SQLite and separate input/result stores with private identity markers.
 Only `init` creates a new installation. Missing/corrupt/swapped stores or markers are rejected,
-not recreated. Do not edit markers, rename acceptance directories into this format, or manually
-seed SQL. Opening supported state may apply existing migrations; local inspection is not a
+not recreated. Do not edit markers or manually seed SQL. Opening supported state may apply existing migrations; local inspection is not a
 byte-for-byte read-only filesystem operation.
 
 Token scopes are explicit `read`, `write`, `operate`, `manage`, `execute`; TTL defaults to 24 hours and is bounded

@@ -41,7 +41,7 @@ The bundle contains `metadata.sqlite` and `backup.json`; missing receipts, sidec
 excessive size or unsupported schemas fail. These are Go composition APIs, **not a backup CLI**.
 Default snapshot ceiling is 256 MiB, explicitly configurable within implementation bounds.
 
-A database snapshot does not contain input/result bytes, acceptance process markers or future
+A database snapshot does not contain input/result bytes, identity markers or future
 revocations/expiry facts. Checksums detect corruption, not malicious replacement of both data
 and receipt. Preserve interrupted output for diagnosis; it is not a successful backup.
 
