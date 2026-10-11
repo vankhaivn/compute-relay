@@ -24,7 +24,7 @@ feature set, not individual commits, audits or CI runs.
 - Reproducible macOS arm64 companion bundles with a locked independent provider interpreter,
   complete payload checksums, create-new installation and relocation discovery.
 
-**Pre-release:** public provider log/cleanup surfaces, strict runtime configuration, doctor/client
+**Pre-release:** live-log qualification, public provider cleanup surfaces, strict runtime configuration, doctor/client
 examples, cross-platform distribution and full release hardening remain. The integrated normal-server
 path requires scoped operator re-qualification before new live support claims. See
 [current status](docs/status.md).

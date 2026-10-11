@@ -78,6 +78,11 @@ func (h *handler) logs(w http.ResponseWriter, r *http.Request, p auth.Principal,
 		respondError(w, r, 409, domain.CodeLogCursorReset, domain.FailureStageObservation, "log continuity changed; restart from an empty cursor")
 		return
 	}
+	var failure provider.LogReadFailure
+	if errors.As(err, &failure) && failure.Valid() {
+		respondError(w, r, 503, domain.CodeStateStoreUnavailable, domain.FailureStageObservation, failure.Error())
+		return
+	}
 	if err != nil {
 		mapError(w, r, err)
 		return

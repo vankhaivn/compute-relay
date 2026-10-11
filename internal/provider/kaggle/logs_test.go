@@ -92,10 +92,11 @@ func TestLogSnapshotsBoundLinesAndDistinguishEmptyUnavailableAndIdentityFailure(
 	if err != nil || page.Availability != "after_completion" || len(page.Lines) != 0 || page.Truncated || page.NextCursor != "" {
 		t.Fatal("empty log misrepresented", err)
 	}
-	reply = monitorResponse{Protocol: 1, Status: "unavailable", Reason: "missing_log"}
+	reply = monitorResponse{Protocol: 1, Status: "unavailable", Reason: "read_unavailable"}
 	page, err = reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
-	if err != nil || page.Availability != "unavailable" || len(page.Lines) != 0 || page.Source != "provider" {
-		t.Fatal("invented fallback logs", err)
+	var failure provider.LogReadFailure
+	if !errors.As(err, &failure) || failure.Reason != "read_unavailable" || len(page.Lines) != 0 || page.NextCursor != "" {
+		t.Fatal("lost safe diagnostic or invented fallback logs", page, err)
 	}
 	reply = monitorResponse{Protocol: 1, Status: "invalid", Reason: "identity_mismatch"}
 	if _, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1}); !errors.Is(err, ErrExecutionIdentity) {
@@ -148,5 +149,25 @@ func TestReplayCaughtUpLiveKeepsCursorAndTerminalEmptyEnds(t *testing.T) {
 	page, err = reader.ReadLogs(context.Background(), ref, request)
 	if err != nil || page.NextCursor != "" || len(page.Lines) != 0 {
 		t.Fatal(page, err)
+	}
+}
+
+func TestLogReadFailureReasonsRemainTypedAndContainNoLines(t *testing.T) {
+	reasons := []string{"auth_read_failed", "kernel_read_failed", "stream_timeout", "stream_http_401", "stream_http_403", "stream_http_404", "stream_http_429", "stream_http_4xx", "stream_http_5xx", "stream_redirect", "stream_http_other", "stream_format_invalid", "replay_unavailable", "read_unavailable"}
+	reply := monitorResponse{Protocol: 1, Status: "unavailable"}
+	reader, ref, _ := logFixture(t, func() monitorResponse { return reply })
+	for _, reason := range reasons {
+		t.Run(reason, func(t *testing.T) {
+			reply.Reason = reason
+			page, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+			var failure provider.LogReadFailure
+			if !errors.As(err, &failure) || failure.Reason != reason || !failure.Valid() || len(page.Lines) != 0 || page.NextCursor != "" || page.Source != "" {
+				t.Fatal(page, err)
+			}
+		})
+	}
+	reply.Reason = "SYNTHETIC_TOKEN"
+	if _, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1}); !errors.Is(err, ErrProtocol) || strings.Contains(err.Error(), "SYNTHETIC_TOKEN") {
+		t.Fatal("untrusted diagnostic escaped", err)
 	}
 }

@@ -206,3 +206,22 @@ func TestMonitorRotationTimestampAndSerializedReads(t *testing.T) {
 	close(release)
 	wg.Wait()
 }
+
+func TestMonitorLogFailureAllowlistDoesNotChangeQuotaProtocol(t *testing.T) {
+	reasons := []string{"auth_read_failed", "kernel_read_failed", "stream_timeout", "stream_http_401", "stream_http_403", "stream_http_404", "stream_http_429", "stream_http_4xx", "stream_http_5xx", "stream_redirect", "stream_http_other", "stream_format_invalid", "replay_unavailable", "read_unavailable"}
+	for _, reason := range reasons {
+		reply := monitorResponse{Protocol: 1, Status: "unavailable", Reason: reason}
+		if !reply.valid("logs") || reply.valid("quota") != (reason == "read_unavailable") {
+			t.Fatal("mode diagnostic boundary changed", reason)
+		}
+		reply.TextB64 = "c2VjcmV0"
+		if reply.valid("logs") {
+			t.Fatal("failure carried log bytes", reason)
+		}
+	}
+	for _, reason := range []string{"missing_log", "SYNTHETIC_TOKEN", "stream_http_402", "stream_timeout: detail"} {
+		if (monitorResponse{Protocol: 1, Status: "unavailable", Reason: reason}).valid("logs") {
+			t.Fatal("untrusted reason accepted", reason)
+		}
+	}
+}
