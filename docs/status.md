@@ -21,6 +21,7 @@ The current implementation boundary. No public release is available.
 | Result collection | Automatic by default; an immutable manual policy waits for `/collect` and reports selected-output byte progress. |
 | Attempt logs | Bounded pages for an explicit original attempt with current read authority. Best effort: transient failures and long replay latency remain possible. |
 | Artifact delivery | Attempt-scoped listing, metadata and create-only downloads verified to the end of the stream. |
+| Local retention | Provider-mode serve expires and deletes eligible input and result bytes at startup and hourly (24 hours unreferenced, 7 days after safe completion); holds and unresolved work keep them. |
 
 `202 Accepted` means local metadata committed, not remote success. A provider mutation needs a
 durable one-shot intent plus a consumed managed authorization or the explicit-mode attempt budget.

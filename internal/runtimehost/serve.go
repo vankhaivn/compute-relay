@@ -133,7 +133,11 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 			return announce(listening)
 		})
 	}
-	var extra []func(context.Context) error
+	sweeper, err := h.retentionSweeper(clock{})
+	if err != nil {
+		return err
+	}
+	extra := []func(context.Context) error{func(ctx context.Context) error { return runRetention(ctx, sweeper, retentionInterval) }}
 	if managed != nil {
 		extra = append(extra, func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) })
 	}

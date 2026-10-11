@@ -1,8 +1,8 @@
 # Retention, byte cleanup and remote previews
 
-Expiry, local deletion and remote cleanup are different operations. This reference describes
-explicitly composed services; the normal server runs no automatic sweeper. Remote apply and
-staging cleanup are not implemented by the current preview path.
+Expiry, local deletion and remote cleanup are different operations. Serve modes with provider
+workers run the local sweep below with the default policy; admission-only serve does not. Remote
+apply and staging cleanup are not implemented by the current preview path.
 
 ## Eligibility and holds
 
@@ -34,6 +34,9 @@ Metadata/event history is retained indefinitely by this component; no metadata p
 ## Exact local sweep
 
 `retention.NewSweeper` / `SweepOnce` operate only on committed tombstones with bounded pages.
+Provider-mode serve runs a pass at startup and then hourly: it follows the durable inventory scan
+until it wraps and deletes committed tombstones page by page. A failed expiry, listing or deletion
+never stops dispatch, collection or HTTP serving; the next pass resumes from the tombstones.
 Input/result roots have separate persistent `.retention-id` bindings. Swapped/replaced roots or
 one root supplied for both roles fail; paths alone are not authority and automatic rebind is absent.
 
