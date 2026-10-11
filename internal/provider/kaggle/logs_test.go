@@ -52,12 +52,16 @@ func TestLogSnapshotsPageWithoutMixingChangedOrForeignEvidence(t *testing.T) {
 	}
 	request := provider.PageRequest{Limit: 2, Cursor: page.NextCursor}
 	last, err := reader.ReadLogs(context.Background(), ref, request)
-	if err != nil || last.Validate(request) != nil || len(last.Lines) != 2 || last.Lines[0] != "三" || last.NextCursor != "" {
+	if err != nil || last.Validate(request) != nil || len(last.Lines) != 2 || last.Lines[0] != "三" || last.NextCursor == "" {
 		t.Fatal(last, err)
 	}
 	text += "newly appended\n"
+	if p, err := reader.ReadLogs(context.Background(), ref, request); err != nil || p.Lines[0] != "三" {
+		t.Fatal("append broke replay", p, err)
+	}
+	text = "changed\n"
 	if _, err := reader.ReadLogs(context.Background(), ref, request); !errors.Is(err, ErrLogChanged) {
-		t.Fatal("mixed snapshots", err)
+		t.Fatal("changed replay accepted", err)
 	}
 	before := *calls
 	foreign := ref
@@ -123,5 +127,26 @@ func TestLogSnapshotsValidatePageAndCursorBeforeIO(t *testing.T) {
 	m := monitorFixture(t)
 	if _, err := NewLogReader(reader.executor, m); !errors.Is(err, ErrConfig) {
 		t.Fatal("foreign monitor binding accepted")
+	}
+}
+
+func TestReplayCaughtUpLiveKeepsCursorAndTerminalEmptyEnds(t *testing.T) {
+	reply := logResponse("", "live")
+	reply.Replay = true
+	reply.Prefix = string(provider.Digest(nil))
+	reader, ref, _ := logFixture(t, func() monitorResponse { return reply })
+	page, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+	if err != nil || len(page.Lines) != 0 || page.NextCursor == "" {
+		t.Fatal(page, err)
+	}
+	request := provider.PageRequest{Limit: 1, Cursor: page.NextCursor}
+	page, err = reader.ReadLogs(context.Background(), ref, request)
+	if err != nil || page.NextCursor != request.Cursor {
+		t.Fatal(page, err)
+	}
+	reply.Availability = "after_completion"
+	page, err = reader.ReadLogs(context.Background(), ref, request)
+	if err != nil || page.NextCursor != "" || len(page.Lines) != 0 {
+		t.Fatal(page, err)
 	}
 }

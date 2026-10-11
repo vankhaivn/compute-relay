@@ -34,17 +34,17 @@ func (r budgetedDispatchRepository) ClaimNext(ctx context.Context, owner string,
 	return r.Repository.ClaimNext(ctx, owner, now)
 }
 
-func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dispatch.Engine, *collection.Engine, scheduler.Settings, error) {
+func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dispatch.Engine, *collection.Engine, scheduler.Settings, *provider.SnapshotRegistry, error) {
 	var noSettings scheduler.Settings
 	if !profileName.MatchString(serve.Profile) ||
 		(serve.MachineShape != "NvidiaTeslaT4" && serve.MachineShape != "NvidiaTeslaP100") ||
 		serve.MaxAttempts < 1 || serve.MaxAttempts > 64 ||
 		serve.Config.Validate() != nil {
-		return nil, nil, noSettings, ErrRequest
+		return nil, nil, noSettings, nil, ErrRequest
 	}
 	profile, enabled, err := h.store.ReadProfile(ctx, serve.Profile)
 	if err != nil || !enabled || profile.CostClass != "free_allowance" {
-		return nil, nil, noSettings, ErrRequest
+		return nil, nil, noSettings, nil, ErrRequest
 	}
 	binding := provider.BindingSnapshot{
 		Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef,
@@ -54,11 +54,11 @@ func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dis
 		binding.Binding.ConfigurationRevision != serve.Config.Revision ||
 		binding.AccountScope != serve.Config.AccountName ||
 		binding.CredentialRef != string(serve.Config.CredentialRef) {
-		return nil, nil, noSettings, ErrRequest
+		return nil, nil, noSettings, nil, ErrRequest
 	}
 	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{serve.Config.CredentialRef}, os.LookupEnv)
 	if err != nil {
-		return nil, nil, noSettings, ErrRequest
+		return nil, nil, noSettings, nil, ErrRequest
 	}
 	policy := kaggle.DefaultExecutionPolicy()
 	policy.MachineShape = serve.MachineShape
@@ -69,14 +69,14 @@ func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dis
 		policy, serve.MaxAttempts, true,
 	)
 	if err != nil {
-		return nil, nil, noSettings, ErrRequest
+		return nil, nil, noSettings, nil, ErrRequest
 	}
 	if _, err = adapter.Check(ctx); err != nil {
-		return nil, nil, noSettings, ErrState
+		return nil, nil, noSettings, nil, ErrState
 	}
 	registry := provider.NewSnapshotRegistry()
 	if err = registry.Register(binding, adapter); err != nil {
-		return nil, nil, noSettings, ErrState
+		return nil, nil, noSettings, nil, ErrState
 	}
 
 	dispatchConfig := dispatch.DefaultConfig()
@@ -85,13 +85,13 @@ func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dis
 	repo := budgetedDispatchRepository{Repository: h.store, adapter: adapter}
 	dispatcher, err := dispatch.New(repo, registry, h.inputs, nil, clock{}, dispatchConfig)
 	if err != nil {
-		return nil, nil, noSettings, ErrState
+		return nil, nil, noSettings, nil, ErrState
 	}
 	collectionConfig := collection.DefaultConfig()
 	collectionConfig.Workers = 1
 	collector, err := collection.New(h.store, registry, h.results, clock{}, collectionConfig)
 	if err != nil {
-		return nil, nil, noSettings, ErrState
+		return nil, nil, noSettings, nil, ErrState
 	}
 
 	// Persist worker admission only after the complete composition exists. A
@@ -102,7 +102,7 @@ func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dis
 	settings.MaxWorkers = 1
 	settings.MaxActivePerAccount = 1
 	if err = h.store.ConfigureScheduler(ctx, settings); err != nil {
-		return nil, nil, noSettings, ErrState
+		return nil, nil, noSettings, nil, ErrState
 	}
-	return dispatcher, collector, settings, nil
+	return dispatcher, collector, settings, registry, nil
 }

@@ -9,7 +9,7 @@ application authorization, the durable queue or permission to retry ambiguous co
 | [Kaggle preflight](kaggle-preflight.md) | Locked environment, explicit credentials and local/read-only checks. |
 | [Private staging](kaggle-staging.md) | One-shot preparation, exact bytes and separately observed readiness. |
 | [Execution](kaggle-execution.md) | Frozen source, submission authority and exact-version observation. |
-| [Operational mappings](kaggle-operations.md) | Quota, log snapshots, cancellation and timeout evidence. |
+| [Operational mappings](kaggle-operations.md) | Quota, bounded log replay, cancellation and timeout evidence. |
 | [Artifacts](kaggle-artifacts.md) | Versioned selected-file reads and immutable collection recovery. |
 | [Acceptance runbook](kaggle-acceptance.md) | The fixed, explicitly authorized GPU experiment. |
 

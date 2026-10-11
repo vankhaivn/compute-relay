@@ -60,6 +60,7 @@ type managedServices struct {
 	dispatcher     *dispatch.Engine
 	collector      *collection.Engine
 	settings       scheduler.Settings
+	resolver       *managedSnapshotResolver
 }
 
 func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*managedServices, error) {
@@ -96,6 +97,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return result, nil // Unsupported protected storage never falls back or fails old jobs.
 	}
 	resolver := &managedSnapshotResolver{ctx: ctx, read: h.store.ReadManagedBinding}
+	result.resolver = resolver
 	resolver.make = func(binding connections.RuntimeBinding) (provider.Provider, error) {
 		return h.managedProvider(config, service, binding)
 	}
@@ -164,10 +166,14 @@ type managedSnapshotResolver struct {
 }
 
 func (r *managedSnapshotResolver) Resolve(expected provider.BindingSnapshot) (provider.Provider, error) {
+	return r.ResolveContext(r.ctx, expected)
+}
+
+func (r *managedSnapshotResolver) ResolveContext(parent context.Context, expected provider.BindingSnapshot) (provider.Provider, error) {
 	if !expected.Valid() {
 		return nil, ErrRequest
 	}
-	ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	binding, err := r.read(ctx, expected)
 	if err != nil {

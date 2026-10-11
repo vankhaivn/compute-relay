@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"strings"
 	"unicode/utf8"
 
@@ -13,12 +12,12 @@ import (
 )
 
 var (
-	ErrLogCursor  = errors.New("invalid or foreign log snapshot cursor")
-	ErrLogChanged = errors.New("provider log snapshot changed; restart with an empty cursor")
+	ErrLogCursor  = provider.ErrLogCursorInvalid
+	ErrLogChanged = provider.ErrLogCursorReset
 )
 
 // LogReader is bound to the original attempt and shares an instance's serialized
-// monitor. It returns provider snapshots, never runtime/payload artifact fallback.
+// monitor. It returns bounded provider replay pages, never runtime/payload artifact fallback.
 type LogReader struct {
 	executor *Executor
 	monitor  *Monitor
@@ -35,7 +34,7 @@ func NewLogReader(e *Executor, m *Monitor) (*LogReader, error) {
 
 type logCursor struct {
 	Reference domain.SHA256Digest `json:"reference"`
-	Snapshot  domain.SHA256Digest `json:"snapshot"`
+	Prefix    domain.SHA256Digest `json:"prefix"`
 	Offset    int                 `json:"offset"`
 }
 
@@ -55,7 +54,7 @@ func (l *LogReader) ReadLogs(ctx context.Context, ref provider.RemoteReference, 
 	var cursor logCursor
 	if page.Cursor != "" {
 		raw, err := base64.RawURLEncoding.Strict().DecodeString(page.Cursor)
-		if err != nil || closedObject(raw, &cursor) != nil || cursor.Reference != expected || !cursor.Snapshot.Valid() || cursor.Offset < 0 || cursor.Offset > maxLogSnapshot || base64.RawURLEncoding.EncodeToString(raw) != page.Cursor {
+		if err != nil || closedObject(raw, &cursor) != nil || cursor.Reference != expected || !cursor.Prefix.Valid() || cursor.Offset < 0 || cursor.Offset > 32<<20 || base64.RawURLEncoding.EncodeToString(raw) != page.Cursor {
 			return none, ErrLogCursor
 		}
 	}
@@ -66,9 +65,12 @@ func (l *LogReader) ReadLogs(ctx context.Context, ref provider.RemoteReference, 
 		return none, ErrExecutionIdentity
 	}
 	request.KernelID = recorded.KernelID
-	r, err := l.monitor.call(ctx, "logs", &request)
+	r, err := l.monitor.callRequest(ctx, "logs", monitorRequest{Protocol: 1, Owner: l.monitor.config.AccountName, Execution: &request, LogOffset: cursor.Offset, LogPrefix: string(cursor.Prefix), LogLimit: page.Limit})
 	if err != nil {
 		return none, err
+	}
+	if r.Status == "reset" {
+		return none, ErrLogChanged
 	}
 	if r.Status == "invalid" {
 		return none, ErrExecutionIdentity
@@ -80,8 +82,11 @@ func (l *LogReader) ReadLogs(ctx context.Context, ref provider.RemoteReference, 
 	if err != nil {
 		return none, ErrProtocol
 	}
+	if r.Replay && r.Offset < cursor.Offset {
+		return none, ErrProtocol
+	}
 	digest := provider.Digest(raw)
-	if page.Cursor != "" && cursor.Snapshot != digest {
+	if !r.Replay && page.Cursor != "" && (cursor.Offset > len(raw) || cursor.Prefix != provider.Digest(raw[:cursor.Offset])) {
 		return none, ErrLogChanged
 	}
 	lines := []string{}
@@ -91,11 +96,18 @@ func (l *LogReader) ReadLogs(ctx context.Context, ref provider.RemoteReference, 
 			lines = lines[:len(lines)-1]
 		}
 	}
-	if cursor.Offset > len(lines) {
+	start := 0
+	if !r.Replay {
+		if cursor.Offset > len(raw) {
+			return none, ErrLogChanged
+		}
+		start = len(strings.Split(string(raw[:cursor.Offset]), "\n")) - 1
+	}
+	if start > len(lines) {
 		return none, ErrLogCursor
 	}
-	end := min(cursor.Offset+page.Limit, len(lines))
-	result := provider.LogPage{Source: "provider", Availability: r.Availability, Lines: append([]string{}, lines[cursor.Offset:end]...), Truncated: r.Truncated}
+	end := min(start+page.Limit, len(lines))
+	result := provider.LogPage{Source: "provider", Availability: r.Availability, Lines: append([]string{}, lines[start:end]...), Truncated: r.Truncated}
 	for i, line := range result.Lines {
 		if len(line) > 16<<10 {
 			n := 16 << 10
@@ -106,8 +118,17 @@ func (l *LogReader) ReadLogs(ctx context.Context, ref provider.RemoteReference, 
 			result.Truncated = true
 		}
 	}
-	if end < len(lines) {
-		raw, _ := json.Marshal(logCursor{Reference: expected, Snapshot: digest, Offset: end})
+	if r.Replay && (len(raw) > 0 || r.Availability != "after_completion") || end < len(lines) || r.Availability == "live" || r.Availability == "delayed" {
+		offset := 0
+		for _, line := range lines[:end] {
+			offset += len(line) + 1
+		}
+		offset = min(offset, len(raw))
+		digest = provider.Digest(raw[:offset])
+		if r.Replay {
+			offset, digest = r.Offset, domain.SHA256Digest(r.Prefix)
+		}
+		raw, _ := json.Marshal(logCursor{Reference: expected, Prefix: digest, Offset: offset})
 		result.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
 	}
 	if err := result.Validate(page); err != nil {

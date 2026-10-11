@@ -1,5 +1,7 @@
 """Exact monitor pure protocol tests; no SDK import or network needed."""
 import base64
+import hashlib
+from types import SimpleNamespace
 import importlib.util
 import io
 import json
@@ -13,6 +15,15 @@ ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location("monitor_bridge", ROOT / "internal/provider/kaggle/monitor.py")
 monitor = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(monitor)
+CORE_SPEC = importlib.util.spec_from_file_location("monitor_core", ROOT / "internal/provider/kaggle/execution.py")
+monitor.core = importlib.util.module_from_spec(CORE_SPEC)
+CORE_SPEC.loader.exec_module(monitor.core)
+
+
+def log_response(events, sse=True):
+    body = (b"".join(b"data: " + json.dumps(event).encode() + b"\n\n" for event in events)
+            if sse else json.dumps(events).encode())
+    return SimpleNamespace(headers={"Content-Type": "text/event-stream" if sse else "application/json"}, raw=io.BytesIO(body))
 
 
 def quota_fixture():
@@ -81,27 +92,66 @@ class MonitorProtocolTests(unittest.TestCase):
             monitor.quota_result(fractional)
 
     def test_logs_redact_before_bounding_and_preserve_explicit_availability(self):
-        result = monitor.log_result({"log": "first\r\nSYNTHETIC_TOKEN\rlast"}, "RUNNING", "SYNTHETIC_TOKEN")
-        raw = base64.b64decode(result["text_b64"])
-        self.assertEqual(raw, b"first\n[REDACTED]\nlast")
-        self.assertEqual(result["availability"], "delayed")
-        self.assertFalse(result["truncated"])
+        for sse in (True, False):
+            result = monitor.stream_result(log_response([{"data": "first\r\nSYNTHETIC_"},
+                                                        {"data": "TOKEN\rlast"}], sse), {}, "RUNNING", "SYNTHETIC_TOKEN")
+            self.assertEqual(base64.b64decode(result["text_b64"]), b"first\n[REDACTED]\nlast\n")
+            self.assertEqual(result["availability"], "live")
+            self.assertFalse(result["truncated"])
+            self.assertTrue(result["replay"])
         for state in ("COMPLETE", "ERROR"):
-            empty = monitor.log_result({"log": ""}, state, "SYNTHETIC_TOKEN")
-            self.assertEqual(empty["status"], "logs")
-            self.assertEqual(empty["availability"], "after_completion")
-            self.assertEqual(empty["text_b64"], "")
-        for raw in ({}, {"log": None}):
-            self.assertEqual(monitor.log_result(raw, "COMPLETE", "x")["status"], "unavailable")
-        for value in ([], 1, True, "\ud800"):
-            with self.assertRaises((ValueError, UnicodeError)):
-                monitor.log_result({"log": value}, "COMPLETE", "x")
-        large = monitor.log_result({"log": "界" * 30000}, "UNKNOWN", "SYNTHETIC_TOKEN")
-        data = base64.b64decode(large["text_b64"])
-        self.assertTrue(large["truncated"])
-        self.assertLessEqual(len(data), monitor.MAX_LOG_BYTES)
-        self.assertEqual(data.decode("utf-8"), "界" * (65536 // 3))
-        self.assertEqual(large["availability"], "delayed")
+            result = monitor.stream_result(log_response([], False), {}, state, "SYNTHETIC_TOKEN")
+            self.assertEqual(result["status"], "logs")
+            self.assertEqual(result["availability"], "after_completion")
+            self.assertEqual(result["text_b64"], "")
+        for event in ({}, {"data": None}, {"data": []}, {"data": 1}, {"data": True}, {"data": "\ud800"}):
+            with self.subTest(event=event):
+                with self.assertRaises((ValueError, UnicodeError)):
+                    monitor.stream_result(log_response([event]), {}, "COMPLETE", "x")
+
+    def test_incremental_pages_keep_prefix_and_detect_changed_or_reset_replay(self):
+        events = [{"data": "one\n"}, {"data": "two\n"}]
+        first = monitor.stream_result(log_response(events), {"log_limit": 1}, "RUNNING", "x")
+        self.assertEqual(base64.b64decode(first["text_b64"]), b"one\n")
+        request = dict(log_limit=1, log_offset=first["offset"], log_prefix=first["prefix"])
+        second = monitor.stream_result(log_response(events + [{"data": "three\n"}]), request, "RUNNING", "x")
+        self.assertEqual(base64.b64decode(second["text_b64"]), b"two\n")
+        request.update(log_offset=second["offset"], log_prefix=second["prefix"])
+        idle = monitor.stream_result(log_response(events), request, "RUNNING", "x")
+        self.assertEqual((idle["offset"], idle["prefix"], idle["text_b64"]),
+                         (second["offset"], second["prefix"], ""))
+        self.assertEqual(idle["availability"], "live")
+        reset = monitor.stream_result(log_response([]), request, "RUNNING", "x")
+        self.assertEqual(reset, monitor.empty("reset", "log_changed"))
+        with self.assertRaises(monitor.core.IdentityMismatch):
+            monitor.stream_result(log_response([{"data": "bad\n"}, {"data": "two\n"}]), request, "RUNNING", "x")
+        with self.assertRaises(monitor.core.IdentityMismatch):
+            monitor.stream_result(log_response(events), dict(log_offset=1, log_prefix=hashlib.sha256(b"o").hexdigest()), "RUNNING", "x")
+
+    def test_page_bytes_are_bounded_without_skipping_the_next_line(self):
+        events = [{"data": "a" * 40000 + "\n"}, {"data": "b" * 40000 + "\n"}]
+        result = monitor.stream_result(log_response(events), {}, "RUNNING", "x")
+        self.assertTrue(result["truncated"])
+        self.assertEqual(base64.b64decode(result["text_b64"]), b"a" * 40000 + b"\n")
+        self.assertEqual(result["offset"], 40001)
+        next_page = monitor.stream_result(log_response(events), dict(log_offset=result["offset"], log_prefix=result["prefix"]), "RUNNING", "x")
+        self.assertEqual(base64.b64decode(next_page["text_b64"]), b"b" * 40000 + b"\n")
+        with self.assertRaises(ValueError):
+            monitor.stream_result(log_response([{"data": "a" * (monitor.MAX_EVENT_BYTES + 1)}]), {}, "RUNNING", "x")
+        for wire in (b"data: {bad}\n\n", b"data: {}\n\n", b"foreign: payload\n", b"data: {\"data\":\"x\"}"):
+            with self.subTest(wire=wire):
+                with self.assertRaises(ValueError):
+                    monitor.stream_result(SimpleNamespace(headers={"Content-Type": "text/event-stream"}, raw=io.BytesIO(wire)), {}, "RUNNING", "x")
+
+    def test_idle_stream_or_sentinel_is_never_completion_evidence(self):
+        class Idle:
+            def read(self, size):
+                raise TimeoutError("SYNTHETIC_TOKEN")
+        for state, availability in (("RUNNING", "live"), ("COMPLETE", "delayed")):
+            result = monitor.stream_result(SimpleNamespace(headers={"Content-Type": "text/event-stream"}, raw=Idle()), {}, state, "SYNTHETIC_TOKEN")
+            self.assertEqual((result["status"], result["availability"], result["text_b64"]), ("logs", availability, ""))
+        result = monitor.stream_result(SimpleNamespace(headers={"Content-Type": "text/event-stream"}, raw=io.BytesIO(b"data: END_OF_LOG\n\n")), {}, "RUNNING", "x")
+        self.assertEqual(result["availability"], "live")
 
     def test_quota_request_and_local_pins_reject_before_credentials(self):
         good = {"protocol": 1, "owner": "fixture_user", "execution": None}
@@ -119,13 +169,14 @@ class MonitorProtocolTests(unittest.TestCase):
 
     def test_independent_watchdog_and_exception_redaction(self):
         source = (ROOT / "internal/provider/kaggle/monitor.py").read_text(encoding="utf-8")
-        script = ("import time\nns={'__name__':'fixture'}\nexec(" + repr(source) + ",ns)\n"
-                  "timer=ns['threading'].Timer\n"
-                  "def bounded(seconds, callback):\n assert seconds==25\n return timer(0.05,callback)\n"
-                  "ns['threading'].Timer=bounded\nns['main']=lambda:time.sleep(60)\nns['bounded_main']()\n")
-        result = subprocess.run([sys.executable, "-I", "-c", script], input=b"", capture_output=True, timeout=5, check=False)
-        self.assertEqual(result.returncode, 3)
-        self.assertEqual(result.stdout + result.stderr, b"")
+        for mode, budget in (("quota", 25), ("logs", 9)):
+            script = ("import time\nns={'__name__':'fixture'}\nexec(" + repr(source) + ",ns)\n"
+                      "ns['sys'].argv=['helper'," + repr(mode) + "]\ntimer=ns['threading'].Timer\n"
+                      "def bounded(seconds, callback):\n assert seconds==" + str(budget) + "\n return timer(0.05,callback)\n"
+                      "ns['threading'].Timer=bounded\nns['main']=lambda:time.sleep(60)\nns['bounded_main']()\n")
+            result = subprocess.run([sys.executable, "-I", "-c", script], input=b"", capture_output=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 3)
+            self.assertEqual(result.stdout + result.stderr, b"")
         import contextlib
         out = io.StringIO()
         with mock.patch.object(monitor, "main", side_effect=ValueError("SYNTHETIC_TOKEN")), contextlib.redirect_stdout(out):

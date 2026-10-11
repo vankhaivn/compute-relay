@@ -345,7 +345,8 @@ separately reviewed, bounded fault procedure.
 Do not invent commands for these gaps. Record their exact prerequisite and owner in the ledger.
 
 **V13 — Quota/log/multiple-page evidence.** The fixed experiment has six results and the normal
-server lacks public provider log/quota routes. It does not force multiple provider pages or
+server now exposes bounded attempt logs, whose live qualification is pending; public quota
+reads remain absent. It does not force multiple provider pages or
 fully test live log delay/reservations. Use a separately reviewed bounded probe of the existing
 Monitor/LogReader/ArtifactReader ports, with real account data kept private. Document actual
 page counts, cursor behavior, units, missing fields and identity checks. Until that probe and

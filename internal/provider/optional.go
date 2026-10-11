@@ -7,6 +7,12 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 )
 
+// Cursor errors let application readers report continuity failures without exposing provider details.
+var (
+	ErrLogCursorInvalid = errors.New("invalid log cursor")
+	ErrLogCursorReset   = errors.New("log cursor continuity reset")
+)
+
 func (outcome CancellationOutcome) Validate() error {
 	switch outcome.Status {
 	case domain.CancellationConfirmed:

@@ -68,7 +68,8 @@
     {
       "schema": "schemas/error.v1alpha1.schema.json",
       "valid": [
-        "examples/error.submission-unknown.valid.json"
+        "examples/error.submission-unknown.valid.json",
+        "examples/error.log-cursor-reset.valid.json"
       ],
       "invalid": [
         "examples/invalid/error.bare-retryable.json"
@@ -251,6 +252,19 @@
         "examples/invalid/execution-authorization.unbounded.json",
         "examples/invalid/execution-authorization.no-consumption-time.json",
         "examples/invalid/execution-authorization.batch-permit.json"
+      ]
+    },
+    {
+      "schema": "schemas/job-logs.v1alpha1.schema.json",
+      "valid": [
+        "examples/job-logs.live.valid.json",
+        "examples/job-logs.unavailable.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/job-logs.missing-attempt.json",
+        "examples/invalid/job-logs.unavailable-lines.json",
+        "examples/invalid/job-logs.private-field.json",
+        "examples/invalid/job-logs.too-many-lines.json"
       ]
     }
   ]

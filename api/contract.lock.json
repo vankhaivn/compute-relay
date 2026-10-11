@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "9920ade92e99a1ec97c2ecf603023789cbe2535848384c722d1862d0605b9280",
-      "bytes": 9107
+      "sha256": "f92e409f8ae93b6e9c962578856a36d1f8b89d6ff7c7bb4a61a400b507f92b29",
+      "bytes": 9610
     },
     {
       "path": "api/examples/artifact.metadata.valid.json",
@@ -125,6 +125,11 @@
       "path": "api/examples/control-request.valid.json",
       "sha256": "e02cc9cac4047d9e44191fe39d42f20e54d7fa892bf414af828226f8c19d0e24",
       "bytes": 35
+    },
+    {
+      "path": "api/examples/error.log-cursor-reset.valid.json",
+      "sha256": "f7c88737496e8c4145dd1ec9e33770c89637c8d31086c88eaaae35d7da1931a3",
+      "bytes": 299
     },
     {
       "path": "api/examples/error.submission-unknown.valid.json",
@@ -317,6 +322,26 @@
       "bytes": 423
     },
     {
+      "path": "api/examples/invalid/job-logs.missing-attempt.json",
+      "sha256": "8c4c7e804295829bacce496e7c51c141069f1427dc2031e14e2894480010e7fb",
+      "bytes": 269
+    },
+    {
+      "path": "api/examples/invalid/job-logs.private-field.json",
+      "sha256": "663bda1a4180bf71d494e62de298d408553be666870cb4895d1f1d51d0bdafeb",
+      "bytes": 342
+    },
+    {
+      "path": "api/examples/invalid/job-logs.too-many-lines.json",
+      "sha256": "bbcdcf7dfc2f1ed2bb748ca9d3b705d15a6de8ccd656ea653ee8ca6f40f4f9f3",
+      "bytes": 1484
+    },
+    {
+      "path": "api/examples/invalid/job-logs.unavailable-lines.json",
+      "sha256": "ae7ff39ae4a489bac3c87871561b60981aa189ca7c25484a766c020b3f2f941a",
+      "bytes": 269
+    },
+    {
       "path": "api/examples/invalid/job-status.automatic-awaiting-request.json",
       "sha256": "1626db34c44c2efa3ed355a802b88dd7fa4db1d13d3fa8f4d9da3482ed0fb012",
       "bytes": 957
@@ -472,6 +497,16 @@
       "bytes": 422
     },
     {
+      "path": "api/examples/job-logs.live.valid.json",
+      "sha256": "f95fedd8d7572dd59a700c38bb974ef269354e8c41b709ccf07c14cbca934f33",
+      "bytes": 299
+    },
+    {
+      "path": "api/examples/job-logs.unavailable.valid.json",
+      "sha256": "2493178d5770c3247f2c8426bbd9a127793b57d5c2396c2cba83c0986e41b3fe",
+      "bytes": 251
+    },
+    {
       "path": "api/examples/job-status.awaiting-collection.valid.json",
       "sha256": "07cd21e3e68f01db3024ecd919eb6bf68b1a0f0431282b95213541cb014825e6",
       "bytes": 954
@@ -558,8 +593,8 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "0cd10fdafacafda6e68551242bb890338e2438861fec3dd3b725f2c1a6af0412",
-      "bytes": 58855
+      "sha256": "71b280c03a94d214e68bf42e91a0d11c9250e426a492807f7639b6eae9a9d072",
+      "bytes": 62470
     },
     {
       "path": "api/schemas/artifact.v1alpha1.schema.json",
@@ -573,8 +608,8 @@
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",
-      "sha256": "8c540a0c33dcce4b20cc3e46b9771468e3641e82b8cd79936a5bb3757031275b",
-      "bytes": 8921
+      "sha256": "854ed1e3efd5139215e25f7c75b695a99bf8a771adf937203613835acea93cc3",
+      "bytes": 8949
     },
     {
       "path": "api/schemas/connection-operation.v1alpha1.schema.json",
@@ -615,6 +650,11 @@
       "path": "api/schemas/job-admission.v1alpha1.schema.json",
       "sha256": "a2983816d2c282325d1851791835eeb785141321a8b67466534828a024ffe213",
       "bytes": 1273
+    },
+    {
+      "path": "api/schemas/job-logs.v1alpha1.schema.json",
+      "sha256": "15a210978bfb12c62db92acfb7dbd1da93c631f57dce7c5b46e47c10c03cfe0d",
+      "bytes": 2293
     },
     {
       "path": "api/schemas/job-spec.v1alpha1.schema.json",

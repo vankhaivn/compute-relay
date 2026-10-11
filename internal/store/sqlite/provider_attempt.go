@@ -31,7 +31,12 @@ func (s *Store) LoadProviderAttempt(ctx context.Context, id provider.Identity) (
 		if err != nil {
 			return err
 		}
-		if record.Attempt.ID != id.AttemptID || record.Profile.Binding.ProviderInstanceID != id.InstanceID {
+		record.Attempt, record.AttemptNonce, err = loadAttempt(ctx, tx, id.WorkspaceID, id.JobID, id.AttemptID)
+		if err != nil {
+			return err
+		}
+		record.Job.ActiveAttemptID = id.AttemptID // Reconstruction only; never mutate the active job.
+		if record.Profile.Binding.ProviderInstanceID != id.InstanceID {
 			return ErrCorrupt
 		}
 		var sequence int64

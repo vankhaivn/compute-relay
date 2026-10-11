@@ -18,6 +18,7 @@ func TestObjectAndHTTPErrorWireShapesMatchSchemas(t *testing.T) {
 		value  any
 	}{
 		{"object", domain.ObjectMetadata{ID: "obj_wire", WorkspaceID: "workspace", Bytes: 0, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}},
+		{"error", api.ErrorEnvelope{Error: api.ErrorBody{Code: domain.CodeLogCursorReset, Message: "log continuity changed", Stage: domain.FailureStageObservation, RequestID: "req_example", RecommendedAction: domain.RecommendedActionFixRequest}}},
 		{"error", api.ErrorEnvelope{Error: api.ErrorBody{Code: domain.CodeInvalidRequest, Message: "invalid declaration", Stage: domain.FailureStageValidation, RequestID: "req_example", RecommendedAction: domain.RecommendedActionFixRequest}}},
 		{"error", api.ErrorEnvelope{Error: api.ErrorBody{Code: domain.CodeRequestLimitExceeded, Message: "local request limit", Stage: domain.FailureStageLocalRuntime, RequestID: "req_example", RecommendedAction: domain.RecommendedActionWait}}},
 	}
@@ -44,7 +45,7 @@ func TestObjectAndHTTPErrorWireShapesMatchSchemas(t *testing.T) {
 }
 
 func TestImplementationStatusTracksOfflineHandlers(t *testing.T) {
-	for _, id := range []string{"getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob", "retryJob", "cancelJob", "reconcileJob", "collectJob", "getOperation"} {
+	for _, id := range []string{"getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob", "getJobLogs", "retryJob", "cancelJob", "reconcileJob", "collectJob", "getOperation"} {
 		if operationStatus(id) != "implemented-offline" {
 			t.Fatal(id)
 		}

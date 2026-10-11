@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "LOG_CURSOR_RESET",
+    "message": "log continuity changed; restart from an empty cursor",
+    "stage": "observation",
+    "request_id": "req_example",
+    "safe_operation_retry": false,
+    "compute_may_have_started": false,
+    "recommended_action": "fix_request"
+  }
+}

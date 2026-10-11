@@ -95,7 +95,8 @@ func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *test
 		Features []string `json:"features"`
 	}
 	if json.Unmarshal(get("/v1/info"), &info) != nil || !strings.Contains(strings.Join(info.Features, ","), "managed_connections") ||
-		!strings.Contains(strings.Join(info.Features, ","), "attempt_authorization") {
+		!strings.Contains(strings.Join(info.Features, ","), "attempt_authorization") ||
+		!strings.Contains(strings.Join(info.Features, ","), "job_logs") {
 		t.Fatal("managed feature discovery missing")
 	}
 	var providers struct {
