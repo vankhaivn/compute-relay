@@ -127,7 +127,13 @@ func TestExecutorAmbiguityReconcilesWithoutAnotherSubmit(t *testing.T) {
 }
 
 func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) {
-	for _, fault := range []string{"disabled", "changed-prepared", "staging-unknown", "staging-replaced", "local-mismatch", "cancelled"} {
+	for fault, want := range map[string]string{
+		"disabled": reasonSubmissionDisabled, "changed-prepared": reasonPreparationMismatch,
+		"staging-error": reasonStagingRecheck, "cancelled": reasonStagingRecheck,
+		"staging-unknown": reasonStagingUnconfirmed, "staging-replaced": reasonStagingUnconfirmed,
+		"local-mismatch": reasonLocalRuntime, "credential": reasonCredential,
+		"timeout": reasonCallTimeout, "stopping": reasonRuntimeStopped,
+	} {
 		t.Run(fault, func(t *testing.T) {
 			e := newExecutionFixture(t)
 			e.run = func(context.Context, Config, string, []byte, executionRequest) (executionResponse, error) {
@@ -137,11 +143,44 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 			prepared := e.prepared
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			// afterStaging arms a fault for the submission call once staging is rechecked.
+			staged := e.stager.run
+			afterStaging := func(arm func()) {
+				e.stager.run = func(ctx context.Context, c Config, mode string, secret []byte, p stagingPlan, b StagingBlobs) (stagingResponse, error) {
+					arm()
+					return staged(ctx, c, mode, secret, p, b)
+				}
+			}
 			switch fault {
 			case "disabled":
 				e.allowSubmit = false
 			case "changed-prepared":
 				prepared.Resource = "other"
+			case "staging-error":
+				e.stager.run = func(context.Context, Config, string, []byte, stagingPlan, StagingBlobs) (stagingResponse, error) {
+					return stagingResponse{}, ErrProcess
+				}
+			case "credential":
+				missing, err := credentials.NewEnvironment([]ports.CredentialRef{e.stager.config.CredentialRef}, func(string) (string, bool) { return "", false })
+				if err != nil {
+					t.Fatal(err)
+				}
+				afterStaging(func() { e.stager.credentials = missing })
+			case "timeout":
+				e.policy.Timeout = 10 * time.Millisecond
+				afterStaging(func() {
+					e.stager.local = func(ctx context.Context, _ Config, _ Mode, _ []byte) (Report, error) {
+						<-ctx.Done()
+						return Report{}, ctx.Err()
+					}
+				})
+			case "stopping":
+				afterStaging(func() {
+					e.stager.local = func(ctx context.Context, _ Config, _ Mode, _ []byte) (Report, error) {
+						cancel()
+						return Report{}, ctx.Err()
+					}
+				})
 			case "staging-unknown", "staging-replaced":
 				e.stager.run = func(_ context.Context, _ Config, _ string, _ []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
 					if fault == "staging-unknown" {
@@ -152,15 +191,37 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 					return r, nil
 				}
 			case "local-mismatch":
-				e.stager.local = func(context.Context, Config, Mode, []byte) (Report, error) { return Report{}, ErrConfig }
+				afterStaging(func() {
+					e.stager.local = func(context.Context, Config, Mode, []byte) (Report, error) { return Report{}, ErrConfig }
+				})
 			case "cancelled":
 				cancel()
 			}
 			out := e.Submit(ctx, prepared)
-			if out.Validate(e.plan.Job.Identity) != nil || out.Status != provider.SubmissionRejected || out.Problem.ComputeMayHaveStarted {
-				t.Fatal("unattempted request was not rejected safely")
+			if out.Validate(e.plan.Job.Identity) != nil || out.Status != provider.SubmissionRejected || out.Problem.ComputeMayHaveStarted || out.Problem.Details[domain.ReasonDetail] != want {
+				t.Fatal("unattempted request was not rejected safely with its reason", out.Problem)
 			}
 		})
+	}
+}
+
+func TestExecutorCarriesOnlyClosedHelperRefusals(t *testing.T) {
+	// After invocation, a refusal without a closed reason is a protocol fault and stays ambiguous.
+	for reason, want := range map[string]provider.SubmissionStatus{"kernel_read_failed": provider.SubmissionRejected, "": provider.SubmissionUnknown, "403 Forbidden": provider.SubmissionUnknown} {
+		e := newExecutionFixture(t)
+		e.run = func(context.Context, Config, string, []byte, executionRequest) (executionResponse, error) {
+			return executionResponse{Protocol: 1, Status: "rejected", Reason: reason}, nil
+		}
+		out := e.Submit(context.Background(), e.prepared)
+		if out.Validate(e.plan.Job.Identity) != nil || out.Status != want || want == provider.SubmissionRejected && out.Problem.Details[domain.ReasonDetail] != reason {
+			t.Fatal("helper refusal was misclassified", reason, out)
+		}
+	}
+	e := newExecutionFixture(t)
+	found := executionFound(e.request, "QUEUED")
+	found.Reason = "kernel_read_failed"
+	if found.valid() || (executionResponse{Protocol: 1, Status: "unknown", Reason: "kernel_read_failed"}).valid() {
+		t.Fatal("a reason accompanied a status other than rejected")
 	}
 }
 

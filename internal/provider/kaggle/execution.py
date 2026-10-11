@@ -19,10 +19,12 @@ OPERATIONS = {
     "status": "kernels.KernelsApiService/GetKernelSessionStatus",
 }
 STATES = ("QUEUED", "RUNNING", "COMPLETE", "ERROR", "CANCEL_REQUESTED", "CANCEL_ACKNOWLEDGED", "NEW_SCRIPT")
+# Closed rejection reasons name the read that failed before any save, never its error text.
+READ_FAILURES = {"auth": "auth_read_failed", "get": "kernel_read_failed", "quota": "quota_read_failed"}
 
 
-def outcome(status):
-    return dict(protocol=1, status=status, kernel_id="", reference="", version=0,
+def outcome(status, reason=""):
+    return dict(protocol=1, status=status, reason=reason, kernel_id="", reference="", version=0,
                 source_sha256="", raw_state="")
 
 
@@ -143,6 +145,7 @@ class Guard:
         self.session.send = self.send
         self.mode = mode
         self.expected = None
+        self.operation = None
         self.count = 0
         self.save_sent = False
         self.last = None
@@ -152,7 +155,7 @@ class Guard:
             raise ValueError("invalid request sequence")
         if operation == "save" and (self.mode != "submit" or self.save_sent):
             raise ValueError("mutation not authorized")
-        self.expected = operation
+        self.expected = self.operation = operation
         self.last = None
         try:
             return method(request)
@@ -243,8 +246,11 @@ def operate(r, token, mode):
             auth = IntrospectTokenRequest()
             auth.token = token
             identity = guard.call("auth", client.security.oauth_client.introspect_token, auth)
-            if type(guard.last.get("active")) is not bool or guard.last["active"] is not True or identity.active is not True or identity.username != r["owner"]:
-                return outcome("rejected" if mode == "submit" else "unknown")
+            active = type(guard.last.get("active")) is bool and guard.last["active"] is True and identity.active is True
+            if not active or identity.username != r["owner"]:
+                if mode != "submit":
+                    return outcome("unknown")
+                return outcome("rejected", "account_mismatch" if active else "token_inactive")
             api = client.kernels.kernels_api_client
 
             def get(expected_id=""):
@@ -269,7 +275,7 @@ def operate(r, token, mode):
                     guard.call("quota", api.get_accelerator_quota_statistics, ApiGetAcceleratorQuotaStatisticsRequest())
                     quota = guard.last.get("gpuQuota")
                     if type(quota) is not dict or quota.get("isPayToScaleEnabled", False) is not False:
-                        return outcome("rejected")
+                        return outcome("rejected", "gpu_quota_unverified")
                 save = ApiSaveKernelRequest()
                 save.slug = r["owner"] + "/" + r["slug"]
                 save.new_title, save.text = r["slug"], r["source"]
@@ -307,7 +313,9 @@ def operate(r, token, mode):
     except Exception:
         # Nonzero/HTTP errors after the wire mutation might still have created a
         # version. Never treat an error body as proof of rejection or repeat save.
-        return outcome("unknown" if mode != "submit" or guard is None or guard.save_sent else "rejected")
+        if mode != "submit" or guard is None or guard.save_sent:
+            return outcome("unknown")
+        return outcome("rejected", READ_FAILURES.get(guard.operation, "helper_failed"))
 
 
 def main():

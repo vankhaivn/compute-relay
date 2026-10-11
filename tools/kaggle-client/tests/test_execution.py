@@ -170,7 +170,9 @@ class ExecutionPinnedSDKTests(unittest.TestCase):
         self.get_fault = ""
         self.status_reply = {"status": "COMPLETE"}
         self.wrong_account = False
+        self.auth_fault = ""
         self.pay = False
+        self.quota_fault = False
         self.change_during_status = False
 
     def exchange(self, adapter, request, **kwargs):
@@ -184,8 +186,12 @@ class ExecutionPinnedSDKTests(unittest.TestCase):
         self.calls.append((operation, body))
         if operation == bridge.OPERATIONS["auth"]:
             self.assertEqual(body["token"], "SYNTHETIC_TOKEN")
-            return response(json.dumps({"active": True, "username": "other_user" if self.wrong_account else self.r["owner"]}).encode())
+            if self.auth_fault == "unreachable":
+                return response(b'{}', 503)
+            return response(json.dumps({"active": self.auth_fault != "inactive", "username": "other_user" if self.wrong_account else self.r["owner"]}).encode())
         if operation == bridge.OPERATIONS["quota"]:
+            if self.quota_fault:
+                return response(b'{}', 503)
             return response(json.dumps({"gpuQuota": {"isPayToScaleEnabled": self.pay}}).encode())
         if operation == bridge.OPERATIONS["get"]:
             self.assertEqual(body["userName"], self.r["owner"])
@@ -261,7 +267,8 @@ class ExecutionPinnedSDKTests(unittest.TestCase):
         for fault in ("lost", "http", "error", "version", "invalid-input"):
             with self.subTest(fault=fault):
                 self.kernel, self.saves, self.save_fault = None, 0, fault
-                self.assertEqual(self.invoke("submit")["status"], "unknown")
+                result = self.invoke("submit")
+                self.assertEqual((result["status"], result["reason"]), ("unknown", ""))
                 self.assertEqual(self.saves, 1)
                 self.save_fault = ""
                 self.assertEqual(self.invoke("reconcile")["status"], "found")
@@ -273,12 +280,28 @@ class ExecutionPinnedSDKTests(unittest.TestCase):
         self.assertEqual(self.saves, 0)
         self.get_fault = "error-body"
         self.assertEqual(self.invoke("submit")["status"], "invalid")
-        self.get_fault = "unreachable"
-        self.assertEqual(self.invoke("submit")["status"], "rejected")
         self.assertEqual(self.saves, 0)
-        self.get_fault, self.wrong_account = "", True
-        self.assertEqual(self.invoke("submit")["status"], "rejected")
+
+    def test_each_refusal_before_save_names_one_closed_reason(self):
+        def refused(**fault):
+            self.__dict__.update(fault)
+            result = self.invoke("submit")
+            self.__dict__.update(auth_fault="", wrong_account=False, get_fault="", quota_fault=False, pay=False)
+            self.assertEqual(result["status"], "rejected")
+            return result["reason"]
+        self.assertEqual(refused(auth_fault="inactive"), "token_inactive")
+        self.assertEqual(refused(wrong_account=True), "account_mismatch")
+        self.assertEqual(refused(auth_fault="unreachable"), "auth_read_failed")
+        self.assertEqual(refused(get_fault="unreachable"), "kernel_read_failed")
+        self.r.update(gpu=True, machine_shape="NvidiaTeslaT4")
+        self.assertEqual(refused(pay=True), "gpu_quota_unverified")
+        self.assertEqual(refused(quota_fault=True), "quota_read_failed")
+        with mock.patch.object(bridge.Guard, "call", side_effect=ValueError("before any request")):
+            self.assertEqual(refused(), "helper_failed")
         self.assertEqual(self.saves, 0)
+        # Reads never refuse; their failures stay unknown without a reason.
+        self.auth_fault = "inactive"
+        self.assertEqual(self.invoke("observe"), bridge.outcome("unknown"))
 
     def test_missing_and_new_status_cannot_inherit_default_queued(self):
         self.kernel = kernel_fixture(self.r)
