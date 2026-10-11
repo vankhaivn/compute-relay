@@ -52,6 +52,35 @@ func TestUpgradeFromFirstMigrationPreservesIdentity(t *testing.T) {
 	}
 }
 
+// Existing installations record these digests and refuse to open when a shipped migration
+// changes, so every released file is frozen byte for byte. Append new migrations instead.
+func TestReleasedMigrationsAreFrozen(t *testing.T) {
+	released := []string{
+		"0001_identity.sql 20d73957c03ded0f24ac743e23ed6975246f2a2aa50de8f2cd5706e999c56a1d",
+		"0002_workspace_objects.sql 23fa96b850befd5ca1fb8db6d9e8697a0322624476d66e65a13c29fbec7d44ae",
+		"0003_admission.sql e20173c79349c7ced7b79c357e9cf3abedc78c295f0e340c48a44b719a59031d",
+		"0004_scheduler.sql 0f700afbb305c80df33c425651ffc5189651af7738233129cb3aa4637d4b1575",
+		"0005_dispatch.sql 6151f59b2b362e1b73543fffc0a8a1653d41284177cdf0f9b01b8093dfd37d54",
+		"0006_operations.sql d2f23ab35dd7dde59e49aa2e60b42d524ac35f0f9fc4d68db9107c801a5876b7",
+		"0007_collection.sql 7035b159fe7947a6ee55056e48a2fb1c80b2e0bba54c97515d48bae261a533b1",
+		"0008_retention.sql 3d2c2a6678dca327a87d6779d35efd30db1275f68c060cbbb79fdcf8c995b6ad",
+		"0009_retention_roots.sql 4ea9f136b568646613467716ca0f67662e2f4f4bfc891ed3154c49c4b4b81e78",
+		"0010_managed_connections.sql ebc2183edb541d214823ad2caff163c2fdfebbac6c931e5664cefd181f13dbc5",
+		"0011_execution_authorization.sql 56c7114ae536dd74a58fcf4f9238183c90ee8725c5aa70603327feb6133deed6",
+		"0012_collection_progress.sql 1856d9995c682f374c040307df13fbe2b911cda27d6dde40c5349b27772400df",
+		"0013_connection_configuration.sql 521a2da75f70fd51e47d3c17640c70261a35dcc81c2dc098a69cde618dd123e0",
+		"0014_preparation_progress.sql cefc2b8c6f80a12c1e0104b90b0f1dd7d2b50b38d209ec0df1a81db16e415fe6",
+	}
+	if len(migrations) < len(released) {
+		t.Fatalf("released migrations removed: %d < %d", len(migrations), len(released))
+	}
+	for i, want := range released {
+		if got := migrations[i].name + " " + migrations[i].digest; got != want {
+			t.Fatalf("released migration %d changed: %s", i+1, got)
+		}
+	}
+}
+
 func TestFailedMigrationIsAtomic(t *testing.T) {
 	s, _ := newStore(t)
 	sql := "CREATE TABLE partial_migration (v INTEGER); INSERT INTO nonexistent_table VALUES(1);"

@@ -6,10 +6,12 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +118,7 @@ func TestDeterministicArchiveInstallAndRelocation(t *testing.T) {
 		if err != nil || d.Executable != filepath.Join(dest, "bin/compute-relay") {
 			t.Fatal(err)
 		}
+		assertDiscoveryWire(t, d, dest)
 		moved := filepath.Join(t.TempDir(), "moved")
 		if err := os.Rename(dest, moved); err != nil {
 			t.Fatal(err)
@@ -129,6 +132,38 @@ func TestDeterministicArchiveInstallAndRelocation(t *testing.T) {
 		if _, err := Discover(moved); err == nil {
 			t.Fatal("accepted modified binary")
 		}
+	}
+}
+
+// Installed clients read discovery and the installer's echoed build by these exact names.
+func assertDiscoveryWire(t *testing.T, d Discovery, dest string) {
+	t.Helper()
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Manifest struct {
+			Schema string         `json:"schema"`
+			Build  map[string]any `json:"build"`
+		} `json:"manifest"`
+		Executable    string `json:"executable"`
+		ManagedPython string `json:"managed_python"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Manifest.Schema != "compute-relay/companion/v1alpha1" || wire.Executable != filepath.Join(dest, "bin", "compute-relay") ||
+		wire.ManagedPython != filepath.Join(dest, "client", "python", "bin", "python3.11") {
+		t.Fatal("discovery wire changed", string(raw))
+	}
+	keys := make([]string, 0, len(wire.Manifest.Build))
+	for key := range wire.Manifest.Build {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	if strings.Join(keys, ",") != "go_version,kaggle_version,kagglesdk_version,platform,python_distribution,python_version,revision,source_sha256,uv_version,worktree_modified" {
+		t.Fatal("build identity fields changed", keys)
 	}
 }
 

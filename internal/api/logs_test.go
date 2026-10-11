@@ -61,6 +61,13 @@ func TestJobLogsRouteQueryAuthenticationAndUnavailable(t *testing.T) {
 				t.Fatalf("status %d want %d: %s", response.StatusCode, tc.status, raw)
 			}
 			if tc.status == 200 {
+				var wire any
+				if err := json.Unmarshal(raw, &wire); err != nil {
+					t.Fatal(err)
+				}
+				if err := controlSchema(t, "job-logs.v1alpha1.schema.json").Validate(wire); err != nil {
+					t.Fatal("actual log page violates schema", err)
+				}
 				var page struct {
 					APIVersion   string   `json:"api_version"`
 					WorkspaceID  string   `json:"workspace_id"`
