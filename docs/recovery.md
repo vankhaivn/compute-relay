@@ -18,6 +18,7 @@ confirmed running/activity evidence.
 | Failed before an intent committed | No external permit exists; inspect the actual transaction outcome before retrying local work. |
 | Intent committed, acknowledgement lost or external call uncertain | Reload the journal and observe original identity only, even if a lookup returns not found. |
 | Staging pending or exhausted observation failures before submission | Explicitly reconcile the original attempt. This resumes staging observation with its original preparation ID and frozen plan, without another upload/create call or attempt grant. Privacy or identity mismatch still requires intervention. |
+| Submission rejected before any provider request | No compute was requested. Read `problem.details.reason` to tell configuration, staging and transient stops apart ([Kaggle reasons](development/providers/kaggle-execution.md#submission-and-exact-reads)); fix the cause, then retry compute explicitly. |
 | Remote active/unknown | Retain account capacity and recovery material; inspect/reconcile the recorded resource. |
 | Cancellation unsupported or target missing | Keep manual-required/unknown termination. Never delete resources or substitute IDs to pretend cancellation. |
 | Manual terminal job, `collection.state=awaiting_request` | Wait until results are wanted, then collect explicitly for the original attempt. Polling/reopening is read-only. |
