@@ -46,6 +46,9 @@ func TestDialAuthenticatesWithKeyPasswordAndInteractivePassword(t *testing.T) {
 func TestDialPinsPresentedHostKeyOnlyWhenNoneIsSupplied(t *testing.T) {
 	server := newTestServer(t)
 	server.Password = "secret"
+	// The pin must be the ED25519 key OpenSSH tools display, not the ECDSA key
+	// x/crypto would otherwise prefer.
+	server.ECDSAHostKey = true
 	target := server.target()
 	pinned := target.HostKey
 	target.HostKey = ""

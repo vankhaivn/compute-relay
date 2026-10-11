@@ -4,7 +4,9 @@ package sshtest
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -24,6 +26,8 @@ type Server struct {
 	ClientKey ssh.PublicKey
 	// InteractiveOnly rejects the "password" method, as macOS sshd usually does.
 	InteractiveOnly bool
+	// ECDSAHostKey also offers an ECDSA P-256 host key, as most sshd hosts do.
+	ECDSAHostKey bool
 	// Handle receives the exact remote command string and the session stdin.
 	Handle func(command string, stdin io.Reader, stdout, stderr io.Writer) int
 
@@ -97,6 +101,17 @@ func (s *Server) config() *ssh.ServerConfig {
 		}
 	}
 	config.AddHostKey(s.hostKey)
+	if s.ECDSAHostKey {
+		private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			panic(err)
+		}
+		signer, err := ssh.NewSignerFromKey(private)
+		if err != nil {
+			panic(err)
+		}
+		config.AddHostKey(signer)
+	}
 	return config
 }
 

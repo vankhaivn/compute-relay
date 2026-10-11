@@ -132,6 +132,9 @@ func Dial(ctx context.Context, target Target, credential Credential) (*Client, e
 			}
 			return nil
 		},
+		// OpenSSH's order, so the pinned key is the one ssh-keyscan and known_hosts show.
+		HostKeyAlgorithms: []string{ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+			ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256},
 		Timeout: handshakeTimeout,
 	}
 	var dialer net.Dialer
