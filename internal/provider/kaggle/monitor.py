@@ -95,8 +95,9 @@ class LogStreamGuard:
         if request.method != "GET" or request.url != self.url:
             raise ValueError("unexpected stream request")
         try:
+            # The read timeout also covers response headers, before replay starts.
             response = self.session.get_adapter(self.url).send(
-                request, timeout=(3, 0.5), stream=True, proxies={}, verify=True, cert=None)
+                request, timeout=(2, 2), stream=True, proxies={}, verify=True, cert=None)
         except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout):
             raise LogUnavailable("stream_timeout") from None
         status = response.status_code
