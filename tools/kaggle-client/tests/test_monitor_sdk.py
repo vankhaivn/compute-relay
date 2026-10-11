@@ -33,7 +33,7 @@ class MonitorPinnedSDKTests(unittest.TestCase):
     def exchange(self, adapter, request, **settings):
         if request.method == "GET":
             self.assertEqual(request.url, "https://api.kaggle.com/v1/kernels/logs/stream/" + self.execution["owner"] + "/" + self.execution["slug"])
-            self.assertEqual(settings, dict(timeout=(3, 0.5), stream=True, proxies={}, verify=True, cert=None))
+            self.assertEqual(settings, dict(timeout=(2, 2), stream=True, proxies={}, verify=True, cert=None))
             self.assertEqual(request.headers["Authorization"], "Bearer SYNTHETIC_TOKEN")
             self.assertEqual(request.headers["Accept"], "text/event-stream, */*")
             self.assertNotIn("Content-Type", request.headers)
@@ -309,7 +309,7 @@ class MonitorPinnedSDKTests(unittest.TestCase):
         build_response.assert_not_called()
         self.assertEqual(pool.urlopen.call_count, 1)
         settings = pool.urlopen.call_args.kwargs
-        self.assertEqual((settings["timeout"].connect_timeout, settings["timeout"].read_timeout), (3, 0.5))
+        self.assertEqual((settings["timeout"].connect_timeout, settings["timeout"].read_timeout), (2, 2))
         self.assertEqual(settings["retries"].total, 0)
         self.assertFalse(settings["redirect"])
         self.assertFalse(settings["preload_content"])
@@ -350,3 +350,44 @@ class MonitorPinnedSDKTests(unittest.TestCase):
                 self.assertEqual(self.raw_body.reads, 1)
                 self.assertEqual(self.calls[-1][0], "logs-stream")
                 self.assertTrue(self.raw_body.closed)
+
+    def test_real_adapter_allows_headers_later_than_old_half_second_limit(self):
+        from urllib3.exceptions import ReadTimeoutError
+        from urllib3.response import HTTPResponse
+        self.real_adapter_send = requests.adapters.HTTPAdapter.send
+        self.fault = "log-real-header-timeout"
+        timeouts = []
+        delayed_headers = 1.0
+
+        class DelayedHeaderPool:
+            def urlopen(inner, **settings):
+                # A virtual header delay keeps this regression deterministic on
+                # every host; the real adapter still constructs/applies Timeout.
+                timeout = settings["timeout"]
+                timeouts.append((timeout.connect_timeout, timeout.read_timeout))
+                self.assertEqual(settings["method"], "GET")
+                self.assertEqual(settings["headers"]["Authorization"], "Bearer SYNTHETIC_TOKEN")
+                self.assertFalse(settings["redirect"])
+                self.assertEqual(settings["retries"].total, 0)
+                self.assertFalse(settings["preload_content"])
+                if timeout.read_timeout < delayed_headers:
+                    raise ReadTimeoutError(inner, "/synthetic", "SYNTHETIC_TOKEN")
+                return HTTPResponse(body=io.BytesIO(b'[{"data":"delayed header log\\n"}]'),
+                                    headers={"Content-Type":"application/json"}, status=200,
+                                    preload_content=False, decode_content=False)
+
+        with mock.patch.object(requests.adapters.HTTPAdapter, "get_connection_with_tls_context", return_value=DelayedHeaderPool()):
+            # Exercise the previous timeout through the same actual adapter; it
+            # must fail before the new monitor path can read the finite body.
+            request = requests.Request("GET", "https://api.kaggle.com/v1/kernels/logs/stream/fixture_user/fixture-slug",
+                                       headers={"Authorization":"Bearer SYNTHETIC_TOKEN"}).prepare()
+            with self.assertRaises(requests.exceptions.ReadTimeout):
+                self.real_adapter_send(requests.adapters.HTTPAdapter(max_retries=0), request,
+                                       timeout=(3, 0.5), stream=True, proxies={}, verify=True, cert=None)
+            result = self.invoke("logs")
+        self.assertEqual(timeouts, [(3, 0.5), (2, 2)])
+        self.assertEqual(result["status"], "logs")
+        self.assertEqual(result["availability"], "after_completion")
+        self.assertEqual(base64.b64decode(result["text_b64"]), b"delayed header log\n")
+        self.assertEqual(self.calls[-1][0], execution.OPERATIONS["get"])
+        self.assertEqual(len(self.calls), 5)

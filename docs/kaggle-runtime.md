@@ -303,6 +303,8 @@ This integrated path is intentionally narrow:
   [API usage](../api/README.md#reading-attempt-logs). Bounded running replay has offline evidence;
   a finite live probe completed without observable log pages, so running delivery remains
   unqualified. Failed reads return fixed diagnostic categories without provider response text.
+  Stream connect and socket reads each allow two seconds, including response headers;
+  replay and the enclosing request retain their separate finite deadlines.
   A public provider quota HTTP API is not shipped.
 - Provider timeout enforcement beyond local/runner budgets, exact hardware release and remote
   cleanup remain unverified or unsupported as documented in [Current status](status.md).
