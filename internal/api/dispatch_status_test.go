@@ -63,6 +63,23 @@ func TestDispatchProblemWireShapeAndRedaction(t *testing.T) {
 	if err = schema.Validate(wire); err != nil {
 		t.Fatal("actual problem response failed existing schema", err)
 	}
+	// A closed reason is public; unsafe text in the same key is dropped with the other details.
+	for reason, public := range map[string]bool{"staging_not_confirmed": true, "https://reason-canary.invalid": false, "Reason canary": false} {
+		reasoned := p.WithDetail(domain.ReasonDetail, reason)
+		record.Problem = &reasoned
+		encoded, err := json.Marshal(jobStatus(record))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]any
+		if strings.Contains(string(encoded), "canary") || json.Unmarshal(encoded, &wire) != nil || schema.Validate(wire) != nil {
+			t.Fatal("reasoned problem leaked or failed the schema", reason)
+		}
+		details, exists := wire["problem"].(map[string]any)["details"]
+		if exists != public || public && len(details.(map[string]any)) != 1 || public && details.(map[string]any)["reason"] != reason {
+			t.Fatal("unexpected public details", reason, details)
+		}
+	}
 	record.Problem = nil
 	if _, exists := jobStatus(record)["problem"]; exists {
 		t.Fatal("absent problem was fabricated")
