@@ -301,3 +301,23 @@ func FuzzApplyNeverRepeatsMutation(f *testing.F) {
 		}
 	})
 }
+
+func TestSubmittedAttemptSpreadsUnresolvedOutcomesOverMinutes(t *testing.T) {
+	var before, after time.Duration
+	for failures := 0; failures < MaxFailures; failures++ {
+		local := retryDelay(time.Second, Journal{Failures: failures})
+		submitted := retryDelay(time.Second, Journal{SubmitStarted: true, Failures: failures})
+		if failures == 0 && (local != time.Second || submitted != time.Second) {
+			t.Fatal("healthy observation cadence changed", local, submitted)
+		}
+		if failures > 0 {
+			before, after = before+local, after+submitted
+		}
+	}
+	if before != 30*time.Second || after != 7*time.Minute {
+		t.Fatal("unexpected spread before attention", before, after)
+	}
+	if retryDelay(time.Minute, Journal{SubmitStarted: true, Failures: MaxFailures}) != 2*time.Minute {
+		t.Fatal("retry ceiling changed")
+	}
+}
