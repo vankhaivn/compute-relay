@@ -92,6 +92,8 @@ type Config struct {
 	ImageRecipeSHA256 string
 	CPUs              string
 	MemoryBytes       int64
+	MachineID         string
+	EngineID          string
 }
 
 type session interface {
@@ -121,6 +123,10 @@ var (
 func NewAdapter(config Config, binding provider.BindingSnapshot, creds ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock) (*Adapter, error) {
 	if !binding.Valid() || binding.Binding.ProviderInstanceID != config.InstanceID || binding.CredentialRef != string(config.CredentialRef) ||
 		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || config.MaxProcesses < 0 || config.MaxProcesses > 65536 {
+		return nil, ErrRequest
+	}
+	if config.MachineID != "" && !domain.SHA256Digest(config.MachineID).Valid() ||
+		config.EngineID != "" && (!domain.SHA256Digest(config.EngineID).Valid() || config.MachineID == "") {
 		return nil, ErrRequest
 	}
 	if config.ImageRecipeSHA256 == "" {
@@ -160,7 +166,17 @@ func (a *Adapter) withDocker(ctx context.Context, use func(docker, Endpoint) err
 		if err != nil {
 			return err
 		}
-		return use(docker{exec: conn, binary: binary}, endpoint)
+		d := docker{exec: conn, binary: binary}
+		if a.config.MachineID != "" {
+			d, err = d.localResource(ctx)
+			if err != nil {
+				return err
+			}
+			if err = d.verifyResource(ctx, a.config.MachineID, a.config.EngineID); err != nil {
+				return err
+			}
+		}
+		return use(d, endpoint)
 	})
 }
 

@@ -294,7 +294,7 @@ func validConnectionOperation(operation connections.Operation, workspace domain.
 	case "failed":
 		if operation.Problem != nil {
 			switch *operation.Problem {
-			case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
+			case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "resource_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
 				return true
 			}
 		}

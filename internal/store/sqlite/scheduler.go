@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
+	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -23,7 +24,8 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 	rows, err := tx.QueryContext(ctx, `SELECT q.queue_seq,q.workspace_id,q.job_id,q.attempt_id,q.dispatch_barrier,q.not_before_ms,
  a.state,a.orchestration,j.active_attempt_id=q.attempt_id,w.enabled,r.snapshot,
  json_extract(j.request,'$.resources.accelerator'),json_extract(j.request,'$.timeouts.remote_wall_seconds'),
- COALESCE(l.until_ms,0),COALESCE(l.held,0),(COALESCE(e.status IN ('granted','consumed'),0) OR g.authorization_id IS NOT NULL)
+ COALESCE(l.until_ms,0),COALESCE(l.held,0),(COALESCE(e.status IN ('granted','consumed'),0) OR g.authorization_id IS NOT NULL),
+ COALESCE(rr.resource_kind,''),COALESCE(rr.resource_scope,'')
  FROM scheduler_queue q JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id
  JOIN workspaces w ON w.workspace_id=q.workspace_id
@@ -31,6 +33,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
  LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
  LEFT JOIN execution_authorizations e ON e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
  LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
+ LEFT JOIN scheduler_resource_reservations rr ON rr.queue_seq=q.queue_seq
  WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out') OR (l.held=1 AND l.until_ms>?)
  ORDER BY q.queue_seq LIMIT ?`, now.UnixMilli(), scheduler.ScanLimit+1)
 	if err != nil {
@@ -38,12 +41,15 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 	}
 	result := []scheduler.Candidate{}
 	frozenLimits := map[int64]int{}
+	frozenResources := map[int64]string{}
+	resourceReceipts := map[int64]connections.ResourceIdentity{}
 	for rows.Next() {
 		var c scheduler.Candidate
 		var raw, phase, profile string
 		var until, notBefore int64
 		var held bool
-		if err = rows.Scan(&c.Sequence, &c.WorkspaceID, &c.JobID, &c.AttemptID, &c.DispatchBarrier, &notBefore, &raw, &phase, &c.ActiveAttempt, &c.WorkspaceEnabled, &profile, &c.Resource, &c.WallSeconds, &until, &held, &c.AuthorizationGranted); err != nil {
+		var resource connections.ResourceIdentity
+		if err = rows.Scan(&c.Sequence, &c.WorkspaceID, &c.JobID, &c.AttemptID, &c.DispatchBarrier, &notBefore, &raw, &phase, &c.ActiveAttempt, &c.WorkspaceEnabled, &profile, &c.Resource, &c.WallSeconds, &until, &held, &c.AuthorizationGranted, &resource.Kind, &resource.ID); err != nil {
 			rows.Close()
 			return nil, dbError(err)
 		}
@@ -58,6 +64,11 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 		}
 		frozenLimits[c.Sequence] = p.MaxActiveAttempts
 		c.Managed = executionauth.Managed(p)
+		if c.Managed && p.MaxActiveAttempts == 0 {
+			frozenLimits[c.Sequence] = 1
+		}
+		frozenResources[c.Sequence] = p.ResourceScope
+		resourceReceipts[c.Sequence] = resource
 		c.AccountScope = p.AccountScope
 		c.ProviderInstanceID = p.Binding.ProviderInstanceID
 		c.Policy = scheduler.AccountPolicy{MaxActive: settings.MaxActivePerAccount}
@@ -123,6 +134,9 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 		c.Quota = q
 	}
 	reserveManagedQuota(result, now)
+	if err = schedulerResources(ctx, tx, result, frozenResources, resourceReceipts, now); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -193,6 +207,12 @@ func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, mana
 			return advanceSchedulerClock(ctx, tx, now)
 		}
 		row := rows[index]
+		if row.ResourceScope != "" {
+			_, err = tx.ExecContext(ctx, `INSERT INTO scheduler_resource_reservations VALUES(?,?,?) ON CONFLICT(queue_seq) DO NOTHING`, row.Sequence, row.ResourceKind, row.ResourceScope)
+			if err != nil {
+				return dbError(err)
+			}
+		}
 		a, _, err := loadAttempt(ctx, tx, row.WorkspaceID, row.JobID, row.AttemptID)
 		if err != nil {
 			return err

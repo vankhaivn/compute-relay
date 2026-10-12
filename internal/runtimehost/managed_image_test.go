@@ -38,8 +38,8 @@ func TestManagedImageInstallationRecoveryNeverRepeatsMutation(t *testing.T) {
 				v.ImageID = installed
 				return v, err
 			}
-			adapter.install = func(ctx context.Context, raw []byte, account, architecture string, op domain.OperationID, recoverOnly bool) (sshhost.HostVerification, error) {
-				if account == "" || architecture != "amd64" || !op.Valid() {
+			adapter.install = func(ctx context.Context, raw []byte, account, machineID, architecture string, op domain.OperationID, recoverOnly bool) (sshhost.HostVerification, error) {
+				if account == "" || machineID != strings.Repeat("2", 64) || architecture != "amd64" || !op.Valid() {
 					t.Fatal("installation lost its frozen identity")
 				}
 				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Minute {
@@ -135,7 +135,7 @@ func TestManagedImageInstallationRecoveryNeverRepeatsMutation(t *testing.T) {
 				t.Fatal(err)
 			}
 			config, err := parseManagedSSHRuntimeConfig(frozen.RuntimeConfig)
-			if err != nil || config.Version != 2 || config.Image != installed || config.Architecture != "amd64" || config.RecipeSHA256 != sshhost.ImageRecipeDigest() {
+			if err != nil || config.Version != 3 || config.Image != installed || config.Architecture != "amd64" || config.RecipeSHA256 != sshhost.ImageRecipeDigest() || config.MachineID != strings.Repeat("2", 64) || config.EngineID != strings.Repeat("3", 64) {
 				t.Fatal("image ID or platform was not frozen", config, err)
 			}
 		})

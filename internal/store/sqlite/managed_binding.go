@@ -72,6 +72,16 @@ func (s *Store) ReadManagedBinding(ctx context.Context, expected provider.Bindin
 			return err
 		}
 		result = connections.RuntimeBinding{ProviderType: providerType, CanonicalAccount: account, Profile: profile, RuntimeConfig: append([]byte(nil), runtimeConfig...)}
+		resource, err := managedResource(ctx, tx, profile.AccountScope)
+		if err != nil {
+			return err
+		}
+		if profile.ResourceScope != "" && profile.ResourceScope != resource.ID {
+			return ErrCorrupt
+		}
+		if resource.ID != "" {
+			result.Resource = &resource
+		}
 		return nil
 	})
 	if err != nil {

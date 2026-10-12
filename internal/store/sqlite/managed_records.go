@@ -74,7 +74,7 @@ func managedProfileOwned(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, 
 	}
 	return nil
 }
-func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, now time.Time) (connections.Connection, error) {
+func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, snapshot *managedScheduling, now time.Time) (connections.Connection, error) {
 	v := r.view
 	if r.profile != "" && v.NewWork == "enabled" && v.Authentication == "verified" && r.pending == "" {
 		var raw string
@@ -104,6 +104,10 @@ func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, now time.T
 			v.Quotas = append(v.Quotas, connections.Quota{Status: "unknown", Resource: "cpu", Unit: "seconds", Precision: "unknown"})
 		}
 		v.ActiveAttempts = capacity.ReservedAttempts
+		v.Concurrency, err = managedConcurrency(ctx, tx, r, v.Selection, snapshot, now)
+		if err != nil {
+			return v, err
+		}
 	}
 	return v, nil
 }
@@ -129,7 +133,7 @@ func (s *Store) ReadConnection(ctx context.Context, w domain.WorkspaceID, token,
 		if err != nil {
 			return err
 		}
-		v, err = projectManaged(ctx, tx, r, now)
+		v, err = projectManaged(ctx, tx, r, &managedScheduling{}, now)
 		return err
 	})
 	return v, err
@@ -166,12 +170,13 @@ func (s *Store) ListConnections(ctx context.Context, w domain.WorkspaceID, token
 		if len(ids) > connections.MaxConnections {
 			return ErrCorrupt
 		}
+		snapshot := &managedScheduling{}
 		for _, id := range ids {
 			r, err := loadManaged(ctx, tx, w, id)
 			if err != nil {
 				return err
 			}
-			v, err := projectManaged(ctx, tx, r, now)
+			v, err := projectManaged(ctx, tx, r, snapshot, now)
 			if err != nil {
 				return err
 			}
@@ -216,6 +221,15 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 		r.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}
 		if r.Configuration.Validate() != nil {
 			return r, ErrCorrupt
+		}
+	}
+	if r.CanonicalAccount != "" {
+		resource, err := managedResource(ctx, tx, connections.AccountScope(r.ProviderType, r.CanonicalAccount))
+		if err != nil {
+			return r, err
+		}
+		if resource.ID != "" {
+			r.Resource = &resource
 		}
 	}
 	return r, nil

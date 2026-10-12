@@ -70,7 +70,8 @@
             "active_work",
             "stale_revision",
             "unsupported_provider",
-            "image_installation_unknown"
+            "image_installation_unknown",
+            "resource_changed"
           ]
         }
       ]

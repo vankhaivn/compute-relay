@@ -9,6 +9,8 @@ type HostVerification struct {
 	OS           string
 	ImageID      string
 	Architecture string
+	MachineID    string
+	EngineID     string
 }
 
 // VerifyHost retains the canonical identity interface for existing callers.

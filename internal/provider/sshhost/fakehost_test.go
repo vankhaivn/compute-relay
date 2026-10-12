@@ -52,6 +52,10 @@ type fakeHost struct {
 	registry      bool // pull succeeds
 	containers    map[string]*fakeContainer
 	calls         [][]string
+	wireCalls     [][]string
+	machineID     string
+	engineID      string
+	dockerHost    string
 	starts        int
 	created       int
 	secretPackets [][]byte
@@ -61,7 +65,8 @@ type fakeHost struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{}}
+	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{},
+		machineID: strings.Repeat("a", 32), engineID: "synthetic-engine-01", dockerHost: "unix:///var/run/docker.sock"}
 }
 
 func (h *fakeHost) Close() error {
@@ -138,7 +143,25 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.wireCalls = append(h.wireCalls, append([]string(nil), argv...))
+	if len(argv) > 0 && argv[0] == "/usr/bin/env" {
+		if len(argv) < 9 || !slices.Equal(argv[:5], []string{"/usr/bin/env", "-u", "DOCKER_CONTEXT", "-u", "DOCKER_HOST"}) || argv[6] != "--host" || argv[7] != h.dockerHost {
+			h.t.Fatal("Docker command did not pin the local socket", argv)
+		}
+		argv = append([]string{argv[5]}, argv[8:]...)
+	}
 	h.calls = append(h.calls, argv)
+	switch {
+	case slices.Equal(argv, []string{"/usr/bin/uname", "-s"}):
+		_, _ = io.WriteString(stdout, "Linux\n")
+		return Result{}, nil
+	case slices.Equal(argv, []string{"/bin/cat", "/etc/machine-id"}):
+		_, _ = io.WriteString(stdout, h.machineID+"\n")
+		return Result{}, nil
+	case slices.Equal(argv, []string{"/bin/sh", "-c", `printf '%s\n%s\n' "${DOCKER_CONTEXT-}" "${DOCKER_HOST-}"`}):
+		_, _ = io.WriteString(stdout, "\n\n")
+		return Result{}, nil
+	}
 	if argv[0] == "test" {
 		if argv[2] == "/usr/local/bin/docker" {
 			return Result{}, nil
@@ -152,6 +175,12 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 		}
 	}
 	switch {
+	case slices.Equal(args, []string{"context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"}):
+		_ = json.NewEncoder(stdout).Encode(h.dockerHost)
+		return Result{}, nil
+	case slices.Equal(args, []string{"info", "--format", "{{json .ID}}"}):
+		_ = json.NewEncoder(stdout).Encode(h.engineID)
+		return Result{}, nil
 	case slices.Equal(args, []string{"info", "--format", "{{.SystemTime}}"}):
 		_, _ = io.WriteString(stdout, h.engineTime.Format(time.RFC3339Nano))
 		return Result{}, nil

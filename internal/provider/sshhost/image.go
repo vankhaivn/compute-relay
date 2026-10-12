@@ -64,11 +64,15 @@ func VerifyManagedHostBound(ctx context.Context, raw []byte, account string) (Ho
 
 // InstallImage executes one fixed metadata-only build. The caller must persist its
 // one-shot barrier first. Recovery inspects the exact operation tag and never builds.
-func InstallImage(ctx context.Context, raw []byte, account, architecture string, operation domain.OperationID, recoverOnly bool) (HostVerification, error) {
-	if !operation.Valid() || !strings.HasPrefix(string(operation), "op_") || account == "" || !SupportedArchitecture(architecture) {
+func InstallImage(ctx context.Context, raw []byte, account, machineID, architecture string, operation domain.OperationID, recoverOnly bool) (HostVerification, error) {
+	if !operation.Valid() || !strings.HasPrefix(string(operation), "op_") || account == "" ||
+		machineID == "" && !recoverOnly || machineID != "" && !domain.SHA256Digest(machineID).Valid() || !SupportedArchitecture(architecture) {
 		return HostVerification{}, ErrRequest
 	}
 	return withImageHost(ctx, raw, account, func(ctx context.Context, d docker, verified HostVerification) (HostVerification, error) {
+		if machineID != "" && verified.MachineID != machineID {
+			return HostVerification{}, ErrResourceIdentity
+		}
 		if verified.Architecture != architecture {
 			return HostVerification{}, ErrIdentity
 		}
@@ -125,5 +129,21 @@ func withImageHost(ctx context.Context, raw []byte, account string, use func(con
 	if err != nil {
 		return HostVerification{}, err
 	}
-	return use(ctx, docker{exec: client, binary: binary}, verified)
+	d, err := (docker{exec: client, binary: binary}).localResource(ctx)
+	if err != nil {
+		return HostVerification{}, err
+	}
+	os, arch, err := d.platform(ctx)
+	if err != nil || os != verified.OS || arch != verified.Architecture {
+		return HostVerification{}, ErrResourceIdentity
+	}
+	verified.MachineID, err = machineIdentity(ctx, client)
+	if err != nil {
+		return HostVerification{}, err
+	}
+	verified.EngineID, err = d.engineIdentity(ctx)
+	if err != nil {
+		return HostVerification{}, err
+	}
+	return use(ctx, d, verified)
 }
