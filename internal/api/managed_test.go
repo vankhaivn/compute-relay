@@ -110,7 +110,7 @@ type managedHTTP struct {
 	adapter *managedAdapter
 }
 
-func setupManagedHTTP(t *testing.T, configured bool) *managedHTTP {
+func setupManagedHTTP(t *testing.T, configured bool, adapters ...connections.Adapter) *managedHTTP {
 	t.Helper()
 	ctx := context.Background()
 	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state"), sqlite.DefaultOptions())
@@ -154,7 +154,10 @@ func setupManagedHTTP(t *testing.T, configured bool) *managedHTTP {
 	if err = store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: 0, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}); err != nil {
 		t.Fatal(err)
 	}
-	f.service, err = connections.New(access, store, f.vault, []connections.Adapter{f.adapter}, nil)
+	if len(adapters) == 0 {
+		adapters = []connections.Adapter{f.adapter}
+	}
+	f.service, err = connections.New(access, store, f.vault, adapters, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
