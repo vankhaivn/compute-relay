@@ -131,10 +131,11 @@ COMPUTE_RELAY_SSH_DOCKER_E2E=1 go test -count=1 -run 'TestRealDockerOverSSH|Test
 ```
 
 Set `COMPUTE_RELAY_SSH_DOCKER_PLATFORM=linux/amd64` on an arm64 machine to repeat it for an Intel
-target. Then, with approval for the exact host, follow [SSH hosts](../ssh-hosts.md): verify one
-connection, compare the pinned fingerprint with the host's own, run one authorized CPU job to a
-published result, cancel a second authorized job, and request cleanup for each attempt. Confirm
-on the host that no `compute-relay-` container remains.
+target. Then, with approval for the exact host, follow [SSH hosts](../ssh-hosts.md): verify a
+password and a key connection with the host's own fingerprint and refuse a wrong one, run one
+authorized CPU job to a published result across a Relay restart, cancel a second authorized job,
+and request cleanup for each attempt. Confirm on the host that no `compute-relay-` container
+remains.
 
 **Gaps needing a reviewed procedure.** Do not invent commands for these; record them as
 `blocked-procedure` until a bounded plan and approval exist:

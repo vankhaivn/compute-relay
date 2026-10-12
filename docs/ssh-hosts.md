@@ -19,8 +19,8 @@ type, so the usual connection, admission and per-attempt authorization rules app
 
 Docker access is administrative access to the host. Use an account meant for running jobs.
 
-Optionally record the host key fingerprint on the host itself, then compare it with the one
-Relay pins:
+Relay does not display the key it pins, so read the host key fingerprint on the host itself and
+put it in the `host_key_fingerprint` field. Verification then refuses any other key:
 
 ```sh
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
@@ -39,7 +39,7 @@ write-only:
 | `password` | one login | Password for that user. |
 | `private_key` | one login | OpenSSH or PEM private key; `private_key_passphrase` if it is encrypted. |
 | `port` | no | Defaults to 22. |
-| `host_key_fingerprint` | no | `SHA256:…` value. Without it, the key presented at verification is pinned. |
+| `host_key_fingerprint` | recommended | `SHA256:…` value. Without it, the key presented at verification is pinned unchecked. |
 | `docker_path` | no | Absolute Docker CLI path. |
 | `cpus`, `memory_mib` | no | Per-job limits, for example `2` and `4096`. Without them the engine's own limits apply. |
 
