@@ -157,7 +157,7 @@ for eligibility and failure receipts.
 | No selection and `host.image.status=missing` | Request `install_image` and inspect its operation receipt. |
 | `image_installation_unknown` | Check the host, registry access and non-interactive Docker credential helpers; use `check` to discover a completed image. Do not assume the remote build stopped. |
 | Preparation fails after deleting an image | Restore the exact frozen image for retained jobs. Installing a new image only changes future selections. |
-| Credential store unavailable after switching modes or binaries | Grant the intended binary access to this installation's existing Keychain items, or keep the previously working mode; do not reset the runtime. |
+| Credential store unavailable | Preserve the runtime and its selected store. For file storage, check the original private file and permissions; for Keychain, grant the intended binary access to the existing items or keep the working mode. Do not reset the runtime. |
 
 The Dockerfile pins the base digest; its SHA256 identifies the repository recipe.
 The legacy base reference remains in [docker.go](../internal/provider/sshhost/docker.go). See the [SSH host reference](development/providers/ssh-host.md)
