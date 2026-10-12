@@ -23,6 +23,7 @@ The current implementation boundary. No public release is available.
 | Result collection | Automatic by default; an immutable manual policy waits for `/collect` and reports selected-output byte progress. |
 | Attempt logs | Bounded pages for an explicit original attempt with current read authority. Best effort: transient failures and long replay latency remain possible. |
 | Execution deadlines | Optional immutable absolute UTC deadline on supported paths, with enforcement in the remote runner and SSH container supervisor. See [execution deadlines](execution-deadlines.md). |
+| Finite media example | Public API controller and pinned FFmpeg workload for H.264/AAC RTMPS stream copy, bounded progress and a remote watchdog. See the [integration guide](../examples/finite-rtmps/README.md). |
 | Artifact delivery | Attempt-scoped listing, metadata and create-only downloads verified to the end of the stream. |
 | Local retention | Provider-mode serve expires and deletes eligible input and result bytes at startup and hourly (24 hours unreferenced, 7 days after safe completion); holds and unresolved work keep them. |
 
@@ -47,6 +48,9 @@ Offline tests are not live-provider evidence. Live evidence so far:
   verified artifacts, cancellation and exact cleanup of completed and never-started containers.
   Absolute-deadline enforcement stopped a TERM-ignoring payload and child while Relay was offline,
   then recovered the original timeout result and cleaned up that container after restart.
+  Short finite RTMPS tests on that host over Tailscale verified 1080p H.264/AAC stream copy,
+  TLS certificate and hostname validation, media stalls and receiver disconnects with Relay offline,
+  original-attempt preservation through an SSH outage, and explicit continuation under the original deadline.
 
 Another account, environment or workload needs its own scoped qualification before support is
 claimed. Use the [validation checklist](development/validation-checklist.md).
@@ -64,6 +68,8 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 - SSH host qualification covers one macOS Intel host over LAN and Tailscale. Encrypted private
   keys, host sleep, Docker-engine restarts, other Tailscale network paths and Linux VPS hosts remain
   unqualified live.
+- Finite RTMPS qualification currently covers short runs over Tailscale with a controlled receiver
+  on the target host. Multi-hour delivery, RTMPS over LAN and public ingest routes remain unqualified.
 - Direct HTTPS input is not composed into `serve`; upload immutable inputs first.
 
 Remaining product work is in the [implementation plan](development/implementation-plan.md).

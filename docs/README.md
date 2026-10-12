@@ -14,6 +14,7 @@ are under [development](development/README.md).
 | Stage an SSH attempt before explicitly starting it | [Preparation gates](preparation-gates.md) |
 | Supply temporary secret values to a gated SSH workload | [Workload secrets](workload-secrets.md) |
 | Bound time-sensitive execution across queueing and disconnects | [Execution deadlines](execution-deadlines.md) |
+| Run a finite H.264/AAC stream-copy delivery | [RTMPS example](../examples/finite-rtmps/README.md) |
 | Administer the runtime, workspaces and tokens | [Local runtime](local-runtime.md) |
 | Package code and upload inputs | [Bundles and import](packaging-and-import.md) |
 | Configure profiles, validate/admit jobs and issue controls | [Application CLI](application-cli.md) |

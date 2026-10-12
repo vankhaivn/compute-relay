@@ -20,6 +20,8 @@ No release has been published. This summarizes the current pre-release feature s
   clock-skew checks on advertised-capability hosts; see [execution deadline limits](docs/execution-deadlines.md).
 - Optional SSH preparation and start gates with separately supplied ephemeral workload secrets;
   see [preparation gates](docs/preparation-gates.md) and [workload secrets](docs/workload-secrets.md).
+- A [finite RTMPS example](examples/finite-rtmps/README.md) with a pinned runtime, public API
+  controller, stream-copy pacing and a remote media-progress watchdog.
 - Reproducible macOS arm64 companion bundles.
 
 See [current status](docs/status.md) for limits.
