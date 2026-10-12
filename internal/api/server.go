@@ -22,6 +22,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
 	"github.com/vankhaivn/compute-relay/internal/buildinfo"
+	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
@@ -37,6 +38,7 @@ type Config struct {
 	Authorizations *executionauth.Service // Optional durable managed-attempt consent.
 	Results        *collection.Reader     // nil disables published artifact reads; no provider fallback.
 	Operations     *operations.Service    // nil disables durable controls; never use an in-memory fallback.
+	Cleanup        *cleanup.Service       // nil disables explicit remote cleanup admission; requires Operations.
 	Jobs           *admission.Service     // nil disables durable job routes; never use a memory fallback.
 	HTTPSInputs    *objects.Ingestor      // nil disables HTTPS ingestion; operator composition supplies the guarded client.
 	LocalImports   *objects.Importer      // nil disables local import; configured by the operator composition root.
@@ -56,6 +58,10 @@ type Config struct {
 }
 
 const FeatureManualResultCollection = "manual_result_collection"
+
+// FeatureJobCleanup advertises durable cleanup admission. Like collect, an accepted
+// request is applied only by a separately composed provider worker.
+const FeatureJobCleanup = "job_cleanup"
 
 func DefaultConfig() Config {
 	return Config{
@@ -234,6 +240,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", "operation_status")
 			if h.config.Jobs != nil {
 				features = append(features, FeatureManualResultCollection)
+			}
+			if h.config.Cleanup != nil {
+				features = append(features, FeatureJobCleanup)
 			}
 		}
 		if h.config.Connections != nil {

@@ -154,14 +154,28 @@
       ]
     },
     {
+      "schema": "schemas/cleanup-request.v1alpha1.schema.json",
+      "valid": [
+        "examples/cleanup-request.valid.json",
+        "examples/cleanup-request.discard.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/cleanup-request.implicit-attempt.json",
+        "examples/invalid/cleanup-request.string-discard.json"
+      ]
+    },
+    {
       "schema": "schemas/control-operation.v1alpha1.schema.json",
       "valid": [
         "examples/control-operation.prevented.valid.json",
-        "examples/control-operation.retry.valid.json"
+        "examples/control-operation.retry.valid.json",
+        "examples/control-operation.cleanup.valid.json",
+        "examples/control-operation.cleanup-unsupported.valid.json"
       ],
       "invalid": [
         "examples/invalid/control-operation.false-termination.json",
-        "examples/invalid/control-operation.retry-without-attempt.json"
+        "examples/invalid/control-operation.retry-without-attempt.json",
+        "examples/invalid/control-operation.cleanup-accepted-deleted.json"
       ]
     },
     {

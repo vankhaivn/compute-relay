@@ -208,7 +208,7 @@ func validateOpenAPI(root, relative string) error {
 		"getHealth": {}, "getReadiness": {}, "getRuntimeInfo": {},
 		"validateJob": {}, "createJob": {}, "getJob": {},
 		"cancelJob": {}, "retryJob": {}, "reconcileJob": {},
-		"collectJob": {}, "getOperation": {},
+		"collectJob": {}, "cleanupJob": {}, "getOperation": {},
 		"uploadObject": {}, "getObject": {}, "importObject": {}, "ingestObject": {},
 		"listArtifacts": {}, "getArtifact": {}, "downloadArtifact": {}, "getJobLogs": {},
 		"listProviderDescriptors": {}, "listConnections": {}, "getConnection": {},
@@ -241,7 +241,7 @@ func validateOpenAPI(root, relative string) error {
 func operationStatus(id string) string {
 	switch id {
 	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob",
-		"cancelJob", "retryJob", "reconcileJob", "collectJob", "getOperation", "listArtifacts", "getArtifact", "downloadArtifact", "getJobLogs",
+		"cancelJob", "retryJob", "reconcileJob", "collectJob", "cleanupJob", "getOperation", "listArtifacts", "getArtifact", "downloadArtifact", "getJobLogs",
 		"listProviderDescriptors", "listConnections", "getConnection", "createConnection", "changeConnection", "getConnectionOperation",
 		"authorizeAttempt", "getAttemptAuthorization":
 		return "implemented-offline"

@@ -1,0 +1,26 @@
+{
+  "operation_id": "op_cleanup",
+  "workspace_id": "example",
+  "job_id": "job_example",
+  "attempt_id": "att_original",
+  "kind": "cleanup",
+  "status": "failed",
+  "revision": 3,
+  "created_at": "2026-09-15T00:00:00Z",
+  "updated_at": "2026-09-15T00:01:00Z",
+  "effect": "failed",
+  "remote_termination_confirmed": false,
+  "replay": false,
+  "problem": {
+    "code": "UNSUPPORTED_CAPABILITY",
+    "message": "remote cleanup is not supported for this attempt's provider binding; owned resources were preserved",
+    "stage": "validation",
+    "safe_operation_retry": false,
+    "compute_may_have_started": false,
+    "recommended_action": "inspect_provider"
+  },
+  "links": {
+    "self": "/v1/workspaces/example/operations/op_cleanup",
+    "job": "/v1/workspaces/example/jobs/job_example"
+  }
+}

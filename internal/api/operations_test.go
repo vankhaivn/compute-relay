@@ -20,6 +20,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/api"
 	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -41,6 +42,13 @@ func (b *controlBlobs) Open(_ context.Context, w domain.WorkspaceID, id domain.O
 }
 
 func setupControlHTTP(t *testing.T, override operations.Repository) (*jobHTTP, *controlBlobs) {
+	t.Helper()
+	return setupControlsHTTP(t, override, nil)
+}
+
+// setupControlsHTTP composes durable controls and cleanup admission over one store.
+// A non-nil cleanup repository replaces only cleanup admission and reads.
+func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOverride cleanup.Repository) (*jobHTTP, *controlBlobs) {
 	t.Helper()
 	ctx := context.Background()
 	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state"), sqlite.DefaultOptions())
@@ -103,12 +111,23 @@ func setupControlHTTP(t *testing.T, override operations.Repository) (*jobHTTP, *
 	if err != nil {
 		t.Fatal(err)
 	}
+	var cleanups cleanup.Repository = store
+	if cleanupOverride != nil {
+		cleanups = cleanupOverride
+	}
+	cleaner, err := cleanup.NewService(access, cleanups, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := api.DefaultConfig()
-	cfg.Listen, cfg.Jobs, cfg.Operations = ln.Addr().String(), jobs, controls
+	cfg.Listen, cfg.Jobs, cfg.Operations, cfg.Cleanup = ln.Addr().String(), jobs, controls, cleaner
+	if _, off := cleanupOverride.(noCleanup); off {
+		cfg.Cleanup = nil
+	}
 	cfg.WorkspaceRate = api.Rate{PerSecond: 1000, Burst: 1000}
 	cfg.GlobalRate = cfg.WorkspaceRate
 	server, err := api.NewServer(cfg, access, obj, store.Ready)
@@ -238,7 +257,8 @@ func TestControlHTTPLostReceiptAndStrictRequestGuards(t *testing.T) {
 	f.call(t, "POST", job.Links.Self+"/retry", "a", "reason-required", body, 400)
 	f.call(t, "POST", job.Links.Self+"/retry", "a", "queued-no-retry", strings.TrimSuffix(body, "}")+`,"reason":"explicit retry"}`, 409)
 	f.call(t, "GET", path, "a", "", "", 405)
-	f.call(t, "POST", job.Links.Self+"/cleanup", "a", "not-a-cancel", body, 404)
+	f.call(t, "POST", job.Links.Self+"/cleanup", "a", "not-a-cancel", body, 409)
+	f.call(t, "POST", job.Links.Self+"/purge", "a", "not-a-control", body, 404)
 	for _, tc := range []struct {
 		name string
 		edit func(*http.Request)
@@ -281,7 +301,7 @@ func TestControlHTTPLostReceiptAndStrictRequestGuards(t *testing.T) {
 	}
 	f.call(t, "POST", headers.Get("Location"), "a", "", "", 405)
 	_, b = f.call(t, "GET", "/v1/info", "a", "", "", 200)
-	for _, feature := range []string{"job_cancel", "job_retry", "job_reconcile", "job_collect", "operation_status"} {
+	for _, feature := range []string{"job_cancel", "job_retry", "job_reconcile", "job_collect", "job_cleanup", "operation_status"} {
 		if !bytes.Contains(b, []byte(`"`+feature+`"`)) {
 			t.Fatal("configured feature not advertised", feature)
 		}

@@ -185,6 +185,10 @@ func admitCollection(ctx context.Context, tx *sql.Tx, target admission.Record, r
 	if state.Result == domain.ResultExpired {
 		return r, operations.ErrState
 	}
+	// Remote data that an explicit cleanup may already have deleted is never transferred.
+	if err := pendingCleanup(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID); err != nil {
+		return r, err
+	}
 	work, err := controlWork(ctx, tx, target)
 	if err != nil {
 		return r, err
