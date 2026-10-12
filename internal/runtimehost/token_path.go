@@ -27,7 +27,7 @@ func tokenDestination(root, output string) (string, error) {
 		return "", ErrRequest
 	}
 	first := strings.ToLower(strings.Split(filepath.ToSlash(relative), "/")[0])
-	if first == "state" || first == "inputs" || first == "results" || relative == "." {
+	if first == "state" || first == "inputs" || first == "results" || first == "credentials" || relative == "." {
 		return "", ErrRequest
 	}
 	if _, err := os.Lstat(absolute); !errors.Is(err, os.ErrNotExist) {
