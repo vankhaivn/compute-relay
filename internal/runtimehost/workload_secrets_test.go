@@ -5,11 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/statefs"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -35,14 +38,18 @@ func TestWorkloadSecretReplayKeySurvivesRestartAndPlaintextDoesNot(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if host != nil {
+			_ = host.Close()
+		}
+	}()
 	pool, err := host.workloadSecretPool(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := secretPoolFingerprint(t, pool)
 	path := filepath.Join(root, "state", "workload-secret-key")
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err := statefs.CheckFile(path); err != nil {
 		t.Fatal("unprotected replay key", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -53,6 +60,7 @@ func TestWorkloadSecretReplayKeySurvivesRestartAndPlaintextDoesNot(t *testing.T)
 	if err = host.Close(); err != nil {
 		t.Fatal(err)
 	}
+	host = nil
 	if pool.Available(workloadsecret.Key{WorkspaceID: "app", JobID: "job_1", AttemptID: "attempt_1"}, "secret_1", time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)) {
 		t.Fatal("close retained material")
 	}
@@ -60,7 +68,6 @@ func TestWorkloadSecretReplayKeySurvivesRestartAndPlaintextDoesNot(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer host.Close()
 	pool, err = host.workloadSecretPool(ctx)
 	if err != nil || first != secretPoolFingerprint(t, pool) {
 		t.Fatal("restart changed keyed replay identity", err)
@@ -82,6 +89,11 @@ func TestWorkloadSecretKeyRejectsUnsafeOrCorruptState(t *testing.T) {
 				err = os.WriteFile(path, []byte("short"), 0600)
 			case "permissions":
 				err = os.WriteFile(path, bytes.Repeat([]byte{3}, 32), 0644)
+				if err == nil && runtime.GOOS == "windows" {
+					// Windows inherits the protected parent DACL; mode bits do not
+					// grant public access. Add an actual Everyone read grant.
+					err = exec.Command("icacls", path, "/grant", "*S-1-1-0:(R)").Run()
+				}
 			case "symlink":
 				target := filepath.Join(t.TempDir(), "key")
 				if err = os.WriteFile(target, bytes.Repeat([]byte{4}, 32), 0600); err == nil {
