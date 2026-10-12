@@ -1,8 +1,8 @@
 # Managed connections
 
 Managed mode lets a local application administer provider connections while the server is
-running. The adapters are Kaggle and [SSH hosts](ssh-hosts.md); the protected credential backend
-is macOS Keychain.
+running. The adapters are Kaggle and [SSH hosts](ssh-hosts.md). New installations store credentials
+in a private local file; macOS Keychain remains optional.
 Ordinary `serve` and the explicit environment-configured [Kaggle mode](kaggle-runtime.md)
 remain separate modes. Managed startup does not check an account or authorize compute.
 
@@ -31,14 +31,44 @@ GPU. Changing the service flag does not rewrite saved connections or jobs; expli
 connection to publish a new selection under that configuration.
 Managed flags cannot be mixed with standalone Kaggle flags. No flag grants an attempt permit.
 The machine shape applies only to Kaggle. SSH host connections are always CPU, and the wall and
-internet flags apply to both types. The Keychain backend needs the Python executable even when
-only SSH hosts are used.
+internet flags apply to both types. This managed mode still requires Python for its provider
+composition, including when using file credentials with only SSH connections.
 
 Check authenticated `/v1/info` for `managed_connections`, `connection_configuration` and
 `attempt_authorization`, then
 `GET /v1/workspaces/{w}/providers` for installed descriptors and protected-store availability.
-Unsupported storage is reported explicitly; it never falls back to plaintext. A supported
+Unsupported storage is reported explicitly; it never falls back to another backend. A supported
 backend can still deny an actual operation. Local readiness is not provider authentication.
+
+## Choose credential storage
+
+The first managed start records its backend in `state/credential-store`. New installations default
+to `file`; pass `--managed-credential-store keychain` to choose macOS Keychain, or
+`--managed-credential-store file` to select the file backend explicitly. Later starts reuse the
+recorded choice. Installations that already saved credentials with an older version retain Keychain.
+An explicit different backend is rejected: this flag is not a credential migration command.
+
+The file backend stores provider credentials and the request-fingerprint key in
+`credentials/secrets.env` under the runtime root. Relay creates the directory with private Unix
+permissions (`0700`), files with `0600`, or private inherited Windows ACLs. Values are base64 encoded
+to preserve private keys and arbitrary bytes; **they are not encrypted**. Only filesystem access
+protects this store. The local operator and processes running as that user remain trusted.
+
+Use the connection API to add, replace and remove credentials. Do not edit or source `secrets.env`,
+export it into a process environment, put it in Git or include it in a job bundle. Relay reads it as
+data and updates it atomically. Passwords are never returned by the API or written to SQLite.
+The file backend does not depend on an executable's name or macOS identity: stop the old process,
+install the new binary and restart against the same root.
+
+Keychain keeps its existing per-application access controls; replacing the executable or its
+Python interpreter can require a new access grant. Neither backend falls back, exports credentials
+to the other store, or recreates a missing fingerprint key after initialization. Preserve a damaged
+installation and restore its original files or Keychain items. Automatic backend migration is not
+implemented.
+
+For a file-backed backup, stop Relay and preserve `credentials/` and `state/credential-store`
+alongside the installation identity, database and both blob stores. A database-only backup does
+not include credentials. Restoring only one side can invalidate recovery and request replay.
 
 ## Connection lifecycle
 

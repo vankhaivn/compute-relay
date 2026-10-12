@@ -80,6 +80,12 @@ func TestManagedServeParserDefaultsAndExplicitPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := []string{"serve", "--root", "run", "--managed-python", python}
+	for _, backend := range []string{"file", "keychain"} {
+		r, err := Parse(append(append([]string{}, base...), "--managed-credential-store", backend))
+		if err != nil || r.ManagedCredentialStore != backend {
+			t.Fatal("explicit credential backend rejected", err)
+		}
+	}
 	r, err := Parse(base)
 	if err != nil || r.ManagedPython != python || r.ManagedMachineShape != "NvidiaTeslaT4" || r.ManagedMaxWallSeconds != 1800 || r.ManagedMaxWorkers != 2 || r.ManagedAllowInternet {
 		t.Fatal("managed defaults do not match the bounded policy", err)
@@ -112,6 +118,8 @@ func TestManagedServeParserRejectsAmbiguousOrUnboundedFlags(t *testing.T) {
 	}
 	base := []string{"serve", "--root", "run", "--managed-python", python}
 	for _, flags := range [][]string{
+		{"--managed-credential-store", ""}, {"--managed-credential-store", "automatic"},
+		{"--managed-credential-store", "file", "--managed-credential-store", "keychain"},
 		{"--provider-config", "SYNTHETIC_PRIVATE_PATH"}, {"--provider-profile", "kaggle-t4"}, {"--provider-machine-shape", "NvidiaTeslaT4"},
 		{"--max-provider-attempts", "1"}, {"--allow-gpu"}, {"--allow-gpu=false"}, {"--allow-private-staging"},
 		{"--managed-python", python}, {"--managed-machine-shape", "NvidiaTeslaT4", "--managed-machine-shape", "NvidiaTeslaP100"},

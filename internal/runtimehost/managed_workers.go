@@ -27,6 +27,7 @@ import (
 // new attempt separately requires the explicit persisted authorization endpoint.
 type ManagedServeConfig struct {
 	PythonExecutable     string
+	CredentialStore      string
 	MachineShape         string
 	MaxRemoteWallSeconds int64
 	AllowRemoteInternet  bool
@@ -34,6 +35,9 @@ type ManagedServeConfig struct {
 }
 
 func (c ManagedServeConfig) validate() error {
+	if c.CredentialStore != "" && c.CredentialStore != "file" && c.CredentialStore != "keychain" {
+		return ErrRequest
+	}
 	if c.MachineShape != "cpu" && c.MachineShape != "NvidiaTeslaT4" && c.MachineShape != "NvidiaTeslaP100" ||
 		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
 		return ErrRequest
@@ -73,12 +77,9 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 	if err != nil {
 		return nil, ErrRequest
 	}
-	var vault credentials.Vault
-	keychain, err := credentials.NewKeychain(h.identity.InstallationID, config.PythonExecutable)
-	if err == nil {
-		vault = keychain
-	} else if !errors.Is(err, credentials.ErrUnsupported) {
-		return nil, ErrState
+	vault, err := h.managedVault(ctx, config)
+	if err != nil {
+		return nil, err
 	}
 	return h.composeManaged(ctx, config, vault, &managedKaggleAdapter{discovery: discovery, config: config}, newManagedSSHAdapter(config))
 }

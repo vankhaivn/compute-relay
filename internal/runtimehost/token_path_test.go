@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
 
 func TestTokenAncestorAliasCannotEnterProtectedStores(t *testing.T) {
@@ -27,7 +28,10 @@ func TestTokenAncestorAliasCannotEnterProtectedStores(t *testing.T) {
 	if _, err := h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"state", "inputs", "results"} {
+	if _, err := statefs.PrivateDir(filepath.Join(h.root.Path, "credentials"), false); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"state", "inputs", "results", "credentials"} {
 		output := filepath.Join(alias, name, "must-not-create")
 		if _, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read}, time.Hour, output); err == nil {
 			t.Fatal("ancestor alias bypassed protected storage")

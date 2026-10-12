@@ -90,6 +90,12 @@ setup uses the discovered binary's ordinary `init`, workspace and token commands
 new verified bundle and reuse the existing state root after stopping the old process; they
 never initialize or replace it as part of extraction.
 
+New managed installations use a private credential file outside the companion bundle. Bundle
+updates and relocation retain it through the same runtime root. Existing Keychain installations
+keep Keychain and may require access for a changed executable or interpreter. Select Keychain
+with `--managed-credential-store keychain` on first managed use; see
+[credential storage](managed-connections.md#choose-credential-storage).
+
 Pass `executable` as the process and `managed_python` as the value of `--managed-python`:
 
 ```sh
