@@ -1,0 +1,11 @@
+{
+  "authorization_id": "op_prepare01",
+  "workspace_id": "workspace_a",
+  "job_id": "job_fixture",
+  "attempt_id": "att_fixture",
+  "kind": "prepare",
+  "status": "consumed",
+  "created_at": "2026-10-12T19:00:00Z",
+  "consumed_at": "2026-10-12T19:00:01Z",
+  "replay": false
+}

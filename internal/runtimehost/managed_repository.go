@@ -72,6 +72,24 @@ func (r managedAuthorizationRepository) AuthorizeExecution(ctx context.Context, 
 	})
 }
 
+func (r managedAuthorizationRepository) PrepareExecution(ctx context.Context, command executionauth.GateCommand, request executionauth.PrepareRequest) (executionauth.GateReceipt, error) {
+	return retryManagedClock(ctx, command.Now, func(at time.Time) (executionauth.GateReceipt, error) {
+		command.Now = at
+		return r.Repository.PrepareExecution(ctx, command, request)
+	})
+}
+func (r managedAuthorizationRepository) StartExecution(ctx context.Context, command executionauth.GateCommand, request executionauth.StartRequest) (executionauth.GateReceipt, error) {
+	return retryManagedClock(ctx, command.Now, func(at time.Time) (executionauth.GateReceipt, error) {
+		command.Now = at
+		return r.Repository.StartExecution(ctx, command, request)
+	})
+}
+func (r managedAuthorizationRepository) ReadReadiness(ctx context.Context, workspace domain.WorkspaceID, token string, job domain.JobID, now time.Time) (executionauth.Readiness, error) {
+	return retryManagedClock(ctx, now, func(at time.Time) (executionauth.Readiness, error) {
+		return r.Repository.ReadReadiness(ctx, workspace, token, job, at)
+	})
+}
+
 type managedDispatchStore interface {
 	dispatch.Repository
 	dispatch.CancellationRepository

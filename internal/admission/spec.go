@@ -45,6 +45,7 @@ type Output struct {
 	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
 type Spec struct {
+	ExecutionControl string            `json:"execution_control,omitempty"`
 	ResultCollection string            `json:"result_collection,omitempty"`
 	APIVersion       string            `json:"api_version"`
 	Name             string            `json:"name"`
@@ -80,6 +81,10 @@ type Spec struct {
 		FinalizationGraceSeconds int64  `json:"finalization_grace_seconds"`
 	} `json:"timeouts"`
 }
+
+// SeparateStart selects the one-shot prepare/ready/start contract. Omission keeps
+// the original combined authorization path and its canonical request unchanged.
+func (s Spec) SeparateStart() bool { return s.ExecutionControl == "prepare_then_start" }
 
 // Deadline is an immutable UTC bound on setup and payload execution. Parse validates
 // its canonical whole-second spelling; omission preserves relative-only jobs.

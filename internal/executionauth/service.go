@@ -29,6 +29,10 @@ func (c Command) Validate() error {
 type Repository interface {
 	AuthorizeExecution(context.Context, Command) (Receipt, error)
 	ReadExecutionAuthorization(context.Context, domain.WorkspaceID, string, domain.JobID, domain.OperationID) (Receipt, error)
+	PrepareExecution(context.Context, GateCommand, PrepareRequest) (GateReceipt, error)
+	StartExecution(context.Context, GateCommand, StartRequest) (GateReceipt, error)
+	ReadGateAuthorization(context.Context, domain.WorkspaceID, string, domain.JobID, domain.OperationID) (GateReceipt, error)
+	ReadReadiness(context.Context, domain.WorkspaceID, string, domain.JobID, time.Time) (Readiness, error)
 }
 type Service struct {
 	access *auth.Service

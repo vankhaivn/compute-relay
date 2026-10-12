@@ -41,6 +41,7 @@ type Capabilities struct {
 	Accelerators     []string `json:"accelerators"`
 	RemoteCancel     string   `json:"remote_cancel"`
 	Quota            string   `json:"quota"`
+	SeparateStart    string   `json:"separate_prepare_start,omitempty"`
 	AbsoluteDeadline string   `json:"absolute_execution_deadline,omitempty"`
 }
 type Descriptor struct {

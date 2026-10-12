@@ -174,8 +174,28 @@ type containerInfo struct {
 	Image  string         `json:"Image"`
 	State  containerState `json:"State"`
 	Config struct {
-		Labels map[string]string `json:"Labels"`
+		Labels     map[string]string `json:"Labels"`
+		User       string            `json:"User"`
+		Cmd        []string          `json:"Cmd"`
+		Entrypoint []string          `json:"Entrypoint"`
+		WorkingDir string            `json:"WorkingDir"`
 	} `json:"Config"`
+	HostConfig struct {
+		NetworkMode   string   `json:"NetworkMode"`
+		PidMode       string   `json:"PidMode"`
+		Privileged    bool     `json:"Privileged"`
+		CapDrop       []string `json:"CapDrop"`
+		CapAdd        []string `json:"CapAdd"`
+		SecurityOpt   []string `json:"SecurityOpt"`
+		Binds         []string `json:"Binds"`
+		Memory        int64    `json:"Memory"`
+		MemorySwap    int64    `json:"MemorySwap"`
+		NanoCPUs      int64    `json:"NanoCpus"`
+		PidsLimit     int64    `json:"PidsLimit"`
+		RestartPolicy struct {
+			Name string `json:"Name"`
+		} `json:"RestartPolicy"`
+	} `json:"HostConfig"`
 }
 
 // Started reports Docker's own evidence that the container process was launched.

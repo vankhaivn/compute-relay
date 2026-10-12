@@ -44,6 +44,10 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			next.Cancellation = domain.CancellationNotRequested
 			next.DeadlineExceeded = true
 			j.Problem = problem(domain.CodeRemoteTimeout, false)
+			if a.PreparationExpired {
+				p := provider.Problem(domain.CodeRemoteTimeout, domain.FailureStageExecution, "Preparation hold has expired; no new execution was requested.").WithDetail(domain.ReasonDetail, "preparation_expired")
+				j.Problem = &p
+			}
 			event = domain.EventReconciliationDeferred
 		}
 	case RequestReconciliation:
@@ -118,6 +122,10 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			return Journal{}, state, "", ErrConflict
 		}
 		j.SubmitStarted = true
+		if a.StartAuthorization != nil {
+			copy := *a.StartAuthorization
+			j.StartAuthorization = &copy
+		}
 		j.Phase = Submitting
 		j.Problem = nil
 		j.Failures = 0
@@ -294,7 +302,7 @@ func problem(code domain.ErrorCode, may bool) *domain.Problem {
 	action := domain.RecommendedActionReconcile
 	switch code {
 	case domain.CodeRemoteTimeout:
-		p := provider.Problem(code, domain.FailureStageExecution, "Absolute execution deadline has expired; no new execution was requested.").WithDetail(domain.ReasonDetail, "absolute_deadline_expired")
+		p := provider.Problem(code, domain.FailureStageExecution, "Execution authorization deadline has expired; no new execution was requested.").WithDetail(domain.ReasonDetail, "absolute_deadline_expired")
 		return &p
 	case domain.CodeInputFetchFailed, domain.CodeInputNotFound, domain.CodeInputDigestMismatch, domain.CodeInputTooLarge:
 		stage = domain.FailureStageInputPreparation

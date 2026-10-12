@@ -28,8 +28,8 @@
     },
     {
       "path": "runner/manifest.schema.json",
-      "bytes": 4839,
-      "sha256": "780e052db7c2d8769d06215ae7ad101a454854eb4bf9f04993fcec454213bcc8"
+      "bytes": 4890,
+      "sha256": "c0bfda92a2c62fe71a65aded90e726de3fc9bce48963aa7e6b3327b65beff7f8"
     },
     {
       "path": "runner/python/relay_runner/__init__.py",
@@ -38,8 +38,8 @@
     },
     {
       "path": "runner/python/relay_runner/contract.py",
-      "bytes": 8581,
-      "sha256": "19c299303ebc5e61350cc0751aa0e8d9739c801019e4b87eb940f00648821603"
+      "bytes": 10903,
+      "sha256": "4365290eb891cff3705d0d876226dcadce6a3665c1d3c01e575b0a51251690b7"
     },
     {
       "path": "runner/python/relay_runner/deadline.py",
@@ -53,8 +53,8 @@
     },
     {
       "path": "runner/python/relay_runner/main.py",
-      "bytes": 18120,
-      "sha256": "8a51ab5a95a319e5a94085f396de7a0fddfdec6674ba2ac959018c7347098270"
+      "bytes": 19010,
+      "sha256": "ff7950c05242d22fdc31e9a4b851d5fe90d80e6b4d7d69e5d0ec975bf35876e8"
     },
     {
       "path": "runner/python/relay_runner/process.py",
@@ -80,6 +80,11 @@
       "path": "runner/tests/test_runner.py",
       "bytes": 21903,
       "sha256": "8e228bbe3be9b86d08e6e61ac8748fa8e01300666f39d049093e02248dafe087"
+    },
+    {
+      "path": "runner/tests/test_start.py",
+      "bytes": 4856,
+      "sha256": "02e65940250bcaf44b68e9914f9369d4702c83e56d5da2f8256d34a4fa8c6377"
     }
   ]
 }

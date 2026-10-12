@@ -3,7 +3,7 @@
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 VERSION = "compute-relay/runner/v1"
 RUNNER_VERSION = "0.1.0"
@@ -115,7 +115,9 @@ def argv(value, maximum=64):
 
 def validate(m):
     fields(m, ("manifest_version", "job_id", "attempt_id", "attempt_nonce", "bundle", "inputs",
-               "input_manifest_sha256", "execution", "resources", "network", "timeouts", "outputs"), ("limits",))
+               "input_manifest_sha256", "execution", "resources", "network", "timeouts", "outputs"), ("limits", "execution_control"))
+    if "execution_control" in m:
+        require(m["execution_control"] == "prepare_then_start")
     require(m["manifest_version"] == VERSION)
     for key in ("job_id", "attempt_id"):
         require(type(m[key]) is str and ID.fullmatch(m[key]))
@@ -204,3 +206,40 @@ def validate(m):
 def load(raw):
     manifest = strict_json(raw)
     return manifest, validate(manifest)
+
+
+def apply_start(manifest, manifest_raw, control_raw, now):
+    """Validate a separate provider-written authority; tighten only in memory."""
+    require(manifest.get("execution_control") == "prepare_then_start")
+    control = strict_json(control_raw, 4096)
+    fields(control, ("version", "job_id", "attempt_id", "attempt_nonce", "manifest_sha256",
+                     "authorization_id", "readiness_revision", "max_remote_wall_seconds",
+                     "execution_deadline", "start_before"))
+    require(control["version"] == "compute-relay/start/v1")
+    for key in ("job_id", "attempt_id", "attempt_nonce"):
+        require(control[key] == manifest[key])
+    require(control["manifest_sha256"] == hashlib.sha256(manifest_raw).hexdigest())
+    require(type(control["authorization_id"]) is str and ID.fullmatch(control["authorization_id"]))
+    require(type(control["readiness_revision"]) is str and DIGEST.fullmatch(control["readiness_revision"]))
+    bounds = {}
+    for key in ("execution_deadline", "start_before"):
+        raw = control[key]
+        require(type(raw) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", raw))
+        try:
+            parsed = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            require(parsed.year > 1)
+            bounds[key] = parsed.timestamp()
+        except ValueError as exc:
+            raise Failure() from exc
+    require(bounds["start_before"] <= bounds["execution_deadline"])
+    if now >= bounds["start_before"]:
+        raise Failure("REMOTE_TIMEOUT", "execution", "Explicit start authority expired")
+    budgets = manifest["timeouts"]
+    integer(control["max_remote_wall_seconds"], 1, budgets["remote_wall_seconds"])
+    if "execution_deadline" in budgets:
+        original = datetime.strptime(budgets["execution_deadline"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+        require(bounds["execution_deadline"] <= original)
+    manifest["timeouts"] = dict(budgets, remote_wall_seconds=control["max_remote_wall_seconds"],
+                                execution_deadline=control["execution_deadline"])
+    validate(manifest)
+    return control

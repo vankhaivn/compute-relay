@@ -249,7 +249,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			features = append(features, "managed_connections", "connection_configuration")
 		}
 		if h.config.Authorizations != nil {
-			features = append(features, "attempt_authorization")
+			features = append(features, "attempt_authorization", "separate_prepare_start")
 		}
 		if h.config.Logs != nil {
 			features = append(features, "job_logs")
@@ -275,6 +275,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if segments[3] == "providers" || segments[3] == "connections" || segments[3] == "connection-operations" {
 		h.connections(w, r, principal, workspace, segments)
+		return
+	}
+	if segments[3] == "jobs" && (len(segments) == 6 && (segments[5] == "prepare" || segments[5] == "start" || segments[5] == "readiness") || len(segments) == 7 && segments[5] == "gate-authorizations") {
+		h.executionGate(w, r, principal, workspace, segments)
 		return
 	}
 	if segments[3] == "jobs" && (len(segments) == 6 && segments[5] == "authorize" || len(segments) == 7 && segments[5] == "authorizations") {

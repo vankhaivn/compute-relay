@@ -10,6 +10,7 @@ import (
 	"maps"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -257,8 +258,40 @@ func (h *fakeHost) create(args []string, stdout io.Writer) Result {
 func (h *fakeHost) inspect(c *fakeContainer, stdout io.Writer) Result {
 	state := map[string]any{"Status": c.status, "Running": c.status == "running", "OOMKilled": c.oom, "ExitCode": c.exit,
 		"StartedAt": c.started.Format(time.RFC3339Nano), "FinishedAt": "0001-01-01T00:00:00Z"}
-	raw, _ := json.Marshal([]map[string]any{{"Id": c.id, "Name": "/" + c.name, "Image": fakeImageID, "State": state,
-		"Config": map[string]any{"Labels": c.labels}}})
+	cfg := map[string]any{"Labels": c.labels}
+	host := map[string]any{}
+	for i := 0; i+1 < len(c.args); i++ {
+		val := c.args[i+1]
+		switch c.args[i] {
+		case "--user":
+			cfg["User"] = val
+		case "--workdir":
+			cfg["WorkingDir"] = val
+		case "--network":
+			host["NetworkMode"] = val
+		case "--cap-drop":
+			host["CapDrop"] = []string{val}
+		case "--security-opt":
+			host["SecurityOpt"] = []string{val}
+		case "--restart":
+			host["RestartPolicy"] = map[string]string{"Name": val}
+		case "--memory":
+			n, _ := strconv.ParseInt(val, 10, 64)
+			host["Memory"] = n
+		case "--memory-swap":
+			n, _ := strconv.ParseInt(val, 10, 64)
+			host["MemorySwap"] = n
+		case "--pids-limit":
+			n, _ := strconv.ParseInt(val, 10, 64)
+			host["PidsLimit"] = n
+		case "--cpus":
+			n, _ := strconv.ParseFloat(val, 64)
+			host["NanoCpus"] = int64(n * 1e9)
+		case fakeImageID:
+			cfg["Cmd"] = c.args[i+1:]
+		}
+	}
+	raw, _ := json.Marshal([]map[string]any{{"Id": c.id, "Name": "/" + c.name, "Image": fakeImageID, "State": state, "Config": cfg, "HostConfig": host}})
 	_, _ = stdout.Write(raw)
 	return Result{}
 }

@@ -1,0 +1,7 @@
+{
+  "attempt_id": "att_fixture",
+  "readiness_revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "max_remote_wall_seconds": 1800,
+  "execution_deadline": "2026-10-12T20:00:00Z",
+  "authorize_compute": true
+}

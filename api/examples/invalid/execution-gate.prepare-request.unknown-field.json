@@ -1,0 +1,8 @@
+{
+  "attempt_id": "att_fixture",
+  "max_preparation_seconds": 120,
+  "ready_until": "2026-10-12T20:00:00Z",
+  "max_staged_bytes": 1048576,
+  "authorize_private_staging": true,
+  "extra": "rejected"
+}

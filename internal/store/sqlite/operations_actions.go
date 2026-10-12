@@ -104,6 +104,11 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 		return finishControl(ctx, tx, r, domain.OperationSucceeded, effect, nil, now)
 	}
 	if !work.Journal.SubmitStarted {
+		if work.Journal.Plan == nil {
+			if err = releaseGateStorage(ctx, tx, string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID)); err != nil {
+				return r, err
+			}
+		}
 		next, state, _, err := dispatch.Apply(work.Journal, state, dispatch.Action{Kind: dispatch.PreventDispatch}, now)
 		if err != nil {
 			return r, err

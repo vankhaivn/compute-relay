@@ -77,7 +77,7 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		if record.Request.Spec().Expired(c.Now) {
 			return admission.ErrExpired
 		}
-		if !executionauth.Managed(record.Profile) || !scheduler.LocalOnly(record.Attempt.State) || c.Now.Before(record.Attempt.UpdatedAt) {
+		if record.Request.Spec().SeparateStart() || !executionauth.Managed(record.Profile) || !scheduler.LocalOnly(record.Attempt.State) || c.Now.Before(record.Attempt.UpdatedAt) {
 			return executionauth.ErrState
 		}
 		if err = managedProfileOwned(ctx, tx, c.WorkspaceID, record.Profile); err != nil {
