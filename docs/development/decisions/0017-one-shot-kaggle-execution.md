@@ -5,7 +5,7 @@ Status: accepted. Requirements: PRV-02, DUR-03, DOM-02/03.
 ## Decision
 
 Compose an immutable per-attempt Executor from the original plan, private ready staging and
-frozen policy/account. Package exactly the five locked runner modules as inert source, binding
+frozen policy/account. Package exactly the locked runner modules as inert source, binding
 nonce, plan/input/staging and effective GPU policy. Use a stable intent-derived name rather than
 content-derived replacement names. Never execute generated workload source on the control host.
 

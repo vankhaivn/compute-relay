@@ -8,7 +8,7 @@ behind the durable dispatch gate.
 
 `NewExecutor(stager, policy, plan, prepared, allowSubmit)` clones the original validated plan,
 private/ready version-1 staging reference and policy. It constructs inert source locally,
-not credentials or provider calls. The unchanged five runner modules are checked against their
+not credentials or provider calls. The locked runner modules are checked against their
 source lock and explicitly embedded without caches. The runner manifest binds original input
 IDs/names/targets/digests, command/resources/network/time/outputs, nonce, staging and GPU policy.
 Credentials, source URLs, profile/job labels and host paths are excluded; explicitly supplied

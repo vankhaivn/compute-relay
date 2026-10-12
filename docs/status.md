@@ -21,6 +21,7 @@ The current implementation boundary. No public release is available.
 | Preparation progress | While `preparing`, status reports input bytes handed to the provider staging upload. Observational only. |
 | Result collection | Automatic by default; an immutable manual policy waits for `/collect` and reports selected-output byte progress. |
 | Attempt logs | Bounded pages for an explicit original attempt with current read authority. Best effort: transient failures and long replay latency remain possible. |
+| Execution deadlines | Optional immutable absolute UTC deadline on supported paths, with enforcement in the remote runner and SSH container supervisor. See [execution deadlines](execution-deadlines.md). |
 | Artifact delivery | Attempt-scoped listing, metadata and create-only downloads verified to the end of the stream. |
 | Local retention | Provider-mode serve expires and deletes eligible input and result bytes at startup and hourly (24 hours unreferenced, 7 days after safe completion); holds and unresolved work keep them. |
 
@@ -42,7 +43,9 @@ Offline tests are not live-provider evidence. Live evidence so far:
   containers covers LAN password access and Tailscale password/unencrypted Ed25519-key access.
   The Tailscale run used file credentials without Python, explicitly installed the standard image,
   preserved a running CPU attempt across a Relay restart, replayed bounded logs, verified artifacts,
-  confirmed cancellation and deleted both attempts' containers.
+  confirmed cancellation and deleted both attempts' containers. Absolute-deadline enforcement
+  also stopped a TERM-ignoring payload and child while Relay was offline, then recovered the
+  original timeout result and cleaned up the same container after Relay restarted.
 
 Another account, environment or workload needs its own scoped qualification before support is
 claimed. Use the [validation checklist](development/validation-checklist.md).
@@ -50,6 +53,8 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 ## Known limits
 
 - Provider timeout enforcement is separate from local and runner deadlines.
+- Host sleep, VM clock behavior and reboot remain unqualified for execution deadlines. Software
+  cannot act on a powered-off or suspended host; expiry is observed after it resumes.
 - Batch cancellation is manual-required without a verified session target; exact hardware release
   is not observable.
 - Explicit attempt-scoped remote cleanup is admitted and applied by provider-mode workers. The SSH
