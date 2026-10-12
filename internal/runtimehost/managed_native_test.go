@@ -21,11 +21,32 @@ func TestManagedSSHOnlyCompositionNeedsNoPythonOrAccountRead(t *testing.T) {
 	if err != nil || len(descriptors) != 1 || descriptors[0].Type != "ssh" {
 		t.Fatal("SSH-only mode advertised Kaggle", descriptors, err)
 	}
-	if (s.dispatcher != nil) != (runtime.GOOS == "darwin") || f.vault.calls != 0 || f.adapter.checks != 0 {
+	if s.dispatcher == nil || f.vault.calls != 0 || f.adapter.checks != 0 {
 		t.Fatal("startup touched credentials or misrepresented vault support")
 	}
 	f.connection(t, "saved-kaggle-key", "SYNTHETIC_FIRST")
 	if _, err := f.host.managedWorkers(context.Background(), config); err != ErrRequest {
 		t.Fatal("SSH-only startup stranded a saved Kaggle connection", err)
+	}
+}
+
+func TestManagedSSHOnlyCredentialChoicesNeedNoPython(t *testing.T) {
+	for _, backend := range []string{"file", "keychain"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newManagedTestFixture(t, true)
+			config := f.config
+			config.PythonExecutable, config.MachineShape, config.CredentialStore = "", "cpu", backend
+			s, err := f.host.managedWorkers(context.Background(), config)
+			if err != nil {
+				t.Fatal("SSH-only credential choice failed", err)
+			}
+			if (s.dispatcher != nil) != (backend == "file" || runtime.GOOS == "darwin") {
+				t.Fatal("credential backend availability changed")
+			}
+			selected, err := f.host.managedCredentialStore(context.Background(), "")
+			if err != nil || selected != backend || f.vault.calls != 0 || f.adapter.checks != 0 {
+				t.Fatal("startup changed the backend or accessed an account", err)
+			}
+		})
 	}
 }

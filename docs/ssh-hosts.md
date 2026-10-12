@@ -29,15 +29,16 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 ## Create the connection
 
-On macOS, start SSH-only managed serve without Python:
+Start SSH-only managed serve without Python:
 
 ```sh
 compute-relay serve --root /absolute/private/runtime --managed
 ```
 
 For installations that also use Kaggle, use `--managed-python` as described in
-[managed connections](managed-connections.md). Existing Python-created Keychain entries may
-require explicit macOS approval for the Go binary before switching modes. The SSH descriptor appears in `GET /v1/workspaces/{w}/providers` with type `ssh`. Every field is
+[managed connections](managed-connections.md). New installations use private file credentials.
+When Keychain is selected, existing Python-created entries may require explicit macOS approval
+for the Go binary before switching modes. The SSH descriptor appears in `GET /v1/workspaces/{w}/providers` with type `ssh`. Every field is
 write-only:
 
 | Field | Required | Meaning |

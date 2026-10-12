@@ -1,6 +1,7 @@
 # ADR-0025: Managed connections and durable attempt authorization
 
-Status: accepted (2026-10-07). Refines ADR-0021, ADR-0022 and ADR-0024.
+Status: accepted (2026-10-07). Refines ADR-0021, ADR-0022 and ADR-0024. Credential backend selection
+is refined by [ADR-0029](0029-file-credential-store.md).
 
 ## Context
 
@@ -38,7 +39,7 @@ compatible. Handlers acknowledge durable local operations and do not invoke prov
 ## Alternatives and consequences
 
 Keeping provider credentials in consuming applications duplicates provider policy and prevents
-Relay from enforcing account continuity. Plaintext persistence or secret hashes in SQLite violate
+Relay from enforcing account continuity. Provider values or unkeyed secret hashes in SQLite violate
 the credential boundary. Replacing immutable profiles with mutable aliases can retarget queued
 work; process counters alone lose consent limits on restart.
 

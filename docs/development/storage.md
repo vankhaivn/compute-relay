@@ -41,7 +41,7 @@ The bundle contains `metadata.sqlite` and `backup.json`; missing receipts, sidec
 excessive size or unsupported schemas fail. These are Go composition APIs, **not a backup CLI**.
 Default snapshot ceiling is 256 MiB, explicitly configurable within implementation bounds.
 
-A database snapshot does not contain input/result bytes, identity markers or future
+A database snapshot does not contain credentials, input/result bytes, identity markers or future
 revocations/expiry facts. Checksums detect corruption, not malicious replacement of both data
 and receipt. Preserve interrupted output for diagnosis; it is not a successful backup.
 
@@ -51,6 +51,8 @@ and receipt. Preserve interrupted output for diagnosis; it is not a successful b
    copy of a live database can omit committed WAL state.
 2. Quiesce writers and retention. Take the database snapshot and separately preserve every
    referenced blob, including unpublished collection recovery files and root `.retention-id`.
+   Managed installations also need `state/credential-store` and their original credential store:
+   the private `credentials/` directory for file storage, or the matching Keychain entries.
 3. Stop the original installation. Restore into a new private directory with compatible binary,
    migrations and complete matching stores; inspect identity, bytes and current authority before use.
 4. Review grants/tokens/expiry restored from older snapshots. Do not rewrite markers or bind old

@@ -124,7 +124,7 @@ func TestLocalTokenRejectsProtectedDestinationsAndInvalidAuthority(t *testing.T)
 	}
 	defer h.Close()
 	h.CreateWorkspace(ctx, "app")
-	for _, name := range []string{"state/secret", "inputs/secret", "results/secret", "STATE/secret"} {
+	for _, name := range []string{"state/secret", "inputs/secret", "results/secret", "credentials/secret", "STATE/secret"} {
 		dst := filepath.Join(path, filepath.FromSlash(name))
 		if _, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read}, time.Hour, dst); err == nil {
 			t.Fatal("credential entered store root")

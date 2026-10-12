@@ -47,6 +47,8 @@ exact remote execution count, provider timeout enforcement or hardware release w
 ## Backup and incident handling
 
 Preserve SQLite with its committed WAL state, both blob roots and all identity/process markers.
+For managed file credentials, also preserve the private `credentials/` directory and
+`state/credential-store`; Keychain-backed installations need their original Keychain entries.
 A database-only backup does not restore deleted bytes or stop remote work. Never activate original
 and restored copies concurrently against one provider identity. Review restored grants/revocations
 before exposing work. Follow [storage](development/storage.md), not ad-hoc database/file copies.

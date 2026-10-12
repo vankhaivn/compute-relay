@@ -80,6 +80,12 @@ func TestManagedServeParserDefaultsAndExplicitPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := []string{"serve", "--root", "run", "--managed-python", python}
+	for _, backend := range []string{"file", "keychain"} {
+		r, err := Parse(append(append([]string{}, base...), "--managed-credential-store", backend))
+		if err != nil || r.ManagedCredentialStore != backend {
+			t.Fatal("explicit credential backend rejected", err)
+		}
+	}
 	r, err := Parse(base)
 	if err != nil || r.ManagedPython != python || r.ManagedMachineShape != "NvidiaTeslaT4" || r.ManagedMaxWallSeconds != 1800 || r.ManagedMaxWorkers != 2 || r.ManagedAllowInternet {
 		t.Fatal("managed defaults do not match the bounded policy", err)
@@ -112,6 +118,8 @@ func TestManagedServeParserRejectsAmbiguousOrUnboundedFlags(t *testing.T) {
 	}
 	base := []string{"serve", "--root", "run", "--managed-python", python}
 	for _, flags := range [][]string{
+		{"--managed-credential-store", ""}, {"--managed-credential-store", "automatic"},
+		{"--managed-credential-store", "file", "--managed-credential-store", "keychain"},
 		{"--provider-config", "SYNTHETIC_PRIVATE_PATH"}, {"--provider-profile", "kaggle-t4"}, {"--provider-machine-shape", "NvidiaTeslaT4"},
 		{"--max-provider-attempts", "1"}, {"--allow-gpu"}, {"--allow-gpu=false"}, {"--allow-private-staging"},
 		{"--managed-python", python}, {"--managed-machine-shape", "NvidiaTeslaT4", "--managed-machine-shape", "NvidiaTeslaP100"},
@@ -187,6 +195,12 @@ func TestManagedServeCPUIsExplicitAndDoesNotGrantCompute(t *testing.T) {
 }
 
 func TestManagedSSHOnlyModeNeedsNoPythonAndStaysExplicit(t *testing.T) {
+	for _, backend := range []string{"file", "keychain"} {
+		r, err := Parse([]string{"serve", "--root", "run", "--managed", "--managed-credential-store", backend})
+		if err != nil || !r.Managed || r.ManagedPython != "" || r.ManagedCredentialStore != backend {
+			t.Fatal("SSH-only credential choice rejected", err)
+		}
+	}
 	r, err := Parse([]string{"serve", "--root", "run", "--managed"})
 	if err != nil || !r.Managed || r.ManagedPython != "" || r.ManagedMachineShape != "cpu" || r.ManagedMaxWorkers != 2 || r.ManagedMaxWallSeconds != 1800 || r.AllowGPU || r.MaxProviderAttempts != 0 {
 		t.Fatal("SSH-only defaults or authority changed", err)
@@ -194,6 +208,7 @@ func TestManagedSSHOnlyModeNeedsNoPythonAndStaysExplicit(t *testing.T) {
 	for _, flags := range [][]string{
 		{"--managed=false"}, {"--managed", "--managed"}, {"--managed", "--managed-machine-shape", "NvidiaTeslaT4"},
 		{"--managed", "--provider-profile", "fixture"}, {"--managed", "--managed-python", ""},
+		{"--managed-credential-store", "file"}, {"--managed", "--managed-credential-store", "unknown"},
 	} {
 		if _, err := Parse(append([]string{"serve", "--root", "run"}, flags...)); err != ErrArguments {
 			t.Fatal("ambiguous SSH-only flags accepted", flags, err)

@@ -27,6 +27,7 @@ import (
 // new attempt separately requires the explicit persisted authorization endpoint.
 type ManagedServeConfig struct {
 	PythonExecutable     string
+	CredentialStore      string
 	MachineShape         string
 	MaxRemoteWallSeconds int64
 	AllowRemoteInternet  bool
@@ -34,6 +35,9 @@ type ManagedServeConfig struct {
 }
 
 func (c ManagedServeConfig) validate() error {
+	if c.CredentialStore != "" && c.CredentialStore != "file" && c.CredentialStore != "keychain" {
+		return ErrRequest
+	}
 	if c.MachineShape != "cpu" && c.MachineShape != "NvidiaTeslaT4" && c.MachineShape != "NvidiaTeslaP100" ||
 		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
 		return ErrRequest
@@ -75,8 +79,6 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	var vault credentials.Vault
-	var err error
 	adapters := []connections.Adapter{newManagedSSHAdapter(config)}
 	if config.PythonExecutable == "" {
 		present, err := h.store.HasManagedConnections(ctx, "kaggle")
@@ -86,20 +88,16 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 		if present {
 			return nil, ErrRequest
 		}
-		vault, err = credentials.NewNativeKeychain(h.identity.InstallationID)
 	} else {
 		discovery, discoveryErr := kaggle.NewDiscovery(config.PythonExecutable, clock{})
 		if discoveryErr != nil {
 			return nil, ErrRequest
 		}
 		adapters = append(adapters, &managedKaggleAdapter{discovery: discovery, config: config})
-		vault, err = credentials.NewKeychain(h.identity.InstallationID, config.PythonExecutable)
 	}
-	if err != nil && !errors.Is(err, credentials.ErrUnsupported) {
-		return nil, ErrState
-	}
+	vault, err := h.managedVault(ctx, config)
 	if err != nil {
-		vault = nil
+		return nil, err
 	}
 	return h.composeManaged(ctx, config, vault, adapters...)
 }

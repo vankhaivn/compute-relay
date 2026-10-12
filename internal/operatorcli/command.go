@@ -16,28 +16,29 @@ var ErrArguments = errors.New("invalid operator arguments")
 var ErrHelp = errors.New("operator help requested")
 
 type Request struct {
-	Command               string
-	Action                string
-	Root                  string
-	ID                    string
-	Workspace             string
-	Output                string
-	File                  string
-	Listen                string
-	ProviderConfig        string
-	ProviderProfile       string
-	ProviderMachineShape  string
-	MaxProviderAttempts   int
-	AllowPrivateStaging   bool
-	AllowGPU              bool
-	Managed               bool
-	ManagedPython         string
-	ManagedMachineShape   string
-	ManagedMaxWallSeconds int64
-	ManagedMaxWorkers     int
-	ManagedAllowInternet  bool
-	Scopes                []string
-	TTL                   time.Duration
+	Command                string
+	Action                 string
+	Root                   string
+	ID                     string
+	Workspace              string
+	Output                 string
+	File                   string
+	Listen                 string
+	ProviderConfig         string
+	ProviderProfile        string
+	ProviderMachineShape   string
+	MaxProviderAttempts    int
+	AllowPrivateStaging    bool
+	AllowGPU               bool
+	Managed                bool
+	ManagedPython          string
+	ManagedCredentialStore string
+	ManagedMachineShape    string
+	ManagedMaxWallSeconds  int64
+	ManagedMaxWorkers      int
+	ManagedAllowInternet   bool
+	Scopes                 []string
+	TTL                    time.Duration
 }
 
 const Usage = `Local runtime commands:
@@ -48,9 +49,9 @@ const Usage = `Local runtime commands:
     --provider-machine-shape NvidiaTeslaT4 --max-provider-attempts N --allow-private-staging --allow-gpu
   compute-relay serve --root DIR --managed-python ABS \
     [--managed-machine-shape NvidiaTeslaT4] [--managed-max-wall-seconds 1800] \
-    [--managed-max-workers 2] [--managed-allow-internet]
+    [--managed-max-workers 2] [--managed-allow-internet] [--managed-credential-store file|keychain]
   compute-relay serve --root DIR --managed [--managed-max-wall-seconds 1800] \
-    [--managed-max-workers 2] [--managed-allow-internet]
+    [--managed-max-workers 2] [--managed-allow-internet] [--managed-credential-store file|keychain]
   compute-relay workspace create|show|enable|disable --root DIR --id ID
   compute-relay token issue --root DIR --workspace ID --scope read [--scope write] --ttl 24h --output NEW_PRIVATE_FILE
   compute-relay token revoke --root DIR --id TOKEN_ID
@@ -59,10 +60,11 @@ const Usage = `Local runtime commands:
 Stop serve before local administration. Secrets are never printed; token output
 requires a new file in an existing private directory. Plain serve keeps provider
 workers disabled. Standalone provider mode requires every explicit provider flag
-and a finite per-process attempt budget. --managed enables SSH-only mode with native
-macOS Keychain and no Python. --managed-python ABS also enables Kaggle and requires
+and a finite per-process attempt budget. --managed enables SSH-only mode without Python. --managed-python ABS also enables Kaggle and requires
 an absolute interpreter path; each attempt needs separate API execution authorization. Its
 policy flags grant no compute consent and cannot be mixed with standalone flags.
+New managed installations store credentials in private, unencrypted secrets.env;
+existing Keychain installations keep Keychain. The selected store is retained on restart.
 Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100; wall limit: 1-86400 seconds;
 workers: 1-16; internet defaults to disabled. Local shutdown is not remote
 cancellation. Validation is local schema validation, not admission.
@@ -150,6 +152,7 @@ func Parse(args []string) (Request, error) {
 	add("provider-profile", &r.ProviderProfile)
 	add("provider-machine-shape", &r.ProviderMachineShape)
 	add("managed-python", &r.ManagedPython)
+	add("managed-credential-store", &r.ManagedCredentialStore)
 	add("managed-machine-shape", &r.ManagedMachineShape)
 	addBool := func(name string, dst *bool) {
 		fs.BoolFunc(name, "", func(value string) error {
@@ -218,7 +221,7 @@ func Parse(args []string) (Request, error) {
 	allowed := map[string]bool{"root": true}
 	switch r.Command {
 	case "serve":
-		for _, k := range []string{"listen", "provider-config", "provider-profile", "provider-machine-shape", "max-provider-attempts", "allow-private-staging", "allow-gpu", "managed", "managed-python", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
+		for _, k := range []string{"listen", "provider-config", "provider-profile", "provider-machine-shape", "max-provider-attempts", "allow-private-staging", "allow-gpu", "managed", "managed-python", "managed-credential-store", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
 			allowed[k] = true
 		}
 	case "workspace":
@@ -249,9 +252,12 @@ func Parse(args []string) (Request, error) {
 	if r.Command == "serve" {
 		providerFlags := seen["provider-config"] || seen["provider-profile"] || seen["provider-machine-shape"] ||
 			seen["max-provider-attempts"] || seen["allow-private-staging"] || seen["allow-gpu"]
-		managedFlags := seen["managed"] || seen["managed-python"] || seen["managed-machine-shape"] || seen["managed-max-wall-seconds"] ||
+		managedFlags := seen["managed"] || seen["managed-python"] || seen["managed-credential-store"] || seen["managed-machine-shape"] || seen["managed-max-wall-seconds"] ||
 			seen["managed-max-workers"] || seen["managed-allow-internet"]
 		if managedFlags {
+			if seen["managed-credential-store"] && r.ManagedCredentialStore != "file" && r.ManagedCredentialStore != "keychain" {
+				return r, ErrArguments
+			}
 			if providerFlags || seen["managed"] && !r.Managed || !r.Managed && !seen["managed-python"] ||
 				seen["managed-python"] && (!filepath.IsAbs(r.ManagedPython) || strings.ContainsAny(r.ManagedPython, "\r\n\ufffd")) {
 				return r, ErrArguments

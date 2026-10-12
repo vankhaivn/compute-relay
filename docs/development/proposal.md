@@ -1353,6 +1353,8 @@ Do not allow deleting/disabling the only adapter configuration needed to reconci
 
 Provider credentials belong to the operator's explicitly configured runtime environment, protected credential files, or Relay-owned protected vault. Store references such as `env:NAME`, `file:/protected/path`, or an opaque vault slot, not plaintext secrets in job specs or SQLite. The accepted [managed-connection extension](managed-connections.md) adds write-only live administration, adapter-owned account discovery, and explicit cross-store recovery under [ADR-0025](decisions/0025-managed-connections-and-attempt-authorization.md). Ordinary application job tokens do not acquire administration or execution authority.
 
+For self-hosted managed installations, [ADR-0029](decisions/0029-file-credential-store.md) selects a private, unencrypted local credential file by default for new installations and retains macOS Keychain as an option. Existing Keychain installations keep their backend. Credential storage is independent of the executable version; backend changes never happen as an automatic error fallback.
+
 For Kaggle, official authentication supports multiple mechanisms; the adapter should document the selected supported modes and precedence instead of scanning every host credential source indiscriminately. [S-02]
 
 Do not pass provider credentials to the remote runner. Do not include them in a bundle, dataset, notebook source, process command-line argument, downloadable diagnostic archive, or logs.
@@ -1480,7 +1482,7 @@ compute-connector/
     └── kaggle/                    optional managed/pinned client environment
 ```
 
-The agent may keep migration assets embedded in the binary instead of a filesystem directory. Do not put user credentials in this layout by default unless the operator explicitly supplies a protected credential file there.
+Migration assets may be embedded in the binary instead of a filesystem directory. Managed mode owns a separate private `credentials/` directory and a durable backend selection under `state/`; include them in coordinated backups. Do not mix credentials with job blobs, diagnostic exports or application configuration.
 
 Store paths in a portable form where possible; do not expose physical paths as public API identifiers.
 

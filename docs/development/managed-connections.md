@@ -102,10 +102,21 @@ the engine has stopped. This action never creates a job execution permit.
 
 ## Credential storage and crash recovery
 
-Credentials remain in a Relay-owned protected store, initially macOS Keychain. SQLite stores
+Credentials remain in an installation-scoped store: a private unencrypted file for new
+installations, or optional macOS Keychain. The first managed startup durably selects the backend;
+an older installation with an initialized fingerprint key retains Keychain. SQLite stores
 only opaque references, generations, verification outcomes and a keyed request fingerprint.
 Explicit environment references remain supported in standalone mode. An unsupported or denied
-vault does not fall back to plaintext files, SQLite, process arguments or ambient credentials.
+vault never switches backend or falls back to SQLite, process arguments or ambient credentials.
+See [ADR-0029](decisions/0029-file-credential-store.md).
+
+The file backend rewrites the complete bounded `credentials/secrets.env` through a private
+same-directory temporary file, file sync, atomic replacement and directory sync where supported.
+The installation lock excludes another runtime process; a mutex serializes vault mutations.
+Immutable keys accept identical replay and reject changed bytes. Entries include an installation
+identity header, hexadecimal key names and base64 values; encoding does not encrypt them. Input
+is parsed as data, never evaluated or inherited by child processes. Malformed/duplicate entries,
+links, broad permissions and mismatched identity fail without replacing the original file.
 
 The credential port uses bounded byte callbacks; values are cleared after use where possible.
 The protected store also owns the installation-specific HMAC key used to compare secret-bearing

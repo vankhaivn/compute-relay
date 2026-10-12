@@ -65,7 +65,7 @@ byte-for-byte read-only filesystem operation.
 
 Token scopes are explicit `read`, `write`, `operate`, `manage`, `execute`; TTL defaults to 24 hours and is bounded
 from one minute to thirty days. Output requires a new file in a private, stable, same-volume
-parent outside protected state/input/result subdirectories. Database insertion and secret-file
+parent outside protected state/input/result/credential subdirectories. Database insertion and secret-file
 delivery are not one atomic transaction. A delivery failure attempts revocation and reports
 `revoked-after-delivery-error` or `revocation-unconfirmed` with the token ID. Do not use a partial
 file or assume a nonzero exit rolled back authority. A failure writing stdout can follow a
@@ -73,6 +73,11 @@ successful effect. Preserve receipts and inspect state before retrying.
 
 Buffer clearing does not securely erase all OS/string copies. Protect tokens and backups from
 other users; the local operator and same-user filesystem writers remain trusted.
+
+Managed credentials use the installation's selected [credential store](managed-connections.md#choose-credential-storage).
+New installations use private, unencrypted `credentials/secrets.env`; Keychain remains optional.
+Keep that directory and `state/credential-store` with a stopped-runtime backup. Replacing a binary
+does not replace the file store or its keys.
 
 ## HTTP and shutdown
 

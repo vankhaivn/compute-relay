@@ -58,6 +58,7 @@ long-running service and its own credentials.
   cannot reinstall a missing version-2 image. Original version-1 jobs preserve their earlier policy;
   their admission aliases are retired on upgrade until recheck and installation produce a new selection.
 - Connection status publishes the pinned fingerprint and verified Linux engine architecture.
-- SSH-only `serve --managed` uses macOS Security.framework directly without Python or CGo.
-  Existing Keychain access control still applies; changing executables may require operator trust.
+- SSH-only `serve --managed` needs neither Python nor CGo. Credential selection follows
+  [ADR-0029](0029-file-credential-store.md); optional Keychain uses macOS Security.framework
+  directly. Existing Keychain access control still applies when changing executables.
 - Live qualification on an operator host is separate from offline tests and local-engine runs.

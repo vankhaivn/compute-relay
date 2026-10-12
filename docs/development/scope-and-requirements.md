@@ -102,7 +102,7 @@ refines PRD-03/PRD-08 and SEC-01 without weakening existing immutable-job and re
 | ID | Requirement | Verification |
 |---|---|---|
 | MGT-01 | Separate workspace management and execution authority; provider-owned descriptors and asynchronous account discovery. | Scope isolation, rejected credentials, unknown capability and no-compute HTTP fixtures. |
-| MGT-02 | Keep secrets in a Relay-owned protected vault; preserve write-only replay and cross-store recovery. | Keyed replay, canary scans, vault denial, stage/commit interruption and native qualification. |
+| MGT-02 | Keep secrets in a Relay-owned store: private file storage for new self-hosted installations or optional Keychain; preserve backend identity, write-only replay and cross-store recovery. | Keyed replay, canary scans, permissions, immutable entries, atomic file publication, backend selection, vault denial, restart/relocation and native qualification. |
 | MGT-03 | Immutable revision selection, canonical-account capacity and original-account recovery after manual selection changes. | Stale selection, duplicate account, disable/remove guards and old-job collection. |
 | MGT-04 | One durable finite permit per managed attempt, consumed before mutations; startup and recovery never refill it. | Restart/claim faults, ambiguous response and new retry without a grant. |
 

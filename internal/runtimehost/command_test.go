@@ -131,10 +131,7 @@ func TestManagedCommandComposesPolicyWithoutReadingCredentials(t *testing.T) {
 	if json.Unmarshal(output.Bytes(), &announcement) != nil || announcement.Status != "listening" || announcement.Address == "" {
 		t.Fatal("managed command omitted its listening receipt")
 	}
-	wantMode, wantDispatch := "managed-connections", false
-	if runtime.GOOS == "darwin" {
-		wantMode, wantDispatch = "managed-workers", true
-	}
+	wantMode, wantDispatch := "managed-workers", true
 	if announcement.Mode != wantMode || announcement.DispatchEnabled != wantDispatch {
 		t.Fatal("managed CLI policy fell back to another serve mode")
 	}

@@ -178,8 +178,8 @@ func TestExecutableManagedHelpAndInvalidModeFlags(t *testing.T) {
 // Pins the managed companion surface that installed application clients drive: exact receipts,
 // readiness body and feature names, a minimal process environment and owned-state refusal.
 func TestExecutableManagedCompanionClientSurface(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("managed workers require the macOS credential store")
+	if runtime.GOOS == "windows" {
+		t.Skip("this executable fixture requires Unix interrupt delivery; native file-vault and managed startup tests cover Windows")
 	}
 	root := filepath.Join(t.TempDir(), "runtime")
 	var initialized, reopened struct {
