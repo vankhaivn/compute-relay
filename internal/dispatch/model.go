@@ -9,6 +9,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -41,22 +42,26 @@ const (
 // Journal is INTERNAL recovery evidence, not a public status response. Request URLs
 // are deliberately absent. Plans and remote references must not be logged wholesale.
 type Journal struct {
-	Version       int64                     `json:"version"`
-	Phase         Phase                     `json:"phase"`
-	Plan          *provider.Plan            `json:"plan,omitempty"`
-	PreparationID domain.OperationID        `json:"preparation_id,omitempty"`
-	Prepared      *provider.Prepared        `json:"prepared,omitempty"`
-	SubmitStarted bool                      `json:"submit_started"`
-	Remote        *provider.RemoteReference `json:"remote,omitempty"`
-	Observation   *provider.Observation     `json:"observation,omitempty"`
-	Problem       *domain.Problem           `json:"problem,omitempty"`
-	Failures      int                       `json:"failures"`
+	Version            int64                        `json:"version"`
+	Phase              Phase                        `json:"phase"`
+	Plan               *provider.Plan               `json:"plan,omitempty"`
+	PreparationID      domain.OperationID           `json:"preparation_id,omitempty"`
+	Prepared           *provider.Prepared           `json:"prepared,omitempty"`
+	SubmitStarted      bool                         `json:"submit_started"`
+	StartAuthorization *provider.StartAuthorization `json:"start_authorization,omitempty"`
+	Remote             *provider.RemoteReference    `json:"remote,omitempty"`
+	Observation        *provider.Observation        `json:"observation,omitempty"`
+	Problem            *domain.Problem              `json:"problem,omitempty"`
+	Failures           int                          `json:"failures"`
 }
 
 func (j Journal) Recoverable() bool {
 	return j.Phase == Staging || j.Phase == Ready || j.Phase == Submitting || j.Phase == Submitted
 }
 func (j Journal) Valid() bool {
+	if j.StartAuthorization != nil && (!j.SubmitStarted || j.Prepared == nil || j.StartAuthorization.Validate(*j.Prepared) != nil) {
+		return false
+	}
 	if j.Version < 0 || j.Failures < 0 || j.Failures > MaxFailures {
 		return false
 	}
@@ -123,6 +128,7 @@ type Work struct {
 	Job            admission.Record
 	Journal        Journal
 	Cancellation   *CancellationControl
+	Gate           *executionauth.Gate
 }
 
 // Repository commits journal, resource/submission intent, state and events together.
@@ -162,11 +168,13 @@ const (
 )
 
 type Action struct {
-	Kind          Kind
-	Plan          *provider.Plan
-	PreparationID domain.OperationID
-	Prepared      *provider.Prepared
-	Submission    *provider.SubmissionOutcome
-	Observation   *provider.Observation
-	Code          domain.ErrorCode
+	Kind               Kind
+	Plan               *provider.Plan
+	PreparationID      domain.OperationID
+	Prepared           *provider.Prepared
+	Submission         *provider.SubmissionOutcome
+	Observation        *provider.Observation
+	Code               domain.ErrorCode
+	StartAuthorization *provider.StartAuthorization
+	PreparationExpired bool
 }

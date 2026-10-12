@@ -375,7 +375,8 @@
         "remote_network_control",
         "strong_execution_identity",
         "custom_container",
-        "retained_sessions"
+        "retained_sessions",
+        "separate_prepare_start"
       ]
     },
     "workspace_id": {

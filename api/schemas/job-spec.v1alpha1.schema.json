@@ -358,6 +358,12 @@
       ],
       "default": "automatic",
       "description": "Frozen per-job result collection policy. Omission preserves automatic collection. Manual requires explicit collect for all results, including diagnostic controls."
+    },
+    "execution_control": {
+      "enum": [
+        "combined",
+        "prepare_then_start"
+      ]
     }
   }
 }

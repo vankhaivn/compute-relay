@@ -105,6 +105,16 @@ and object ownership; neither admits work or proves provider availability. Submi
 job/attempt/receipt metadata. Admission-only serve leaves the job queued; provider-enabled serve
 runs separate durable workers that may then stage and dispatch it.
 
+Managed SSH jobs may opt into `execution_control: "prepare_then_start"`; omission keeps the
+legacy combined `/authorize` flow. In this mode, `POST /v1/workspaces/{w}/jobs/{job_id}/prepare`
+with `execute` scope grants bounded private staging into a stopped container only.
+`GET /v1/workspaces/{w}/jobs/{job_id}/readiness` uses `read` scope and reports durable local
+readiness without remote actions. Start with `POST /v1/workspaces/{w}/jobs/{job_id}/start` using
+`execute` scope, binding the exact attempt and readiness revision, finite wall budget and deadline,
+and `authorize_compute: true`. Read receipts at
+`/v1/workspaces/{w}/jobs/{job_id}/gate-authorizations/{authorization_id}` with `execute` scope.
+See [preparation gates](preparation-gates.md) for the complete contract.
+
 New jobs may add `"result_collection": "manual"` to wait for an explicit `job collect` after
 remote completion. Check `/v1/info` for `manual_result_collection` before opting in. Omission
 or `"automatic"` keeps automatic collection. The accepted policy is immutable and also applies

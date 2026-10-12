@@ -75,11 +75,15 @@ type Plan struct {
 	VerifyAfterStart []domain.CapabilityName
 }
 type Prepared struct {
-	Identity      Identity
-	PreparationID domain.OperationID
-	PlanSHA256    domain.SHA256Digest
-	Resource      string
-	Ready         bool
+	// Verification hashes the observed runtime, image, policy and staged bytes.
+	// Legacy combined preparation leaves both fields empty.
+	VerificationSHA256 domain.SHA256Digest `json:",omitempty"`
+	ManifestSHA256     domain.SHA256Digest `json:",omitempty"`
+	Identity           Identity
+	PreparationID      domain.OperationID
+	PlanSHA256         domain.SHA256Digest
+	Resource           string
+	Ready              bool
 	// Private is an adapter assertion supported by its verified private-staging path.
 	// Unknown/false cannot authorize compute dispatch. Fake true is offline evidence only.
 	Private bool

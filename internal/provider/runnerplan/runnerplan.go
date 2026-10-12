@@ -51,6 +51,9 @@ func Build(plan provider.Plan) (map[string]any, admission.Spec, error) {
 	for _, key := range []string{"execution", "outputs", "resources", "network", "timeouts"} {
 		manifest[key] = fields[key]
 	}
+	if spec.SeparateStart() {
+		manifest["execution_control"] = "prepare_then_start"
+	}
 	inputs := make([]map[string]any, 0, len(spec.Inputs))
 	for i, in := range spec.Inputs {
 		frozen := plan.Job.Inputs.Inputs[i]

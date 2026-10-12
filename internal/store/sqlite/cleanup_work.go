@@ -198,6 +198,11 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 		if err != nil {
 			return ErrInvalid
 		}
+		if o.Effect == cleanup.RemoteDeleted || o.Effect == cleanup.AlreadyAbsent {
+			if err = releaseGateStorage(ctx, tx, string(before.Operation.WorkspaceID), string(before.Operation.JobID), string(before.Operation.AttemptID)); err != nil {
+				return err
+			}
+		}
 		return saveCleanup(ctx, tx, before, cleanup.Record{Operation: next, Effect: o.Effect})
 	})
 }

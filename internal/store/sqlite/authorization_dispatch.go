@@ -16,6 +16,12 @@ func dispatchAuthorization(ctx context.Context, tx *sql.Tx, work dispatch.Work, 
 	if !executionauth.Managed(work.Job.Profile) {
 		return "", nil
 	}
+	if work.Job.Request.Spec().SeparateStart() {
+		if work.Gate == nil {
+			return "", dispatch.ErrPolicy
+		}
+		return work.Gate.Preparation.Status, nil
+	}
 	var binding, account, inputs, nonce, status, created string
 	var consumed sql.NullString
 	var wall int64
@@ -81,7 +87,11 @@ func (s *Store) ConsumeAuthorization(ctx context.Context, h dispatch.Handle, now
 		if err != nil {
 			return err
 		}
-		if status == executionauth.Granted {
+		if status == executionauth.Granted && work.Gate != nil {
+			if err = consumeGatePreparation(ctx, tx, &work, now); err != nil {
+				return err
+			}
+		} else if status == executionauth.Granted {
 			updated, err := tx.ExecContext(ctx, "UPDATE execution_authorizations SET status='consumed',consumed_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status='granted'", now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID))
 			if err != nil {
 				return dbError(err)

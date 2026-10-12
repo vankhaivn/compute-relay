@@ -327,14 +327,14 @@ func connectionError(w http.ResponseWriter, r *http.Request, err error) {
 
 func authorizationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, admission.ErrExpired):
+	case errors.Is(err, admission.ErrExpired), errors.Is(err, admission.ErrLimit):
 		jobError(w, r, err)
 	case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, auth.ErrForbidden):
 		mapError(w, r, err)
 	case errors.Is(err, admission.ErrKey):
 		jobError(w, r, err)
 	case errors.Is(err, executionauth.ErrRequest):
-		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "an exact attempt, frozen wall-time bound and explicit staging and compute authorization are required")
+		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "an exact attempt, finite bounds and the required explicit authorization are required")
 	case errors.Is(err, executionauth.ErrNotFound), errors.Is(err, admission.ErrNotFound):
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "authorization, job or attempt not found or not visible")
 	case errors.Is(err, executionauth.ErrConflict):

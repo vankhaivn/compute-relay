@@ -214,6 +214,7 @@ func validateOpenAPI(root, relative string) error {
 		"listProviderDescriptors": {}, "listConnections": {}, "getConnection": {},
 		"createConnection": {}, "changeConnection": {}, "getConnectionOperation": {},
 		"authorizeAttempt": {}, "getAttemptAuthorization": {},
+		"prepareExecutionGate": {}, "startExecutionGate": {}, "getExecutionReadiness": {}, "getExecutionGateAuthorization": {},
 	}
 	observedOperations := make(map[string]struct{}, len(expectedOperations))
 	for path, pathItem := range document.Paths.Map() {
@@ -243,7 +244,7 @@ func operationStatus(id string) string {
 	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob",
 		"cancelJob", "retryJob", "reconcileJob", "collectJob", "cleanupJob", "getOperation", "listArtifacts", "getArtifact", "downloadArtifact", "getJobLogs",
 		"listProviderDescriptors", "listConnections", "getConnection", "createConnection", "changeConnection", "getConnectionOperation",
-		"authorizeAttempt", "getAttemptAuthorization":
+		"authorizeAttempt", "getAttemptAuthorization", "prepareExecutionGate", "startExecutionGate", "getExecutionReadiness", "getExecutionGateAuthorization":
 		return "implemented-offline"
 	default:
 		return "planned"

@@ -1,0 +1,11 @@
+{
+  "attempt_id": "att_fixture",
+  "state": "ready",
+  "revision": "not-a-sha256",
+  "observed_at": "2026-10-12T19:00:00Z",
+  "ready_until": "2026-10-12T20:00:00Z",
+  "staged_bytes": 1048576,
+  "required_actions": [
+    "start"
+  ]
+}

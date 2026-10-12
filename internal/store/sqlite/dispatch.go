@@ -116,10 +116,27 @@ func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.T
 	work.Handle = dispatch.Handle{Claim: c, Version: j.Version}
 	work.Job = record
 	work.Journal = j
+	work.Gate, err = loadExecutionGate(ctx, tx, record, now)
+	if err != nil {
+		return dispatch.Work{}, err
+	}
 	if !work.InstallationID.Valid() {
 		return dispatch.Work{}, ErrCorrupt
 	}
 	if j.Plan != nil {
+		if record.Request.Spec().SeparateStart() {
+			g := work.Gate
+			if g == nil || j.Prepared != nil && j.Prepared.Ready && j.Prepared.ReadinessRevision() != g.ReadyRevision {
+				return dispatch.Work{}, ErrCorrupt
+			}
+			if j.SubmitStarted {
+				if g.Start == nil || g.StartReceipt == nil || g.StartReceipt.Status != executionauth.Consumed || j.StartAuthorization == nil || *j.StartAuthorization != *g.Start {
+					return dispatch.Work{}, ErrCorrupt
+				}
+			} else if g.StartReceipt != nil && g.StartReceipt.Status == executionauth.Consumed {
+				return dispatch.Work{}, ErrCorrupt
+			}
+		}
 		if executionauth.Managed(record.Profile) {
 			status, err := dispatchAuthorization(ctx, tx, work, now)
 			if err != nil || status != executionauth.Consumed {
@@ -257,7 +274,7 @@ func (s *Store) FreezeInput(ctx context.Context, h dispatch.Handle, index int, m
 }
 
 func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now time.Time) error {
-	if work.Job.Request.Spec().Expired(now) {
+	if work.Job.Request.Spec().Expired(now) || work.Gate != nil && work.Gate.Expired(now) {
 		return admission.ErrExpired
 	}
 	settings, last, err := schedulerControl(ctx, tx, now)
@@ -311,8 +328,19 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 		if err = checkHandle(work, h); err != nil {
 			return err
 		}
-		if action.Kind == dispatch.ExpireDispatch && !work.Job.Request.Spec().Expired(now) {
+		if action.Kind == dispatch.ExpireDispatch && !work.Job.Request.Spec().Expired(now) && (work.Gate == nil || !work.Gate.Expired(now)) {
 			return dispatch.ErrInvalid
+		}
+		if action.Kind == dispatch.ExpireDispatch {
+			action.PreparationExpired = false
+			if work.Gate != nil && !work.Job.Request.Spec().Expired(now) {
+				until, _ := time.Parse(time.RFC3339, work.Gate.Request.ReadyUntil)
+				action.PreparationExpired = !now.Before(until)
+				if work.Gate.Start != nil {
+					deadline, _ := time.Parse(time.RFC3339, work.Gate.Start.ExecutionDeadline)
+					action.PreparationExpired = action.PreparationExpired && !deadline.Before(until)
+				}
+			}
 		}
 		if action.Kind == dispatch.BeginPreparation || action.Kind == dispatch.BeginSubmission {
 			status, err := dispatchAuthorization(ctx, tx, work, now)
@@ -334,9 +362,17 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 				return err
 			}
 		}
+		if err = commitGateStep(ctx, tx, &work, &action, now); err != nil {
+			return err
+		}
 		next, state, event, err := dispatch.Apply(work.Journal, work.Job.Attempt.State, action, now)
 		if err != nil {
 			return err
+		}
+		if state.Orchestration.Terminal() && next.Plan == nil {
+			if err = releaseGateStorage(ctx, tx, string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID)); err != nil {
+				return err
+			}
 		}
 		raw, err := json.Marshal(next)
 		if err != nil || len(raw) > dispatch.MaxJournalBytes {

@@ -23,13 +23,14 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 	rows, err := tx.QueryContext(ctx, `SELECT q.queue_seq,q.workspace_id,q.job_id,q.attempt_id,q.dispatch_barrier,q.not_before_ms,
  a.state,a.orchestration,j.active_attempt_id=q.attempt_id,w.enabled,r.snapshot,
  json_extract(j.request,'$.resources.accelerator'),json_extract(j.request,'$.timeouts.remote_wall_seconds'),
- COALESCE(l.until_ms,0),COALESCE(l.held,0),COALESCE(e.status IN ('granted','consumed'),0)
+ COALESCE(l.until_ms,0),COALESCE(l.held,0),(COALESCE(e.status IN ('granted','consumed'),0) OR g.authorization_id IS NOT NULL)
  FROM scheduler_queue q JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id
  JOIN workspaces w ON w.workspace_id=q.workspace_id
  JOIN profile_revisions r ON r.profile=j.profile AND r.revision=j.profile_revision
  LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
  LEFT JOIN execution_authorizations e ON e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
+ LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
  WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out') OR (l.held=1 AND l.until_ms>?)
  ORDER BY q.queue_seq LIMIT ?`, now.UnixMilli(), scheduler.ScanLimit+1)
 	if err != nil {

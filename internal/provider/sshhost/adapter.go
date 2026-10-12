@@ -170,7 +170,7 @@ func (a *Adapter) Describe() provider.Descriptor {
 		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning,
 		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityExecutionTimeout,
 		domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
-		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline,
+		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart,
 	} {
 		c := domain.CapabilityStatus{Name: name, Support: domain.CapabilitySupportSupported, Evidence: domain.EvidenceImplementedOffline,
 			ClientVersion: Version, Reason: "operator-owned Docker host reached over SSH with a pinned host key"}
@@ -187,6 +187,8 @@ func (a *Adapter) Describe() provider.Descriptor {
 			c.Reason = "inputs are copied only into the attempt's own container"
 		case domain.CapabilityExecutionTimeout:
 			c.Reason = "the runner budget and a host-side timeout bound the container without Relay connectivity"
+		case domain.CapabilitySeparateStart:
+			c.Reason = "verified stopped-container preparation requires separate finite start authority"
 		case domain.CapabilityAbsoluteDeadline:
 			c.Reason = "UTC and Linux suspend-aware deadlines independently bound payload groups and finalization"
 		case domain.CapabilityRemoteNetworkControl:
@@ -258,8 +260,13 @@ func labels(plan provider.Plan, operation domain.OperationID) map[string]string 
 	id := plan.Job.Identity
 	result := map[string]string{labelPrefix + "installation": string(id.InstallationID), labelPrefix + "instance": string(id.InstanceID),
 		labelPrefix + "attempt": string(id.AttemptID), labelPrefix + "preparation": string(operation), labelPrefix + "plan": string(plan.Digest())}
-	if req, err := admission.Parse(plan.Job.Specification); err == nil && req.Spec().Timeouts.ExecutionDeadline != "" {
-		result[labelPrefix+"execution-deadline"] = req.Spec().Timeouts.ExecutionDeadline
+	if req, err := admission.Parse(plan.Job.Specification); err == nil {
+		if req.Spec().Timeouts.ExecutionDeadline != "" {
+			result[labelPrefix+"execution-deadline"] = req.Spec().Timeouts.ExecutionDeadline
+		}
+		if req.Spec().SeparateStart() {
+			result[labelPrefix+"execution-control"] = "prepare_then_start"
+		}
 	}
 	return result
 }
@@ -296,9 +303,11 @@ func decodeRef(resource string, id provider.Identity) (containerRef, error) {
 }
 
 type marker struct {
-	Preparation domain.OperationID  `json:"preparation_id"`
-	Plan        domain.SHA256Digest `json:"plan_sha256"`
-	Container   string              `json:"container_id"`
+	Preparation  domain.OperationID  `json:"preparation_id"`
+	Plan         domain.SHA256Digest `json:"plan_sha256"`
+	Container    string              `json:"container_id"`
+	Verification domain.SHA256Digest `json:"verification_sha256,omitempty"`
+	Manifest     domain.SHA256Digest `json:"manifest_sha256,omitempty"`
 }
 
 // Prepare creates the attempt's stopped container, copies the runner, manifest, bundle
@@ -328,7 +337,7 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		// The digest-pinned image is pulled once per host; the job network policy
 		// governs the container, not the engine's registry access.
 		image, found, err := d.inspectImage(ctx, a.config.Image)
-		if err == nil && !found && a.config.ImageRecipeSHA256 == "" {
+		if err == nil && !found && a.config.ImageRecipeSHA256 == "" && !spec.SeparateStart() {
 			if err = d.pull(ctx, a.config.Image); err == nil {
 				image, found, err = d.inspectImage(ctx, a.config.Image)
 			}
@@ -359,11 +368,14 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		command := []string{"timeout", "-k", "30", strconv.FormatInt(plan.Job.WallSeconds+timeoutGrace, 10),
 			"python3", "-E", "-s", "/relay/runner/run.py", "--manifest", "/relay/manifest.json", "--execute",
 			"--staging-root", "/relay/staging", "--work-root", workRoot, "--network-mode", mode}
-		if spec.Timeouts.ExecutionDeadline != "" {
+		if spec.Timeouts.ExecutionDeadline != "" || spec.SeparateStart() {
 			// The trusted supervisor is PID 1, so its final exit also tears down any
 			// remaining descendants in Docker's private PID namespace.
 			command = append([]string(nil), command[4:]...)
 			command[6] = "--supervise"
+		}
+		if spec.SeparateStart() {
+			command = append(command, "--start-control", startControlPath)
 		}
 		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: labels(plan, operation), Internet: mode == "required",
 			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
@@ -371,8 +383,21 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		if err != nil {
 			return err
 		}
-		staged, _ := json.Marshal(marker{Preparation: operation, Plan: plan.Digest(), Container: id})
-		if err = a.stage(ctx, d, id, plan, modules, manifestJSON); err == nil {
+		proof := marker{Preparation: operation, Plan: plan.Digest(), Container: id}
+		if err = a.stage(ctx, d, id, plan, modules, manifestJSON); err == nil && spec.SeparateStart() {
+			var info containerInfo
+			var exists bool
+			info, exists, err = d.inspect(ctx, name)
+			if err == nil && (!exists || info.ID != id || info.Started() || info.Image != image.ID) {
+				err = ErrIdentity
+			}
+			if err == nil {
+				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON)
+				proof.Manifest = provider.Digest(manifestJSON)
+			}
+		}
+		if err == nil {
+			staged, _ := json.Marshal(proof)
 			err = d.copyIn(ctx, id, singleFile(strings.TrimPrefix(stagedMarker, "/"), staged))
 		}
 		if err != nil {
@@ -380,7 +405,7 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 			return err
 		}
 		prepared = provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(),
-			Resource: encodeRef(name, id), Ready: true, Private: true}
+			Resource: encodeRef(name, id), Ready: true, Private: true, VerificationSHA256: proof.Verification, ManifestSHA256: proof.Manifest}
 		return nil
 	})
 	if err != nil {
@@ -524,6 +549,10 @@ func (a *Adapter) ReconcilePreparation(ctx context.Context, plan provider.Plan, 
 	if err := a.validPlan(ctx, plan); err != nil {
 		return provider.PreparationObservation{}, err
 	}
+	req, _ := admission.Parse(plan.Job.Specification)
+	if req.Spec().SeparateStart() {
+		return a.reconcileControlledPreparation(ctx, plan, operation)
+	}
 	observation := provider.PreparationObservation{Status: provider.ReconciliationNotFound}
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
 		name := containerName(plan.Job.Identity)
@@ -570,6 +599,10 @@ func unknownSubmission() provider.SubmissionOutcome {
 // Submit starts the prepared container exactly once. A failure before the start
 // command is sent is a rejection; any failure after it leaves acceptance unknown.
 func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
+	return a.submit(ctx, prepared, nil)
+}
+
+func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start *provider.StartAuthorization) provider.SubmissionOutcome {
 	if a == nil || !prepared.Ready || !prepared.Private || prepared.Identity.InstanceID != a.config.InstanceID {
 		return rejected("preparation_mismatch")
 	}
@@ -597,7 +630,28 @@ func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provid
 			outcome = unknownSubmission()
 			return nil
 		}
-		if raw := info.Config.Labels[labelPrefix+"execution-deadline"]; raw != "" {
+		controlled := info.Config.Labels[labelPrefix+"execution-control"] == "prepare_then_start"
+		if controlled != (start != nil) {
+			outcome = rejected("start_authorization_required")
+			return nil
+		}
+		rawDeadline := info.Config.Labels[labelPrefix+"execution-deadline"]
+		if start != nil {
+			if err = a.checkControlledStart(ctx, d, info, prepared, *start); err != nil {
+				outcome = rejected("readiness_invalidated")
+				if errors.Is(err, errStartClaimed) {
+					outcome = unknownSubmission()
+				}
+				return nil
+			}
+			rawDeadline = start.ExecutionDeadline
+			before, _ := time.Parse(time.RFC3339, start.StartBefore)
+			if !a.clock.Now().Before(before) {
+				outcome = startExpired(*start)
+				return nil
+			}
+		}
+		if raw := rawDeadline; raw != "" {
 			deadline, err := time.Parse(time.RFC3339, raw)
 			if err != nil || deadline.UTC().Format(time.RFC3339) != raw || info.Config.Labels[labelPrefix+"plan"] != string(prepared.PlanSHA256) {
 				outcome = rejected("preparation_mismatch")
@@ -618,8 +672,22 @@ func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provid
 				outcome = deadlineRejected()
 				return nil
 			}
+			if start != nil {
+				before, _ := time.Parse(time.RFC3339, start.StartBefore)
+				if !after.Before(before) || !remote.Before(before) {
+					outcome = startExpired(*start)
+					return nil
+				}
+			}
 		}
 		sent = true
+		if start != nil {
+			raw, _ := json.Marshal(startControl{Version: "compute-relay/start/v1", JobID: prepared.Identity.JobID,
+				AttemptID: prepared.Identity.AttemptID, AttemptNonce: prepared.Identity.Nonce, ManifestSHA256: prepared.ManifestSHA256, StartAuthorization: *start})
+			if err = d.copyIn(ctx, ref.ID, singleFile(strings.TrimPrefix(startControlPath, "/"), raw)); err != nil {
+				return err
+			}
+		}
 		result, err := d.simple(ctx, "container", "start", ref.ID)
 		if err != nil || result.ExitCode != 0 {
 			return ErrRemoteDocker

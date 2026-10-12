@@ -13,7 +13,7 @@ import tarfile
 import zlib
 import time
 
-from .contract import MAX_MANIFEST, RUNNER_VERSION, Failure, input_digest, load, require
+from .contract import MAX_MANIFEST, RUNNER_VERSION, Failure, apply_start, input_digest, load, require
 from .files import artifacts, atomic_json, copy_verified, extract_bundle, open_file
 from .process import Log, run
 from .deadline import Bound, epoch, supervise
@@ -96,9 +96,10 @@ def pinned_requirements(code, name):
     return "\n".join(lines) + "\n"
 
 
-def execute(manifest, staging, root, network_mode, cancelled=lambda: False):
+def execute(manifest, staging, root, network_mode, cancelled=lambda: False, authorization=None):
     """Explicit remote/test entry; work root must be new. No retry or existing-root resume."""
     manifest, limits = load(json.dumps(manifest).encode())
+    require((manifest.get("execution_control") == "prepare_then_start") == (authorization is not None))
     if sys.platform != "linux":
         raise Failure("UNSUPPORTED_CAPABILITY", "validation", "Runner execution requires Linux")
     staging, root = Path(staging).absolute(), Path(root).absolute()
@@ -131,6 +132,8 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False):
                   "network_adapter_declared": network_mode,
                   "network_enforcement": "provider_required_not_runner_enforced",
                   "processes": [], "logs": {}, "phase_seconds": {}}
+    if authorization is not None:
+        provenance["start_authorization"] = authorization
     if work_bound:
         provenance.update(deadline_origin="utc_and_linux_boottime", execution_deadline=budgets["execution_deadline"],
                           effective_execution_deadline=datetime.fromtimestamp(work_bound.utc_end, timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -280,28 +283,42 @@ def main(argv=None):
     parser.add_argument("--staging-root")
     parser.add_argument("--work-root")
     parser.add_argument("--network-mode", choices=("disabled", "required"))
+    parser.add_argument("--start-control")
     args = parser.parse_args(argv)
     stopped = [False]
     previous = {}
     try:
         with open(args.manifest, "rb") as source:
-            manifest, limits = load(source.read(MAX_MANIFEST + 1))
+            manifest_raw = source.read(MAX_MANIFEST + 1)
+            manifest, limits = load(manifest_raw)
         if args.validate_only:
             print(json.dumps({"status": "valid", "runner_version": RUNNER_VERSION, "executed": False}))
             return 0
         require(args.staging_root and args.work_root and args.network_mode)
+        authorization = None
+        if manifest.get("execution_control") == "prepare_then_start":
+            require(args.start_control)
+            with open(args.start_control, "rb") as source:
+                authorization = apply_start(manifest, manifest_raw, source.read(4097), time.time())
+        else:
+            require(args.start_control is None)
         if args.supervise:
             require("execution_deadline" in manifest["timeouts"] and sys.platform == "linux")
-            return supervise(manifest, [sys.executable, "-E", "-s", str(Path(__file__).parents[1] / "run.py"),
-                                        "--manifest", args.manifest, "--execute", "--staging-root", args.staging_root,
-                                        "--work-root", args.work_root, "--network-mode", args.network_mode])
+            command = [sys.executable, "-E", "-s", str(Path(__file__).parents[1] / "run.py"),
+                       "--manifest", args.manifest, "--execute", "--staging-root", args.staging_root,
+                       "--work-root", args.work_root, "--network-mode", args.network_mode]
+            if args.start_control:
+                command.extend(["--start-control", args.start_control])
+            return supervise(manifest, command)
         for sig in (signal.SIGTERM, signal.SIGINT):
             previous[sig] = signal.signal(sig, lambda *_: stopped.__setitem__(0, True))
-        result = execute(manifest, args.staging_root, args.work_root, args.network_mode, lambda: stopped[0])
+        result = execute(manifest, args.staging_root, args.work_root, args.network_mode, lambda: stopped[0], authorization)
         print(json.dumps({"phase": result["phase"], "exit_code": result["exit_code"], "runner_version": RUNNER_VERSION}))
         return 0 if result["phase"] == "completed" else 124 if result["phase"] == "timed_out" and "execution_deadline" in manifest["timeouts"] else 1
-    except (Failure, OSError, ValueError, TypeError, KeyError, RecursionError):
+    except (Failure, OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
         print("Runner rejected input or could not finalize; no result is implied", file=sys.stderr)
+        if isinstance(exc, Failure) and exc.code == "REMOTE_TIMEOUT":
+            return 124
         return 64
     finally:
         for sig, handler in previous.items():

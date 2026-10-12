@@ -165,8 +165,13 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	}()
 	// Expiry prohibits a future start; it cannot establish that possible execution
 	// stopped. Submitting and submitted attempts retain observation-only recovery.
-	if !work.Journal.SubmitStarted && work.Job.Request.Spec().Expired(e.clock.Now()) && work.Job.Attempt.State.Cancellation == domain.CancellationNotRequested {
+	expired := work.Job.Request.Spec().Expired(e.clock.Now()) || work.Gate != nil && work.Gate.Expired(e.clock.Now())
+	if !work.Journal.SubmitStarted && expired && work.Job.Attempt.State.Cancellation == domain.CancellationNotRequested && !(work.Gate != nil && work.Journal.Phase == Staging && work.Journal.Prepared == nil) {
 		return s.commit(Action{Kind: ExpireDispatch})
+	}
+	preparationLimit := e.config.PreparationTimeout
+	if work.Gate != nil {
+		preparationLimit = min(preparationLimit, time.Duration(work.Gate.Request.MaxPreparationSeconds)*time.Second)
 	}
 	binding := provider.BindingSnapshot{Binding: work.Job.Profile.Binding, AccountScope: work.Job.Profile.AccountScope, CredentialRef: work.Job.Profile.CredentialRef}
 	p, err := e.providers.Resolve(binding)
@@ -219,7 +224,11 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		// This invocation alone received the successful new intent commit. Restart paths
 		// enter Staging below and cannot call Prepare, even if no resource is found.
 		observed := provider.WithPreparationProgress(ctx, s.progress)
-		prepared, err := control(observed, e.config.PreparationTimeout, func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
+		if work.Gate != nil {
+			until, _ := time.Parse(time.RFC3339, work.Gate.Request.ReadyUntil)
+			preparationLimit = min(preparationLimit, until.Sub(e.clock.Now()))
+		}
+		prepared, err := control(observed, preparationLimit, func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
 		if err != nil {
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
@@ -233,20 +242,47 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return s.fail(domain.CodeConfigurationInvalid)
 		}
 		journal := work.Journal
-		seen, err := control(ctx, e.config.PreparationTimeout, func(c context.Context) (provider.PreparationObservation, error) {
+		seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
 			return observer.ReconcilePreparation(c, journal.Plan.Clone(), journal.PreparationID)
 		})
 		if err != nil {
+			if expired && work.Gate != nil {
+				return s.commit(Action{Kind: ExpireDispatch})
+			}
 			return s.fail(domain.CodeStagingFailed)
 		}
 		if seen.Validate(*journal.Plan, journal.PreparationID) != nil {
 			return s.fail(domain.CodeRemoteIdentityMismatch)
 		}
 		if seen.Status != provider.ReconciliationFound {
+			if expired && work.Gate != nil {
+				return s.commit(Action{Kind: ExpireDispatch})
+			}
 			return s.fail(domain.CodeStagingNotReady)
 		}
 		return s.prepared(*seen.Prepared)
 	case Ready:
+		if work.Gate != nil {
+			if work.Gate.Start == nil {
+				return nil
+			}
+			if _, ok := p.(provider.ControlledStarter); !ok {
+				return s.fail(domain.CodeUnsupportedCapability)
+			}
+			observer, ok := p.(provider.PreparationObserver)
+			if !ok {
+				return s.fail(domain.CodeConfigurationInvalid)
+			}
+			seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
+				return observer.ReconcilePreparation(c, work.Journal.Plan.Clone(), work.Journal.PreparationID)
+			})
+			if err != nil {
+				return s.fail(errorCode(err, domain.CodeStagingNotReady))
+			}
+			if seen.Validate(*work.Journal.Plan, work.Journal.PreparationID) != nil || seen.Status != provider.ReconciliationFound || seen.Prepared == nil || seen.Prepared.ReadinessRevision() != work.Gate.ReadyRevision {
+				return s.fail(domain.CodeRemoteIdentityMismatch)
+			}
+		}
 		if err = s.commit(Action{Kind: BeginSubmission}); err != nil {
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
@@ -254,7 +290,12 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return err
 		}
 		prepared := *s.work().Journal.Prepared
-		outcome, callErr := control(ctx, e.config.PreparationTimeout, func(c context.Context) (provider.SubmissionOutcome, error) { return p.Submit(c, prepared), nil })
+		outcome, callErr := control(ctx, preparationLimit, func(c context.Context) (provider.SubmissionOutcome, error) {
+			if start := s.work().Journal.StartAuthorization; start != nil {
+				return p.(provider.ControlledStarter).Start(c, prepared, *start), nil
+			}
+			return p.Submit(c, prepared), nil
+		})
 		if callErr != nil || outcome.Validate(prepared.Identity) != nil {
 			outcome = provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: problem(domain.CodeProviderSubmissionUnknown, true)}
 		}

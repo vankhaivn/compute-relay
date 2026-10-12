@@ -114,6 +114,13 @@
                   "unsupported",
                   "unknown"
                 ]
+              },
+              "separate_prepare_start": {
+                "enum": [
+                  "supported",
+                  "unsupported",
+                  "unknown"
+                ]
               }
             }
           },

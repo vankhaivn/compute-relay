@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
@@ -33,6 +34,7 @@ type Scenario struct {
 	Files            []File
 	PreparationReady bool
 	GPU              domain.CapabilitySupport
+	SeparateStart    bool // Declared only by explicit-start orchestration fixtures.
 	AbsoluteDeadline bool // Declared only by tests of controller-side deadline gates.
 }
 
@@ -125,9 +127,13 @@ func (p *Basic) Describe() provider.Descriptor {
 	for _, name := range []domain.CapabilityName{domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
 		domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
 		domain.CapabilityStrongIdentity, domain.CapabilityGPU, domain.CapabilityRemoteCancellation,
-		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline} {
+		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart} {
 		support := domain.CapabilitySupportSupported
 		switch name {
+		case domain.CapabilitySeparateStart:
+			if !p.backend.scenario.SeparateStart {
+				support = domain.CapabilitySupportUnsupported
+			}
 		case domain.CapabilityAbsoluteDeadline:
 			if !p.backend.scenario.AbsoluteDeadline {
 				support = domain.CapabilitySupportUnsupported
@@ -202,12 +208,34 @@ func (p *Basic) Prepare(ctx context.Context, plan provider.Plan, operation domai
 		return r.prepared, nil
 	}
 	prepared := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: plan.Job.Identity.ResourceKey, Ready: p.backend.scenario.PreparationReady, Private: true}
+	for _, capability := range plan.Job.Required {
+		if capability == domain.CapabilitySeparateStart {
+			prepared.VerificationSHA256 = provider.Digest([]byte("offline-verification-" + string(plan.Digest())))
+			prepared.ManifestSHA256 = provider.Digest([]byte("offline-manifest-" + string(plan.Digest())))
+		}
+	}
 	remote := provider.RemoteReference{Identity: prepared.Identity, Resource: prepared.Resource, Version: "fixture-1"}
 	r := &record{plan: plan.Clone(), prepared: prepared, remote: remote}
 	p.backend.records[key] = r
 	return prepared, nil
 }
 func (p *Basic) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
+	return p.submit(ctx, prepared, false)
+}
+func (p *Basic) Start(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
+	if !p.backend.scenario.SeparateStart || start.Validate(prepared) != nil {
+		return rejection("explicit start authorization required")
+	}
+	before, _ := time.Parse(time.RFC3339, start.StartBefore)
+	if !p.clock.Now().Before(before) {
+		return rejection("explicit start expired")
+	}
+	return p.submit(ctx, prepared, true)
+}
+func (p *Basic) submit(ctx context.Context, prepared provider.Prepared, controlled bool) provider.SubmissionOutcome {
+	if prepared.ReadinessRevision().Valid() != controlled {
+		return rejection("wrong authorization mode")
+	}
 	if err := ctx.Err(); err != nil {
 		return rejection("submission cancelled before any simulated side effect")
 	}

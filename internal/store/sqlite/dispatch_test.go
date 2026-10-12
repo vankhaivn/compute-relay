@@ -53,14 +53,15 @@ type dispatchFixture struct {
 }
 type probeProvider struct {
 	*fake.Bound
-	store          *Store
-	losePrepare    bool
-	panicSubmit    bool
-	validateError  bool
-	public         bool
-	rejectQuota    bool
-	prepareEntered chan struct{}
-	prepareRelease chan struct{}
+	store                *Store
+	losePrepare          bool
+	panicSubmit          bool
+	validateError        bool
+	public               bool
+	rejectQuota          bool
+	prepareEntered       chan struct{}
+	prepareRelease       chan struct{}
+	afterPreparationRead func()
 }
 
 func (p *probeProvider) Prepare(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.Prepared, error) {

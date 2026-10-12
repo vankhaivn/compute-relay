@@ -56,11 +56,15 @@ func (s *Store) claimRecovery(ctx context.Context, owner string, now time.Time, 
  JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
  JOIN profile_revisions p ON p.profile=j.profile AND p.revision=j.profile_revision
  LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
+ LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
+ LEFT JOIN start_authorizations x ON x.workspace_id=q.workspace_id AND x.job_id=q.job_id AND x.attempt_id=q.attempt_id
  WHERE (COALESCE(json_extract(p.snapshot,'$.credential_ref'),'') LIKE 'vault:%')=?
  AND q.dispatch_barrier=1 AND d.phase IN ('staging','ready','submitting','submitted')
  AND a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out')
+ AND (d.phase!='ready' OR g.authorization_id IS NULL OR x.authorization_id IS NOT NULL OR g.ready_until_ms<=?
+ OR EXISTS(SELECT 1 FROM operations o WHERE o.workspace_id=q.workspace_id AND o.job_id=q.job_id AND o.attempt_id=q.attempt_id AND o.kind='cancel' AND o.status IN ('accepted','running')))
  AND q.not_before_ms<=? AND (l.held IS NULL OR l.held=0 OR l.until_ms<=?)
- ORDER BY q.not_before_ms,q.queue_seq LIMIT 1`, managed, now.UnixMilli(), now.UnixMilli()).Scan(&sequence)
+ ORDER BY q.not_before_ms,q.queue_seq LIMIT 1`, managed, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&sequence)
 		if errors.Is(err, sql.ErrNoRows) {
 			return advanceSchedulerClock(ctx, tx, now)
 		}

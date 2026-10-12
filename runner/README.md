@@ -110,6 +110,13 @@ checks before start. Timed-out absolute jobs return runner status 124. Provider 
 time remains separate from runner time. Host sleep, VM clock behavior and reboot remain
 unqualified until explicit live tests.
 
+For `execution_control=prepare_then_start`, the SSH container stays stopped after byte
+verification. Execution requires a separate `--start-control` file with version
+`compute-relay/start/v1`, exact manifest SHA-256, job/attempt/nonce, readiness revision,
+authorization identity and finite start/wall/deadline bounds. The trusted supervisor and child
+validate this control before creating a work root; budgets tighten only in memory. The control
+contains no workload secrets. See [preparation gates](../docs/preparation-gates.md).
+
 Stdout/stderr default to 20 MiB retained per stream, with seen/stored counts and truncation.
 Known credential-pattern redaction is best-effort hygiene, not a universal secret detector.
 Redacted child output is also mirrored to notebook stdout/stderr through a bounded best-effort

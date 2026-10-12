@@ -140,6 +140,9 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 	} else if !permitted || !enabled {
 		return profile, nil, 0, auth.ErrForbidden
 	}
+	if spec.SeparateStart() && !strings.HasPrefix(profile.CredentialRef, "vault:") {
+		return profile, nil, 0, admission.ErrRequirements
+	}
 	if err = profile.Check(spec); err != nil {
 		return profile, nil, 0, err
 	}
