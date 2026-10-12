@@ -38,9 +38,10 @@ type Field struct {
 	MaxBytes  int    `json:"max_bytes"`
 }
 type Capabilities struct {
-	Accelerators []string `json:"accelerators"`
-	RemoteCancel string   `json:"remote_cancel"`
-	Quota        string   `json:"quota"`
+	Accelerators     []string `json:"accelerators"`
+	RemoteCancel     string   `json:"remote_cancel"`
+	Quota            string   `json:"quota"`
+	AbsoluteDeadline string   `json:"absolute_execution_deadline,omitempty"`
 }
 type Descriptor struct {
 	Type              string       `json:"type"`

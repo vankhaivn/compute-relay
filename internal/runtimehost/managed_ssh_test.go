@@ -145,7 +145,7 @@ func TestManagedSSHConnectionRefusesRejectedLoginsAndChangedHostKeys(t *testing.
 func TestManagedSSHDescriptorKeepsEveryFieldWriteOnly(t *testing.T) {
 	descriptor := newManagedSSHAdapter(ManagedServeConfig{}).Descriptor()
 	if descriptor.Type != "ssh" || len(descriptor.Fields) != 10 || descriptor.Capabilities.RemoteCancel != "supported" ||
-		descriptor.Capabilities.Quota != "unsupported" || strings.Join(descriptor.Capabilities.Accelerators, ",") != "cpu" {
+		descriptor.Capabilities.Quota != "unsupported" || descriptor.Capabilities.AbsoluteDeadline != "supported" || strings.Join(descriptor.Capabilities.Accelerators, ",") != "cpu" {
 		t.Fatalf("descriptor = %+v", descriptor)
 	}
 	for _, field := range descriptor.Fields {

@@ -678,8 +678,8 @@
     },
     {
       "path": "api/examples/provider-descriptors.fixture.valid.json",
-      "sha256": "3ba1397f8900e57c2815988b567f16fa06637a222c18d6cf303e1abb4a3c7235",
-      "bytes": 512
+      "sha256": "166ff8c7a0fe31963722c590e9465985ae91549abafa81ef30c9cf6e979a3e7d",
+      "bytes": 564
     },
     {
       "path": "api/examples/result-manifest.success.valid.json",
@@ -798,8 +798,8 @@
     },
     {
       "path": "api/schemas/provider-descriptors.v1alpha1.schema.json",
-      "sha256": "2e7f34688fbc4cd53644bfdb11a278aef33e25ea0e0d45ffe87a3814dac17012",
-      "bytes": 3155
+      "sha256": "8a87a952beca44923303fb82300be472dbec1d06deec2b4fd32ca20496d345a5",
+      "bytes": 3487
     },
     {
       "path": "api/schemas/result-manifest.v1alpha1.schema.json",

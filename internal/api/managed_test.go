@@ -84,7 +84,7 @@ func (*managedAdapter) Descriptor() connections.Descriptor {
 	return connections.Descriptor{
 		Type: "fixture", Label: "Fixture provider",
 		Fields:       []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: 8192}},
-		Capabilities: connections.Capabilities{Accelerators: []string{"cpu", "gpu"}, RemoteCancel: "unsupported", Quota: "supported"},
+		Capabilities: connections.Capabilities{Accelerators: []string{"cpu", "gpu"}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "supported"},
 	}
 }
 func (*managedAdapter) Encode(fields map[string]string) ([]byte, error) {
@@ -214,6 +214,9 @@ func TestManagedHTTPConnectionContractsReplayAndAuthority(t *testing.T) {
 	_, raw := f.call(t, "GET", base+"/providers", "read", "", "", 200)
 	wireSchema(t, "provider-descriptors", raw)
 	managedSafeResponse(t, raw)
+	if !bytes.Contains(raw, []byte(`"absolute_execution_deadline":"supported"`)) {
+		t.Fatal("provider discovery omitted the execution deadline capability")
+	}
 	_, raw = f.call(t, "GET", base+"/connections", "read", "", "", 200)
 	wireSchema(t, "connection", raw)
 	if string(bytes.TrimSpace(raw)) != `{"connections":[]}` {

@@ -18,7 +18,8 @@
           "gpu"
         ],
         "remote_cancel": "unknown",
-        "quota": "supported"
+        "quota": "supported",
+        "absolute_execution_deadline": "supported"
       },
       "credential_storage": "available"
     }
