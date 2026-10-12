@@ -26,7 +26,8 @@ The owner approved this scope change; it adds a provider and does not weaken the
   start evidence. Observation, cancellation, artifacts, logs and cleanup read only the exact
   container named, identified and labelled for the attempt.
 - **Remote data.** Cleanup deletes only that stopped container, through the provider cleanup port
-  and only when requested. Nothing is deleted automatically.
+  and only on an explicit [ADR-0027](0027-explicit-remote-cleanup.md) request. Nothing is deleted
+  automatically.
 - **Policy.** Profiles use the `operator_managed` cost class and the CPU accelerator. The host
   reports no quota, so CPU work runs with an unknown-quota warning. One account allows one active
   attempt.

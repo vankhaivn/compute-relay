@@ -143,8 +143,8 @@ on the host that no `compute-relay-` container remains.
   manual without a verified session target.
 - Deliberate submission-response loss. A normal restart does not induce this ambiguity; never
   simulate it by retrying, deleting the journal or creating a new root.
-- Cleanup and backup. There is no cleanup apply; any manual cleanup needs approval for exact
-  targets. A restore test preserves SQLite, both blob roots and identity markers and activates
+- Cleanup and backup. Cleanup apply is the attempt-scoped control only; any other cleanup needs
+  approval for exact targets. A restore test preserves SQLite, both blob roots and identity markers and activates
   only one copy.
 
 Update [current status](../status.md) and the

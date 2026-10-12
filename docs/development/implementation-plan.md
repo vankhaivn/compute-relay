@@ -29,8 +29,8 @@ fallback. Missing optional capabilities stay unsupported or unknown rather than 
 | M1-07 | Deliberately lost provider acknowledgement is a distinct fault qualification; normal restart/reconciliation does not claim to induce that ambiguity. |
 | M1-08 | Record the provider support/blocked capability mapping for a release decision. |
 
-Large multi-page output, exact hardware release and remote cleanup apply remain explicit limits in
-the provider guides. Credential authorization never implies authorization for GPU use, destructive
+Large multi-page output, exact hardware release and Kaggle remote cleanup apply remain explicit
+limits in the provider guides. Credential authorization never implies authorization for GPU use, destructive
 cleanup, public data or paid capacity.
 
 ## M5 — Product integration

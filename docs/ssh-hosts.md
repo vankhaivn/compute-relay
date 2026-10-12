@@ -75,9 +75,21 @@ results.
 
 ## Delete remote data
 
-Containers, their staged inputs and their outputs stay on the host after the attempt. Request
-cleanup for the job through the Relay API; it deletes only that attempt's stopped container.
-Nothing on the host is deleted automatically or by restarting Relay.
+Containers, their staged inputs and their outputs stay on the host after the attempt. Nothing on
+the host is deleted automatically or by restarting Relay. To delete one attempt's container,
+send an authenticated request with an `operate` token and an `Idempotency-Key`:
+
+```http
+POST /v1/workspaces/{w}/jobs/{job_id}/cleanup
+{"attempt_id": "att_…"}
+```
+
+The 202 receipt starts as `pending`; read it with `GET /v1/workspaces/{w}/operations/{id}` until it
+reports `remote_deleted` or `already_absent`. The attempt must be finished and its results
+collected; add `"discard_uncollected": true` only to delete results you never collected. Relay
+removes only the stopped container labelled for that attempt and never forces removal. The
+standard image stays on the host. See [remote cleanup](development/operations.md#remote-cleanup)
+for eligibility and failure receipts.
 
 ## Troubleshooting
 
