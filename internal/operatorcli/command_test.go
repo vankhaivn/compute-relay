@@ -185,3 +185,18 @@ func TestManagedServeCPUIsExplicitAndDoesNotGrantCompute(t *testing.T) {
 		t.Fatal("explicit CPU managed policy rejected or granted compute", err)
 	}
 }
+
+func TestManagedSSHOnlyModeNeedsNoPythonAndStaysExplicit(t *testing.T) {
+	r, err := Parse([]string{"serve", "--root", "run", "--managed"})
+	if err != nil || !r.Managed || r.ManagedPython != "" || r.ManagedMachineShape != "cpu" || r.ManagedMaxWorkers != 2 || r.ManagedMaxWallSeconds != 1800 || r.AllowGPU || r.MaxProviderAttempts != 0 {
+		t.Fatal("SSH-only defaults or authority changed", err)
+	}
+	for _, flags := range [][]string{
+		{"--managed=false"}, {"--managed", "--managed"}, {"--managed", "--managed-machine-shape", "NvidiaTeslaT4"},
+		{"--managed", "--provider-profile", "fixture"}, {"--managed", "--managed-python", ""},
+	} {
+		if _, err := Parse(append([]string{"serve", "--root", "run"}, flags...)); err != ErrArguments {
+			t.Fatal("ambiguous SSH-only flags accepted", flags, err)
+		}
+	}
+}

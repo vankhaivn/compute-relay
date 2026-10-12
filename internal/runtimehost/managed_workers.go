@@ -38,6 +38,12 @@ func (c ManagedServeConfig) validate() error {
 		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
 		return ErrRequest
 	}
+	if c.PythonExecutable == "" {
+		if c.MachineShape != "cpu" {
+			return ErrRequest
+		}
+		return nil
+	}
 	if _, err := kaggle.NewDiscovery(c.PythonExecutable, clock{}); err != nil {
 		return ErrRequest
 	}
@@ -69,18 +75,33 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	discovery, err := kaggle.NewDiscovery(config.PythonExecutable, clock{})
-	if err != nil {
-		return nil, ErrRequest
-	}
 	var vault credentials.Vault
-	keychain, err := credentials.NewKeychain(h.identity.InstallationID, config.PythonExecutable)
-	if err == nil {
-		vault = keychain
-	} else if !errors.Is(err, credentials.ErrUnsupported) {
+	var err error
+	adapters := []connections.Adapter{newManagedSSHAdapter(config)}
+	if config.PythonExecutable == "" {
+		present, err := h.store.HasManagedConnections(ctx, "kaggle")
+		if err != nil {
+			return nil, ErrState
+		}
+		if present {
+			return nil, ErrRequest
+		}
+		vault, err = credentials.NewNativeKeychain(h.identity.InstallationID)
+	} else {
+		discovery, discoveryErr := kaggle.NewDiscovery(config.PythonExecutable, clock{})
+		if discoveryErr != nil {
+			return nil, ErrRequest
+		}
+		adapters = append(adapters, &managedKaggleAdapter{discovery: discovery, config: config})
+		vault, err = credentials.NewKeychain(h.identity.InstallationID, config.PythonExecutable)
+	}
+	if err != nil && !errors.Is(err, credentials.ErrUnsupported) {
 		return nil, ErrState
 	}
-	return h.composeManaged(ctx, config, vault, &managedKaggleAdapter{discovery: discovery, config: config}, newManagedSSHAdapter(config))
+	if err != nil {
+		vault = nil
+	}
+	return h.composeManaged(ctx, config, vault, adapters...)
 }
 
 // composeManaged provides the offline fixture seam. Neither it nor its concrete

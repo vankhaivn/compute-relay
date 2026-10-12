@@ -30,6 +30,7 @@ type Request struct {
 	MaxProviderAttempts   int
 	AllowPrivateStaging   bool
 	AllowGPU              bool
+	Managed               bool
 	ManagedPython         string
 	ManagedMachineShape   string
 	ManagedMaxWallSeconds int64
@@ -48,6 +49,8 @@ const Usage = `Local runtime commands:
   compute-relay serve --root DIR --managed-python ABS \
     [--managed-machine-shape NvidiaTeslaT4] [--managed-max-wall-seconds 1800] \
     [--managed-max-workers 2] [--managed-allow-internet]
+  compute-relay serve --root DIR --managed [--managed-max-wall-seconds 1800] \
+    [--managed-max-workers 2] [--managed-allow-internet]
   compute-relay workspace create|show|enable|disable --root DIR --id ID
   compute-relay token issue --root DIR --workspace ID --scope read [--scope write] --ttl 24h --output NEW_PRIVATE_FILE
   compute-relay token revoke --root DIR --id TOKEN_ID
@@ -56,8 +59,9 @@ const Usage = `Local runtime commands:
 Stop serve before local administration. Secrets are never printed; token output
 requires a new file in an existing private directory. Plain serve keeps provider
 workers disabled. Standalone provider mode requires every explicit provider flag
-and a finite per-process attempt budget. Managed mode requires an absolute Python
-interpreter path; each attempt needs separate API execution authorization. Its
+and a finite per-process attempt budget. --managed enables SSH-only mode with native
+macOS Keychain and no Python. --managed-python ABS also enables Kaggle and requires
+an absolute interpreter path; each attempt needs separate API execution authorization. Its
 policy flags grant no compute consent and cannot be mixed with standalone flags.
 Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100; wall limit: 1-86400 seconds;
 workers: 1-16; internet defaults to disabled. Local shutdown is not remote
@@ -163,6 +167,7 @@ func Parse(args []string) (Request, error) {
 	}
 	addBool("allow-private-staging", &r.AllowPrivateStaging)
 	addBool("allow-gpu", &r.AllowGPU)
+	addBool("managed", &r.Managed)
 	addBool("managed-allow-internet", &r.ManagedAllowInternet)
 	addNumber := func(name string, maximum int64, set func(int64)) {
 		fs.Func(name, "", func(value string) error {
@@ -213,7 +218,7 @@ func Parse(args []string) (Request, error) {
 	allowed := map[string]bool{"root": true}
 	switch r.Command {
 	case "serve":
-		for _, k := range []string{"listen", "provider-config", "provider-profile", "provider-machine-shape", "max-provider-attempts", "allow-private-staging", "allow-gpu", "managed-python", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
+		for _, k := range []string{"listen", "provider-config", "provider-profile", "provider-machine-shape", "max-provider-attempts", "allow-private-staging", "allow-gpu", "managed", "managed-python", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
 			allowed[k] = true
 		}
 	case "workspace":
@@ -244,14 +249,18 @@ func Parse(args []string) (Request, error) {
 	if r.Command == "serve" {
 		providerFlags := seen["provider-config"] || seen["provider-profile"] || seen["provider-machine-shape"] ||
 			seen["max-provider-attempts"] || seen["allow-private-staging"] || seen["allow-gpu"]
-		managedFlags := seen["managed-python"] || seen["managed-machine-shape"] || seen["managed-max-wall-seconds"] ||
+		managedFlags := seen["managed"] || seen["managed-python"] || seen["managed-machine-shape"] || seen["managed-max-wall-seconds"] ||
 			seen["managed-max-workers"] || seen["managed-allow-internet"]
 		if managedFlags {
-			if providerFlags || !filepath.IsAbs(r.ManagedPython) || strings.ContainsAny(r.ManagedPython, "\r\n\ufffd") {
+			if providerFlags || seen["managed"] && !r.Managed || !r.Managed && !seen["managed-python"] ||
+				seen["managed-python"] && (!filepath.IsAbs(r.ManagedPython) || strings.ContainsAny(r.ManagedPython, "\r\n\ufffd")) {
 				return r, ErrArguments
 			}
 			if !seen["managed-machine-shape"] {
 				r.ManagedMachineShape = "NvidiaTeslaT4"
+				if r.ManagedPython == "" {
+					r.ManagedMachineShape = "cpu"
+				}
 			}
 			if !seen["managed-max-wall-seconds"] {
 				r.ManagedMaxWallSeconds = 1800
@@ -260,6 +269,9 @@ func Parse(args []string) (Request, error) {
 				r.ManagedMaxWorkers = 2
 			}
 			if r.ManagedMachineShape != "cpu" && r.ManagedMachineShape != "NvidiaTeslaT4" && r.ManagedMachineShape != "NvidiaTeslaP100" {
+				return r, ErrArguments
+			}
+			if r.ManagedPython == "" && r.ManagedMachineShape != "cpu" {
 				return r, ErrArguments
 			}
 		}
