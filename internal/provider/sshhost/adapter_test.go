@@ -567,3 +567,21 @@ func TestReadTarRefusesLinksAndOversizedFiles(t *testing.T) {
 		t.Fatalf("over caller limit: %v", err)
 	}
 }
+
+func TestPrepareUsesFrozenProcessLimit(t *testing.T) {
+	h := newHarness(t)
+	h.adapter.config.MaxProcesses = 256
+	_, _ = h.prepare(t)
+	h.host.mu.Lock()
+	defer h.host.mu.Unlock()
+	found := false
+	for _, argv := range h.host.calls {
+		command := strings.Join(argv, " ")
+		if strings.Contains(command, "container create") {
+			found = strings.Contains(command, "--pids-limit 256")
+		}
+	}
+	if !found {
+		t.Fatal("container did not use the configured PID limit")
+	}
+}

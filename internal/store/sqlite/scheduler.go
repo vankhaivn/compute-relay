@@ -36,6 +36,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 		return nil, dbError(err)
 	}
 	result := []scheduler.Candidate{}
+	frozenLimits := map[int64]int{}
 	for rows.Next() {
 		var c scheduler.Candidate
 		var raw, phase, profile string
@@ -54,6 +55,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 			rows.Close()
 			return nil, ErrCorrupt
 		}
+		frozenLimits[c.Sequence] = p.MaxActiveAttempts
 		c.Managed = executionauth.Managed(p)
 		c.AccountScope = p.AccountScope
 		c.ProviderInstanceID = p.Binding.ProviderInstanceID
@@ -89,6 +91,9 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 				return nil, dbError(err)
 			}
 			policies[c.AccountScope] = c.Policy
+		}
+		if frozen := frozenLimits[c.Sequence]; frozen > 0 {
+			c.Policy.MaxActive = min(c.Policy.MaxActive, frozen)
 		}
 		if c.Managed {
 			// Explicit CPU work retains unknown-quota warnings and known

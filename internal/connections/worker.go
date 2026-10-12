@@ -159,6 +159,12 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	profile.CredentialRef = "vault:" + op.ConnectionID
 	if record.Configuration != nil {
 		profile.MaxRemoteWallSeconds = record.Configuration.MaxRemoteWallSeconds
+		if record.Configuration.MaxActiveAttempts != 0 {
+			profile.MaxActiveAttempts = record.Configuration.MaxActiveAttempts
+		}
+		if record.Configuration.MaxProcesses != 0 {
+			profile.MaxProcesses = record.Configuration.MaxProcesses
+		}
 	}
 	if profile.Validate() != nil {
 		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())

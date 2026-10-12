@@ -85,6 +85,7 @@ type Config struct {
 	AllowInternet  bool
 	MaxWallSeconds int64
 	Image          string
+	MaxProcesses   int
 }
 
 type session interface {
@@ -113,8 +114,11 @@ var (
 
 func NewAdapter(config Config, binding provider.BindingSnapshot, creds ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock) (*Adapter, error) {
 	if !binding.Valid() || binding.Binding.ProviderInstanceID != config.InstanceID || binding.CredentialRef != string(config.CredentialRef) ||
-		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || !ValidImage(config.Image) {
+		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || !ValidImage(config.Image) || config.MaxProcesses < 0 || config.MaxProcesses > 65536 {
 		return nil, ErrRequest
+	}
+	if config.MaxProcesses == 0 {
+		config.MaxProcesses = pidsLimit
 	}
 	if _, err := HostKeyOf(config.Account); err != nil {
 		return nil, ErrRequest
@@ -320,7 +324,7 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 			mode = "required"
 		}
 		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Labels: labels(plan, operation), Internet: mode == "required",
-			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: pidsLimit,
+			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
 			Command: []string{"timeout", "-k", "30", strconv.FormatInt(plan.Job.WallSeconds+timeoutGrace, 10),
 				"python3", "-E", "-s", "/relay/runner/run.py", "--manifest", "/relay/manifest.json", "--execute",
 				"--staging-root", "/relay/staging", "--work-root", workRoot, "--network-mode", mode}})

@@ -9,7 +9,6 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 func (s *Store) NextConnectionOperation(ctx context.Context, now time.Time) (connections.Record, bool, error) {
@@ -197,10 +196,6 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 					return dbError(err)
 				}
 			}
-			policy, _ := json.Marshal(scheduler.AccountPolicy{MaxActive: 1, StrictQuota: true})
-			if _, err = tx.ExecContext(ctx, `INSERT INTO scheduler_accounts VALUES(?,?) ON CONFLICT(account_scope) DO NOTHING`, scope, string(policy)); err != nil {
-				return dbError(err)
-			}
 			quota := result.Verification.Quota
 			if quota.ObservedAt.IsZero() {
 				quota.ObservedAt = result.Now.UTC()
@@ -214,6 +209,9 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 	_, err = tx.ExecContext(ctx, `UPDATE managed_connections SET authentication=?,new_work=?,canonical_account=?,account_scope=?,active_credential_key=?,current_profile=?,pending_operation='',updated_at=? WHERE connection_id=?`, authState, newWork, account, scope, credential, profile, stamp, op.ConnectionID)
 	if err != nil {
 		return dbError(err)
+	}
+	if err = refreshManagedAccountPolicy(ctx, tx, scope); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET stage='done',status=?,problem=?,updated_at=? WHERE operation_id=?`, status, problem, stamp, op.ID)
 	return dbError(err)

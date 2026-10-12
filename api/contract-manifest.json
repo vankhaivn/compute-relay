@@ -201,7 +201,8 @@
         "examples/connection-request.enable.valid.json",
         "examples/connection-request.remove.valid.json",
         "examples/connection-request.create-configured.valid.json",
-        "examples/connection-request.configure.valid.json"
+        "examples/connection-request.configure.valid.json",
+        "examples/connection-request.configure-host.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection-request.caller-account.json",
@@ -214,7 +215,10 @@
         "examples/invalid/connection-request.configure-overmaximum.json",
         "examples/invalid/connection-request.configure-fractional.json",
         "examples/invalid/connection-request.configure-unknown-field.json",
-        "examples/invalid/connection-request.check-with-configuration.json"
+        "examples/invalid/connection-request.check-with-configuration.json",
+        "examples/invalid/connection-request.zero-concurrency.json",
+        "examples/invalid/connection-request.unbounded-pids.json",
+        "examples/invalid/connection-request.excess-pids.json"
       ]
     },
     {

@@ -51,6 +51,8 @@ type Selection struct {
 	Profile               string `json:"profile"`
 	ConfigurationRevision string `json:"configuration_revision"`
 	MaxRemoteWallSeconds  int64  `json:"max_remote_wall_seconds"`
+	MaxActiveAttempts     int    `json:"max_active_attempts,omitempty"`
+	MaxProcesses          int    `json:"max_processes,omitempty"`
 	AllowRemoteInternet   bool   `json:"allow_remote_internet"`
 	Accelerator           string `json:"accelerator,omitempty"`
 }
@@ -59,10 +61,12 @@ type Selection struct {
 // Omission preserves the adapter's configured startup default.
 type Configuration struct {
 	MaxRemoteWallSeconds int64 `json:"max_remote_wall_seconds"`
+	MaxActiveAttempts    int   `json:"max_active_attempts,omitempty"`
+	MaxProcesses         int   `json:"max_processes,omitempty"`
 }
 
 func (c Configuration) Validate() error {
-	if c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 {
+	if c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxActiveAttempts < 0 || c.MaxActiveAttempts > 64 || c.MaxProcesses < 0 || c.MaxProcesses > 65536 {
 		return ErrRequest
 	}
 	return nil
@@ -142,6 +146,9 @@ type Adapter interface {
 	Verify(context.Context, []byte) (Verification, error)
 	Profile(domain.ProviderBinding, string) admission.Profile
 }
+
+// ConfigurationValidator opts an adapter into process and concurrency overrides.
+type ConfigurationValidator interface{ ValidateConfiguration(Configuration) error }
 
 // RuntimeConfigurator freezes adapter-owned non-secret runtime policy, never host paths or credentials.
 type RuntimeConfigurator interface{ RuntimeConfig() []byte }

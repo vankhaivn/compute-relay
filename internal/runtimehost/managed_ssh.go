@@ -78,7 +78,12 @@ func (a *managedSSHAdapter) Profile(binding domain.ProviderBinding, accountScope
 	profile.MaxRemoteWallSeconds = a.config.MaxRemoteWallSeconds
 	profile.AllowRemoteInternet = a.config.AllowRemoteInternet
 	profile.Accelerator = "cpu"
+	profile.MaxActiveAttempts, profile.MaxProcesses = 1, 4096
 	return profile
+}
+
+func (*managedSSHAdapter) ValidateConfiguration(c connections.Configuration) error {
+	return c.Validate()
 }
 
 type managedSSHRuntimeConfig struct {
@@ -117,7 +122,7 @@ func (h *Host) managedSSHProvider(resolver ports.CredentialResolver, binding con
 	snapshot := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 	adapter, err := sshhost.NewAdapter(sshhost.Config{InstanceID: profile.Binding.ProviderInstanceID, Account: binding.CanonicalAccount,
 		CredentialRef: ports.CredentialRef(profile.CredentialRef), AllowInternet: profile.AllowRemoteInternet,
-		MaxWallSeconds: profile.MaxRemoteWallSeconds, Image: frozen.Image}, snapshot, resolver, h.inputs, clock{})
+		MaxWallSeconds: profile.MaxRemoteWallSeconds, Image: frozen.Image, MaxProcesses: profile.MaxProcesses}, snapshot, resolver, h.inputs, clock{})
 	if err != nil {
 		return nil, ErrRequest
 	}

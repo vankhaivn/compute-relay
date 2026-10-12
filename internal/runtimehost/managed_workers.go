@@ -137,7 +137,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return nil, ErrState
 	}
 	settings := scheduler.DefaultSettings()
-	settings.Paused, settings.MaxWorkers, settings.MaxActivePerAccount = false, config.MaxWorkers, 1
+	settings.Paused, settings.MaxWorkers, settings.MaxActivePerAccount = false, config.MaxWorkers, 64
 	if err = h.store.ConfigureScheduler(ctx, settings); err != nil {
 		return nil, ErrState
 	}

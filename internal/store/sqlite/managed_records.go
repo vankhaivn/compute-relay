@@ -26,8 +26,9 @@ func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id strin
 	var r managedRecord
 	var updated string
 	var wall sql.NullInt64
+	var maxActive, maxProcesses int
 	var host []byte
-	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall, &host)
+	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence,max_active_attempts,max_processes FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall, &host, &maxActive, &maxProcesses)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
@@ -39,7 +40,7 @@ func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id strin
 		return r, ErrCorrupt
 	}
 	if wall.Valid {
-		r.view.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64}
+		r.view.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}
 		if r.view.Configuration.Validate() != nil {
 			return r, ErrCorrupt
 		}
@@ -86,7 +87,7 @@ func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, now time.T
 			return v, ErrCorrupt
 		}
 		if enabled {
-			v.Selection = &connections.Selection{Profile: p.Binding.Profile, ConfigurationRevision: p.Binding.ConfigurationRevision, MaxRemoteWallSeconds: p.MaxRemoteWallSeconds, AllowRemoteInternet: p.AllowRemoteInternet, Accelerator: p.Accelerator}
+			v.Selection = &connections.Selection{Profile: p.Binding.Profile, ConfigurationRevision: p.Binding.ConfigurationRevision, MaxRemoteWallSeconds: p.MaxRemoteWallSeconds, AllowRemoteInternet: p.AllowRemoteInternet, Accelerator: p.Accelerator, MaxActiveAttempts: p.MaxActiveAttempts, MaxProcesses: p.MaxProcesses}
 		}
 	}
 	if r.accountScope != "" {
@@ -185,7 +186,8 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 	var receipt, status, updated string
 	var problem sql.NullString
 	var wall sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT o.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds FROM managed_connection_operations o JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall)
+	var maxActive, maxProcesses int
+	err := tx.QueryRowContext(ctx, `SELECT o.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes FROM managed_connection_operations o JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
@@ -204,7 +206,7 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 		r.Operation.Problem = &problem.String
 	}
 	if wall.Valid {
-		r.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64}
+		r.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}
 		if r.Configuration.Validate() != nil {
 			return r, ErrCorrupt
 		}

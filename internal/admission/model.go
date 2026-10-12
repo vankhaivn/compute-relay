@@ -26,7 +26,9 @@ type Profile struct {
 	MaxBundleBytes       int64                  `json:"max_bundle_bytes"`
 	MaxInputBytes        int64                  `json:"max_input_bytes"`
 	// Omitted legacy profiles retain their existing provider-validated resource policy.
-	Accelerator string `json:"accelerator,omitempty"`
+	Accelerator       string `json:"accelerator,omitempty"`
+	MaxActiveAttempts int    `json:"max_active_attempts,omitempty"`
+	MaxProcesses      int    `json:"max_processes,omitempty"`
 }
 
 // Cost classes name who pays for compute. Neither is a paid-provider class: free
@@ -42,6 +44,9 @@ func DefaultProfile(binding domain.ProviderBinding, accountScope string) Profile
 func (p Profile) Validate() error {
 	if p.Binding.Validate() != nil || len(p.Binding.Profile) > 128 || len(p.Binding.ConfigurationRevision) > 128 || !domain.ObjectID(p.AccountScope).Valid() ||
 		p.CostClass != CostFreeAllowance && p.CostClass != CostOperatorManaged || p.MaxRemoteWallSeconds < 1 || p.MaxRemoteWallSeconds > 86400 || p.MaxBundleBytes < 1 || p.MaxBundleBytes > 100<<20 || p.MaxInputBytes < 1 || p.MaxInputBytes > 4<<30 {
+		return ErrRequirements
+	}
+	if p.MaxActiveAttempts < 0 || p.MaxActiveAttempts > 64 || p.MaxProcesses < 0 || p.MaxProcesses > 65536 || (p.MaxActiveAttempts > 0 || p.MaxProcesses > 0) && p.CostClass != CostOperatorManaged {
 		return ErrRequirements
 	}
 	for i, c := range p.Binding.Profile {

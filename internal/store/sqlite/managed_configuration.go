@@ -13,6 +13,14 @@ import (
 // It copies the exact current profile/runtime; it never asks a provider or rebuilds
 // policy from process defaults. Historical profiles and authorizations stay intact.
 func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op connections.Operation, configuration connections.Configuration) error {
+	if prior.view.Configuration != nil {
+		if configuration.MaxActiveAttempts == 0 {
+			configuration.MaxActiveAttempts = prior.view.Configuration.MaxActiveAttempts
+		}
+		if configuration.MaxProcesses == 0 {
+			configuration.MaxProcesses = prior.view.Configuration.MaxProcesses
+		}
+	}
 	profileName := ""
 	if prior.profile != "" {
 		if prior.view.Authentication != "verified" || prior.view.NewWork != "enabled" {
@@ -31,6 +39,12 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 		oldBinding := profile.Binding
 		profile.Binding = connections.ProfileBinding(op.ConnectionID, op.ConnectionRevision)
 		profile.MaxRemoteWallSeconds = configuration.MaxRemoteWallSeconds
+		if configuration.MaxActiveAttempts != 0 {
+			profile.MaxActiveAttempts = configuration.MaxActiveAttempts
+		}
+		if configuration.MaxProcesses != 0 {
+			profile.MaxProcesses = configuration.MaxProcesses
+		}
 		if profile.Validate() != nil {
 			return connections.ErrRequest
 		}
@@ -53,6 +67,9 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 			return ErrCorrupt
 		}
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE managed_connections SET max_remote_wall_seconds=?,current_profile=?,pending_operation='' WHERE connection_id=?`, configuration.MaxRemoteWallSeconds, profileName, op.ConnectionID)
-	return dbError(err)
+	_, err := tx.ExecContext(ctx, `UPDATE managed_connections SET max_remote_wall_seconds=?,max_active_attempts=?,max_processes=?,current_profile=?,pending_operation='' WHERE connection_id=?`, configuration.MaxRemoteWallSeconds, configuration.MaxActiveAttempts, configuration.MaxProcesses, profileName, op.ConnectionID)
+	if err != nil {
+		return dbError(err)
+	}
+	return refreshManagedAccountPolicy(ctx, tx, prior.accountScope)
 }

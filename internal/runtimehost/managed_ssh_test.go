@@ -157,3 +157,38 @@ func TestManagedSSHDescriptorKeepsEveryFieldWriteOnly(t *testing.T) {
 		t.Fatalf("login-free connection: %v", err)
 	}
 }
+
+func TestManagedSSHConfigurationKeepsLimitsAcrossChecks(t *testing.T) {
+	f := newManagedTestFixture(t, true, &managedSSHAdapter{verify: sshFixtureVerify, config: ManagedServeConfig{MaxRemoteWallSeconds: 600}})
+	ctx := context.Background()
+	_, connection := f.sshConnection(t, "ssh-limits-create", "SYNTHETIC_SSH")
+	old := f.binding(t, connection)
+	op, err := f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-limits-configure", []byte(fmt.Sprintf(`{"action":"configure","expected_revision":%d,"configuration":{"max_remote_wall_seconds":1200,"max_active_attempts":3,"max_processes":128}}`, connection.Revision)))
+	if err != nil || op.Status != "succeeded" {
+		t.Fatal(op, err)
+	}
+	connection, err = f.services.connections.Get(ctx, f.actor, "app", connection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-limits-check", []byte(fmt.Sprintf(`{"action":"check","expected_revision":%d}`, connection.Revision)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.services.connections.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	connection, err = f.services.connections.Get(ctx, f.actor, "app", connection.ID)
+	if err != nil || connection.Selection == nil || connection.Selection.MaxActiveAttempts != 3 || connection.Selection.MaxProcesses != 128 {
+		t.Fatalf("limits after check: %+v %v", connection.Selection, err)
+	}
+	frozen, err := f.host.store.ReadManagedBinding(ctx, old)
+	if err != nil || frozen.Profile.MaxActiveAttempts != 1 || frozen.Profile.MaxProcesses != 4096 {
+		t.Fatal("old limits changed", frozen.Profile, err)
+	}
+	kaggle := f.connection(t, "kaggle-limit-create", "SYNTHETIC_FIRST")
+	_, err = f.services.connections.Submit(ctx, f.actor, "app", kaggle.ID, "kaggle-limit-unsupported", []byte(fmt.Sprintf(`{"action":"configure","expected_revision":%d,"configuration":{"max_remote_wall_seconds":1200,"max_processes":128}}`, kaggle.Revision)))
+	if err != connections.ErrRequest {
+		t.Fatal("provider accepted unsupported limits", err)
+	}
+}

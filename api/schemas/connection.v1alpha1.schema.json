@@ -109,6 +109,18 @@
                     "tpu"
                   ],
                   "description": "Exact frozen resource policy. Omitted for legacy profiles; clients must not infer it from the current provider descriptor."
+                },
+                "max_active_attempts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64,
+                  "description": "Maximum concurrent attempts for an operator host; aliases share the lowest retained limit."
+                },
+                "max_processes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65536,
+                  "description": "Maximum processes per container for an operator host."
                 }
               }
             }
@@ -265,6 +277,18 @@
               "minimum": 1,
               "maximum": 86400,
               "description": "Maximum remote wall time in seconds for future job admissions."
+            },
+            "max_active_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64,
+              "description": "Maximum concurrent attempts for an operator host; aliases share the lowest retained limit."
+            },
+            "max_processes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536,
+              "description": "Maximum processes per container for an operator host."
             }
           },
           "description": "Explicit persisted policy override; omission means the existing startup default."

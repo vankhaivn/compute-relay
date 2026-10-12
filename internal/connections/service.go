@@ -138,6 +138,20 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	if replay && record.Stage != "waiting_secret" {
 		return record.Operation, nil
 	}
+	if req.Configuration != nil && (req.Configuration.MaxActiveAttempts != 0 || req.Configuration.MaxProcesses != 0) {
+		providerType := req.ProviderType
+		if connection != "" {
+			current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection, s.now().UTC())
+			if err != nil {
+				return Operation{}, err
+			}
+			providerType = current.ProviderType
+		}
+		validator, ok := s.adapters[providerType].(ConfigurationValidator)
+		if !ok || validator.ValidateConfiguration(*req.Configuration) != nil {
+			return Operation{}, ErrRequest
+		}
+	}
 	var secret []byte
 	if req.Credentials != nil {
 		providerType := req.ProviderType

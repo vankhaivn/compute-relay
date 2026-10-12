@@ -94,10 +94,12 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		stamp := in.Now.UTC().Format(time.RFC3339Nano)
 		if in.Action == "create" {
 			var wall any
+			var maxActive, maxProcesses int
 			if in.Configuration != nil {
 				wall = in.Configuration.MaxRemoteWallSeconds
+				maxActive, maxProcesses = in.Configuration.MaxActiveAttempts, in.Configuration.MaxProcesses
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at,max_remote_wall_seconds) VALUES(?,?,?,?,?,'pending','enabled',?,?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp, wall)
+			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at,max_remote_wall_seconds,max_active_attempts,max_processes) VALUES(?,?,?,?,?,'pending','enabled',?,?,?,?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp, wall, maxActive, maxProcesses)
 		} else {
 			newWork := prior.view.NewWork
 			authentication := prior.view.Authentication

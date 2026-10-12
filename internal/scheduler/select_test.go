@@ -214,3 +214,20 @@ func FuzzSelectionNeverOvercommits(f *testing.F) {
 		}
 	})
 }
+
+func TestActiveFrozenLimitSurvivesNewHigherLimit(t *testing.T) {
+	settings := DefaultSettings()
+	settings.MaxWorkers, settings.MaxActivePerAccount = 4, 64
+	rows := []Candidate{candidate(1, "a", "shared"), candidate(2, "b", "shared")}
+	rows[0].LeaseUntil = testNow.Add(time.Minute)
+	rows[1].Policy.MaxActive = 2
+	index, view, err := Select(rows, "", settings, testNow)
+	if err != nil || index != -1 || len(view.Heads) != 1 || view.Heads[0].Reason != AccountLimit {
+		t.Fatal("new revision overrode an active frozen limit", index, view, err)
+	}
+	rows[0].Policy.MaxActive = 2
+	index, _, err = Select(rows, "", settings, testNow)
+	if err != nil || index != 1 {
+		t.Fatal("two compatible slots were not available", index, err)
+	}
+}

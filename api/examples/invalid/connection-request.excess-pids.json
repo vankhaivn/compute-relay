@@ -1,0 +1,9 @@
+{
+  "action": "configure",
+  "expected_revision": 1,
+  "configuration": {
+    "max_remote_wall_seconds": 1800,
+    "max_active_attempts": 2,
+    "max_processes": 65537
+  }
+}

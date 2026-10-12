@@ -88,6 +88,13 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 			t.Fatal("clear fixture table", name, err)
 		}
 		columns := "*"
+		if name == "managed_connections" && version < 17 {
+			var limited int
+			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connections WHERE max_active_attempts!=0 OR max_processes!=0").Scan(&limited); err != nil || limited != 0 {
+				t.Fatal("legacy fixture cannot represent execution limit overrides", err)
+			}
+			columns = "connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence"
+		}
 		if name == "managed_connections" && version < 16 {
 			var evidenced int
 			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connections WHERE length(host_evidence)>0").Scan(&evidenced); err != nil || evidenced != 0 {
