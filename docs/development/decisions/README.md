@@ -42,6 +42,7 @@ their outcome; a material new choice requires a superseding ADR. Historical word
 | [0031](0031-explicit-preparation-and-start.md) | Distinct finite preparation and start authorities bound to verified remote readiness. |
 
 - [ADR-0032: Attempt-scoped workload secrets](0032-attempt-scoped-workload-secrets.md)
+- [ADR-0033: Shared scheduling resource concurrency](0033-shared-scheduling-resource-concurrency.md) — proposed.
 
 ## Add or revise a decision
 

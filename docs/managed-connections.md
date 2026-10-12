@@ -95,8 +95,8 @@ account asynchronously.
 Under the same workspace prefix, `POST /connections/{id}/actions` accepts an `expected_revision`
 plus `check`, `replace_credential`, `configure`, `disable`, `enable`, `remove`, or the SSH
 `install_image` action. Only replacement
-accepts credentials. SSH configuration also accepts `max_active_attempts` (1–64) and
-`max_processes` (1–65536); omission preserves saved limits. `configure` requires a `configuration`
+accepts credentials. Kaggle and SSH configuration also accept `max_active_attempts` (1–64,
+default 1). SSH additionally accepts `max_processes` (1–65536); omission preserves saved limits. `configure` requires a `configuration`
 object with `max_remote_wall_seconds`;
 for example:
 
@@ -129,8 +129,47 @@ dependent queued, active, uncertain or retained collection work, then deletes ex
 items before recording a tombstone. Removed IDs remain readable but disappear from the active
 list. A failed storage operation leaves a recoverable intent, not a reported success.
 
+## Configure and observe concurrency
+
+Read `capabilities.concurrency` in the provider descriptor before offering a setting. It contains
+`support`, `scope`, `minimum`, `maximum` and `default`. Kaggle uses `scope=account`; SSH uses
+`scope=resource`. Omission means support is unknown. The range describes Relay's local policy,
+not the number of sessions the provider will allocate. Set `configuration.max_active_attempts`
+through the same create/configure actions, then use the returned immutable selection for new jobs.
+Explicit Kaggle mode remains one worker and one active attempt per account.
+
+Connection `concurrency` reports:
+
+| Field | Meaning |
+|---|---|
+| `configured_limit` | This connection's selected limit, default 1. |
+| `effective_limit` | Intersection of current shared policy, retained aliases, active older limits and the runtime ceiling; null when unknown. |
+| `resource` | Verified opaque `{kind, resource_id}` for a shared machine, or null. Compare this ID across connections; never infer grouping from labels or addresses. |
+| `active_attempts` | Claimed preparation, prepared holds and possibly active executions in the scheduling scope; null when its extent is unknown. |
+| `wait_reason` | Current local capacity gate, or null. It does not decide a particular job's authorization, quota or FIFO position. |
+
+A limit of 2 permits two independently authorized attempts to claim when workers and provider
+capacity allow it. A third waits. Retained aliases across workspaces share the lowest applicable
+limit, including disabled aliases; removing an alias is explicit and guarded against active work.
+Reducing the limit does not terminate existing attempts. Increasing it does not widen an active
+job's older lower limit. The top-level legacy `active_attempts` also counts unconsumed grants;
+use `concurrency.active_attempts` to display execution reservations.
+
+For queued or locally blocked managed jobs, job status includes `scheduling.reason`. Common values
+are `execution_authorization_required`, `workspace_fifo`, `worker_limit`, `account_capacity`,
+`resource_capacity`, `resource_identity_unverified` and `resource_reservation_unresolved`.
+`eligible` means the current local gates allow selection, not that compute has started.
+Unknown or stale GPU quota can impose a separate wait. These reads are local and never contact
+providers, load credentials or authorize work. Missing fields on older runtimes mean unknown.
+
+Prepared holds and uncertain remote activity occupy capacity until resolved. Confirmed remote
+inactivity frees an execution slot even when manual result collection is pending. A local timeout,
+expired worker lease or cancellation request cannot free a possibly active remote attempt.
+`--managed-max-workers` bounds local workers independently of the remote execution budget.
+
 ## Read quota details
 
+SSH returns an empty `quotas` array; its host limits are in `concurrency`.
 Connection quota entries expose optional `limit`, `used`, `local_reserved` and `reset_at`.
 All durations are seconds: total allowance is rounded down and provider usage up.
 `remaining` retains its conservative meaning after provider and local reservations;

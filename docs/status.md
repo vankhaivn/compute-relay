@@ -17,6 +17,7 @@ The current implementation boundary. No public release is available.
 | Main binary | Installation, workspace and token administration, immutable admission profiles, bundle tools and application HTTP commands. |
 | SSH host provider | CPU attempts in hardened per-attempt Docker containers on an operator-owned host, with visible pinned host keys, verified engine platforms, explicit standard-image installation, configurable concurrency/process limits, confirmed cancellation and live logs. |
 | Native companion | Reproducible macOS arm64 candidate bundle with its own locked Python client, checksum-verified create-new installation and relocation discovery. |
+| Batch concurrency | Managed Kaggle and SSH advertise local limits of 1–64, default 1; verified SSH machine identity shares one budget across connection paths. Effective limits and queue reasons are public. Parallel live qualification remains outstanding. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation and submission intents, restart reconciliation, explicit controls and verified collection. |
 | Preparation progress | While `preparing`, status reports input bytes handed to the provider staging upload. Observational only. |
 | Preparation gates | Managed SSH supports opt-in stopped-container preparation, readiness, one-shot start and ephemeral secret slots. See [preparation gates](preparation-gates.md) and [workload secrets](workload-secrets.md). |
@@ -53,6 +54,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 
 ## Known limits
 
+- Configurable parallel execution still requires bounded live qualification on Kaggle and the
+  Intel SSH target across LAN/Tailscale and password/key paths. Existing single-job evidence
+  does not qualify concurrent heavy workloads.
 - Provider timeout enforcement is separate from local and runner deadlines.
 - Host sleep, VM clock behavior and reboot remain unqualified for execution deadlines. Software
   cannot act on a powered-off or suspended host; expiry is observed after it resumes.

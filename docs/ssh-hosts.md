@@ -12,6 +12,11 @@ type, so the usual connection, admission and per-attempt authorization rules app
   (keyboard-interactive) are supported.
 - A Docker engine that this account can use without `sudo`, such as Docker Desktop, OrbStack or
   Docker Engine on Linux. The engine must report `linux` with `amd64` or `arm64` architecture, as Docker on macOS does.
+- Linux must expose a valid unique `/etc/machine-id`; macOS must expose `IOPlatformUUID`.
+  These are read over authenticated SSH and hashed before being stored or returned. Cloned
+  machines must initialize their own native identity.
+- The selected Docker endpoint must be a local Unix socket. Docker contexts targeting remote
+  TCP/SSH engines are unsupported; connect Relay to the machine owning the engine directly.
 - Keep the engine running for that user. A non-interactive SSH session does not start Docker
   Desktop.
 - On a host where `docker` is not in `/usr/local/bin`, `/opt/homebrew/bin` or `/usr/bin`, note its
@@ -64,12 +69,13 @@ write-only:
 }
 ```
 
-Verification logs in, checks the host key and Docker engine platform, and inspects the repository
-image. Status returns `host.os`, `host.architecture` and `host.image`. A missing image reports
+Verification logs in, checks the host key, native machine identity and Docker engine identity and
+platform, and inspects the repository image. `concurrency.resource.resource_id` identifies the
+shared scheduling resource across connection paths. Status returns `host.os`, `host.architecture` and `host.image`. A missing image reports
 `host.image.status=missing` with no admission selection. Verification does not pull images,
 build images or start containers. A later credential replacement must reach the same
-host key, user, host and port. A different machine or a reinstalled host needs a new
-connection. Rejected logins and changed host keys both report `credential_rejected`.
+host key, user, host and port, and the same native machine. A changed native identity reports
+`resource_changed`; a different machine or a reinstalled host needs a new connection. Rejected logins and changed host keys both report `credential_rejected`.
 
 ## Install the execution image
 
@@ -98,8 +104,7 @@ for jobs already accepted. Old jobs continue recovery with their original image 
 
 ## Configure limits and run a job
 
-The default is one concurrent attempt per canonical host account and 4096 processes per
-container. To set limits for future jobs, send a configuration action:
+The default is one concurrent attempt per verified machine and 4096 processes per container. To set limits for future jobs, send a configuration action:
 
 ```json
 {
@@ -114,10 +119,26 @@ container. To set limits for future jobs, send a configuration action:
 ```
 
 Concurrency accepts 1–64; the process limit accepts 1–65536. Omitted limits preserve saved values.
-Aliases of the same canonical account, including across workspaces, share the lowest retained
-connection limit. An active job's older, lower limit also remains effective until it releases
-capacity. The runtime's `--managed-max-workers` still bounds local workers. Host identity includes
-the verified key, login user, address and port; separate endpoint identities are separate accounts.
+LAN IP, Tailscale IP/name, DNS aliases, ports and password/key logins reaching the same machine
+share one resource budget across workspaces. Configure every retained alias to 2 to permit two
+parallel attempts; an alias left at 1 keeps the shared limit at 1. Distinct login accounts remain
+pinned separately, and their stricter limits still apply. An active job's older lower limit remains
+effective until it releases capacity. `concurrency` reports the resource ID, configured/effective
+limits and reservations; job status reports the actual queue reason. The runtime's
+`--managed-max-workers` still bounds local workers.
+
+Budget CPU, memory and processes across all concurrent containers, including other local engines
+on the same machine, and within the engine/VM's limits. Raising concurrency does not guarantee
+better throughput. SSH reports no provider quota. Separate Relay installations cannot coordinate
+this budget; use one installation for all connections sharing the host.
+
+After upgrading a connection that lacks resource identity, run `check` to publish a new selection.
+Accepted jobs retain their original identities. Already-active legacy work conservatively blocks
+new machine claims until confirmed inactive; rechecking a connection cannot locate a historical
+reservation. A legacy queued job can claim after verification once those holds are resolved.
+Do not clear state to bypass `resource_reservation_unresolved`. Prepared-but-not-started containers
+and uncertain cancellation also retain slots. Confirmed inactivity releases execution capacity
+before manual result collection.
 
 Use the latest `selection.profile` with `"resources": {"accelerator": "cpu"}` and authorize the
 attempt as usual. Jobs may include an immutable absolute `timeouts.execution_deadline` only when
@@ -128,7 +149,7 @@ Linux `CLOCK_BOOTTIME`; deadlines, setup and payload supervision are described i
 remain unqualified pending explicit live tests.
 
 Each attempt gets one container named `compute-relay-cr-…`. Preparation checks
-the frozen image ID, recipe and platform; it fails if they are unavailable and never installs an
+the frozen image ID, recipe, platform, machine and Docker daemon identity; it fails if they are unavailable and never installs an
 image. Historical jobs admitted under the original digest-based policy retain that policy.
 
 For `execution_control: "prepare_then_start"`, preparation checks the installed pinned image and
@@ -177,7 +198,9 @@ for eligibility and failure receipts.
 | Symptom | Check |
 |---|---|
 | Verification `credential_rejected` | User, password or key; for a changed host, compare its fingerprint and create a new connection. |
-| Verification `provider_unavailable` | Address and port reachability, Docker running for that user, `docker_path`. |
+| Verification `provider_unavailable` | Address and port reachability, Docker running for that user, `docker_path`, native machine identity and a local Unix-socket context. |
+| Verification `resource_changed` | Preserve old jobs and their original host; create a separate connection for the new machine identity. |
+| Job waits with `resource_reservation_unresolved` | Resolve already-active legacy work to confirmed inactivity; connection recheck alone cannot locate it. |
 | No selection and `host.image.status=missing` | Request `install_image` and inspect its operation receipt. |
 | `image_installation_unknown` | Check the host, registry access and non-interactive Docker credential helpers; use `check` to discover a completed image. Do not assume the remote build stopped. |
 | Preparation fails after deleting an image | Restore the exact frozen image for retained jobs. Installing a new image only changes future selections. |

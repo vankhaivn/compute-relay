@@ -266,7 +266,9 @@ uncertain. See [Safe recovery](recovery.md).
 
 This path is intentionally narrow:
 
-- Kaggle T4/P100 machine shapes, one dispatch worker and one collection worker per process.
+- Kaggle T4/P100 machine shapes, one dispatch worker, one collection worker and one active
+  attempt per account. For configurable account concurrency, use
+  [managed connections](managed-connections.md#configure-and-observe-concurrency).
 - Uploaded immutable inputs only; direct HTTPS input is not enabled in this mode.
 - Attempt log pages through the `job_logs` capability ([API usage](../api/README.md#reading-attempt-logs));
   delivery is best effort.

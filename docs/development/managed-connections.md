@@ -40,8 +40,8 @@ limits allowed. Request bodies, raw helper output and credential values are neve
 Creation may include `configuration.max_remote_wall_seconds` (1–86400); omission keeps the
 startup default. `"action":"configure"` requires `expected_revision` and that `configuration`
 object; other actions reject `configuration`, and only credential replacement accepts credentials.
-SSH configuration also accepts `max_active_attempts` (1–64) and `max_processes` (1–65536);
-providers that cannot enforce these reject them. Omitted optional limits preserve saved values.
+Kaggle and SSH accept `max_active_attempts` (1–64, default 1); SSH also accepts
+`max_processes` (1–65536). Providers that cannot enforce an override reject it. Omitted optional limits preserve saved values.
 Configure commits the new policy, revision and a terminal `succeeded` receipt in one transaction,
 without a provider call, authentication, enablement or restart. It is rejected while another
 operation is pending, and an unverified connection still has no admission selection.
@@ -73,12 +73,34 @@ The wall-time override is persisted separately from the frozen profile and survi
 action. Configure publishes a new immutable selection for future admissions when the connection
 has one; existing jobs, attempts and grants keep their original profile and bound. The connection
 projection returns the optional `configuration` object, omitted when the startup default applies.
-Provider session and capacity limits still apply independently. SSH defaults to one concurrent
-attempt and 4096 processes per container. Retained aliases share their lowest configured
-capacity limit; active attempts also retain older, lower frozen limits.
+Provider session and capacity limits still apply independently. Managed Kaggle and SSH default to
+one concurrent attempt; SSH also defaults to 4096 processes per container. Retained aliases share
+their lowest configured capacity limit; active attempts retain older lower frozen limits. Legacy
+managed profiles with no explicit limit retain the serial default. Explicit Kaggle serve remains
+serial regardless of the managed configuration capability.
+
+`capabilities.concurrency` advertises supported local range/default and `account` or `resource`
+scope. `connection.concurrency` projects configured/effective limits, scoped execution reservations,
+verified resource identity and a capacity-wait reason from the same scheduler snapshot used for
+claims. Unknown resource identity, unresolved historical reservations or an unavailable scheduler
+clock produce null effective capacity/counts, never unlimited capacity. A grant alone occupies no
+execution slot. The legacy top-level count retains its grant-inclusive meaning. Queued/blocked
+managed job status adds `scheduling.reason` for authorization, FIFO, worker, capacity or quota
+gates; it exposes no other workspace's identities. These projections perform no provider/vault
+reads and do not mutate the scheduler clock.
+
+SSH keeps its authenticated account and a separate immutable verified machine association.
+Connections through LAN, Tailscale, aliases, ports and users share the most restrictive machine
+budget across workspaces. Local daemon identity pins execution but does not create another pool.
+Prepared holds and possibly active execution reserve capacity independently of worker leases;
+confirmed inactivity releases it before manual collection. Migration retains every old job and
+profile, retires old SSH admission aliases and leaves historical active reservations unresolved
+until confirmed inactive. Recheck cannot relocate such work. A post-upgrade claim records its
+verified resource before preparation. See [ADR-0033](decisions/0033-shared-scheduling-resource-concurrency.md).
 
 The account ID is an opaque Relay identity, not a credential or provider username. Provider
-and canonical account together define the shared quota/capacity key. Two connections for the
+and canonical account together define the shared quota/account-capacity key; the verified machine
+resource adds a shared host bound for SSH. Two connections for the
 same account do not create two slots or two quota balances. Quota projections carry observation
 time and a conservative lower bound after reservations. Unknown/stale quota has null remaining
 capacity, never a manufactured number. The managed default blocks new GPU authorization when
