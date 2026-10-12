@@ -10,7 +10,7 @@ import (
 )
 
 func TestVerifyHostPinsThePresentedKeyAndRequiresALinuxEngine(t *testing.T) {
-	engine := "linux"
+	engine := "linux/amd64"
 	server := newTestServer(t)
 	server.Password = "secret"
 	server.Handle = func(command string, _ io.Reader, stdout, _ io.Writer) int {
@@ -20,7 +20,7 @@ func TestVerifyHostPinsThePresentedKeyAndRequiresALinuxEngine(t *testing.T) {
 				return 0
 			}
 			return 1
-		case strings.HasSuffix(command, "'/usr/local/bin/docker' 'version' '--format' '{{.Server.Os}}'"):
+		case strings.HasSuffix(command, "'/usr/local/bin/docker' 'version' '--format' '{{.Server.Os}}/{{.Server.Arch}}'"):
 			_, _ = io.WriteString(stdout, engine+"\n")
 			return 0
 		}
@@ -58,8 +58,28 @@ func TestVerifyHostPinsThePresentedKeyAndRequiresALinuxEngine(t *testing.T) {
 	if _, err = VerifyHost(ctx, fields(map[string]string{FieldDockerPath: "/opt/bin/docker"})); !errors.Is(err, ErrRemoteDocker) {
 		t.Fatalf("missing docker: %v", err)
 	}
-	engine = "windows"
+	engine = "windows/amd64"
 	if _, err = VerifyHost(ctx, fields(nil)); !errors.Is(err, ErrRemoteDocker) {
 		t.Fatalf("windows engine: %v", err)
+	}
+}
+
+func TestVerifyDockerRejectsUnknownPlatforms(t *testing.T) {
+	for _, platform := range []string{"linux/amd64", "linux/arm64", "linux/386", "linux/", "windows/amd64", "linux/amd64/extra"} {
+		t.Run(platform, func(t *testing.T) {
+			exec := &scriptedExec{answer: func(args []string, _ io.Reader, out io.Writer) (Result, error) {
+				if args[0] == "test" {
+					return Result{}, nil
+				}
+				_, _ = io.WriteString(out, platform)
+				return Result{}, nil
+			}}
+			endpoint := Endpoint{Target: Target{Host: "host.example", Port: 22, User: "operator"}}
+			v, err := verifyDocker(context.Background(), exec, endpoint, "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU")
+			want := platform == "linux/amd64" || platform == "linux/arm64"
+			if (err == nil) != want || want && (v.OS != "linux" || v.HostKey == "" || v.Account == "") {
+				t.Fatalf("verification = %+v, %v", v, err)
+			}
+		})
 	}
 }

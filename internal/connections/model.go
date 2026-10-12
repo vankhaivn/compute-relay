@@ -5,6 +5,7 @@ package connections
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -80,6 +81,7 @@ type Quota struct {
 	Precision     string     `json:"precision"`
 }
 type Connection struct {
+	Host              *HostEvidence      `json:"host,omitempty"`
 	ID                string             `json:"connection_id"`
 	Workspace         domain.WorkspaceID `json:"workspace_id"`
 	Revision          int64              `json:"revision"`
@@ -113,7 +115,26 @@ type Operation struct {
 type Verification struct {
 	CanonicalAccount string
 	Quota            provider.QuotaObservation
+	Host             *HostEvidence
 }
+
+// HostEvidence is the last successfully verified public host identity and platform.
+// Endpoint names, login identities and credentials are never included.
+type HostEvidence struct {
+	HostKeyFingerprint string `json:"host_key_fingerprint"`
+	OS                 string `json:"os"`
+	Architecture       string `json:"architecture"`
+}
+
+var hostFingerprint = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
+
+func (h HostEvidence) Validate() error {
+	if !hostFingerprint.MatchString(h.HostKeyFingerprint) || h.OS != "linux" || (h.Architecture != "amd64" && h.Architecture != "arm64") {
+		return ErrRequest
+	}
+	return nil
+}
+
 type Adapter interface {
 	Descriptor() Descriptor
 	// Encode validates declared provider fields and returns owned opaque credential bytes.

@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "df73a656be11d6597fc21b91a1266eb812ac2b36ec9172c51cb1f7a011f10517",
-      "bytes": 10172
+      "sha256": "47555ed7401588811c7ec67d822eaa159b165582ab4a0f476600a30695c3c668",
+      "bytes": 10281
     },
     {
       "path": "api/examples/artifact.metadata.valid.json",
@@ -100,6 +100,11 @@
       "path": "api/examples/connection.disabled.valid.json",
       "sha256": "e89c66b42ddea1af899bcc410c72f5b5b76288daeea8f131948f503ca9e654c6",
       "bytes": 565
+    },
+    {
+      "path": "api/examples/connection.host.valid.json",
+      "sha256": "5ccc4aae27b7c22a999bcc18d50c4ea12d527656caaeee74d343745745720840",
+      "bytes": 1044
     },
     {
       "path": "api/examples/connection.page.valid.json",
@@ -285,6 +290,11 @@
       "path": "api/examples/invalid/connection.disabled-selection.json",
       "sha256": "a1d03df772c674b1947cb42de2f5cdea4a45e7de5552684620968092ddbd48da",
       "bytes": 706
+    },
+    {
+      "path": "api/examples/invalid/connection.host-architecture.json",
+      "sha256": "c627229d7d2ad5d6bcc0e0d14575053fc6f5ae9e500313aefaeced66a8226c3a",
+      "bytes": 1048
     },
     {
       "path": "api/examples/invalid/connection.secret-echo.json",
@@ -663,8 +673,8 @@
     },
     {
       "path": "api/schemas/connection.v1alpha1.schema.json",
-      "sha256": "70561cc789454a560a2a6ad8463ac15a7984d287c7518b9d4dae14f523b291d7",
-      "bytes": 9177
+      "sha256": "d950294178da51244c3fa2d647966bdca4407207312785d7af95232a02aa0afb",
+      "bytes": 9905
     },
     {
       "path": "api/schemas/control-operation.v1alpha1.schema.json",

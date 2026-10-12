@@ -147,6 +147,18 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 			if result.Profile.AccountScope != expectedScope || account != "" && account != result.Verification.CanonicalAccount {
 				return connections.ErrConflict
 			}
+			if host := result.Verification.Host; host != nil {
+				if host.Validate() != nil {
+					return ErrInvalid
+				}
+				raw, err := json.Marshal(host)
+				if err != nil {
+					return ErrInvalid
+				}
+				if _, err = tx.ExecContext(ctx, `UPDATE managed_connections SET host_evidence=? WHERE connection_id=?`, raw, op.ConnectionID); err != nil {
+					return dbError(err)
+				}
+			}
 			account = result.Verification.CanonicalAccount
 			scope = expectedScope
 			authState = "verified"

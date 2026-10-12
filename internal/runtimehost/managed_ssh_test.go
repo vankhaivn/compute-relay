@@ -19,10 +19,10 @@ const (
 
 // sshFixtureVerify stands in for a live login: the password selects the outcome and the
 // presented host key.
-func sshFixtureVerify(_ context.Context, raw []byte) (string, error) {
+func sshFixtureVerify(_ context.Context, raw []byte) (sshhost.HostVerification, error) {
 	endpoint, err := sshhost.ParseEndpoint(raw)
 	if err != nil {
-		return "", err
+		return sshhost.HostVerification{}, err
 	}
 	target := endpoint.Target
 	switch string(endpoint.Credential.Password) {
@@ -31,9 +31,10 @@ func sshFixtureVerify(_ context.Context, raw []byte) (string, error) {
 	case "SYNTHETIC_SSH_REKEYED":
 		target.HostKey = sshFixtureOther
 	default:
-		return "", sshhost.ErrCredentialReject
+		return sshhost.HostVerification{}, sshhost.ErrCredentialReject
 	}
-	return sshhost.Account(target)
+	account, err := sshhost.Account(target)
+	return sshhost.HostVerification{Account: account, HostKey: target.HostKey, OS: "linux", Architecture: "amd64"}, err
 }
 
 func (f *managedTestFixture) sshConnection(t *testing.T, key, password string) (connections.Operation, connections.Connection) {
@@ -64,6 +65,9 @@ func TestManagedSSHConnectionPublishesAnOperatorManagedCPUProvider(t *testing.T)
 	if connection.Authentication != "verified" || connection.Selection == nil || connection.Selection.Accelerator != "cpu" ||
 		connection.Selection.MaxRemoteWallSeconds != 600 || !connection.Selection.AllowRemoteInternet || connection.ProviderType != "ssh" {
 		t.Fatalf("connection = %+v", connection)
+	}
+	if connection.Host == nil || connection.Host.HostKeyFingerprint != sshFixtureKey || connection.Host.OS != "linux" || connection.Host.Architecture != "amd64" {
+		t.Fatalf("host evidence = %+v", connection.Host)
 	}
 	snapshot := f.binding(t, connection)
 	saved, err := f.host.store.ReadManagedBinding(ctx, snapshot)
@@ -124,6 +128,10 @@ func TestManagedSSHConnectionRefusesRejectedLoginsAndChangedHostKeys(t *testing.
 	}
 	if replace, err = f.services.connections.Operation(ctx, f.actor, "app", replace.ID); err != nil || replace.Problem == nil || *replace.Problem != "account_changed" {
 		t.Fatalf("changed host key = %+v, %v", replace, err)
+	}
+	current, err := f.services.connections.Get(ctx, f.actor, "app", connection.ID)
+	if err != nil || current.Host == nil || current.Host.HostKeyFingerprint != sshFixtureKey {
+		t.Fatalf("changed key overwrote public evidence: %+v, %v", current.Host, err)
 	}
 	saved, err := f.host.store.ReadManagedBinding(ctx, original)
 	if err != nil {

@@ -94,17 +94,18 @@ func (d docker) ping(ctx context.Context) error {
 	return nil
 }
 
-// serverOS reports the engine's operating system; Docker Desktop on macOS reports linux.
-func (d docker) serverOS(ctx context.Context) (string, error) {
+// platform reports the daemon platform, including Docker Desktop's Linux VM.
+func (d docker) platform(ctx context.Context) (string, string, error) {
 	var out bytes.Buffer
-	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 256}, "version", "--format", "{{.Server.Os}}")
+	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 256}, "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if result.ExitCode != 0 {
-		return "", ErrRemoteDocker
+	parts := strings.Split(strings.TrimSpace(out.String()), "/")
+	if result.ExitCode != 0 || len(parts) != 2 {
+		return "", "", ErrRemoteDocker
 	}
-	return strings.TrimSpace(out.String()), nil
+	return parts[0], parts[1], nil
 }
 
 type imageInfo struct {

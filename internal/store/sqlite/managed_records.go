@@ -26,7 +26,8 @@ func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id strin
 	var r managedRecord
 	var updated string
 	var wall sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall)
+	var host []byte
+	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall, &host)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
@@ -40,6 +41,12 @@ func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id strin
 	if wall.Valid {
 		r.view.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64}
 		if r.view.Configuration.Validate() != nil {
+			return r, ErrCorrupt
+		}
+	}
+	if len(host) > 0 {
+		r.view.Host = &connections.HostEvidence{}
+		if len(host) > 1024 || json.Unmarshal(host, r.view.Host) != nil || r.view.Host.Validate() != nil {
 			return r, ErrCorrupt
 		}
 	}

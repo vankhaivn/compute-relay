@@ -55,7 +55,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	}
 	host, port, _ := server.Start()
 
-	f := newManagedTestFixture(t, true, &managedSSHAdapter{verify: sshhost.VerifyHost, config: ManagedServeConfig{MaxRemoteWallSeconds: 300}})
+	f := newManagedTestFixture(t, true, &managedSSHAdapter{verify: sshhost.VerifyHostDetails, config: ManagedServeConfig{MaxRemoteWallSeconds: 300}})
 	request, _ := json.Marshal(map[string]any{"provider_type": "ssh", "label": "Local Docker", "credentials": map[string]string{
 		"host": host, "port": fmt.Sprint(port), "username": server.User, "password": server.Password}})
 	op, err := f.services.connections.Submit(ctx, f.actor, "app", "", "ssh-e2e-connection", request)

@@ -19,13 +19,13 @@ import (
 // field is write-only: the endpoint travels with the login in one vault entry.
 type managedSSHAdapter struct {
 	config ManagedServeConfig
-	verify func(context.Context, []byte) (string, error)
+	verify func(context.Context, []byte) (sshhost.HostVerification, error)
 }
 
 var _ connections.Adapter = (*managedSSHAdapter)(nil)
 
 func newManagedSSHAdapter(config ManagedServeConfig) *managedSSHAdapter {
-	return &managedSSHAdapter{config: config, verify: sshhost.VerifyHost}
+	return &managedSSHAdapter{config: config, verify: sshhost.VerifyHostDetails}
 }
 
 func (*managedSSHAdapter) Descriptor() connections.Descriptor {
@@ -61,14 +61,14 @@ func (*managedSSHAdapter) Encode(fields map[string]string) ([]byte, error) {
 // Verify proves the login, the host key and a Linux Docker engine. An operator-owned
 // host reports no quota; CPU work then runs with an explicit unknown-quota warning.
 func (a *managedSSHAdapter) Verify(ctx context.Context, raw []byte) (connections.Verification, error) {
-	account, err := a.verify(ctx, raw)
+	host, err := a.verify(ctx, raw)
 	if errors.Is(err, sshhost.ErrCredentialReject) || errors.Is(err, sshhost.ErrHostKeyMismatch) {
 		return connections.Verification{}, connections.ErrCredentialRejected
 	}
-	if err != nil || !domain.ObjectID(account).Valid() {
+	if err != nil || !domain.ObjectID(host.Account).Valid() {
 		return connections.Verification{}, connections.ErrUnavailable
 	}
-	return connections.Verification{CanonicalAccount: account,
+	return connections.Verification{CanonicalAccount: host.Account, Host: &connections.HostEvidence{HostKeyFingerprint: host.HostKey, OS: host.OS, Architecture: host.Architecture},
 		Quota: provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "cpu", Source: "operator_host"}}, nil
 }
 
