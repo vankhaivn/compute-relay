@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
+	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/packaging"
@@ -23,9 +25,9 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/testsupport/sshtest"
 )
 
-// TestManagedSSHDockerPipeline runs one job through admission, authorization, dispatch
-// and collection on the local Docker engine behind the in-process SSH server. It pulls
-// the standard image, so it never runs by default.
+// TestManagedSSHDockerPipeline runs one job through admission, authorization, dispatch,
+// collection and requested cleanup on the local Docker engine behind the in-process SSH
+// server. It pulls the standard image, so it never runs by default.
 func TestManagedSSHDockerPipeline(t *testing.T) {
 	if os.Getenv("COMPUTE_RELAY_SSH_DOCKER_E2E") != "1" {
 		t.Skip("set COMPUTE_RELAY_SSH_DOCKER_E2E=1 to use the local Docker engine")
@@ -135,5 +137,35 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	t.Logf("final attempt state %+v problem %v", state, record.Problem)
 	if state.Orchestration != domain.OrchestrationSucceeded || state.Execution != domain.ExecutionSucceeded || state.Result != domain.ResultAvailable {
 		t.Fatalf("attempt state %+v problem %v", state, record.Problem)
+	}
+
+	cleanups, err := cleanup.NewService(f.host.access, f.host.store, clock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := f.host.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Operate}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator, err := f.host.access.Authenticate(ctx, secret.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := cleanups.Submit(ctx, operator, "app", job.JobID, "ssh-e2e-cleanup", []byte(fmt.Sprintf(`{"attempt_id":%q}`, job.AttemptID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleaner, err := cleanupEngine(managedCleanupRepository{f.host.store}, f.services.resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := cleaner.RunOnce(ctx); err != nil || !worked {
+		t.Fatal("cleanup", worked, err)
+	}
+	if receipt, err = cleanups.Get(ctx, operator, "app", receipt.Operation.ID); err != nil || receipt.Effect != cleanup.RemoteDeleted {
+		t.Fatalf("cleanup receipt %+v %v", receipt, err)
+	}
+	if ids, err := exec.Command("docker", "ps", "-aq", "--filter", "label=io.compute-relay.attempt="+string(job.AttemptID)).Output(); err != nil || len(strings.TrimSpace(string(ids))) != 0 {
+		t.Fatalf("container remains after cleanup: %q %v", ids, err)
 	}
 }
