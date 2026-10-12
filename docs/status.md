@@ -19,6 +19,7 @@ The current implementation boundary. No public release is available.
 | Native companion | Reproducible macOS arm64 candidate bundle with its own locked Python client, checksum-verified create-new installation and relocation discovery. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation and submission intents, restart reconciliation, explicit controls and verified collection. |
 | Preparation progress | While `preparing`, status reports input bytes handed to the provider staging upload. Observational only. |
+| Preparation gates | Opt-in managed SSH staging into a stopped container, dated readiness and separate one-shot start authority. See [preparation gates](preparation-gates.md). |
 | Result collection | Automatic by default; an immutable manual policy waits for `/collect` and reports selected-output byte progress. |
 | Attempt logs | Bounded pages for an explicit original attempt with current read authority. Best effort: transient failures and long replay latency remain possible. |
 | Execution deadlines | Optional immutable absolute UTC deadline on supported paths, with enforcement in the remote runner and SSH container supervisor. See [execution deadlines](execution-deadlines.md). |
@@ -41,11 +42,11 @@ Offline tests are not live-provider evidence. Live evidence so far:
   reconnect and complete ordered replay.
 - A 2026-10-12 SSH qualification on one macOS Intel host with Docker 29.6.1 and Linux amd64
   containers covers LAN password access and Tailscale password/unencrypted Ed25519-key access.
-  The Tailscale run used file credentials without Python, explicitly installed the standard image,
-  preserved a running CPU attempt across a Relay restart, replayed bounded logs, verified artifacts,
-  confirmed cancellation and deleted both attempts' containers. Absolute-deadline enforcement
-  also stopped a TERM-ignoring payload and child while Relay was offline, then recovered the
-  original timeout result and cleaned up the same container after Relay restarted.
+  The envelope includes file credentials without Python, explicit standard-image installation,
+  prepared holds and running work across Relay restart, separate one-shot start, bounded logs,
+  verified artifacts, cancellation and exact cleanup of completed and never-started containers.
+  Absolute-deadline enforcement stopped a TERM-ignoring payload and child while Relay was offline,
+  then recovered the original timeout result and cleaned up that container after restart.
 
 Another account, environment or workload needs its own scoped qualification before support is
 claimed. Use the [validation checklist](development/validation-checklist.md).

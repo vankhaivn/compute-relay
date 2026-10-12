@@ -56,7 +56,7 @@ not implied by these reads, and no read or preview deletes remote resources.
 ## Optional managed extension
 
 [Managed connections](../docs/development/managed-connections.md) defines these provider
-descriptor, connection and attempt-authorization routes. Only `--managed-python` serve composes
+descriptor, connection and attempt-authorization routes. Managed serve composes
 them and advertises `managed_connections` and `attempt_authorization` in runtime info. They keep
 the existing job envelope through immutable selection profiles and separate `manage`/`execute`
 scopes. An absent `selection.accelerator` on an older selection means unreported, not the current
@@ -71,7 +71,15 @@ POST /v1/workspaces/{w}/connections/{connection_id}/actions
 GET  /v1/workspaces/{w}/connection-operations/{operation_id}
 POST /v1/workspaces/{w}/jobs/{j}/authorize
 GET  /v1/workspaces/{w}/jobs/{j}/authorizations/{authorization_id}
+POST /v1/workspaces/{w}/jobs/{j}/prepare
+GET  /v1/workspaces/{w}/jobs/{j}/readiness
+POST /v1/workspaces/{w}/jobs/{j}/start
+GET  /v1/workspaces/{w}/jobs/{j}/gate-authorizations/{authorization_id}
 ```
+
+Optional `execution_control=prepare_then_start` uses separate finite staging and compute
+authorities on providers advertising `separate_prepare_start`. Gate POSTs and receipt reads need
+`execute` scope; readiness needs `read`. See [preparation gates](../docs/preparation-gates.md).
 
 ## Important semantics
 

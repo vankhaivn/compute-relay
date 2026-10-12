@@ -131,6 +131,12 @@ Each attempt gets one container named `compute-relay-cr-…`. Preparation checks
 the frozen image ID, recipe and platform; it fails if they are unavailable and never installs an
 image. Historical jobs admitted under the original digest-based policy retain that policy.
 
+For `execution_control: "prepare_then_start"`, preparation checks the installed pinned image and
+verifies the staged input, runtime and manifest bytes plus container policy while the container is
+stopped; it does not start workload code. A missing or changed prepared resource requires a new
+explicitly admitted attempt. Relay does not restage it or pull an image automatically. See
+[preparation gates](preparation-gates.md) for the readiness and start requests.
+
 Jobs run as an unprivileged user with no network unless the connection allows internet and the
 job requires it. CPU, memory and process limits are frozen with the selection. Only Python's
 standard library is preinstalled; declare pinned wheels in jobs that need more and whose network
