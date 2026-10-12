@@ -84,6 +84,15 @@ Save a complete job after replacing the upload ID:
 }
 ```
 
+An optional `timeouts.execution_deadline` fixes the latest execution time as a canonical
+whole-second UTC timestamp, for example `2026-10-12T20:00:00Z`. It is immutable with the job.
+The earlier absolute deadline or relative setup/payload bound wins. New admission,
+authorization or start after expiry is rejected. Replaying a submit returns its original receipt
+and never rearms execution. Absolute deadlines are supported by SSH only when the host advertises
+`absolute_execution_deadline`; that path verifies engine clock skew within five seconds and
+rejects skewed or unverifiable checks before start. See [execution deadlines](execution-deadlines.md)
+for enforcement and limits.
+
 ```sh
 ./compute-relay validate --file ./job.json
 ./compute-relay job validate --workspace app --token-file /absolute/private/runtime/app-token --file ./job.json

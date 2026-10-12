@@ -204,6 +204,9 @@ func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID s
 		if err != nil {
 			return err
 		}
+		if req.Spec().Expired(time.Now()) {
+			return admission.ErrExpired
+		}
 		if pending > 0 {
 			result.Requirements = append(result.Requirements, admission.Requirement{Name: "https_input_snapshots", Verification: "before_dispatch", Reason: "Source records are durable; no input download occurs during admission."})
 		}
@@ -254,6 +257,9 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		profile, refs, _, err := resolveJob(ctx, tx, w, allowed, req)
 		if err != nil {
 			return err
+		}
+		if req.Spec().Expired(time.Now()) {
+			return admission.ErrExpired
 		}
 		var total, workspace int
 		err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(CASE WHEN j.workspace_id=? THEN 1 ELSE 0 END),0) FROM jobs j JOIN attempts a ON a.workspace_id=j.workspace_id AND a.job_id=j.job_id AND a.attempt_id=j.active_attempt_id WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out')`, string(w)).Scan(&total, &workspace)

@@ -30,9 +30,10 @@ There is no overwrite, resume or automatic retry of a payload.
 | `python/relay_runner/contract.py` | Strict manifest decoding and semantic limits. |
 | `python/relay_runner/files.py` | Frozen-input verification, safe bundle extraction and output hashing. |
 | `python/relay_runner/process.py` | Process-group supervision and bounded logs. |
+| `python/relay_runner/deadline.py` | Immutable deadline checks against UTC and Linux `CLOCK_BOOTTIME`. |
 | `python/relay_runner/main.py` | Preparation, setup, resource checks, execution and finalization. |
 | `manifest.schema.json` / `examples/` | Adapter-to-runner contract `compute-relay/runner/v1`. |
-| `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the five modules. |
+| `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the six modules. |
 | `check.py` / `tests/` | Offline checks and repository-owned CPU fixtures. |
 
 The [Kaggle execution component](../docs/development/providers/kaggle-execution.md) constructs the remote
@@ -91,11 +92,23 @@ Shell setup uses explicit argument arrays under the same budget. Neither runs du
 ## Deadlines and results
 
 Preparation, resource checks and setup share `setup_seconds`. Setup plus finalization grace
-must be strictly less than the remote wall budget. Runner monotonic time is separate from
-provider queue/allocation time. On deadline, SIGTERM/SIGINT or leader completion, ordinary
-child process groups receive TERM then KILL with bounded waits. Deliberate session escape,
-uninterruptible kernel I/O, SIGKILL/OOM and provider loss are outside that guarantee.
-Provider timeout enforcement still requires independent evidence.
+must be strictly less than the remote wall budget. An optional immutable
+`timeouts.execution_deadline` is a canonical whole-second UTC timestamp, for example
+`2026-10-12T20:00:00Z`. The earlier absolute deadline or relative setup/payload bound wins. New
+admission, authorization and start after expiry are rejected; replay returns the original
+receipt and does not rearm execution. The runner checks UTC and Linux `CLOCK_BOOTTIME`; payload
+supervision checks the deadline every 50 ms and sends TERM then KILL within a documented
+one-second grace, subject to a schedulable Linux host. Finalization has its independent
+`finalization_grace_seconds` bound. The SSH container supervisor may add up to two seconds.
+Software cannot stop a powered-off or suspended host; after resume it observes expiry. These
+limits do not cover deliberate session escape, uninterruptible kernel I/O, SIGKILL/OOM or provider
+loss. See [execution deadlines](../docs/execution-deadlines.md) for the full contract.
+
+The SSH adapter requires an advertised `absolute_execution_deadline` capability for absolute
+deadlines. It checks engine clock skew is at most five seconds and rejects skewed or unverifiable
+checks before start. Timed-out absolute jobs return runner status 124. Provider queue/allocation
+time remains separate from runner time. Host sleep, VM clock behavior and reboot remain
+unqualified until explicit live tests.
 
 Stdout/stderr default to 20 MiB retained per stream, with seen/stored counts and truncation.
 Known credential-pattern redaction is best-effort hygiene, not a universal secret detector.
@@ -111,7 +124,8 @@ does not erase an earlier payload failure.
 [result manifest](../api/schemas/result-manifest.v1alpha1.schema.json), preserving identity,
 phase, exit code and timeout facts. `control/environment.json` records bounded runtime/setup
 provenance. CLI exit 0 means a completed runner result, 1 a recorded unsuccessful result,
-and 64 rejected input or inability to finalize. A hard kill may prevent any final output.
+and 64 rejected input or inability to finalize. Absolute-deadline SSH containers use the trusted
+`--supervise` entry point and return 124 on timeout. A hard kill may prevent any final output.
 A runner cancellation phase does not prove provider cancellation or hardware release.
 
 The control plane still requires matching provider termination and verified artifact

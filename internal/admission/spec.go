@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/vankhaivn/compute-relay/api/schemas"
@@ -22,6 +23,7 @@ var (
 	ErrInputs       = errors.New("referenced input is missing or not visible")
 	ErrRequirements = errors.New("job exceeds the resolved profile policy")
 	ErrLimit        = errors.New("local outstanding job limit reached")
+	ErrExpired      = errors.New("absolute execution deadline has expired")
 	ErrUnavailable  = errors.New("durable admission unavailable")
 )
 
@@ -72,10 +74,23 @@ type Spec struct {
 		RemoteInternet string `json:"remote_internet"`
 	} `json:"network"`
 	Timeouts struct {
-		RemoteWallSeconds        int64 `json:"remote_wall_seconds"`
-		SetupSeconds             int64 `json:"setup_seconds"`
-		FinalizationGraceSeconds int64 `json:"finalization_grace_seconds"`
+		ExecutionDeadline        string `json:"execution_deadline,omitempty"`
+		RemoteWallSeconds        int64  `json:"remote_wall_seconds"`
+		SetupSeconds             int64  `json:"setup_seconds"`
+		FinalizationGraceSeconds int64  `json:"finalization_grace_seconds"`
 	} `json:"timeouts"`
+}
+
+// Deadline is an immutable UTC bound on setup and payload execution. Parse validates
+// its canonical whole-second spelling; omission preserves relative-only jobs.
+func (s Spec) Deadline() time.Time {
+	at, _ := time.Parse(time.RFC3339, s.Timeouts.ExecutionDeadline)
+	return at
+}
+
+func (s Spec) Expired(now time.Time) bool {
+	at := s.Deadline()
+	return !at.IsZero() && !now.Before(at)
 }
 
 // CollectionMode interprets omission without changing accepted canonical bytes.
@@ -156,6 +171,12 @@ func Parse(raw []byte) (Request, error) {
 }
 
 func semantic(s Spec) error {
+	if raw := s.Timeouts.ExecutionDeadline; raw != "" {
+		at := s.Deadline()
+		if at.Year() < 2 || at.UTC().Format(time.RFC3339) != raw {
+			return ErrSpec
+		}
+	}
 	if strings.TrimSpace(s.Name) == "" || s.Timeouts.SetupSeconds+s.Timeouts.FinalizationGraceSeconds >= s.Timeouts.RemoteWallSeconds {
 		return ErrSpec
 	}

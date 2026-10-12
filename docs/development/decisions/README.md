@@ -38,6 +38,7 @@ their outcome; a material new choice requires a superseding ADR. Historical word
 | [0027](0027-explicit-remote-cleanup.md) | Explicit attempt-scoped remote cleanup applied by a fenced worker; preview stays dry-run. |
 | [0028](0028-ssh-docker-host-provider.md) | Operator-owned Docker hosts over SSH with pinned host keys and per-attempt containers. |
 | [0029](0029-file-credential-store.md) | Private file credentials for new self-hosted installations, with optional Keychain and durable backend selection. |
+| [0030](0030-absolute-execution-deadlines.md) | Immutable UTC execution bounds with remote process supervision and unchanged one-shot recovery. |
 
 ## Add or revise a decision
 

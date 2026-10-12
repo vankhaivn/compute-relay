@@ -108,6 +108,21 @@ func (d docker) platform(ctx context.Context) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+// systemTime reads the engine clock, including Docker Desktop's Linux VM clock.
+// It launches no container or workload code.
+func (d docker) systemTime(ctx context.Context) (time.Time, error) {
+	var out bytes.Buffer
+	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 128}, "info", "--format", "{{.SystemTime}}")
+	if err != nil || result.ExitCode != 0 {
+		return time.Time{}, ErrRemoteDocker
+	}
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(out.String()))
+	if err != nil || at.IsZero() {
+		return time.Time{}, ErrRemoteDocker
+	}
+	return at, nil
+}
+
 type imageInfo struct {
 	ID           string `json:"Id"`
 	OS           string `json:"Os"`

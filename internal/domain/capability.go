@@ -20,6 +20,7 @@ const (
 	CapabilityLogsAfterCompletion  CapabilityName = "logs_after_completion"
 	CapabilityQuotaReporting       CapabilityName = "quota_reporting"
 	CapabilityExecutionTimeout     CapabilityName = "execution_timeout"
+	CapabilityAbsoluteDeadline     CapabilityName = "absolute_execution_deadline"
 	CapabilityRemoteNetworkControl CapabilityName = "remote_network_control"
 	CapabilityStrongIdentity       CapabilityName = "strong_execution_identity"
 	CapabilityCustomContainer      CapabilityName = "custom_container"

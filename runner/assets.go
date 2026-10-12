@@ -17,11 +17,12 @@ import (
 //go:embed python/relay_runner/__init__.py python/relay_runner/contract.py
 //go:embed python/relay_runner/files.py python/relay_runner/main.py
 //go:embed python/relay_runner/process.py assets.lock.json
+//go:embed python/relay_runner/deadline.py
 var assets embed.FS
 
-var sourceNames = [...]string{"__init__.py", "contract.py", "files.py", "main.py", "process.py"}
+var sourceNames = [...]string{"__init__.py", "contract.py", "files.py", "main.py", "process.py", "deadline.py"}
 
-// Sources returns a fresh map of the five locked runner modules. Adapters may
+// Sources returns a fresh map of the locked runner modules. Adapters may
 // encode these trusted assets into a remote script, not substitute uploaded code.
 // The original Python source and its reviewed lock remain the source of truth.
 func Sources() (map[string]string, error) {

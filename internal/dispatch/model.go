@@ -157,6 +157,7 @@ const (
 	ObservationSeen       Kind = "observation_seen"
 	Fault                 Kind = "fault"
 	PreventDispatch       Kind = "prevent_dispatch"
+	ExpireDispatch        Kind = "expire_dispatch"
 	RequestReconciliation Kind = "request_reconciliation"
 )
 

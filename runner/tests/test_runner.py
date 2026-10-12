@@ -307,7 +307,8 @@ time.sleep(30)
         m["network"]["remote_internet"] = "required"
         m["execution"]["dependencies"] = {"python_requirements": "requirements.txt"}
         seen = []
-        def fake_run(args, cwd, env, deadline, grace, stdout, stderr, cancelled):
+        def fake_run(args, cwd, env, deadline, grace, stdout, stderr, cancelled, bound=None):
+            self.assertIsNone(bound)
             seen.append((args, dict(env)))
             if main.PROBE in args:
                 Path(args[-2]).write_text(json.dumps({"python": "fixture", "packages": []}))
@@ -330,7 +331,8 @@ time.sleep(30)
             root = self.base / ("gpu" + str(count))
             m = copy.deepcopy(self.m)
             m["resources"] = {"accelerator": "gpu", "minimum_gpu_count": 2, "minimum_gpu_memory_bytes": 8}
-            def fake_run(args, cwd, env, deadline, grace, stdout, stderr, cancelled):
+            def fake_run(args, cwd, env, deadline, grace, stdout, stderr, cancelled, bound=None):
+                self.assertIsNone(bound)
                 if main.PROBE in args:
                     Path(args[-2]).write_text(json.dumps({"gpu": {"count": count, "memory_bytes": memory, "names": ["synthetic"], "cuda": "fixture", "framework": "fixture"}}))
                 else:

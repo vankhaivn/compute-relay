@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
@@ -256,6 +257,9 @@ func (s *Store) FreezeInput(ctx context.Context, h dispatch.Handle, index int, m
 }
 
 func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now time.Time) error {
+	if work.Job.Request.Spec().Expired(now) {
+		return admission.ErrExpired
+	}
 	settings, last, err := schedulerControl(ctx, tx, now)
 	if err != nil {
 		return err
@@ -306,6 +310,9 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 		}
 		if err = checkHandle(work, h); err != nil {
 			return err
+		}
+		if action.Kind == dispatch.ExpireDispatch && !work.Job.Request.Spec().Expired(now) {
+			return dispatch.ErrInvalid
 		}
 		if action.Kind == dispatch.BeginPreparation || action.Kind == dispatch.BeginSubmission {
 			status, err := dispatchAuthorization(ctx, tx, work, now)

@@ -16,6 +16,8 @@ No release has been published. This summarizes the current pre-release feature s
 - SSH host connections that run CPU jobs in isolated Docker containers on an operator-owned
   machine, with visible pinned host keys, verified architecture, explicit image installation,
   configurable host limits, Python-free SSH-only serving on macOS and requested remote cleanup.
+- Optional immutable absolute execution deadlines with remote runner enforcement and SSH engine
+  clock-skew checks on advertised-capability hosts; see [execution deadline limits](docs/execution-deadlines.md).
 - Reproducible macOS arm64 companion bundles.
 
 See [current status](docs/status.md) for limits.

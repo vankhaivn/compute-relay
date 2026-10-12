@@ -16,6 +16,7 @@ import time
 from .contract import MAX_MANIFEST, RUNNER_VERSION, Failure, input_digest, load, require
 from .files import artifacts, atomic_json, copy_verified, extract_bundle, open_file
 from .process import Log, run
+from .deadline import Bound, epoch, supervise
 
 # Runs in an isolated interpreter, not the workload's module search path. Its stdout is
 # ordinary bounded diagnostics; the structured observation has a separate bounded file.
@@ -113,6 +114,9 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False):
     work_end = wall_end - budgets["finalization_grace_seconds"]
     setup_end = min(start + budgets["setup_seconds"], work_end)
     cleanup_grace = min(1.0, budgets["finalization_grace_seconds"] / 4)
+    absolute = epoch(budgets["execution_deadline"]) if "execution_deadline" in budgets else 0
+    work_bound = Bound(budgets["remote_wall_seconds"] - budgets["finalization_grace_seconds"], absolute) if absolute else None
+    final_bound = Bound(budgets["remote_wall_seconds"], absolute + budgets["finalization_grace_seconds"]) if absolute else None
     phase = "preparation"
     result = {
         "manifest_version": "1", "runner_version": RUNNER_VERSION,
@@ -127,18 +131,26 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False):
                   "network_adapter_declared": network_mode,
                   "network_enforcement": "provider_required_not_runner_enforced",
                   "processes": [], "logs": {}, "phase_seconds": {}}
+    if work_bound:
+        provenance.update(deadline_origin="utc_and_linux_boottime", execution_deadline=budgets["execution_deadline"],
+                          effective_execution_deadline=datetime.fromtimestamp(work_bound.utc_end, timezone.utc).isoformat().replace("+00:00", "Z"),
+                          deadline_bound=work_bound.reason, deadline_poll_seconds=0.05, termination_grace_seconds=1,
+                          finalization_grace_seconds=budgets["finalization_grace_seconds"])
     logs = {name: Log(root / ("control/" + name + ".log"), limits[name + "_bytes"]) for name in ("stdout", "stderr")}
 
-    def check(deadline=setup_end):
+    def check(deadline=setup_end, finalizing=False):
         if cancelled():
             raise Failure("COMMAND_FAILED", "execution", "Runner termination requested")
-        if time.monotonic() >= deadline:
+        bound = final_bound if finalizing else work_bound
+        if time.monotonic() >= deadline or bound and bound.expired():
+            provenance["termination_reason"] = bound.reason if bound and bound.expired() else "relative_budget"
             raise Failure("REMOTE_TIMEOUT", "execution", "Runner time budget exceeded")
 
     def command(args, cwd, env, deadline, label):
         check(deadline)
         before = time.monotonic()
-        outcome = run(args, cwd, env, deadline, cleanup_grace, logs["stdout"], logs["stderr"], cancelled)
+        outcome = run(args, cwd, env, deadline, cleanup_grace, logs["stdout"], logs["stderr"], cancelled,
+                      work_bound.until(deadline) if work_bound else None)
         provenance["processes"].append({"phase": label, "seconds": time.monotonic() - before,
                                         "exit_code": outcome.exit_code, "timed_out": outcome.timed_out,
                                         "cancelled": outcome.cancelled, "leader_reaped": outcome.reaped})
@@ -147,6 +159,7 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False):
         if outcome.cancelled:
             raise Failure("COMMAND_FAILED", "execution", "Runner termination requested")
         if outcome.timed_out:
+            provenance["termination_reason"] = work_bound.reason if work_bound and work_bound.expired() else "relative_budget"
             raise Failure("REMOTE_TIMEOUT", "execution", "Runner time budget exceeded")
         if not outcome.reaped:
             raise Failure("PROVIDER_EXECUTION_LOST", "execution", "Process termination not established")
@@ -234,7 +247,7 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False):
         result["error"]["details"] = {"runner_phase": phase}
     try:
         result["artifacts"] = artifacts(root / "outputs", manifest["outputs"], limits,
-                                          lambda: check(wall_end - cleanup_grace))
+                                          lambda: check(wall_end - cleanup_grace, finalizing=True))
     except (Failure, OSError, ValueError) as exc:
         # Never overwrite an original setup/payload failure/exit code with collection noise.
         if result["error"] is None:
@@ -263,6 +276,7 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--validate-only", action="store_true")
     mode.add_argument("--execute", action="store_true")
+    mode.add_argument("--supervise", action="store_true")
     parser.add_argument("--staging-root")
     parser.add_argument("--work-root")
     parser.add_argument("--network-mode", choices=("disabled", "required"))
@@ -276,11 +290,16 @@ def main(argv=None):
             print(json.dumps({"status": "valid", "runner_version": RUNNER_VERSION, "executed": False}))
             return 0
         require(args.staging_root and args.work_root and args.network_mode)
+        if args.supervise:
+            require("execution_deadline" in manifest["timeouts"] and sys.platform == "linux")
+            return supervise(manifest, [sys.executable, "-E", "-s", str(Path(__file__).parents[1] / "run.py"),
+                                        "--manifest", args.manifest, "--execute", "--staging-root", args.staging_root,
+                                        "--work-root", args.work_root, "--network-mode", args.network_mode])
         for sig in (signal.SIGTERM, signal.SIGINT):
             previous[sig] = signal.signal(sig, lambda *_: stopped.__setitem__(0, True))
         result = execute(manifest, args.staging_root, args.work_root, args.network_mode, lambda: stopped[0])
         print(json.dumps({"phase": result["phase"], "exit_code": result["exit_code"], "runner_version": RUNNER_VERSION}))
-        return 0 if result["phase"] == "completed" else 1
+        return 0 if result["phase"] == "completed" else 124 if result["phase"] == "timed_out" and "execution_deadline" in manifest["timeouts"] else 1
     except (Failure, OSError, ValueError, TypeError, KeyError, RecursionError):
         print("Runner rejected input or could not finalize; no result is implied", file=sys.stderr)
         return 64

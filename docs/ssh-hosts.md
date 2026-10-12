@@ -120,7 +120,14 @@ capacity. The runtime's `--managed-max-workers` still bounds local workers. Host
 the verified key, login user, address and port; separate endpoint identities are separate accounts.
 
 Use the latest `selection.profile` with `"resources": {"accelerator": "cpu"}` and authorize the
-attempt as usual. Each attempt gets one container named `compute-relay-cr-…`. Preparation checks
+attempt as usual. Jobs may include an immutable absolute `timeouts.execution_deadline` only when
+the host advertises `absolute_execution_deadline`. Before start, SSH requires engine clock skew
+of at most five seconds and rejects skewed or unverifiable checks. The runner observes UTC and
+Linux `CLOCK_BOOTTIME`; deadlines, setup and payload supervision are described in the
+[execution deadline contract](execution-deadlines.md). Host sleep, VM clock behavior and reboot
+remain unqualified pending explicit live tests.
+
+Each attempt gets one container named `compute-relay-cr-…`. Preparation checks
 the frozen image ID, recipe and platform; it fails if they are unavailable and never installs an
 image. Historical jobs admitted under the original digest-based policy retain that policy.
 

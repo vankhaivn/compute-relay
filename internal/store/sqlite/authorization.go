@@ -74,6 +74,9 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		if record.Attempt.ID != c.Request.AttemptID {
 			return executionauth.ErrConflict
 		}
+		if record.Request.Spec().Expired(c.Now) {
+			return admission.ErrExpired
+		}
 		if !executionauth.Managed(record.Profile) || !scheduler.LocalOnly(record.Attempt.State) || c.Now.Before(record.Attempt.UpdatedAt) {
 			return executionauth.ErrState
 		}

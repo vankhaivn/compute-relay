@@ -277,7 +277,7 @@ func TestExecutionSourceContainsValidatedOriginalRunnerManifest(t *testing.T) {
 		Manifest json.RawMessage   `json:"manifest"`
 		Modules  map[string]string `json:"modules"`
 	}
-	if json.Unmarshal(raw, &payload) != nil || len(payload.Modules) != 5 {
+	if json.Unmarshal(raw, &payload) != nil || len(payload.Modules) != 6 {
 		t.Fatal("invalid runner package")
 	}
 	for _, secret := range []string{e.stager.config.PythonExecutable, string(e.stager.config.CredentialRef), "SYNTHETIC_TOKEN", "private name"} {

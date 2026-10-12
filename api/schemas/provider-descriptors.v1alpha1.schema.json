@@ -106,6 +106,14 @@
                   "unsupported",
                   "unknown"
                 ]
+              },
+              "absolute_execution_deadline": {
+                "description": "Whether this adapter enforces immutable absolute UTC execution deadlines. Omission means unknown.",
+                "enum": [
+                  "supported",
+                  "unsupported",
+                  "unknown"
+                ]
               }
             }
           },

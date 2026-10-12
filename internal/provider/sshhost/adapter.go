@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -169,7 +170,7 @@ func (a *Adapter) Describe() provider.Descriptor {
 		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning,
 		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityExecutionTimeout,
 		domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
-		domain.CapabilityRetainedSessions,
+		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline,
 	} {
 		c := domain.CapabilityStatus{Name: name, Support: domain.CapabilitySupportSupported, Evidence: domain.EvidenceImplementedOffline,
 			ClientVersion: Version, Reason: "operator-owned Docker host reached over SSH with a pinned host key"}
@@ -186,6 +187,8 @@ func (a *Adapter) Describe() provider.Descriptor {
 			c.Reason = "inputs are copied only into the attempt's own container"
 		case domain.CapabilityExecutionTimeout:
 			c.Reason = "the runner budget and a host-side timeout bound the container without Relay connectivity"
+		case domain.CapabilityAbsoluteDeadline:
+			c.Reason = "UTC and Linux suspend-aware deadlines independently bound payload groups and finalization"
 		case domain.CapabilityRemoteNetworkControl:
 			c.Reason = "containers have no network unless the frozen policy allows internet"
 		case domain.CapabilityRemoteCancellation:
@@ -253,8 +256,12 @@ func containerName(id provider.Identity) string { return containerPrefix + id.Re
 
 func labels(plan provider.Plan, operation domain.OperationID) map[string]string {
 	id := plan.Job.Identity
-	return map[string]string{labelPrefix + "installation": string(id.InstallationID), labelPrefix + "instance": string(id.InstanceID),
+	result := map[string]string{labelPrefix + "installation": string(id.InstallationID), labelPrefix + "instance": string(id.InstanceID),
 		labelPrefix + "attempt": string(id.AttemptID), labelPrefix + "preparation": string(operation), labelPrefix + "plan": string(plan.Digest())}
+	if req, err := admission.Parse(plan.Job.Specification); err == nil && req.Spec().Timeouts.ExecutionDeadline != "" {
+		result[labelPrefix+"execution-deadline"] = req.Spec().Timeouts.ExecutionDeadline
+	}
+	return result
 }
 
 // owned checks that a container carries this attempt's identity labels.
@@ -305,6 +312,9 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 	if err != nil {
 		return provider.Prepared{}, ErrRequest
 	}
+	if spec.Expired(a.clock.Now()) {
+		return provider.Prepared{}, admission.ErrExpired
+	}
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
 		return provider.Prepared{}, ErrRequest
@@ -343,11 +353,21 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		if spec.Network.RemoteInternet == "required" {
 			mode = "required"
 		}
+		if spec.Expired(a.clock.Now()) {
+			return admission.ErrExpired
+		}
+		command := []string{"timeout", "-k", "30", strconv.FormatInt(plan.Job.WallSeconds+timeoutGrace, 10),
+			"python3", "-E", "-s", "/relay/runner/run.py", "--manifest", "/relay/manifest.json", "--execute",
+			"--staging-root", "/relay/staging", "--work-root", workRoot, "--network-mode", mode}
+		if spec.Timeouts.ExecutionDeadline != "" {
+			// The trusted supervisor is PID 1, so its final exit also tears down any
+			// remaining descendants in Docker's private PID namespace.
+			command = append([]string(nil), command[4:]...)
+			command[6] = "--supervise"
+		}
 		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: labels(plan, operation), Internet: mode == "required",
 			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
-			Command: []string{"timeout", "-k", "30", strconv.FormatInt(plan.Job.WallSeconds+timeoutGrace, 10),
-				"python3", "-E", "-s", "/relay/runner/run.py", "--manifest", "/relay/manifest.json", "--execute",
-				"--staging-root", "/relay/staging", "--work-root", workRoot, "--network-mode", mode}})
+			Command: command})
 		if err != nil {
 			return err
 		}
@@ -577,6 +597,28 @@ func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provid
 			outcome = unknownSubmission()
 			return nil
 		}
+		if raw := info.Config.Labels[labelPrefix+"execution-deadline"]; raw != "" {
+			deadline, err := time.Parse(time.RFC3339, raw)
+			if err != nil || deadline.UTC().Format(time.RFC3339) != raw || info.Config.Labels[labelPrefix+"plan"] != string(prepared.PlanSHA256) {
+				outcome = rejected("preparation_mismatch")
+				return nil
+			}
+			if !a.clock.Now().Before(deadline) {
+				outcome = deadlineRejected()
+				return nil
+			}
+			before := a.clock.Now()
+			remote, err := d.systemTime(ctx)
+			after := a.clock.Now()
+			if err != nil || after.Before(before) || after.Sub(before) > 5*time.Second || remote.Before(after.Add(-5*time.Second)) || remote.After(before.Add(5*time.Second)) {
+				outcome = rejected("clock_skew_unverified")
+				return nil
+			}
+			if !after.Before(deadline) || !remote.Before(deadline) {
+				outcome = deadlineRejected()
+				return nil
+			}
+		}
 		sent = true
 		result, err := d.simple(ctx, "container", "start", ref.ID)
 		if err != nil || result.ExitCode != 0 {
@@ -590,6 +632,11 @@ func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provid
 		return unknownSubmission()
 	}
 	return outcome
+}
+
+func deadlineRejected() provider.SubmissionOutcome {
+	p := provider.Problem(domain.CodeRemoteTimeout, domain.FailureStageExecution, "absolute execution deadline expired before container start").WithDetail(domain.ReasonDetail, "absolute_deadline_expired")
+	return provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &p}
 }
 
 // ReconcileSubmission finds the container only when Docker reports it was started.

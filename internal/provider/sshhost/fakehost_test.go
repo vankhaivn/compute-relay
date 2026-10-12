@@ -46,6 +46,7 @@ type fakeHost struct {
 	buildExit  int
 	buildInput []byte
 	platform   string
+	engineTime time.Time
 	image      bool
 	registry   bool // pull succeeds
 	containers map[string]*fakeContainer
@@ -148,6 +149,9 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 		}
 	}
 	switch {
+	case slices.Equal(args, []string{"info", "--format", "{{.SystemTime}}"}):
+		_, _ = io.WriteString(stdout, h.engineTime.Format(time.RFC3339Nano))
+		return Result{}, nil
 	case slices.Equal(args, []string{"version"}):
 		return Result{}, nil
 	case slices.Equal(args, []string{"version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"}):
