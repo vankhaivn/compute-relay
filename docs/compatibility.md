@@ -36,9 +36,15 @@ share only the minimal sanitized values needed by a focused issue/PR.
 | Artifact HTTP | HTTP/1.1 chunked transfer with the final verification trailer preserved. Generic proxy/browser/HTTP/2 compatibility is not established. |
 | Artifact destination | Private same-filesystem temporary file and create-only hard link; unsupported hard links fail rather than overwrite. |
 | Permissions | Native private Unix permissions or protected Windows ACLs. The same-user operator remains trusted. |
+| Managed credentials | New installations use an unencrypted private `credentials/secrets.env` file on Linux, macOS and Windows. Existing Keychain installations retain their backend; Keychain is optional on macOS. See [storage selection](managed-connections.md#choose-credential-storage). |
 | Remote runner | Linux process-group and signal semantics. Windows/macOS support refers to the local host, not remote workload execution. |
 | SSH host | SSH server with password, keyboard-interactive or key login; a Docker engine reporting a `linux` server OS that the login can use; ED25519 host key preferred for pinning. See [SSH hosts](ssh-hosts.md). |
 | Storage durability | Database-only backup excludes blobs. Shared/network filesystems and arbitrary power-loss guarantees are unverified. |
+
+Credential-file updates flush a private temporary file before replacing the original. Unix also
+syncs the directory; Windows does not claim a portable directory-sync or power-loss guarantee.
+The file backend is bounded to 8 MiB and 4096 entries and refuses corruption, unsafe permissions
+and links. It does not provide encryption or protection from same-user processes.
 
 See [local runtime](local-runtime.md), [artifact delivery](artifact-delivery.md),
 [storage](development/storage.md) and [runner](../runner/README.md) for the corresponding procedures.
