@@ -64,7 +64,15 @@ func (a *managedKaggleAdapter) Profile(binding domain.ProviderBinding, accountSc
 	profile.MaxRemoteWallSeconds = a.config.MaxRemoteWallSeconds
 	profile.AllowRemoteInternet = a.config.AllowRemoteInternet
 	profile.Accelerator = a.config.accelerator()
+	profile.MaxActiveAttempts = 1
 	return profile
+}
+
+func (*managedKaggleAdapter) ValidateConfiguration(c connections.Configuration) error {
+	if c.MaxProcesses != 0 {
+		return connections.ErrRequest
+	}
+	return c.Validate()
 }
 
 type managedKaggleRuntimeConfig struct {

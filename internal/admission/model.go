@@ -46,7 +46,7 @@ func (p Profile) Validate() error {
 		p.CostClass != CostFreeAllowance && p.CostClass != CostOperatorManaged || p.MaxRemoteWallSeconds < 1 || p.MaxRemoteWallSeconds > 86400 || p.MaxBundleBytes < 1 || p.MaxBundleBytes > 100<<20 || p.MaxInputBytes < 1 || p.MaxInputBytes > 4<<30 {
 		return ErrRequirements
 	}
-	if p.MaxActiveAttempts < 0 || p.MaxActiveAttempts > 64 || p.MaxProcesses < 0 || p.MaxProcesses > 65536 || (p.MaxActiveAttempts > 0 || p.MaxProcesses > 0) && p.CostClass != CostOperatorManaged {
+	if p.MaxActiveAttempts < 0 || p.MaxActiveAttempts > 64 || p.MaxProcesses < 0 || p.MaxProcesses > 65536 || p.MaxProcesses > 0 && p.CostClass != CostOperatorManaged {
 		return ErrRequirements
 	}
 	for i, c := range p.Binding.Profile {
