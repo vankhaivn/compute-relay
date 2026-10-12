@@ -51,6 +51,9 @@ func Build(plan provider.Plan) (map[string]any, admission.Spec, error) {
 	for _, key := range []string{"execution", "outputs", "resources", "network", "timeouts"} {
 		manifest[key] = fields[key]
 	}
+	if workloadSecrets, exists := fields["workload_secrets"]; exists {
+		manifest["workload_secrets"] = workloadSecrets
+	}
 	if spec.SeparateStart() {
 		manifest["execution_control"] = "prepare_then_start"
 	}

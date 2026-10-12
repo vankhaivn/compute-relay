@@ -40,22 +40,24 @@ type fakeContainer struct {
 // fakeHost is an in-memory Docker host behind the executor seam. It understands only
 // the fixed argument arrays the adapter issues and records every command.
 type fakeHost struct {
-	t          *testing.T
-	mu         sync.Mutex
-	images     map[string]imageInfo
-	builds     int
-	buildExit  int
-	buildInput []byte
-	platform   string
-	engineTime time.Time
-	image      bool
-	registry   bool // pull succeeds
-	containers map[string]*fakeContainer
-	calls      [][]string
-	starts     int
-	created    int
-	closed     int
-	fail       func(args []string) (Result, bool)
+	t             *testing.T
+	mu            sync.Mutex
+	images        map[string]imageInfo
+	builds        int
+	buildExit     int
+	buildInput    []byte
+	platform      string
+	engineTime    time.Time
+	image         bool
+	registry      bool // pull succeeds
+	containers    map[string]*fakeContainer
+	calls         [][]string
+	starts        int
+	created       int
+	secretPackets [][]byte
+	secretAckLost bool
+	closed        int
+	fail          func(args []string) (Result, bool)
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
@@ -205,6 +207,20 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 		return h.create(rest, stdout), nil
 	case "cp":
 		return h.copy(rest, archive, stdout), nil
+	case "exec":
+		if len(rest) != 13 || !slices.Equal(rest[:3], []string{"-i", "--user", "65534:65534"}) || !slices.Equal(rest[4:], []string{"python3", "-E", "-s", "/relay/runner/run.py", "--receive-secrets", "--manifest", "/relay/manifest.json", "--start-control", startControlPath}) {
+			h.t.Error("unexpected secret receiver command")
+			return Result{ExitCode: 125}, nil
+		}
+		c := h.find(rest[3])
+		if c == nil || c.status != "running" {
+			return noSuch("container"), nil
+		}
+		h.secretPackets = append(h.secretPackets, append([]byte(nil), archive...))
+		if h.secretAckLost {
+			return Result{ExitCode: 1}, nil
+		}
+		return Result{}, nil
 	}
 	c := h.find(rest[len(rest)-1])
 	if c == nil {
@@ -263,6 +279,9 @@ func (h *fakeHost) inspect(c *fakeContainer, stdout io.Writer) Result {
 	for i := 0; i+1 < len(c.args); i++ {
 		val := c.args[i+1]
 		switch c.args[i] {
+		case "--tmpfs":
+			path, options, _ := strings.Cut(val, ":")
+			host["Tmpfs"] = map[string]string{path: options}
 		case "--user":
 			cfg["User"] = val
 		case "--workdir":

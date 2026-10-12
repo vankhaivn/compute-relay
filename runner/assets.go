@@ -18,9 +18,10 @@ import (
 //go:embed python/relay_runner/files.py python/relay_runner/main.py
 //go:embed python/relay_runner/process.py assets.lock.json
 //go:embed python/relay_runner/deadline.py
+//go:embed python/relay_runner/secrets.py
 var assets embed.FS
 
-var sourceNames = [...]string{"__init__.py", "contract.py", "files.py", "main.py", "process.py", "deadline.py"}
+var sourceNames = [...]string{"__init__.py", "contract.py", "files.py", "main.py", "process.py", "deadline.py", "secrets.py"}
 
 // Sources returns a fresh map of the locked runner modules. Adapters may
 // encode these trusted assets into a remote script, not substitute uploaded code.

@@ -15,6 +15,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 	runnerassets "github.com/vankhaivn/compute-relay/runner"
 )
 
@@ -76,7 +77,14 @@ func observedPreparationHash(info containerInfo, planDigest domain.SHA256Digest,
 	}{"ssh-readiness/v1", info.ID, info.Image, info.Config, info.HostConfig, planDigest, files})
 	return provider.Digest(raw)
 }
-func validStoppedPolicy(info containerInfo, internet bool) bool {
+func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
+	if secrets {
+		if len(info.HostConfig.Tmpfs) != 1 || info.HostConfig.Tmpfs[secretTmpfsPath] != secretTmpfsOptions {
+			return false
+		}
+	} else if len(info.HostConfig.Tmpfs) != 0 {
+		return false
+	}
 	network := "none"
 	if internet {
 		network = "bridge"
@@ -88,7 +96,7 @@ func validStoppedPolicy(info containerInfo, internet bool) bool {
 // workload, setup command or preparatory probe, including during start validation.
 func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte) (domain.SHA256Digest, error) {
 	req, err := admission.Parse(plan.Job.Specification)
-	if err != nil || !validStoppedPolicy(info, req.Spec().Network.RemoteInternet == "required") {
+	if err != nil || !validStoppedPolicy(info, req.Spec().Network.RemoteInternet == "required", len(req.Spec().WorkloadSecrets) > 0) {
 		return "", ErrIdentity
 	}
 	expected := expectedStaging(plan, modules, manifest)
@@ -186,10 +194,17 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 }
 
 func (a *Adapter) Start(ctx context.Context, prepared provider.Prepared, authorization provider.StartAuthorization) provider.SubmissionOutcome {
-	if authorization.Validate(prepared) != nil {
+	if authorization.Validate(prepared) != nil || authorization.Secrets != nil {
 		return rejected("start_authorization_required")
 	}
-	return a.submit(ctx, prepared, &authorization)
+	return a.submit(ctx, prepared, &authorization, nil)
+}
+
+func (a *Adapter) StartWithSecrets(ctx context.Context, prepared provider.Prepared, authorization provider.StartAuthorization, material workloadsecret.Material) provider.SubmissionOutcome {
+	if authorization.ValidateMaterial(prepared, material) != nil {
+		return rejected("workload_secret_unavailable")
+	}
+	return a.submit(ctx, prepared, &authorization, &material)
 }
 
 // Recheck the small immutable control files and the observed container policy
@@ -209,7 +224,8 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 		return ErrIdentity
 	}
 	var manifest struct {
-		ExecutionControl string `json:"execution_control"`
+		WorkloadSecrets  []workloadsecret.Slot `json:"workload_secrets"`
+		ExecutionControl string                `json:"execution_control"`
 		Bundle           struct {
 			Path   string              `json:"path"`
 			Bytes  int64               `json:"bytes"`
@@ -230,7 +246,14 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 			ExecutionDeadline        string `json:"execution_deadline"`
 		} `json:"timeouts"`
 	}
-	if json.Unmarshal(raw, &manifest) != nil || manifest.ExecutionControl != "prepare_then_start" || !validStoppedPolicy(info, manifest.Network.RemoteInternet == "required") || authorization.MaxRemoteWallSeconds > manifest.Timeouts.RemoteWallSeconds || authorization.MaxRemoteWallSeconds <= manifest.Timeouts.SetupSeconds+manifest.Timeouts.FinalizationGraceSeconds {
+	if json.Unmarshal(raw, &manifest) != nil || manifest.ExecutionControl != "prepare_then_start" || !validStoppedPolicy(info, manifest.Network.RemoteInternet == "required", len(manifest.WorkloadSecrets) > 0) || authorization.MaxRemoteWallSeconds > manifest.Timeouts.RemoteWallSeconds || authorization.MaxRemoteWallSeconds <= manifest.Timeouts.SetupSeconds+manifest.Timeouts.FinalizationGraceSeconds {
+		return ErrIdentity
+	}
+	if len(manifest.WorkloadSecrets) > 0 {
+		if authorization.Secrets == nil || !slices.Equal(manifest.WorkloadSecrets, authorization.Secrets.Slots) {
+			return ErrIdentity
+		}
+	} else if authorization.Secrets != nil {
 		return ErrIdentity
 	}
 	if bound := manifest.Timeouts.ExecutionDeadline; bound != "" {

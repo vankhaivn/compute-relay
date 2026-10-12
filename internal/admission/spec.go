@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/api/schemas"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/httpsinput"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 var (
@@ -45,12 +46,13 @@ type Output struct {
 	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
 type Spec struct {
-	ExecutionControl string            `json:"execution_control,omitempty"`
-	ResultCollection string            `json:"result_collection,omitempty"`
-	APIVersion       string            `json:"api_version"`
-	Name             string            `json:"name"`
-	Profile          string            `json:"profile"`
-	Labels           map[string]string `json:"labels,omitempty"`
+	WorkloadSecrets  []workloadsecret.Slot `json:"workload_secrets,omitempty"`
+	ExecutionControl string                `json:"execution_control,omitempty"`
+	ResultCollection string                `json:"result_collection,omitempty"`
+	APIVersion       string                `json:"api_version"`
+	Name             string                `json:"name"`
+	Profile          string                `json:"profile"`
+	Labels           map[string]string     `json:"labels,omitempty"`
 	Bundle           struct {
 		ObjectID domain.ObjectID `json:"object_id"`
 	} `json:"bundle"`
@@ -176,6 +178,9 @@ func Parse(raw []byte) (Request, error) {
 }
 
 func semantic(s Spec) error {
+	if !workloadsecret.ValidSlots(s.WorkloadSecrets) || len(s.WorkloadSecrets) > 0 && !s.SeparateStart() {
+		return ErrSpec
+	}
 	if raw := s.Timeouts.ExecutionDeadline; raw != "" {
 		at := s.Deadline()
 		if at.Year() < 2 || at.UTC().Format(time.RFC3339) != raw {

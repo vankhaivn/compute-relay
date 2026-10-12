@@ -25,6 +25,9 @@ func TestManagedRouteContractsRejectOtherOperationBodies(t *testing.T) {
 		{"execution-gate", "start_request", "execution-gate.start-request.valid.json", "execution-gate.prepare-request.valid.json"},
 		{"execution-gate", "receipt", "execution-gate.receipt.valid.json", "execution-gate.readiness.valid.json"},
 		{"execution-gate", "readiness", "execution-gate.readiness.valid.json", "execution-gate.receipt.valid.json"},
+		{"workload-secrets", "SupplyRequest", "workload-secrets.supply.valid.json", "workload-secrets.revoke.valid.json"},
+		{"workload-secrets", "RevokeRequest", "workload-secrets.revoke.valid.json", "workload-secrets.supply.valid.json"},
+		{"workload-secrets", "Receipt", "workload-secrets.receipt.valid.json", "workload-secrets.supply.valid.json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.schema+"/"+tc.fragment, func(t *testing.T) {

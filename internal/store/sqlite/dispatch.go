@@ -130,7 +130,7 @@ func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.T
 				return dispatch.Work{}, ErrCorrupt
 			}
 			if j.SubmitStarted {
-				if g.Start == nil || g.StartReceipt == nil || g.StartReceipt.Status != executionauth.Consumed || j.StartAuthorization == nil || *j.StartAuthorization != *g.Start {
+				if g.Start == nil || g.StartReceipt == nil || g.StartReceipt.Status != executionauth.Consumed || j.StartAuthorization == nil || !j.StartAuthorization.Equal(*g.Start) {
 					return dispatch.Work{}, ErrCorrupt
 				}
 			} else if g.StartReceipt != nil && g.StartReceipt.Status == executionauth.Consumed {

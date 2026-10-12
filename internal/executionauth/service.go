@@ -8,6 +8,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 type Command struct {
@@ -35,9 +36,10 @@ type Repository interface {
 	ReadReadiness(context.Context, domain.WorkspaceID, string, domain.JobID, time.Time) (Readiness, error)
 }
 type Service struct {
-	access *auth.Service
-	repo   Repository
-	clock  ports.Clock
+	access  *auth.Service
+	repo    Repository
+	clock   ports.Clock
+	secrets *workloadsecret.Pool
 }
 
 func New(access *auth.Service, repo Repository, clock ports.Clock) (*Service, error) {
@@ -47,8 +49,11 @@ func New(access *auth.Service, repo Repository, clock ports.Clock) (*Service, er
 	if clock == nil {
 		clock = ports.SystemClock{}
 	}
-	return &Service{access, repo, clock}, nil
+	return &Service{access: access, repo: repo, clock: clock}, nil
 }
+
+// WithSecrets connects the process-local material gate before serving requests.
+func (s *Service) WithSecrets(pool *workloadsecret.Pool) *Service { s.secrets = pool; return s }
 func (s *Service) Authorize(ctx context.Context, p auth.Principal, w domain.WorkspaceID, job domain.JobID, key string, raw []byte) (Receipt, error) {
 	p, err := s.authorize(ctx, p, w)
 	if err != nil {

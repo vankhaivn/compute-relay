@@ -28,8 +28,8 @@
     },
     {
       "path": "runner/manifest.schema.json",
-      "bytes": 4890,
-      "sha256": "c0bfda92a2c62fe71a65aded90e726de3fc9bce48963aa7e6b3327b65beff7f8"
+      "bytes": 5371,
+      "sha256": "8de3c05292c458f055c947cacfc3c7381f059c7516fc7c9145f9333f445fd821"
     },
     {
       "path": "runner/python/relay_runner/__init__.py",
@@ -38,8 +38,8 @@
     },
     {
       "path": "runner/python/relay_runner/contract.py",
-      "bytes": 10903,
-      "sha256": "4365290eb891cff3705d0d876226dcadce6a3665c1d3c01e575b0a51251690b7"
+      "bytes": 12209,
+      "sha256": "f22f2f566506e8e4a1d816484ee6747484a04ef7118181d9a81b501e53c87f8d"
     },
     {
       "path": "runner/python/relay_runner/deadline.py",
@@ -48,18 +48,23 @@
     },
     {
       "path": "runner/python/relay_runner/files.py",
-      "bytes": 9360,
-      "sha256": "33a3c4eae399be6bc35d4d774861516027131222d029b68dd2924fa8f7e39317"
+      "bytes": 9949,
+      "sha256": "ad7a2fd646fab7bf2cd3cf5c6e21455c76e5009569f4b446b863820008fbe1d0"
     },
     {
       "path": "runner/python/relay_runner/main.py",
-      "bytes": 19010,
-      "sha256": "ff7950c05242d22fdc31e9a4b851d5fe90d80e6b4d7d69e5d0ec975bf35876e8"
+      "bytes": 20608,
+      "sha256": "84d8b8f28c8accfc3df853b7d339e74a7fda266b6ec30169da76310c016ee6ce"
     },
     {
       "path": "runner/python/relay_runner/process.py",
-      "bytes": 7362,
-      "sha256": "22910c16210b5f3a944ec75f5afc829de9dee997a565d1661a627ec95b3da118"
+      "bytes": 7777,
+      "sha256": "911b969f1cd3d63db797506a6c602a235b70708087e0de528d69b8b86a30d377"
+    },
+    {
+      "path": "runner/python/relay_runner/secrets.py",
+      "bytes": 9572,
+      "sha256": "f37bc5c25687f288049d9befda5a5f5d03fedb1f356b1fd97e769f4e00ff4cb9"
     },
     {
       "path": "runner/python/run.py",
@@ -80,6 +85,11 @@
       "path": "runner/tests/test_runner.py",
       "bytes": 21903,
       "sha256": "8e228bbe3be9b86d08e6e61ac8748fa8e01300666f39d049093e02248dafe087"
+    },
+    {
+      "path": "runner/tests/test_secrets.py",
+      "bytes": 11045,
+      "sha256": "ff3d0613932966678b2cc83e12ca3e81a2b45c8e1ee97644ecdfb986b36238da"
     },
     {
       "path": "runner/tests/test_start.py",

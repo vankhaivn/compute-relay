@@ -10,7 +10,8 @@
       "valid": [
         "examples/job.valid.json",
         "examples/job.manual-collection.valid.json",
-        "examples/job.deadline.valid.json"
+        "examples/job.deadline.valid.json",
+        "examples/job.workload-secrets.valid.json"
       ],
       "invalid": [
         "examples/invalid/job.unknown-field.json",
@@ -19,7 +20,9 @@
         "examples/invalid/job.cpu-with-gpu-requirement.json",
         "examples/invalid/job.collection-null.json",
         "examples/invalid/job.collection-unknown.json",
-        "examples/invalid/job.deadline-offset.json"
+        "examples/invalid/job.deadline-offset.json",
+        "examples/invalid/job.workload-secrets-without-gate.invalid.json",
+        "examples/invalid/job.workload-secrets-invalid-name.invalid.json"
       ]
     },
     {
@@ -307,6 +310,18 @@
         "examples/invalid/execution-gate.start-request.unknown-field.json",
         "examples/invalid/execution-gate.receipt.consumed-without-time.json",
         "examples/invalid/execution-gate.readiness.malformed-revision.json"
+      ]
+    },
+    {
+      "schema": "schemas/workload-secrets.v1alpha1.schema.json",
+      "valid": [
+        "examples/workload-secrets.supply.valid.json",
+        "examples/workload-secrets.receipt.valid.json",
+        "examples/workload-secrets.revoke.valid.json"
+      ],
+      "invalid": [
+        "examples/invalid/workload-secrets.supply.missing-expiry.json",
+        "examples/invalid/workload-secrets.supply.malformed-slot-name.json"
       ]
     }
   ]

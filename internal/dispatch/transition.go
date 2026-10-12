@@ -123,7 +123,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		}
 		j.SubmitStarted = true
 		if a.StartAuthorization != nil {
-			copy := *a.StartAuthorization
+			copy := a.StartAuthorization.Clone()
 			j.StartAuthorization = &copy
 		}
 		j.Phase = Submitting

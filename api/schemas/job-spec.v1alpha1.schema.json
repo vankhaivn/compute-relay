@@ -364,6 +364,52 @@
         "combined",
         "prepare_then_start"
       ]
+    },
+    "workload_secrets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "exposure"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+          },
+          "exposure": {
+            "type": "string",
+            "enum": [
+              "file",
+              "file_and_local_process_arguments"
+            ]
+          }
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "workload_secrets"
+        ]
+      },
+      "then": {
+        "required": [
+          "execution_control"
+        ],
+        "properties": {
+          "execution_control": {
+            "const": "prepare_then_start"
+          }
+        }
+      }
+    }
+  ]
 }

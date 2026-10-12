@@ -376,7 +376,8 @@
         "strong_execution_identity",
         "custom_container",
         "retained_sessions",
-        "separate_prepare_start"
+        "separate_prepare_start",
+        "ephemeral_workload_secrets"
       ]
     },
     "workspace_id": {

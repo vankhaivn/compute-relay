@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 type SubmitMode string
@@ -29,6 +30,7 @@ type File struct {
 	Content []byte
 }
 type Scenario struct {
+	EphemeralSecrets bool // Opt-in offline secret-gate fixture.
 	Mode             SubmitMode
 	States           []domain.ExecutionState
 	Files            []File
@@ -127,9 +129,13 @@ func (p *Basic) Describe() provider.Descriptor {
 	for _, name := range []domain.CapabilityName{domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
 		domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
 		domain.CapabilityStrongIdentity, domain.CapabilityGPU, domain.CapabilityRemoteCancellation,
-		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart} {
+		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets} {
 		support := domain.CapabilitySupportSupported
 		switch name {
+		case domain.CapabilityEphemeralSecrets:
+			if !p.backend.scenario.EphemeralSecrets {
+				support = domain.CapabilitySupportUnsupported
+			}
 		case domain.CapabilitySeparateStart:
 			if !p.backend.scenario.SeparateStart {
 				support = domain.CapabilitySupportUnsupported
@@ -223,6 +229,18 @@ func (p *Basic) Submit(ctx context.Context, prepared provider.Prepared) provider
 	return p.submit(ctx, prepared, false)
 }
 func (p *Basic) Start(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
+	if start.Secrets != nil {
+		return rejection("explicit material required")
+	}
+	return p.start(ctx, prepared, start)
+}
+func (p *Basic) StartWithSecrets(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization, material workloadsecret.Material) provider.SubmissionOutcome {
+	if !p.backend.scenario.EphemeralSecrets || start.ValidateMaterial(prepared, material) != nil {
+		return rejection("explicit material required")
+	}
+	return p.start(ctx, prepared, start)
+}
+func (p *Basic) start(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
 	if !p.backend.scenario.SeparateStart || start.Validate(prepared) != nil {
 		return rejection("explicit start authorization required")
 	}
