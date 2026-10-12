@@ -54,6 +54,7 @@ Thumbs.db
 Desktop.ini
 
 # Local scratch
+.local/
 .tmp/
 tmp/
 *.log
