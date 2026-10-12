@@ -19,10 +19,10 @@ const (
 
 // sshFixtureVerify stands in for a live login: the password selects the outcome and the
 // presented host key.
-func sshFixtureVerify(_ context.Context, raw []byte) (string, error) {
+func sshFixtureVerify(_ context.Context, raw []byte, _ string) (sshhost.HostVerification, error) {
 	endpoint, err := sshhost.ParseEndpoint(raw)
 	if err != nil {
-		return "", err
+		return sshhost.HostVerification{}, err
 	}
 	target := endpoint.Target
 	switch string(endpoint.Credential.Password) {
@@ -31,9 +31,10 @@ func sshFixtureVerify(_ context.Context, raw []byte) (string, error) {
 	case "SYNTHETIC_SSH_REKEYED":
 		target.HostKey = sshFixtureOther
 	default:
-		return "", sshhost.ErrCredentialReject
+		return sshhost.HostVerification{}, sshhost.ErrCredentialReject
 	}
-	return sshhost.Account(target)
+	account, err := sshhost.Account(target)
+	return sshhost.HostVerification{Account: account, HostKey: target.HostKey, OS: "linux", Architecture: "amd64", ImageID: "sha256:" + strings.Repeat("1", 64)}, err
 }
 
 func (f *managedTestFixture) sshConnection(t *testing.T, key, password string) (connections.Operation, connections.Connection) {
@@ -65,13 +66,16 @@ func TestManagedSSHConnectionPublishesAnOperatorManagedCPUProvider(t *testing.T)
 		connection.Selection.MaxRemoteWallSeconds != 600 || !connection.Selection.AllowRemoteInternet || connection.ProviderType != "ssh" {
 		t.Fatalf("connection = %+v", connection)
 	}
+	if connection.Host == nil || connection.Host.HostKeyFingerprint != sshFixtureKey || connection.Host.OS != "linux" || connection.Host.Architecture != "amd64" {
+		t.Fatalf("host evidence = %+v", connection.Host)
+	}
 	snapshot := f.binding(t, connection)
 	saved, err := f.host.store.ReadManagedBinding(ctx, snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if saved.Profile.CostClass != admission.CostOperatorManaged || saved.Profile.Accelerator != "cpu" ||
-		!strings.HasPrefix(saved.CanonicalAccount, "ssh-") || !strings.Contains(string(saved.RuntimeConfig), sshhost.StandardImage) {
+		!strings.HasPrefix(saved.CanonicalAccount, "ssh-") || !strings.Contains(string(saved.RuntimeConfig), "sha256:"+strings.Repeat("1", 64)) {
 		t.Fatalf("saved = %+v", saved)
 	}
 	p, err := f.host.managedProvider(f.config, f.services.connections, saved)
@@ -125,6 +129,10 @@ func TestManagedSSHConnectionRefusesRejectedLoginsAndChangedHostKeys(t *testing.
 	if replace, err = f.services.connections.Operation(ctx, f.actor, "app", replace.ID); err != nil || replace.Problem == nil || *replace.Problem != "account_changed" {
 		t.Fatalf("changed host key = %+v, %v", replace, err)
 	}
+	current, err := f.services.connections.Get(ctx, f.actor, "app", connection.ID)
+	if err != nil || current.Host == nil || current.Host.HostKeyFingerprint != sshFixtureKey {
+		t.Fatalf("changed key overwrote public evidence: %+v, %v", current.Host, err)
+	}
 	saved, err := f.host.store.ReadManagedBinding(ctx, original)
 	if err != nil {
 		t.Fatal("changed host key broke the verified binding", err)
@@ -147,5 +155,40 @@ func TestManagedSSHDescriptorKeepsEveryFieldWriteOnly(t *testing.T) {
 	}
 	if _, err := (&managedSSHAdapter{}).Encode(map[string]string{"host": "100.64.0.7", "username": "kenji"}); err != connections.ErrRequest {
 		t.Fatalf("login-free connection: %v", err)
+	}
+}
+
+func TestManagedSSHConfigurationKeepsLimitsAcrossChecks(t *testing.T) {
+	f := newManagedTestFixture(t, true, &managedSSHAdapter{verify: sshFixtureVerify, config: ManagedServeConfig{MaxRemoteWallSeconds: 600}})
+	ctx := context.Background()
+	_, connection := f.sshConnection(t, "ssh-limits-create", "SYNTHETIC_SSH")
+	old := f.binding(t, connection)
+	op, err := f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-limits-configure", []byte(fmt.Sprintf(`{"action":"configure","expected_revision":%d,"configuration":{"max_remote_wall_seconds":1200,"max_active_attempts":3,"max_processes":128}}`, connection.Revision)))
+	if err != nil || op.Status != "succeeded" {
+		t.Fatal(op, err)
+	}
+	connection, err = f.services.connections.Get(ctx, f.actor, "app", connection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-limits-check", []byte(fmt.Sprintf(`{"action":"check","expected_revision":%d}`, connection.Revision)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.services.connections.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	connection, err = f.services.connections.Get(ctx, f.actor, "app", connection.ID)
+	if err != nil || connection.Selection == nil || connection.Selection.MaxActiveAttempts != 3 || connection.Selection.MaxProcesses != 128 {
+		t.Fatalf("limits after check: %+v %v", connection.Selection, err)
+	}
+	frozen, err := f.host.store.ReadManagedBinding(ctx, old)
+	if err != nil || frozen.Profile.MaxActiveAttempts != 1 || frozen.Profile.MaxProcesses != 4096 {
+		t.Fatal("old limits changed", frozen.Profile, err)
+	}
+	kaggle := f.connection(t, "kaggle-limit-create", "SYNTHETIC_FIRST")
+	_, err = f.services.connections.Submit(ctx, f.actor, "app", kaggle.ID, "kaggle-limit-unsupported", []byte(fmt.Sprintf(`{"action":"configure","expected_revision":%d,"configuration":{"max_remote_wall_seconds":1200,"max_processes":128}}`, kaggle.Revision)))
+	if err != connections.ErrRequest {
+		t.Fatal("provider accepted unsupported limits", err)
 	}
 }

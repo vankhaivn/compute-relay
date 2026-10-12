@@ -17,7 +17,8 @@ The owner approved this scope change; it adds a provider and does not weaken the
   credentials, and the existing same-account rule refuses a credential replacement that changes
   the host key or login endpoint.
 - **Isolation.** Each attempt owns one labelled container created from a digest-pinned standard
-  image. The container runs as an unprivileged user with all capabilities dropped, no new
+  image installed through an explicit management action. The resulting image ID and platform
+  are frozen with the selection. The container runs as an unprivileged user with all capabilities dropped, no new
   privileges, a PID limit, no restart policy, no network unless the frozen policy allows
   internet, and optional operator CPU and memory limits.
 - **Contract mapping.** Prepare creates the stopped container and stages the runner, manifest,
@@ -29,8 +30,9 @@ The owner approved this scope change; it adds a provider and does not weaken the
   and only on an explicit [ADR-0027](0027-explicit-remote-cleanup.md) request. Nothing is deleted
   automatically.
 - **Policy.** Profiles use the `operator_managed` cost class and the CPU accelerator. The host
-  reports no quota, so CPU work runs with an unknown-quota warning. One account allows one active
-  attempt.
+  reports no quota, so CPU work runs with an unknown-quota warning. One account defaults to one
+  active attempt; concurrency and process limits are configurable and frozen for admitted work.
+  Retained aliases share the lowest account limit, and active jobs retain older lower limits.
 
 [SSH host reference](../providers/ssh-host.md) owns the detailed mapping and
 [SSH hosts](../../ssh-hosts.md) the operator procedure.
@@ -39,8 +41,9 @@ The owner approved this scope change; it adds a provider and does not weaken the
 
 The operator wants compute on their own machine without manual SSH sessions or leftover
 data. Running jobs directly in a remote shell leaves files, processes and network access to the
-login account and has no exact remote identity. Building an image on the host makes the
-execution environment drift. Trust-on-first-use without pinning would let a changed host
+login account and has no exact remote identity. Arbitrary build inputs would let the execution
+environment drift. Relay instead embeds a metadata-only Dockerfile with a pinned base digest,
+records the recipe hash and freezes the verified result ID. Trust-on-first-use without pinning would let a changed host
 receive the login. A Relay-side agent on the host was rejected because it adds a second
 long-running service and its own credentials.
 
@@ -50,7 +53,12 @@ long-running service and its own credentials.
   should use an account intended for this purpose.
 - The standard image has only Python's standard library; jobs install pinned wheels during setup
   when their network policy allows it.
-- Prepare pulls the pinned image when the host lacks it. That registry access belongs to the
-  engine, not to the job's network policy.
+- An explicit `install_image` action may fetch the pinned base and build the repository image.
+  Its durable one-shot barrier permits only read-only recovery after uncertainty; job preparation
+  cannot reinstall a missing version-2 image. Original version-1 jobs preserve their earlier policy;
+  their admission aliases are retired on upgrade until recheck and installation produce a new selection.
+- Connection status publishes the pinned fingerprint and verified Linux engine architecture.
+- SSH-only `serve --managed` needs neither Python nor CGo. Credential selection follows
+  [ADR-0029](0029-file-credential-store.md); optional Keychain uses macOS Security.framework
+  directly. Existing Keychain access control still applies when changing executables.
 - Live qualification on an operator host is separate from offline tests and local-engine runs.
-  The Keychain vault still needs `--managed-python`.

@@ -66,7 +66,12 @@ func (h *Host) managedVault(ctx context.Context, config ManagedServeConfig) (cre
 		}
 		return vault, nil
 	}
-	vault, err := credentials.NewKeychain(h.identity.InstallationID, config.PythonExecutable)
+	var vault credentials.Vault
+	if config.PythonExecutable == "" {
+		vault, err = credentials.NewNativeKeychain(h.identity.InstallationID)
+	} else {
+		vault, err = credentials.NewKeychain(h.identity.InstallationID, config.PythonExecutable)
+	}
 	if errors.Is(err, credentials.ErrUnsupported) {
 		return nil, nil
 	}

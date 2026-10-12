@@ -14,7 +14,8 @@ No release has been published. This summarizes the current pre-release feature s
 - Managed connections with write-only credentials in a private file or optional macOS Keychain,
   shared account capacity and durable per-attempt execution authorization.
 - SSH host connections that run CPU jobs in isolated Docker containers on an operator-owned
-  machine, with pinned host keys and requested remote cleanup.
+  machine, with visible pinned host keys, verified architecture, explicit image installation,
+  configurable host limits, Python-free SSH-only serving on macOS and requested remote cleanup.
 - Reproducible macOS arm64 companion bundles.
 
 See [current status](docs/status.md) for limits.

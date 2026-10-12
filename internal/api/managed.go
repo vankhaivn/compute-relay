@@ -283,7 +283,7 @@ func validConnectionOperation(operation connections.Operation, workspace domain.
 		return false
 	}
 	switch operation.Action {
-	case "create", "check", "replace_credential", "disable", "enable", "remove", "configure":
+	case "create", "check", "replace_credential", "disable", "enable", "remove", "configure", "install_image":
 	default:
 		return false
 	}
@@ -293,7 +293,7 @@ func validConnectionOperation(operation connections.Operation, workspace domain.
 	case "failed":
 		if operation.Problem != nil {
 			switch *operation.Problem {
-			case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "active_work", "stale_revision", "unsupported_provider":
+			case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
 				return true
 			}
 		}

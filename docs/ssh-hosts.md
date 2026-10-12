@@ -11,7 +11,7 @@ type, so the usual connection, admission and per-attempt authorization rules app
   Sharing → Remote Login. Password and private-key logins both work; macOS password prompts
   (keyboard-interactive) are supported.
 - A Docker engine that this account can use without `sudo`, such as Docker Desktop, OrbStack or
-  Docker Engine on Linux. The engine must report a `linux` server OS, as Docker on macOS does.
+  Docker Engine on Linux. The engine must report `linux` with `amd64` or `arm64` architecture, as Docker on macOS does.
 - Keep the engine running for that user. A non-interactive SSH session does not start Docker
   Desktop.
 - On a host where `docker` is not in `/usr/local/bin`, `/opt/homebrew/bin` or `/usr/bin`, note its
@@ -19,8 +19,9 @@ type, so the usual connection, admission and per-attempt authorization rules app
 
 Docker access is administrative access to the host. Use an account meant for running jobs.
 
-Relay does not display the key it pins, so read the host key fingerprint on the host itself and
-put it in the `host_key_fingerprint` field. Verification then refuses any other key:
+Read the host key fingerprint on the host itself and put it in the `host_key_fingerprint`
+field. Verification refuses any other key and publishes the pinned fingerprint in connection
+status as `host.host_key_fingerprint`:
 
 ```sh
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
@@ -28,8 +29,16 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 ## Create the connection
 
-Start managed serve as described in [managed connections](managed-connections.md). The SSH
-descriptor appears in `GET /v1/workspaces/{w}/providers` with type `ssh`. Every field is
+Start SSH-only managed serve without Python:
+
+```sh
+compute-relay serve --root /absolute/private/runtime --managed
+```
+
+For installations that also use Kaggle, use `--managed-python` as described in
+[managed connections](managed-connections.md). New installations use private file credentials.
+When Keychain is selected, existing Python-created entries may require explicit macOS approval
+for the Go binary before switching modes. The SSH descriptor appears in `GET /v1/workspaces/{w}/providers` with type `ssh`. Every field is
 write-only:
 
 | Field | Required | Meaning |
@@ -55,23 +64,71 @@ write-only:
 }
 ```
 
-Verification logs in, checks the host key and that Docker answers, and returns a CPU selection.
-It does not pull images or start containers. A later credential replacement must reach the same
+Verification logs in, checks the host key and Docker engine platform, and inspects the repository
+image. Status returns `host.os`, `host.architecture` and `host.image`. A missing image reports
+`host.image.status=missing` with no admission selection. Verification does not pull images,
+build images or start containers. A later credential replacement must reach the same
 host key, user, host and port. A different machine or a reinstalled host needs a new
 connection. Rejected logins and changed host keys both report `credential_rejected`.
 
-## Run a job
+## Install the execution image
 
-Use `selection.profile` with `"resources": {"accelerator": "cpu"}` and authorize the attempt
-as usual. Each attempt gets one container named `compute-relay-cr-…`. The first preparation on a
-host pulls the Relay standard image, a digest-pinned Python 3.11 image. The job runs as an
-unprivileged user with no network unless the connection allows internet and the job requires it.
-Only Python's standard library is preinstalled; declare pinned wheels in the job when it needs
-more and its network policy allows downloads.
+Send this action with a management token, an `Idempotency-Key` and the current revision:
 
-One attempt runs at a time per host. Cancellation stops the container and is confirmed from
-Docker's state. Logs stream the payload's standard output; standard error is collected with the
-results.
+```http
+POST /v1/workspaces/{w}/connections/{id}/actions
+{"action":"install_image","expected_revision":1}
+```
+
+The worker builds the repository's [Dockerfile](../internal/provider/sshhost/image/Dockerfile)
+from its pinned base digest. The build context contains only that file; the recipe has no
+package installation or job code. The engine may fetch the base image from its registry.
+The worker has a five-minute deadline. Poll `GET /v1/workspaces/{w}/connection-operations/{id}`
+for the outcome, then reload the connection. A successful installation reports `host.image.id`
+and publishes a CPU selection that freezes that exact image ID, recipe and architecture.
+
+An interrupted build may continue in the engine. `image_installation_unknown` means its result
+could not be proved; it does not mean the engine stopped. Restart and exact replay never rebuild
+an uncertain operation. After checking the host, an explicit `check` can discover a completed
+image. A new installation requires a new explicit action and idempotency key.
+
+After upgrading from digest-only SSH selections, run `check`, then `install_image` as needed.
+The migration retires old admission aliases while retaining their profiles and runtime policy
+for jobs already accepted. Old jobs continue recovery with their original image policy.
+
+## Configure limits and run a job
+
+The default is one concurrent attempt per canonical host account and 4096 processes per
+container. To set limits for future jobs, send a configuration action:
+
+```json
+{
+  "action": "configure",
+  "expected_revision": 2,
+  "configuration": {
+    "max_remote_wall_seconds": 1800,
+    "max_active_attempts": 2,
+    "max_processes": 256
+  }
+}
+```
+
+Concurrency accepts 1–64; the process limit accepts 1–65536. Omitted limits preserve saved values.
+Aliases of the same canonical account, including across workspaces, share the lowest retained
+connection limit. An active job's older, lower limit also remains effective until it releases
+capacity. The runtime's `--managed-max-workers` still bounds local workers. Host identity includes
+the verified key, login user, address and port; separate endpoint identities are separate accounts.
+
+Use the latest `selection.profile` with `"resources": {"accelerator": "cpu"}` and authorize the
+attempt as usual. Each attempt gets one container named `compute-relay-cr-…`. Preparation checks
+the frozen image ID, recipe and platform; it fails if they are unavailable and never installs an
+image. Historical jobs admitted under the original digest-based policy retain that policy.
+
+Jobs run as an unprivileged user with no network unless the connection allows internet and the
+job requires it. CPU, memory and process limits are frozen with the selection. Only Python's
+standard library is preinstalled; declare pinned wheels in jobs that need more and whose network
+policy allows downloads. Cancellation is confirmed from Docker's state. Logs stream the payload's
+standard output; standard error is collected with results.
 
 ## Delete remote data
 
@@ -97,8 +154,11 @@ for eligibility and failure receipts.
 |---|---|
 | Verification `credential_rejected` | User, password or key; for a changed host, compare its fingerprint and create a new connection. |
 | Verification `provider_unavailable` | Address and port reachability, Docker running for that user, `docker_path`. |
-| Preparation fails on a new host | Run `docker pull` for the standard image on the host itself. Docker Desktop credential helpers can refuse non-interactive sessions. |
+| No selection and `host.image.status=missing` | Request `install_image` and inspect its operation receipt. |
+| `image_installation_unknown` | Check the host, registry access and non-interactive Docker credential helpers; use `check` to discover a completed image. Do not assume the remote build stopped. |
+| Preparation fails after deleting an image | Restore the exact frozen image for retained jobs. Installing a new image only changes future selections. |
+| Credential store unavailable | Preserve the runtime and its selected store. For file storage, check the original private file and permissions; for Keychain, grant the intended binary access to the existing items or keep the working mode. Do not reset the runtime. |
 
-The standard image reference is `sshhost.StandardImage` in
-[docker.go](../internal/provider/sshhost/docker.go). See the [SSH host reference](development/providers/ssh-host.md)
+The Dockerfile pins the base digest; its SHA256 identifies the repository recipe.
+The legacy base reference remains in [docker.go](../internal/provider/sshhost/docker.go). See the [SSH host reference](development/providers/ssh-host.md)
 for exact Docker behavior and [current status](status.md) for evidence.

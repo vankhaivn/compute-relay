@@ -88,6 +88,27 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 			t.Fatal("clear fixture table", name, err)
 		}
 		columns := "*"
+		if name == "managed_connection_operations" && version < 18 {
+			var installed int
+			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connection_operations WHERE action='install_image' OR length(installation)>0").Scan(&installed); err != nil || installed != 0 {
+				t.Fatal("legacy fixture cannot represent image installation", err)
+			}
+			columns = "operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,problem,created_at,updated_at"
+		}
+		if name == "managed_connections" && version < 17 {
+			var limited int
+			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connections WHERE max_active_attempts!=0 OR max_processes!=0").Scan(&limited); err != nil || limited != 0 {
+				t.Fatal("legacy fixture cannot represent execution limit overrides", err)
+			}
+			columns = "connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence"
+		}
+		if name == "managed_connections" && version < 16 {
+			var evidenced int
+			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connections WHERE length(host_evidence)>0").Scan(&evidenced); err != nil || evidenced != 0 {
+				t.Fatal("legacy fixture cannot represent host evidence", err)
+			}
+			columns = "connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds"
+		}
 		if name == "managed_connections" && version < 13 {
 			var configured int
 			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connections WHERE max_remote_wall_seconds IS NOT NULL").Scan(&configured); err != nil || configured != 0 {

@@ -14,7 +14,12 @@ serve, issue separate private tokens for ordinary job operations, connection man
 tokens outside an ordinary job-producing process. Token issuance remains local administration
 and requires the server to be stopped.
 
-Use an absolute Python executable containing the repository's locked Kaggle client:
+For SSH-only use, `compute-relay serve --root /absolute/private/runtime --managed`
+uses the selected credential backend and needs no Python. It defaults to CPU and advertises only
+SSH. It refuses to start if non-removed Kaggle connections are saved in that installation.
+
+For Kaggle and SSH together, use an absolute Python executable containing the repository's
+locked Kaggle client:
 
 ```sh
 compute-relay serve --root /absolute/private/runtime \
@@ -31,8 +36,7 @@ GPU. Changing the service flag does not rewrite saved connections or jobs; expli
 connection to publish a new selection under that configuration.
 Managed flags cannot be mixed with standalone Kaggle flags. No flag grants an attempt permit.
 The machine shape applies only to Kaggle. SSH host connections are always CPU, and the wall and
-internet flags apply to both types. This managed mode still requires Python for its provider
-composition, including when using file credentials with only SSH connections.
+internet flags apply to both types.
 
 Check authenticated `/v1/info` for `managed_connections`, `connection_configuration` and
 `attempt_authorization`, then
@@ -60,6 +64,11 @@ data and updates it atomically. Passwords are never returned by the API or writt
 The file backend does not depend on an executable's name or macOS identity: stop the old process,
 install the new binary and restart against the same root.
 
+With Keychain selected, SSH-only mode uses the native macOS API; the Python mode uses its existing
+bridge. Both use the same item names and bytes, disable interactive prompts while serving, and
+never broaden access lists or recreate inaccessible credentials. See Apple’s
+[per-app Keychain access instructions](https://support.apple.com/en-gb/guide/mac-help/kychn002/26/mac/26).
+
 Keychain keeps its existing per-application access controls; replacing the executable or its
 Python interpreter can require a new access grant. Neither backend falls back, exports credentials
 to the other store, or recreates a missing fingerprint key after initialization. Preserve a damaged
@@ -84,8 +93,11 @@ managed adapter's existing startup default applies. Creation still discovers and
 account asynchronously.
 
 Under the same workspace prefix, `POST /connections/{id}/actions` accepts an `expected_revision`
-plus `check`, `replace_credential`, `configure`, `disable`, `enable` or `remove`. Only replacement
-accepts credentials. `configure` requires a `configuration` object with the same bounded field;
+plus `check`, `replace_credential`, `configure`, `disable`, `enable`, `remove`, or the SSH
+`install_image` action. Only replacement
+accepts credentials. SSH configuration also accepts `max_active_attempts` (1–64) and
+`max_processes` (1–65536); omission preserves saved limits. `configure` requires a `configuration`
+object with `max_remote_wall_seconds`;
 for example:
 
 ```json

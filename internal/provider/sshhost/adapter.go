@@ -79,12 +79,17 @@ type StagingBlobs interface {
 // Config is one verified connection revision. Account is the canonical host identity
 // that pins the host key; Image is the verified standard image reference.
 type Config struct {
-	InstanceID     domain.ProviderInstanceID
-	Account        string
-	CredentialRef  ports.CredentialRef
-	AllowInternet  bool
-	MaxWallSeconds int64
-	Image          string
+	InstanceID        domain.ProviderInstanceID
+	Account           string
+	CredentialRef     ports.CredentialRef
+	AllowInternet     bool
+	MaxWallSeconds    int64
+	Image             string
+	MaxProcesses      int
+	Architecture      string
+	ImageRecipeSHA256 string
+	CPUs              string
+	MemoryBytes       int64
 }
 
 type session interface {
@@ -113,8 +118,18 @@ var (
 
 func NewAdapter(config Config, binding provider.BindingSnapshot, creds ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock) (*Adapter, error) {
 	if !binding.Valid() || binding.Binding.ProviderInstanceID != config.InstanceID || binding.CredentialRef != string(config.CredentialRef) ||
-		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || !ValidImage(config.Image) {
+		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || config.MaxProcesses < 0 || config.MaxProcesses > 65536 {
 		return nil, ErrRequest
+	}
+	if config.ImageRecipeSHA256 == "" {
+		if !ValidImage(config.Image) || config.Architecture != "" || config.CPUs != "" || config.MemoryBytes != 0 {
+			return nil, ErrRequest
+		}
+	} else if !ValidImageID(config.Image) || !domain.SHA256Digest(config.ImageRecipeSHA256).Valid() || !SupportedArchitecture(config.Architecture) || !ValidResourceLimits(config.CPUs, config.MemoryBytes) {
+		return nil, ErrRequest
+	}
+	if config.MaxProcesses == 0 {
+		config.MaxProcesses = pidsLimit
 	}
 	if _, err := HostKeyOf(config.Account); err != nil {
 		return nil, ErrRequest
@@ -303,13 +318,22 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		// The digest-pinned image is pulled once per host; the job network policy
 		// governs the container, not the engine's registry access.
 		image, found, err := d.inspectImage(ctx, a.config.Image)
-		if err == nil && !found {
+		if err == nil && !found && a.config.ImageRecipeSHA256 == "" {
 			if err = d.pull(ctx, a.config.Image); err == nil {
 				image, found, err = d.inspectImage(ctx, a.config.Image)
 			}
 		}
 		if err != nil || !found || image.OS != "linux" {
 			return ErrRemoteDocker
+		}
+		platform := ""
+		if a.config.ImageRecipeSHA256 != "" {
+			os, arch, err := d.platform(ctx)
+			if err != nil || os != "linux" || arch != a.config.Architecture || image.Architecture != arch || image.ID != a.config.Image || image.Config.Labels[imageRecipeLabel] != a.config.ImageRecipeSHA256 {
+				return ErrIdentity
+			}
+			endpoint.CPUs, endpoint.MemoryBytes = a.config.CPUs, a.config.MemoryBytes
+			platform = "linux/" + a.config.Architecture
 		}
 		name := containerName(plan.Job.Identity)
 		if _, exists, err := d.inspect(ctx, name); err != nil || exists {
@@ -319,8 +343,8 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		if spec.Network.RemoteInternet == "required" {
 			mode = "required"
 		}
-		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Labels: labels(plan, operation), Internet: mode == "required",
-			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: pidsLimit,
+		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: labels(plan, operation), Internet: mode == "required",
+			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
 			Command: []string{"timeout", "-k", "30", strconv.FormatInt(plan.Job.WallSeconds+timeoutGrace, 10),
 				"python3", "-E", "-s", "/relay/runner/run.py", "--manifest", "/relay/manifest.json", "--execute",
 				"--staging-root", "/relay/staging", "--work-root", workRoot, "--network-mode", mode}})

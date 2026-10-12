@@ -42,6 +42,12 @@ func (c ManagedServeConfig) validate() error {
 		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
 		return ErrRequest
 	}
+	if c.PythonExecutable == "" {
+		if c.MachineShape != "cpu" {
+			return ErrRequest
+		}
+		return nil
+	}
 	if _, err := kaggle.NewDiscovery(c.PythonExecutable, clock{}); err != nil {
 		return ErrRequest
 	}
@@ -73,15 +79,27 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	discovery, err := kaggle.NewDiscovery(config.PythonExecutable, clock{})
-	if err != nil {
-		return nil, ErrRequest
+	adapters := []connections.Adapter{newManagedSSHAdapter(config)}
+	if config.PythonExecutable == "" {
+		present, err := h.store.HasManagedConnections(ctx, "kaggle")
+		if err != nil {
+			return nil, ErrState
+		}
+		if present {
+			return nil, ErrRequest
+		}
+	} else {
+		discovery, discoveryErr := kaggle.NewDiscovery(config.PythonExecutable, clock{})
+		if discoveryErr != nil {
+			return nil, ErrRequest
+		}
+		adapters = append(adapters, &managedKaggleAdapter{discovery: discovery, config: config})
 	}
 	vault, err := h.managedVault(ctx, config)
 	if err != nil {
 		return nil, err
 	}
-	return h.composeManaged(ctx, config, vault, &managedKaggleAdapter{discovery: discovery, config: config}, newManagedSSHAdapter(config))
+	return h.composeManaged(ctx, config, vault, adapters...)
 }
 
 // composeManaged provides the offline fixture seam. Neither it nor its concrete
@@ -117,7 +135,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return nil, ErrState
 	}
 	settings := scheduler.DefaultSettings()
-	settings.Paused, settings.MaxWorkers, settings.MaxActivePerAccount = false, config.MaxWorkers, 1
+	settings.Paused, settings.MaxWorkers, settings.MaxActivePerAccount = false, config.MaxWorkers, 64
 	if err = h.store.ConfigureScheduler(ctx, settings); err != nil {
 		return nil, ErrState
 	}

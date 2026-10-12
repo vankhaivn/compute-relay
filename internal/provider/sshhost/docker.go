@@ -94,23 +94,27 @@ func (d docker) ping(ctx context.Context) error {
 	return nil
 }
 
-// serverOS reports the engine's operating system; Docker Desktop on macOS reports linux.
-func (d docker) serverOS(ctx context.Context) (string, error) {
+// platform reports the daemon platform, including Docker Desktop's Linux VM.
+func (d docker) platform(ctx context.Context) (string, string, error) {
 	var out bytes.Buffer
-	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 256}, "version", "--format", "{{.Server.Os}}")
+	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 256}, "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if result.ExitCode != 0 {
-		return "", ErrRemoteDocker
+	parts := strings.Split(strings.TrimSpace(out.String()), "/")
+	if result.ExitCode != 0 || len(parts) != 2 {
+		return "", "", ErrRemoteDocker
 	}
-	return strings.TrimSpace(out.String()), nil
+	return parts[0], parts[1], nil
 }
 
 type imageInfo struct {
 	ID           string `json:"Id"`
 	OS           string `json:"Os"`
 	Architecture string `json:"Architecture"`
+	Config       struct {
+		Labels map[string]string `json:"Labels"`
+	} `json:"Config"`
 }
 
 func (d docker) inspectImage(ctx context.Context, ref string) (imageInfo, bool, error) {
@@ -184,6 +188,7 @@ func (d docker) inspect(ctx context.Context, name string) (containerInfo, bool, 
 type containerSpec struct {
 	Name        string
 	Image       string
+	Platform    string
 	Labels      map[string]string
 	Internet    bool
 	CPUs        string
@@ -200,6 +205,9 @@ func (s containerSpec) args() []string {
 	args := []string{"container", "create", "--name", s.Name, "--user", "65534:65534", "--network", network,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", strconv.Itoa(s.PIDs),
 		"--restart", "no", "--stop-timeout", "30", "--workdir", "/relay"}
+	if s.Platform != "" {
+		args = append(args, "--platform", s.Platform)
+	}
 	// Optional limits; without them the engine's own VM or cgroup bounds the attempt.
 	if s.MemoryBytes > 0 {
 		memory := strconv.FormatInt(s.MemoryBytes, 10)

@@ -50,7 +50,7 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 		if !ValidListen(r.Listen) {
 			return ErrRequest
 		}
-		if r.ManagedPython != "" || r.ManagedCredentialStore != "" || r.ManagedMachineShape != "" || r.ManagedMaxWallSeconds != 0 || r.ManagedMaxWorkers != 0 || r.ManagedAllowInternet {
+		if r.Managed || r.ManagedPython != "" || r.ManagedCredentialStore != "" || r.ManagedMachineShape != "" || r.ManagedMaxWallSeconds != 0 || r.ManagedMaxWorkers != 0 || r.ManagedAllowInternet {
 			if r.ProviderConfig != "" || r.ProviderProfile != "" || r.ProviderMachineShape != "" || r.MaxProviderAttempts != 0 || r.AllowPrivateStaging || r.AllowGPU {
 				return ErrRequest
 			}

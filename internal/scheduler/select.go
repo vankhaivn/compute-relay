@@ -86,6 +86,7 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 		return -1, View{}, ErrScanLimit
 	}
 	heads := map[domain.WorkspaceID]int{}
+	activeLimits := map[string]int{}
 	seen := map[int64]bool{}
 	for i, r := range rows {
 		if !r.Identity.Valid() || r.Sequence <= 0 || seen[r.Sequence] || r.State.Validate() != nil || !domain.ObjectID(r.AccountScope).Valid() ||
@@ -100,6 +101,9 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 		}
 		if (live && LocalOnly(r.State)) || HoldsAccount(r.State, r.DispatchBarrier) {
 			view.AccountReservations[r.AccountScope]++
+			if limit, ok := activeLimits[r.AccountScope]; !ok || r.Policy.MaxActive < limit {
+				activeLimits[r.AccountScope] = r.Policy.MaxActive
+			}
 		}
 		if !r.ActiveAttempt || live || r.DispatchBarrier || !LocalOnly(r.State) || r.DispatchModeExcluded {
 			continue
@@ -116,6 +120,10 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 	eligible := map[domain.WorkspaceID]bool{}
 	for _, w := range spaces {
 		r := rows[heads[w]]
+		limit := min(settings.MaxActivePerAccount, r.Policy.MaxActive)
+		if activeLimit, ok := activeLimits[r.AccountScope]; ok {
+			limit = min(limit, activeLimit)
+		}
 		status := QueueStatus{Identity: r.Identity, Sequence: r.Sequence, AccountScope: r.AccountScope, Reason: Eligible, NotBefore: r.NotBefore}
 		switch {
 		case r.Managed && !r.AuthorizationGranted:
@@ -130,7 +138,7 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 			status.Reason = Deferred
 		case view.LiveWorkers >= settings.MaxWorkers:
 			status.Reason = WorkerLimit
-		case view.AccountReservations[r.AccountScope] >= min(settings.MaxActivePerAccount, r.Policy.MaxActive):
+		case view.AccountReservations[r.AccountScope] >= limit:
 			status.Reason = AccountLimit
 		default:
 			status.Reason, status.Warning = r.Quota.Decide(r.Resource, r.WallSeconds, r.Policy.StrictQuota, settings.QuotaFreshFor, now)

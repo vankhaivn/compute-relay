@@ -41,6 +41,11 @@ type fakeContainer struct {
 type fakeHost struct {
 	t          *testing.T
 	mu         sync.Mutex
+	images     map[string]imageInfo
+	builds     int
+	buildExit  int
+	buildInput []byte
+	platform   string
 	image      bool
 	registry   bool // pull succeeds
 	containers map[string]*fakeContainer
@@ -52,7 +57,7 @@ type fakeHost struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	return &fakeHost{t: t, image: true, containers: map[string]*fakeContainer{}}
+	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{}}
 }
 
 func (h *fakeHost) Close() error {
@@ -145,7 +150,35 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 	switch {
 	case slices.Equal(args, []string{"version"}):
 		return Result{}, nil
+	case slices.Equal(args, []string{"version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"}):
+		_, _ = io.WriteString(stdout, h.platform)
+		return Result{}, nil
+	case len(args) > 0 && args[0] == "build":
+		h.builds++
+		h.buildInput = append([]byte(nil), archive...)
+		info := imageInfo{ID: fakeImageID, OS: "linux", Architecture: strings.TrimPrefix(h.platform, "linux/")}
+		info.Config.Labels = map[string]string{"io.compute-relay.image-schema": "1"}
+		var tags []string
+		for i := 1; i < len(args)-1; i++ {
+			if args[i] == "--label" {
+				k, v, _ := strings.Cut(args[i+1], "=")
+				info.Config.Labels[k] = v
+			}
+			if args[i] == "--tag" {
+				tags = append(tags, args[i+1])
+			}
+		}
+		for _, tag := range tags {
+			h.images[tag] = info
+		}
+		h.images[info.ID] = info
+		return Result{ExitCode: h.buildExit}, nil
 	case len(args) == 3 && args[0] == "image" && args[1] == "inspect":
+		if image, exists := h.images[args[2]]; exists {
+			raw, _ := json.Marshal([]imageInfo{image})
+			_, _ = stdout.Write(raw)
+			return Result{}, nil
+		}
 		if !h.image || args[2] != StandardImage {
 			return noSuch("image"), nil
 		}

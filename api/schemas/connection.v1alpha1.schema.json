@@ -109,6 +109,18 @@
                     "tpu"
                   ],
                   "description": "Exact frozen resource policy. Omitted for legacy profiles; clients must not infer it from the current provider descriptor."
+                },
+                "max_active_attempts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64,
+                  "description": "Maximum concurrent attempts for an operator host; aliases share the lowest retained limit."
+                },
+                "max_processes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65536,
+                  "description": "Maximum processes per container for an operator host."
                 }
               }
             }
@@ -265,9 +277,93 @@
               "minimum": 1,
               "maximum": 86400,
               "description": "Maximum remote wall time in seconds for future job admissions."
+            },
+            "max_active_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64,
+              "description": "Maximum concurrent attempts for an operator host; aliases share the lowest retained limit."
+            },
+            "max_processes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536,
+              "description": "Maximum processes per container for an operator host."
             }
           },
           "description": "Explicit persisted policy override; omission means the existing startup default."
+        },
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Last successful host verification; retained after a failed recheck. Contains no endpoint or login identity.",
+          "required": [
+            "host_key_fingerprint",
+            "os",
+            "architecture"
+          ],
+          "properties": {
+            "host_key_fingerprint": {
+              "type": "string",
+              "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+            },
+            "os": {
+              "const": "linux"
+            },
+            "architecture": {
+              "enum": [
+                "amd64",
+                "arm64"
+              ]
+            },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "recipe_sha256"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "missing",
+                    "ready"
+                  ]
+                },
+                "recipe_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "ready"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "id"
+                    ]
+                  },
+                  "else": {
+                    "not": {
+                      "required": [
+                        "id"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
         }
       },
       "allOf": [

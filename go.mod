@@ -3,6 +3,7 @@ module github.com/vankhaivn/compute-relay
 go 1.27.1
 
 require (
+	github.com/ebitengine/purego v0.11.1
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/crypto v0.55.0

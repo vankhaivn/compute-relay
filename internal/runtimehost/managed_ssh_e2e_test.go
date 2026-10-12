@@ -27,7 +27,7 @@ import (
 
 // TestManagedSSHDockerPipeline runs one job through admission, authorization, dispatch,
 // collection and requested cleanup on the local Docker engine behind the in-process SSH
-// server. It pulls the standard image, so it never runs by default.
+// server. It explicitly installs the repository image, so it never runs by default.
 func TestManagedSSHDockerPipeline(t *testing.T) {
 	if os.Getenv("COMPUTE_RELAY_SSH_DOCKER_E2E") != "1" {
 		t.Skip("set COMPUTE_RELAY_SSH_DOCKER_E2E=1 to use the local Docker engine")
@@ -35,9 +35,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	environment := os.Environ()
-	if platform := os.Getenv("COMPUTE_RELAY_SSH_DOCKER_PLATFORM"); platform != "" {
-		environment = append(environment, "DOCKER_DEFAULT_PLATFORM="+platform)
-	}
+
 	server := sshtest.New(t)
 	server.Password = "e2e-password"
 	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -55,7 +53,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	}
 	host, port, _ := server.Start()
 
-	f := newManagedTestFixture(t, true, &managedSSHAdapter{verify: sshhost.VerifyHost, config: ManagedServeConfig{MaxRemoteWallSeconds: 300}})
+	f := newManagedTestFixture(t, true, newManagedSSHAdapter(ManagedServeConfig{MaxRemoteWallSeconds: 300}))
 	request, _ := json.Marshal(map[string]any{"provider_type": "ssh", "label": "Local Docker", "credentials": map[string]string{
 		"host": host, "port": fmt.Sprint(port), "username": server.User, "password": server.Password}})
 	op, err := f.services.connections.Submit(ctx, f.actor, "app", "", "ssh-e2e-connection", request)
@@ -66,9 +64,23 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 		t.Fatal("verify connection", err)
 	}
 	connection, err := f.services.connections.Get(ctx, f.actor, "app", op.ConnectionID)
-	if err != nil || connection.Selection == nil {
-		op, _ = f.services.connections.Operation(ctx, f.actor, "app", op.ID)
-		t.Fatalf("connection not verified: %+v %+v", connection, op)
+	if err != nil || connection.Authentication != "verified" || connection.Host == nil {
+		t.Fatalf("connection not verified: %+v %v", connection, err)
+	}
+	install, err := f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-e2e-image-install", []byte(fmt.Sprintf(`{"action":"install_image","expected_revision":%d}`, connection.Revision)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.services.connections.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := f.services.connections.Operation(ctx, f.actor, "app", install.ID)
+	if err != nil || installed.Status != "succeeded" {
+		t.Fatalf("installation failed: %+v %v", installed, err)
+	}
+	connection, err = f.services.connections.Get(ctx, f.actor, "app", op.ConnectionID)
+	if err != nil || connection.Selection == nil || connection.Host.Image == nil || !sshhost.ValidImageID(connection.Host.Image.ID) {
+		t.Fatalf("installed image did not publish a selection: %+v %v", connection, err)
 	}
 
 	project := t.TempDir()

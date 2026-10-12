@@ -41,8 +41,8 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 				remote.WriteString(command)
 				remote.Write(input)
 				mu.Unlock()
-				if strings.HasSuffix(command, "'version' '--format' '{{.Server.Os}}'") {
-					_, _ = io.WriteString(stdout, "linux\n")
+				if strings.HasSuffix(command, "'version' '--format' '{{.Server.Os}}/{{.Server.Arch}}'") {
+					_, _ = io.WriteString(stdout, "linux/amd64\n")
 					return 0
 				}
 				var in io.Reader
