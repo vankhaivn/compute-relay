@@ -217,6 +217,9 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 			return operations.ErrBusy
 		}
 		if c.Kind == domain.OperationRetryCompute {
+			if target.Request.Spec().Expired(c.Now) {
+				return admission.ErrExpired
+			}
 			proof, err := retryInputs(ctx, tx, c.WorkspaceID, allowed, c.JobID, c.Request.AttemptID)
 			if err != nil {
 				return err

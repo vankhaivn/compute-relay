@@ -33,6 +33,7 @@ type Scenario struct {
 	Files            []File
 	PreparationReady bool
 	GPU              domain.CapabilitySupport
+	AbsoluteDeadline bool // Declared only by tests of controller-side deadline gates.
 }
 
 func DefaultScenario() Scenario {
@@ -124,9 +125,13 @@ func (p *Basic) Describe() provider.Descriptor {
 	for _, name := range []domain.CapabilityName{domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
 		domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
 		domain.CapabilityStrongIdentity, domain.CapabilityGPU, domain.CapabilityRemoteCancellation,
-		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions} {
+		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline} {
 		support := domain.CapabilitySupportSupported
 		switch name {
+		case domain.CapabilityAbsoluteDeadline:
+			if !p.backend.scenario.AbsoluteDeadline {
+				support = domain.CapabilitySupportUnsupported
+			}
 		case domain.CapabilityGPU:
 			support = p.backend.scenario.GPU
 		case domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions:

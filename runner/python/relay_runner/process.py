@@ -124,8 +124,9 @@ def kill_group(pid, sig):
         pass
 
 
-def run(command, cwd, env, deadline, grace, stdout, stderr, cancelled):
-    if cancelled() or time.monotonic() >= deadline:
+def run(command, cwd, env, deadline, grace, stdout, stderr, cancelled, bound=None):
+    expired = lambda: time.monotonic() >= deadline or bool(bound and bound.expired())
+    if cancelled() or expired():
         return Outcome(None, not cancelled(), cancelled(), True)
     # An argument vector and a replacement environment: never shell=True or inherited stdin.
     try:
@@ -135,7 +136,10 @@ def run(command, cwd, env, deadline, grace, stdout, stderr, cancelled):
     except OSError as exc:
         raise Failure("COMMAND_FAILED", "execution", "Could not launch the declared command") from exc
     timed_out, was_cancelled, stopping, killed = False, False, None, False
+    watcher = None
     try:
+        if bound is not None:
+            watcher = bound.watch(proc.pid)
         with selectors.DefaultSelector() as selector:
             for pipe, sink in ((proc.stdout, stdout), (proc.stderr, stderr)):
                 os.set_blocking(pipe.fileno(), False)
@@ -143,9 +147,9 @@ def run(command, cwd, env, deadline, grace, stdout, stderr, cancelled):
             while True:
                 now = time.monotonic()
                 code = proc.poll()
-                if stopping is None and (code is not None or cancelled() or now >= deadline):
+                if stopping is None and (code is not None or cancelled() or expired()):
                     was_cancelled = cancelled()
-                    timed_out = code is None and now >= deadline and not was_cancelled
+                    timed_out = expired() and not was_cancelled and (code is None or bound is not None)
                     kill_group(proc.pid, signal.SIGTERM)
                     stopping = now
                 if stopping is not None:
@@ -175,6 +179,13 @@ def run(command, cwd, env, deadline, grace, stdout, stderr, cancelled):
     finally:
         # Also clean up on disk-write errors or an unexpected supervisor exception.
         kill_group(proc.pid, signal.SIGKILL)
+        if watcher is not None:
+            watcher.terminate()
+            try:
+                watcher.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                watcher.kill()
+                watcher.wait(timeout=0.2)
         for pipe in (proc.stdout, proc.stderr):
             if not pipe.closed:
                 pipe.close()

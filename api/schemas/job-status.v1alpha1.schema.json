@@ -122,6 +122,12 @@
     },
     "preparation": {
       "$ref": "#/$defs/preparation"
+    },
+    "execution_deadline": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "Immutable UTC setup/payload deadline, in whole seconds. Requires absolute_execution_deadline support. The earlier absolute or relative work budget wins; finalization is separately bounded."
     }
   },
   "$defs": {

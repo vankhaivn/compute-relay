@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "api/contract-manifest.json",
-      "sha256": "b21d20db240b438318157a5b37836d84bbcb8538f5b7874819d3e8239ec2cb72",
-      "bytes": 10847
+      "sha256": "2d734b6cd54f2ffc3e2a8077447b29bc4f054a831ce903022007512ba7d0b638",
+      "bytes": 10944
     },
     {
       "path": "api/examples/artifact.metadata.valid.json",
@@ -472,6 +472,11 @@
       "bytes": 1159
     },
     {
+      "path": "api/examples/invalid/job.deadline-offset.json",
+      "sha256": "900aa7b6a98529950fd1d113eb83b338aa5045d3fb9a49954158ea23877ab1b0",
+      "bytes": 1214
+    },
+    {
       "path": "api/examples/invalid/job.empty-command.json",
       "sha256": "730bf294ebcedc23455cc58414f99f056eeda96b4de53614d39d0c53b9e71c16",
       "bytes": 1084
@@ -627,6 +632,11 @@
       "bytes": 312
     },
     {
+      "path": "api/examples/job.deadline.valid.json",
+      "sha256": "497666880e8981989dde9a3ce9678144303d8695283fe45963fd81d65f3de359",
+      "bytes": 1209
+    },
+    {
       "path": "api/examples/job.manual-collection.valid.json",
       "sha256": "d991ee9922b2a87f384e3d9c64a13985938bf47060721341b8db1c77974cedad",
       "bytes": 1192
@@ -703,8 +713,8 @@
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",
-      "sha256": "854ed1e3efd5139215e25f7c75b695a99bf8a771adf937203613835acea93cc3",
-      "bytes": 8949
+      "sha256": "ac07da28e941b0d2fd99f7fa0eec31b69f52894dffebfb7a43a0785887739811",
+      "bytes": 8988
     },
     {
       "path": "api/schemas/connection-operation.v1alpha1.schema.json",
@@ -753,13 +763,13 @@
     },
     {
       "path": "api/schemas/job-spec.v1alpha1.schema.json",
-      "sha256": "50a4ec463ab837bbe77b8ecd91f9cc34b823ab29e39ca399f21b8a0430d34365",
-      "bytes": 8464
+      "sha256": "6838ba4d7f5402449f2f75229f011f103316b976ff5e2245e398f675ebe688a9",
+      "bytes": 8865
     },
     {
       "path": "api/schemas/job-status.v1alpha1.schema.json",
-      "sha256": "b75d93f1ad368c6a910a05d226aabf2eb5b10e810dd0136f6c8861e90f0216e5",
-      "bytes": 12756
+      "sha256": "cf13d87f3f142da5423981cfc0b2d10f38477cf74ef99c0ce9578164c3ca7b6e",
+      "bytes": 13133
     },
     {
       "path": "api/schemas/job-validation.v1alpha1.schema.json",

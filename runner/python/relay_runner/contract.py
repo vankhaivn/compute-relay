@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from datetime import datetime
 
 VERSION = "compute-relay/runner/v1"
 RUNNER_VERSION = "0.1.0"
@@ -175,8 +176,16 @@ def validate(m):
         require(len(resources) == 1)
     fields(m["network"], ("remote_internet",))
     require(m["network"]["remote_internet"] in ("disabled", "required"))
-    fields(m["timeouts"], ("remote_wall_seconds", "setup_seconds", "finalization_grace_seconds"))
+    fields(m["timeouts"], ("remote_wall_seconds", "setup_seconds", "finalization_grace_seconds"), ("execution_deadline",))
     t = m["timeouts"]
+    if "execution_deadline" in t:
+        deadline = t["execution_deadline"]
+        require(type(deadline) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", deadline))
+        try:
+            parsed = datetime.strptime(deadline, "%Y-%m-%dT%H:%M:%SZ")
+            require(parsed.year > 1)
+        except ValueError as exc:
+            raise Failure() from exc
     for key, maximum in (("remote_wall_seconds", 86400), ("setup_seconds", 21600), ("finalization_grace_seconds", 3600)):
         integer(t[key], 1, maximum)
     require(t["setup_seconds"] + t["finalization_grace_seconds"] < t["remote_wall_seconds"])

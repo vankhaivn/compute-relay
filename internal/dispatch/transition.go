@@ -27,7 +27,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 	next := state
 	var event domain.EventType
 	switch a.Kind {
-	case PreventDispatch:
+	case PreventDispatch, ExpireDispatch:
 		if old.SubmitStarted || state.Orchestration.Terminal() || state.Execution != domain.ExecutionNotSubmitted || (state.RemoteActivity != domain.RemoteActivityNotStarted && state.RemoteActivity != domain.RemoteActivityInactive) {
 			return Journal{}, state, "", ErrConflict
 		}
@@ -36,6 +36,16 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		next.Cancellation = domain.CancellationPrevented
 		next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
 		event = domain.EventCancellationRequested
+		if a.Kind == ExpireDispatch {
+			if state.Cancellation != domain.CancellationNotRequested {
+				return Journal{}, state, "", ErrConflict
+			}
+			next.Orchestration = domain.OrchestrationTimedOut
+			next.Cancellation = domain.CancellationNotRequested
+			next.DeadlineExceeded = true
+			j.Problem = problem(domain.CodeRemoteTimeout, false)
+			event = domain.EventReconciliationDeferred
+		}
 	case RequestReconciliation:
 		if state.Execution.Terminal() || state.Orchestration.Terminal() || old.Problem != nil && (old.Problem.Code == domain.CodeRemoteIdentityMismatch || old.Problem.Code == domain.CodePrivateStagingUnavailable) {
 			return Journal{}, state, "", ErrConflict
@@ -137,7 +147,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			code := domain.CodeProviderRejected
 			if a.Submission.Problem != nil {
 				switch a.Submission.Problem.Code {
-				case domain.CodeProviderRateLimited, domain.CodeQuotaExhausted, domain.CodeProviderAuthFailed, domain.CodeProviderAccessDenied:
+				case domain.CodeProviderRateLimited, domain.CodeQuotaExhausted, domain.CodeProviderAuthFailed, domain.CodeProviderAccessDenied, domain.CodeRemoteTimeout:
 					code = a.Submission.Problem.Code
 				}
 			}
@@ -150,6 +160,10 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			next.Execution = domain.ExecutionNotSubmitted
 			next.RemoteActivity = domain.RemoteActivityInactive
 			next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+			if code == domain.CodeRemoteTimeout {
+				next.Orchestration = domain.OrchestrationTimedOut
+				next.DeadlineExceeded = true
+			}
 			if state.Cancellation != domain.CancellationNotRequested {
 				// Explicit non-acceptance, not a not-found lookup, proves prevention.
 				next.Orchestration = domain.OrchestrationCancelled
@@ -279,6 +293,9 @@ func problem(code domain.ErrorCode, may bool) *domain.Problem {
 	message := "Provider observation is unresolved; no new execution was requested."
 	action := domain.RecommendedActionReconcile
 	switch code {
+	case domain.CodeRemoteTimeout:
+		p := provider.Problem(code, domain.FailureStageExecution, "Absolute execution deadline has expired; no new execution was requested.").WithDetail(domain.ReasonDetail, "absolute_deadline_expired")
+		return &p
 	case domain.CodeInputFetchFailed, domain.CodeInputNotFound, domain.CodeInputDigestMismatch, domain.CodeInputTooLarge:
 		stage = domain.FailureStageInputPreparation
 		message = "Input snapshot could not be prepared or verified."

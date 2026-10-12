@@ -202,7 +202,6 @@ func (f *dispatchFixture) attach(t testing.TB, s *Store, fetch dispatch.HTTPSFet
 // The separate executable smoke goes through the actual auth/admission services.
 func (f *dispatchFixture) seed(t testing.TB, w domain.WorkspaceID, number int, url bool, collectionMode ...string) scheduler.Identity {
 	t.Helper()
-	ctx := context.Background()
 	raw := dispatchJSON
 	if len(collectionMode) == 1 {
 		raw = strings.Replace(raw, `"name":"dispatch-fixture"`, `"name":"dispatch-fixture","result_collection":"`+collectionMode[0]+`"`, 1)
@@ -210,6 +209,12 @@ func (f *dispatchFixture) seed(t testing.TB, w domain.WorkspaceID, number int, u
 	if url {
 		raw = strings.Replace(raw, `"kind":"object","object_id":"data"`, `"kind":"https","url":"https://example.com/input?name=private-source-canary"`, 1)
 	}
+	return f.seedRaw(t, w, number, url, raw)
+}
+
+func (f *dispatchFixture) seedRaw(t testing.TB, w domain.WorkspaceID, number int, url bool, raw string) scheduler.Identity {
+	t.Helper()
+	ctx := context.Background()
 	req, err := admission.Parse([]byte(raw))
 	if err != nil {
 		t.Fatal(err)

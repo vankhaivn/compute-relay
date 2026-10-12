@@ -9,7 +9,8 @@
       "schema": "schemas/job-spec.v1alpha1.schema.json",
       "valid": [
         "examples/job.valid.json",
-        "examples/job.manual-collection.valid.json"
+        "examples/job.manual-collection.valid.json",
+        "examples/job.deadline.valid.json"
       ],
       "invalid": [
         "examples/invalid/job.unknown-field.json",
@@ -17,7 +18,8 @@
         "examples/invalid/job.empty-command.json",
         "examples/invalid/job.cpu-with-gpu-requirement.json",
         "examples/invalid/job.collection-null.json",
-        "examples/invalid/job.collection-unknown.json"
+        "examples/invalid/job.collection-unknown.json",
+        "examples/invalid/job.deadline-offset.json"
       ]
     },
     {

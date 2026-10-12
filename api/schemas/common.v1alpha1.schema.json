@@ -371,6 +371,7 @@
         "logs_after_completion",
         "quota_reporting",
         "execution_timeout",
+        "absolute_execution_deadline",
         "remote_network_control",
         "strong_execution_identity",
         "custom_container",

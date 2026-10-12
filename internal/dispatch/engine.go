@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -162,6 +163,11 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			resultErr = yieldErr
 		}
 	}()
+	// Expiry prohibits a future start; it cannot establish that possible execution
+	// stopped. Submitting and submitted attempts retain observation-only recovery.
+	if !work.Journal.SubmitStarted && work.Job.Request.Spec().Expired(e.clock.Now()) && work.Job.Attempt.State.Cancellation == domain.CancellationNotRequested {
+		return s.commit(Action{Kind: ExpireDispatch})
+	}
 	binding := provider.BindingSnapshot{Binding: work.Job.Profile.Binding, AccountScope: work.Job.Profile.AccountScope, CredentialRef: work.Job.Profile.CredentialRef}
 	p, err := e.providers.Resolve(binding)
 	if err != nil {
@@ -199,9 +205,15 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return s.fail(domain.CodeUnsupportedCapability)
 		}
 		if err = s.consumeAuthorization(); err != nil {
+			if errors.Is(err, admission.ErrExpired) {
+				return s.commit(Action{Kind: ExpireDispatch})
+			}
 			return err
 		}
 		if err = s.commit(Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prepID}); err != nil {
+			if errors.Is(err, admission.ErrExpired) {
+				return s.commit(Action{Kind: ExpireDispatch})
+			}
 			return err
 		}
 		// This invocation alone received the successful new intent commit. Restart paths
@@ -209,6 +221,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		observed := provider.WithPreparationProgress(ctx, s.progress)
 		prepared, err := control(observed, e.config.PreparationTimeout, func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
 		if err != nil {
+			if errors.Is(err, admission.ErrExpired) {
+				return s.commit(Action{Kind: ExpireDispatch})
+			}
 			return s.fail(domain.CodeStagingFailed)
 		}
 		return s.prepared(prepared)
@@ -233,6 +248,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.prepared(*seen.Prepared)
 	case Ready:
 		if err = s.commit(Action{Kind: BeginSubmission}); err != nil {
+			if errors.Is(err, admission.ErrExpired) {
+				return s.commit(Action{Kind: ExpireDispatch})
+			}
 			return err
 		}
 		prepared := *s.work().Journal.Prepared

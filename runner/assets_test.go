@@ -8,7 +8,7 @@ import (
 
 func TestSourcesMatchLockedRunnerAndAreIndependent(t *testing.T) {
 	first, err := Sources()
-	if err != nil || len(first) != 5 {
+	if err != nil || len(first) != 6 {
 		t.Fatal("locked runner unavailable", err)
 	}
 	second, err := Sources()

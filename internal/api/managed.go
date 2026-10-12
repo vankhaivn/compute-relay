@@ -327,6 +327,8 @@ func connectionError(w http.ResponseWriter, r *http.Request, err error) {
 
 func authorizationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, admission.ErrExpired):
+		jobError(w, r, err)
 	case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, auth.ErrForbidden):
 		mapError(w, r, err)
 	case errors.Is(err, admission.ErrKey):

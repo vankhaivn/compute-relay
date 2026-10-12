@@ -84,6 +84,9 @@ func jobStatus(record admission.Record) map[string]any {
 	if record.Collection != nil {
 		status["collection"] = record.Collection
 	}
+	if deadline := record.Request.Spec().Timeouts.ExecutionDeadline; deadline != "" {
+		status["execution_deadline"] = deadline
+	}
 	if record.Preparation != nil {
 		status["preparation"] = record.Preparation
 	}
@@ -113,6 +116,8 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "job not found or not visible")
 	case errors.Is(err, admission.ErrRequirements):
 		respondError(w, r, 422, domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "job exceeds the resolved profile policy")
+	case errors.Is(err, admission.ErrExpired):
+		respondError(w, r, 422, domain.CodeRemoteTimeout, domain.FailureStageExecution, "absolute execution deadline has expired")
 	case errors.Is(err, admission.ErrLimit):
 		w.Header().Set("Retry-After", "1")
 		respondError(w, r, 429, domain.CodeRequestLimitExceeded, domain.FailureStageLocalRuntime, "local outstanding job limit reached")
