@@ -38,6 +38,9 @@ Offline tests are not live-provider evidence. Live evidence so far:
   [Kaggle feasibility](development/research/kaggle-feasibility.md).
 - A finite CPU probe on the native companion qualified running log delivery, original-cursor
   reconnect and complete ordered replay.
+- A 2026-10-12 password-based SSH run on a macOS Intel host over LAN, using Docker 29.6.1
+  with Linux amd64 containers, qualified CPU execution, recovery after a Relay restart,
+  bounded logs, verified artifacts, confirmed cancellation and explicit container cleanup.
 
 Another account, environment or workload needs its own scoped qualification before support is
 claimed. Use the [validation checklist](development/validation-checklist.md).
@@ -50,8 +53,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 - Explicit attempt-scoped remote cleanup is admitted and applied by provider-mode workers. The SSH
   host adapter deletes the attempt's stopped container; Kaggle cleanup requests settle as failed
   and preserve resources. Nothing is cleaned up automatically.
-- The SSH host provider has offline tests and local Docker engine runs only; no operator host is
-  qualified yet.
+- SSH host qualification covers password access on one macOS Intel host over LAN. Live key
+  authentication, Tailscale access, host sleep, Docker-engine restarts and Linux VPS hosts remain
+  unqualified.
 - Direct HTTPS input is not composed into `serve`; upload immutable inputs first.
 
 Remaining product work is in the [implementation plan](development/implementation-plan.md).
