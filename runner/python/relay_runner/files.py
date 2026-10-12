@@ -9,6 +9,7 @@ import tarfile
 import zlib
 
 from .contract import BUFFER, DIGEST, Failure, disjoint, fields, integer, relative, require, strict_json
+from .secrets import SecretFound
 
 
 def open_file(root, name):
@@ -34,7 +35,7 @@ def stable(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
-def hash_file(source, limit, check, destination=None):
+def hash_file(source, limit, check, destination=None, scan=None):
     before = os.fstat(source.fileno())
     if before.st_size > limit:
         raise Failure("INPUT_TOO_LARGE", "input_preparation", "File exceeds byte limit")
@@ -47,6 +48,8 @@ def hash_file(source, limit, check, destination=None):
         size += len(data)
         if size > limit:
             raise Failure("INPUT_TOO_LARGE", "input_preparation", "File exceeds byte limit")
+        if scan:
+            scan(data)
         digest.update(data)
         if destination is not None:
             destination.write(data)
@@ -173,7 +176,7 @@ def atomic_json(path, value):
         os.close(fd)
 
 
-def artifacts(root, outputs, limits, check):
+def artifacts(root, outputs, limits, check, redactor=None):
     require(root.is_dir() and not root.is_symlink())
     result, total, visited = [], 0, 0
     for output in outputs:
@@ -223,8 +226,17 @@ def artifacts(root, outputs, limits, check):
         for name in sorted(names):
             check()
             require(len(result) < limits["artifact_files"])
-            with open_file(root, name) as src:
-                size, digest = hash_file(src, min(limits["artifact_bytes"] - total, output.get("max_bytes", limits["artifact_bytes"]) - own_bytes), check)
+            try:
+                if redactor and redactor.contains(name.encode()):
+                    raise SecretFound()
+                with open_file(root, name) as src:
+                    size, digest = hash_file(src, min(limits["artifact_bytes"] - total, output.get("max_bytes", limits["artifact_bytes"]) - own_bytes), check,
+                                             scan=redactor.scanner() if redactor else None)
+            except SecretFound:
+                (root / name).unlink()
+                if output["required"]:
+                    raise Failure("ARTIFACT_COLLECTION_FAILED", "results", "Required output contains protected material") from None
+                continue
             result.append({"path": name, "bytes": size, "sha256": digest})
             total += size
             own_bytes += size

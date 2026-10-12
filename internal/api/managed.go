@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // connections admits durable local administration only. Account verification and
@@ -327,6 +328,8 @@ func connectionError(w http.ResponseWriter, r *http.Request, err error) {
 
 func authorizationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, workloadsecret.ErrRequest), errors.Is(err, workloadsecret.ErrNotFound), errors.Is(err, workloadsecret.ErrConflict), errors.Is(err, workloadsecret.ErrUnavailable), errors.Is(err, workloadsecret.ErrState), errors.Is(err, workloadsecret.ErrLimit):
+		workloadSecretError(w, r, err)
 	case errors.Is(err, admission.ErrExpired), errors.Is(err, admission.ErrLimit):
 		jobError(w, r, err)
 	case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, auth.ErrForbidden):

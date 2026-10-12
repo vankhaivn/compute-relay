@@ -12,7 +12,7 @@ import (
 func TestOperationalCapabilitiesAreIndependentAndNotLiveEvidence(t *testing.T) {
 	c := testConfig(t)
 	first, err := OperationalDescriptor(c)
-	if err != nil || len(first.Capabilities) != 14 {
+	if err != nil || len(first.Capabilities) != 15 {
 		t.Fatal("missing capability inventory", err)
 	}
 	seen := map[domain.CapabilityName]bool{}
@@ -24,6 +24,9 @@ func TestOperationalCapabilitiesAreIndependentAndNotLiveEvidence(t *testing.T) {
 	}
 	if first.Support(domain.CapabilityRemoteCancellation) != domain.CapabilitySupportUnsupported || first.Support(domain.CapabilityLogsWhileRunning) != domain.CapabilitySupportUnknown || first.Support(domain.CapabilityExecutionTimeout) != domain.CapabilitySupportUnknown || first.Support(domain.CapabilityBatchExecution) != domain.CapabilitySupportUnknown {
 		t.Fatal("unverified capability became available")
+	}
+	if first.Support(domain.CapabilityEphemeralSecrets) != domain.CapabilitySupportUnsupported {
+		t.Fatal("unsupported workload secret delivery advertised")
 	}
 	for i := range first.Capabilities {
 		first.Capabilities[i].Reason = "changed"

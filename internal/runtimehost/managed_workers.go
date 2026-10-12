@@ -20,6 +20,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // ManagedServeConfig installs provider policy, not an account or a compute permit.
@@ -67,6 +68,7 @@ func (c ManagedServeConfig) accelerator() string {
 }
 
 type managedServices struct {
+	secrets        *workloadsecret.Service
 	connections    *connections.Service
 	authorizations *executionauth.Service
 	dispatcher     *dispatch.Engine
@@ -117,6 +119,15 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 	if vault == nil {
 		return result, nil // Unsupported protected storage never falls back or fails old jobs.
 	}
+	pool, err := h.workloadSecretPool(ctx)
+	if err != nil {
+		return nil, err
+	}
+	permits.WithSecrets(pool)
+	result.secrets, err = workloadsecret.New(h.access, managedSecretRepository{h.store}, pool, clock{})
+	if err != nil {
+		return nil, ErrState
+	}
 	resolver := &managedSnapshotResolver{ctx: ctx, read: h.store.ReadManagedBinding}
 	result.resolver = resolver
 	resolver.make = func(binding connections.RuntimeBinding) (provider.Provider, error) {
@@ -128,6 +139,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 	if err != nil {
 		return nil, ErrState
 	}
+	result.dispatcher.WithSecrets(pool)
 	collectionConfig := collection.DefaultConfig()
 	collectionConfig.Workers = config.MaxWorkers
 	result.collector, err = collection.New(managedCollectionRepository{h.store}, resolver, h.results, clock{}, collectionConfig)

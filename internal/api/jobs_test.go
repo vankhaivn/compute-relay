@@ -150,7 +150,7 @@ func wireSchema(t *testing.T, name string, data []byte) {
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.AssertFormat()
-	for _, file := range []string{"common", name} {
+	for _, file := range []string{"common", "workload-secrets", name} {
 		b, err := schemas.Files.ReadFile(file + ".v1alpha1.schema.json")
 		if err != nil {
 			t.Fatal(err)

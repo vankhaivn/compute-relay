@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
+	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 func consumeGatePreparation(ctx context.Context, tx *sql.Tx, work *dispatch.Work, now time.Time) error {
@@ -69,6 +71,30 @@ func commitGateStep(ctx context.Context, tx *sql.Tx, work *dispatch.Work, action
 		if g.Start == nil || g.StartReceipt == nil || g.StartReceipt.Status != executionauth.Granted || work.Journal.Prepared == nil || g.Start.Validate(*work.Journal.Prepared) != nil {
 			return dispatch.ErrPolicy
 		}
+		secretID := domain.OperationID("")
+		if g.Start.Secrets != nil {
+			secretID = g.Start.Secrets.AuthorizationID
+		}
+		secret, err := secretForStart(ctx, tx, work.Job, secretID, g.ReadyRevision, g.Start.ExecutionDeadline, now)
+		if err != nil {
+			return err
+		}
+		if secret != nil {
+			if !action.SecretsAvailable {
+				return workloadsecret.ErrUnavailable
+			}
+			result, err := tx.ExecContext(ctx, `UPDATE workload_secret_authorizations SET consumed_at=? WHERE workspace_id=? AND authorization_id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at_ms>?`, now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(secretID), now.UnixMilli())
+			if err != nil {
+				return dbError(err)
+			}
+			count, err := result.RowsAffected()
+			if err != nil {
+				return dbError(err)
+			}
+			if count != 1 {
+				return workloadsecret.ErrUnavailable
+			}
+		}
 		result, err := tx.ExecContext(ctx, `UPDATE start_authorizations SET consumed_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND consumed_at IS NULL`, now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID))
 		if err != nil {
 			return dbError(err)
@@ -80,7 +106,7 @@ func commitGateStep(ctx context.Context, tx *sql.Tx, work *dispatch.Work, action
 		if count != 1 {
 			return dispatch.ErrConflict
 		}
-		copy := *g.Start
+		copy := g.Start.Clone()
 		action.StartAuthorization = &copy
 		g.StartReceipt.Status, g.StartReceipt.ConsumedAt = executionauth.Consumed, &now
 	case dispatch.ExpireDispatch:

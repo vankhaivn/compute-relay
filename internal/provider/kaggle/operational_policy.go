@@ -23,7 +23,7 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting,
 		domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
 		domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
-		domain.CapabilityRetainedSessions,
+		domain.CapabilityRetainedSessions, domain.CapabilityEphemeralSecrets,
 	}
 	d := provider.Descriptor{Type: "kaggle", InstanceID: domain.ProviderInstanceID(c.InstanceID), Version: ClientVersion + "/sdk-" + SDKVersion}
 	for _, name := range names {
@@ -34,7 +34,7 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 		case domain.CapabilityRemoteCancellation:
 			cap.Support = domain.CapabilitySupportUnsupported
 			cap.Reason = "this batch reference has no verified kernel-session ID; manual cancellation is required"
-		case domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions:
+		case domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityEphemeralSecrets:
 			cap.Support = domain.CapabilitySupportUnsupported
 			cap.Reason = "not implemented by this finite batch adapter"
 		case domain.CapabilityLogsAfterCompletion:

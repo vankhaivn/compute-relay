@@ -168,6 +168,7 @@ const (
 )
 
 type Action struct {
+	SecretsAvailable   bool
 	Kind               Kind
 	Plan               *provider.Plan
 	PreparationID      domain.OperationID

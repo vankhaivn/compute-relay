@@ -65,6 +65,9 @@
         },
         "authorize_compute": {
           "const": true
+        },
+        "secret_authorization_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
         }
       }
     },
@@ -215,9 +218,14 @@
               "start",
               "reconcile",
               "cancel",
-              "cleanup"
+              "cleanup",
+              "supply_secrets",
+              "resupply_secrets"
             ]
           }
+        },
+        "secrets": {
+          "$ref": "workload-secrets.v1alpha1.schema.json#/$defs/Readiness"
         }
       }
     }

@@ -137,6 +137,17 @@ stopped; it does not start workload code. A missing or changed prepared resource
 explicitly admitted attempt. Relay does not restage it or pull an image automatically. See
 [preparation gates](preparation-gates.md) for the readiness and start requests.
 
+Hosts advertising `ephemeral_workload_secrets` can supply declared slot values after readiness.
+Values are base64 in the request and held only in process memory and a private 128 KiB tmpfs. Relay
+never stores them in the durable job or SQLite, or injects them through argv or environment. The
+`file_and_local_process_arguments` exposure lets the authorized workload pass a value to its own
+local tool arguments. Limits are eight slots, 8 KiB each, 32 KiB total and at most 24 hours,
+bounded by the execution deadline. After a Relay restart before start, explicitly replay the exact
+supply request; after consumption, replay cannot restore bytes and there is no automatic
+reinjection. Exact-known-value log and artifact filtering is best-effort protection against
+accidental exposure, not malicious encoding.
+See [workload secrets](workload-secrets.md) for the request and receipt contract.
+
 Jobs run as an unprivileged user with no network unless the connection allows internet and the
 job requires it. CPU, memory and process limits are frozen with the selection. Only Python's
 standard library is preinstalled; declare pinned wheels in jobs that need more and whose network

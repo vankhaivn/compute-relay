@@ -20,6 +20,9 @@ import (
 // the standard library; jobs that need more install pinned wheels during setup.
 const StandardImage = "python:3.11-slim-bookworm@sha256:0a310eeecf4e1f5a0743f9a6520c90c88d089c903ca5fd283f501e3a805f5f89"
 
+const secretTmpfsPath = "/relay/secrets"
+const secretTmpfsOptions = "rw,noexec,nosuid,nodev,size=131072,mode=0700,uid=65534,gid=65534"
+
 // DockerCandidates are checked in order when no explicit Docker path is configured.
 // Non-interactive SSH sessions on macOS omit /usr/local/bin from PATH.
 var DockerCandidates = []string{
@@ -179,19 +182,21 @@ type containerInfo struct {
 		Cmd        []string          `json:"Cmd"`
 		Entrypoint []string          `json:"Entrypoint"`
 		WorkingDir string            `json:"WorkingDir"`
+		Env        []string          `json:"Env"`
 	} `json:"Config"`
 	HostConfig struct {
-		NetworkMode   string   `json:"NetworkMode"`
-		PidMode       string   `json:"PidMode"`
-		Privileged    bool     `json:"Privileged"`
-		CapDrop       []string `json:"CapDrop"`
-		CapAdd        []string `json:"CapAdd"`
-		SecurityOpt   []string `json:"SecurityOpt"`
-		Binds         []string `json:"Binds"`
-		Memory        int64    `json:"Memory"`
-		MemorySwap    int64    `json:"MemorySwap"`
-		NanoCPUs      int64    `json:"NanoCpus"`
-		PidsLimit     int64    `json:"PidsLimit"`
+		Tmpfs         map[string]string `json:"Tmpfs"`
+		NetworkMode   string            `json:"NetworkMode"`
+		PidMode       string            `json:"PidMode"`
+		Privileged    bool              `json:"Privileged"`
+		CapDrop       []string          `json:"CapDrop"`
+		CapAdd        []string          `json:"CapAdd"`
+		SecurityOpt   []string          `json:"SecurityOpt"`
+		Binds         []string          `json:"Binds"`
+		Memory        int64             `json:"Memory"`
+		MemorySwap    int64             `json:"MemorySwap"`
+		NanoCPUs      int64             `json:"NanoCpus"`
+		PidsLimit     int64             `json:"PidsLimit"`
 		RestartPolicy struct {
 			Name string `json:"Name"`
 		} `json:"RestartPolicy"`
@@ -221,6 +226,7 @@ func (d docker) inspect(ctx context.Context, name string) (containerInfo, bool, 
 // containerSpec is the complete hardened create request for one attempt. CPUs and
 // MemoryBytes are optional operator limits.
 type containerSpec struct {
+	SecretTmpfs bool
 	Name        string
 	Image       string
 	Platform    string
@@ -240,6 +246,9 @@ func (s containerSpec) args() []string {
 	args := []string{"container", "create", "--name", s.Name, "--user", "65534:65534", "--network", network,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", strconv.Itoa(s.PIDs),
 		"--restart", "no", "--stop-timeout", "30", "--workdir", "/relay"}
+	if s.SecretTmpfs {
+		args = append(args, "--tmpfs", secretTmpfsPath+":"+secretTmpfsOptions)
+	}
 	if s.Platform != "" {
 		args = append(args, "--platform", s.Platform)
 	}

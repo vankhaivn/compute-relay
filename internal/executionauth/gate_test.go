@@ -37,6 +37,11 @@ func TestGateRequestsRejectImplicitAndMutableAuthority(t *testing.T) {
 		})
 	}
 	p, _ := ParsePrepare([]byte(prepare))
+	for _, value := range []string{`""`, `null`, `"bad/id"`} {
+		if _, err := ParseStart([]byte(strings.Replace(start, `"attempt_id":`, `"secret_authorization_id":`+value+`,"attempt_id":`, 1))); err == nil {
+			t.Fatal("explicit invalid secret authorization accepted")
+		}
+	}
 	original := GateDigest("prepare", "job_1", p)
 	p.MaxPreparationSeconds++
 	if original == GateDigest("prepare", "job_1", p) || original == GateDigest("prepare", "job_2", p) {

@@ -17,6 +17,7 @@ from .contract import MAX_MANIFEST, RUNNER_VERSION, Failure, apply_start, input_
 from .files import artifacts, atomic_json, copy_verified, extract_bundle, open_file
 from .process import Log, run
 from .deadline import Bound, epoch, supervise
+from . import secrets
 
 # Runs in an isolated interpreter, not the workload's module search path. Its stdout is
 # ordinary bounded diagnostics; the structured observation has a separate bounded file.
@@ -140,6 +141,7 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False, auth
                           deadline_bound=work_bound.reason, deadline_poll_seconds=0.05, termination_grace_seconds=1,
                           finalization_grace_seconds=budgets["finalization_grace_seconds"])
     logs = {name: Log(root / ("control/" + name + ".log"), limits[name + "_bytes"]) for name in ("stdout", "stderr")}
+    secret_values, redactor = {}, secrets.Redactor()
 
     def check(deadline=setup_end, finalizing=False):
         if cancelled():
@@ -190,6 +192,16 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False, auth
 
     try:
         check()
+        if "workload_secrets" in manifest:
+            require(authorization is not None and "secrets" in authorization)
+            secret_values = secrets.wait(authorization, lambda: check(work_end))
+            redactor = secrets.Redactor(secret_values.values())
+            for log in logs.values():
+                log.redactor = redactor
+            provenance["workload_secrets"] = {"delivery": "one_shot_tmpfs",
+                "authorization_id": authorization["secrets"]["authorization_id"],
+                "expires_at": authorization["secrets"]["expires_at"], "files_removed": False}
+            check()
         if network_mode != manifest["network"]["remote_internet"]:
             raise Failure("UNSUPPORTED_CAPABILITY", "validation", "Adapter network mode does not satisfy the job")
         if input_digest(manifest["inputs"]) != manifest["input_manifest_sha256"]:
@@ -204,6 +216,8 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False, auth
         env.update({"CC_JOB_ID": manifest["job_id"], "CC_ATTEMPT_ID": manifest["attempt_id"],
                     **{"CC_" + key + "_DIR": str(root / name) for key, name in (("CODE", "code"), ("INPUT", "inputs"), ("OUTPUT", "outputs"), ("SCRATCH", "scratch"))},
                     "CC_EXECUTION_MANIFEST_PATH": str(root / "control/execution-manifest.json")})
+        if secret_values:
+            env["CC_SECRET_DIR"] = str(secrets.SECRET_ROOT)
         atomic_json(root / "control/execution-manifest.json", manifest)
         cwd = root / "code" / manifest["execution"].get("working_directory", ".")
         require(cwd.is_dir())  # Only validated, link-free extraction has populated code.
@@ -249,8 +263,16 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False, auth
     if result["error"] is not None:
         result["error"]["details"] = {"runner_phase": phase}
     try:
+        secrets.remove(authorization)
+        if secret_values:
+            provenance["workload_secrets"]["files_removed"] = True
+    except OSError:
+        if result["error"] is None:
+            result["phase"] = "failed"
+            result["error"] = Failure("COMMAND_FAILED", "execution", "Workload secret cleanup unavailable").wire()
+    try:
         result["artifacts"] = artifacts(root / "outputs", manifest["outputs"], limits,
-                                          lambda: check(wall_end - cleanup_grace, finalizing=True))
+                                          lambda: check(wall_end - cleanup_grace, finalizing=True), redactor)
     except (Failure, OSError, ValueError) as exc:
         # Never overwrite an original setup/payload failure/exit code with collection noise.
         if result["error"] is None:
@@ -267,9 +289,15 @@ def execute(manifest, staging, root, network_mode, cancelled=lambda: False, auth
             provenance["logs"][name] = log.close()
     result["finished_at"] = utc()
     provenance["duration_seconds"] = time.monotonic() - start
-    atomic_json(root / "control/environment.json", provenance)
-    atomic_json(root / "control/execution-result.json", result)
-    return result
+    try:
+        atomic_json(root / "control/environment.json", redactor.safe_json(provenance))
+        atomic_json(root / "control/execution-result.json", redactor.safe_json(result))
+        return result
+    finally:
+        for value in secret_values.values():
+            value[:] = b"\x00" * len(value)
+        secret_values.clear()
+        redactor.clear()
 
 
 
@@ -280,6 +308,7 @@ def main(argv=None):
     mode.add_argument("--validate-only", action="store_true")
     mode.add_argument("--execute", action="store_true")
     mode.add_argument("--supervise", action="store_true")
+    mode.add_argument("--receive-secrets", action="store_true")
     parser.add_argument("--staging-root")
     parser.add_argument("--work-root")
     parser.add_argument("--network-mode", choices=("disabled", "required"))
@@ -294,7 +323,6 @@ def main(argv=None):
         if args.validate_only:
             print(json.dumps({"status": "valid", "runner_version": RUNNER_VERSION, "executed": False}))
             return 0
-        require(args.staging_root and args.work_root and args.network_mode)
         authorization = None
         if manifest.get("execution_control") == "prepare_then_start":
             require(args.start_control)
@@ -302,6 +330,10 @@ def main(argv=None):
                 authorization = apply_start(manifest, manifest_raw, source.read(4097), time.time())
         else:
             require(args.start_control is None)
+        if args.receive_secrets:
+            require(authorization is not None and "secrets" in authorization)
+            return secrets.receive(authorization, sys.stdin.buffer)
+        require(args.staging_root and args.work_root and args.network_mode)
         if args.supervise:
             require("execution_deadline" in manifest["timeouts"] and sys.platform == "linux")
             command = [sys.executable, "-E", "-s", str(Path(__file__).parents[1] / "run.py"),

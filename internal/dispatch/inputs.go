@@ -190,6 +190,9 @@ func ResolveJob(work Work, snapshot provider.InputSnapshot) (provider.ResolvedJo
 	key := string(provider.Digest(seed))
 	id := provider.Identity{InstallationID: work.InstallationID, WorkspaceID: work.Job.Job.WorkspaceID, JobID: work.Job.Job.ID, AttemptID: work.Job.Attempt.ID, InstanceID: work.Job.Profile.Binding.ProviderInstanceID, IntentID: domain.SubmissionIntentID("si_" + key), ResourceKey: "cr-" + key[:40], Nonce: work.Job.AttemptNonce, BundleSHA256: snapshot.Bundle.SHA256, InputManifestSHA256: snapshot.InputDigest()}
 	required := []domain.CapabilityName{domain.CapabilityBatchExecution, domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout, domain.CapabilityStrongIdentity, domain.CapabilityRemoteNetworkControl}
+	if len(spec.WorkloadSecrets) > 0 {
+		required = append(required, domain.CapabilityEphemeralSecrets)
+	}
 	if spec.SeparateStart() {
 		required = append(required, domain.CapabilitySeparateStart)
 	}

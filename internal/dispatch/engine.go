@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 type Config struct {
@@ -35,7 +36,10 @@ type Engine struct {
 	clock     Clock
 	config    Config
 	slots     chan struct{}
+	secrets   *workloadsecret.Pool
 }
+
+func (e *Engine) WithSecrets(pool *workloadsecret.Pool) *Engine { e.secrets = pool; return e }
 
 func New(repo Repository, providers Resolver, blobs BlobStore, fetcher HTTPSFetcher, clock Clock, cfg Config) (*Engine, error) {
 	if repo == nil || providers == nil || blobs == nil || !cfg.Valid() {
@@ -262,12 +266,23 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		return s.prepared(*seen.Prepared)
 	case Ready:
+		var material workloadsecret.Material
+		defer material.Clear()
 		if work.Gate != nil {
 			if work.Gate.Start == nil {
 				return nil
 			}
 			if _, ok := p.(provider.ControlledStarter); !ok {
 				return s.fail(domain.CodeUnsupportedCapability)
+			}
+			if secret := work.Gate.Start.Secrets; secret != nil {
+				if _, ok := p.(provider.SecretStarter); !ok {
+					return s.fail(domain.CodeUnsupportedCapability)
+				}
+				key := workloadsecret.Key{WorkspaceID: work.Job.Job.WorkspaceID, JobID: work.Job.Job.ID, AttemptID: work.Job.Attempt.ID}
+				if !e.secrets.Available(key, secret.AuthorizationID, e.clock.Now()) {
+					return nil
+				}
 			}
 			observer, ok := p.(provider.PreparationObserver)
 			if !ok {
@@ -283,7 +298,16 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 				return s.fail(domain.CodeRemoteIdentityMismatch)
 			}
 		}
-		if err = s.commit(Action{Kind: BeginSubmission}); err != nil {
+		if work.Gate != nil && work.Gate.Start.Secrets != nil {
+			key := workloadsecret.Key{WorkspaceID: work.Job.Job.WorkspaceID, JobID: work.Job.Job.ID, AttemptID: work.Job.Attempt.ID}
+			material, err = e.secrets.Claim(key, work.Gate.Start.Secrets.AuthorizationID, e.clock.Now(), func() error { return s.commit(Action{Kind: BeginSubmission, SecretsAvailable: true}) })
+		} else {
+			err = s.commit(Action{Kind: BeginSubmission})
+		}
+		if err != nil {
+			if errors.Is(err, workloadsecret.ErrUnavailable) {
+				return nil
+			}
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
@@ -292,7 +316,10 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		prepared := *s.work().Journal.Prepared
 		outcome, callErr := control(ctx, preparationLimit, func(c context.Context) (provider.SubmissionOutcome, error) {
 			if start := s.work().Journal.StartAuthorization; start != nil {
-				return p.(provider.ControlledStarter).Start(c, prepared, *start), nil
+				if start.Secrets != nil {
+					return p.(provider.SecretStarter).StartWithSecrets(c, prepared, start.Clone(), material), nil
+				}
+				return p.(provider.ControlledStarter).Start(c, prepared, start.Clone()), nil
 			}
 			return p.Submit(c, prepared), nil
 		})

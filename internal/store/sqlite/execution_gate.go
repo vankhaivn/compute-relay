@@ -14,6 +14,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 func gateTable(kind string) string {
@@ -263,6 +264,27 @@ func loadExecutionGate(ctx context.Context, tx *sql.Tx, record admission.Record,
 		deadline = stop
 	}
 	g.Start = &provider.StartAuthorization{AuthorizationID: receipt.AuthorizationID, ReadinessRevision: req.ReadinessRevision, MaxRemoteWallSeconds: req.MaxRemoteWallSeconds, ExecutionDeadline: req.ExecutionDeadline, StartBefore: deadline.UTC().Format(time.RFC3339)}
+	if len(record.Request.Spec().WorkloadSecrets) > 0 {
+		key := workloadsecret.Key{WorkspaceID: record.Job.WorkspaceID, JobID: record.Job.ID, AttemptID: record.Attempt.ID}
+		secret, err := loadSecret(ctx, tx, key, now)
+		if err != nil {
+			return nil, err
+		}
+		expires, _ := workloadsecret.CanonicalTime(secret.original.ExpiresAt)
+		if req.SecretAuthorizationID != secret.original.AuthorizationID || secret.original.ReadinessRevision != g.ReadyRevision || !matchSecretSlots(record.Request.Spec().WorkloadSecrets, secret.original.Metadata) || expires.Before(stop) || secret.original.CreatedAt.After(receipt.CreatedAt) {
+			return nil, ErrCorrupt
+		}
+		if receipt.Status == executionauth.Consumed {
+			if secret.current.Status != "consumed" || !secret.current.ConsumedAt.Equal(*receipt.ConsumedAt) {
+				return nil, ErrCorrupt
+			}
+		} else if secret.current.Status == "consumed" {
+			return nil, ErrCorrupt
+		}
+		g.Start.Secrets = &provider.SecretAuthorization{AuthorizationID: secret.original.AuthorizationID, ExpiresAt: secret.original.ExpiresAt, Slots: record.Request.Spec().WorkloadSecrets}
+	} else if req.SecretAuthorizationID != "" {
+		return nil, ErrCorrupt
+	}
 	return g, nil
 }
 
@@ -318,6 +340,13 @@ func (s *Store) StartExecution(ctx context.Context, c executionauth.GateCommand,
 		}
 		if req.MaxRemoteWallSeconds <= r.Request.Spec().Timeouts.SetupSeconds+r.Request.Spec().Timeouts.FinalizationGraceSeconds || req.MaxRemoteWallSeconds > r.Request.Spec().Timeouts.RemoteWallSeconds || stop.After(c.Now.Add(time.Duration(req.MaxRemoteWallSeconds)*time.Second)) || !r.Request.Spec().Deadline().IsZero() && stop.After(r.Request.Spec().Deadline()) {
 			return executionauth.ErrRequest
+		}
+		secret, err := secretForStart(ctx, tx, r, req.SecretAuthorizationID, req.ReadinessRevision, req.ExecutionDeadline, c.Now)
+		if err != nil {
+			return err
+		}
+		if secret != nil && !c.SecretAvailable {
+			return workloadsecret.ErrUnavailable
 		}
 		if err = authorizationQuota(ctx, tx, r, c.Now); err != nil {
 			return err
@@ -444,6 +473,24 @@ func (s *Store) ReadReadiness(ctx context.Context, w domain.WorkspaceID, token s
 			result.State, result.RequiredActions = "prevented", []string{"cleanup"}
 		case r.Request.Spec().Expired(now) || g != nil && g.Expired(now):
 			result.State, result.RequiredActions = "expired", []string{"cleanup"}
+		}
+		if slots := r.Request.Spec().WorkloadSecrets; len(slots) > 0 {
+			result.Secrets = &workloadsecret.Readiness{RequiredSlots: slots, Status: "missing"}
+			secret, err := loadSecret(ctx, tx, workloadsecret.Key{WorkspaceID: w, JobID: job, AttemptID: r.Attempt.ID}, now)
+			if err != nil && !errors.Is(err, workloadsecret.ErrNotFound) {
+				return err
+			}
+			if err == nil {
+				result.Secrets.AuthorizationID, result.Secrets.ExpiresAt, result.Secrets.Status = secret.current.AuthorizationID, secret.current.ExpiresAt, secret.current.Status
+			}
+			if result.State == "ready" || result.State == "start_authorized" {
+				switch result.Secrets.Status {
+				case "missing":
+					result.RequiredActions = append(result.RequiredActions, "supply_secrets")
+				case "expired", "revoked":
+					result.RequiredActions = []string{"cancel", "cleanup"}
+				}
+			}
 		}
 		return nil
 	})

@@ -13,6 +13,7 @@ import threading
 import codecs
 
 from .contract import BUFFER, Failure
+from .secrets import Redactor
 
 MARKER = b"\n[runner: log truncated]\n"
 SECRET = re.compile(rb"cr1_[A-Za-z0-9_-]{43}|(?:gh[pousr]_[A-Za-z0-9]{20,255})|(?:authorization[=: ]+bearer[ ]+|(?:api[_-]?key|token|password|secret)[=:][ ]*)[^\s\"']{1,512}", re.I)
@@ -74,20 +75,28 @@ class Log:
         self.limit, self.written, self.received = limit, 0, 0
         self.truncated = False
         self.pending = b""
+        self.redactor = Redactor()
         stream = sys.stderr if "stderr" in path.name else sys.stdout
         self.mirror = Mirror(stream) if mirror is None else mirror
 
     def feed(self, raw):
         self.received += len(raw)
         self.pending += raw
-        cut = max(0, len(self.pending) - 1024, self.pending.rfind(b"\n") + 1)
+        cut = max(0, len(self.pending) - max(1024, self.redactor.hold))
+        if not self.redactor.multiline:
+            cut = max(cut, self.pending.rfind(b"\n") + 1)
         for match in SECRET.finditer(self.pending):
             if match.start() < cut < match.end():
                 cut = match.start()
-        self._write(SECRET.sub(b"[REDACTED]", self.pending[:cut]))
+        if self.redactor.pattern:
+            for match in self.redactor.pattern.finditer(self.pending):
+                if match.start() < cut < match.end():
+                    cut = match.start()
+        self._write(self.pending[:cut])
         self.pending = self.pending[cut:]
 
     def _write(self, data):
+        data = self.redactor.redact(SECRET.sub(b"[REDACTED]", self.redactor.redact(data)))
         self.mirror.feed(data)
         available = max(0, self.limit - len(MARKER) - self.written)
         selected = data[:available]
@@ -96,10 +105,10 @@ class Log:
         self.truncated |= len(data) > available
 
     def close(self):
-        self._write(SECRET.sub(b"[REDACTED]", self.pending))
+        self._write(self.pending)
         self.pending = b""
         if self.truncated:
-            tail = MARKER[:max(0, self.limit - self.written)]
+            tail = self.redactor.redact(MARKER)[:max(0, self.limit - self.written)]
             self.file.write(tail)
             self.written += len(tail)
         self.file.flush()

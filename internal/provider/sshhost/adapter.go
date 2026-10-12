@@ -25,6 +25,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 	runnerassets "github.com/vankhaivn/compute-relay/runner"
 )
 
@@ -170,7 +171,7 @@ func (a *Adapter) Describe() provider.Descriptor {
 		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning,
 		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityExecutionTimeout,
 		domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
-		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart,
+		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets,
 	} {
 		c := domain.CapabilityStatus{Name: name, Support: domain.CapabilitySupportSupported, Evidence: domain.EvidenceImplementedOffline,
 			ClientVersion: Version, Reason: "operator-owned Docker host reached over SSH with a pinned host key"}
@@ -187,6 +188,8 @@ func (a *Adapter) Describe() provider.Descriptor {
 			c.Reason = "inputs are copied only into the attempt's own container"
 		case domain.CapabilityExecutionTimeout:
 			c.Reason = "the runner budget and a host-side timeout bound the container without Relay connectivity"
+		case domain.CapabilityEphemeralSecrets:
+			c.Reason = "one-shot attempt-scoped material delivered through stdin to private tmpfs after explicit start"
 		case domain.CapabilitySeparateStart:
 			c.Reason = "verified stopped-container preparation requires separate finite start authority"
 		case domain.CapabilityAbsoluteDeadline:
@@ -378,7 +381,8 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 			command = append(command, "--start-control", startControlPath)
 		}
 		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: labels(plan, operation), Internet: mode == "required",
-			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
+			SecretTmpfs: len(spec.WorkloadSecrets) > 0,
+			CPUs:        endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
 			Command: command})
 		if err != nil {
 			return err
@@ -599,10 +603,10 @@ func unknownSubmission() provider.SubmissionOutcome {
 // Submit starts the prepared container exactly once. A failure before the start
 // command is sent is a rejection; any failure after it leaves acceptance unknown.
 func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	return a.submit(ctx, prepared, nil)
+	return a.submit(ctx, prepared, nil, nil)
 }
 
-func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start *provider.StartAuthorization) provider.SubmissionOutcome {
+func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
 	if a == nil || !prepared.Ready || !prepared.Private || prepared.Identity.InstanceID != a.config.InstanceID {
 		return rejected("preparation_mismatch")
 	}
@@ -691,6 +695,11 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 		result, err := d.simple(ctx, "container", "start", ref.ID)
 		if err != nil || result.ExitCode != 0 {
 			return ErrRemoteDocker
+		}
+		if material != nil {
+			if err = deliverSecrets(ctx, d, ref.ID, prepared, *material); err != nil {
+				return err
+			}
 		}
 		outcome = provider.SubmissionOutcome{Status: provider.SubmissionAccepted,
 			Remote: &provider.RemoteReference{Identity: prepared.Identity, Resource: prepared.Resource, Version: ref.ID}}

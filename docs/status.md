@@ -19,7 +19,7 @@ The current implementation boundary. No public release is available.
 | Native companion | Reproducible macOS arm64 candidate bundle with its own locked Python client, checksum-verified create-new installation and relocation discovery. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation and submission intents, restart reconciliation, explicit controls and verified collection. |
 | Preparation progress | While `preparing`, status reports input bytes handed to the provider staging upload. Observational only. |
-| Preparation gates | Opt-in managed SSH staging into a stopped container, dated readiness and separate one-shot start authority. See [preparation gates](preparation-gates.md). |
+| Preparation gates | Managed SSH supports opt-in stopped-container preparation, readiness, one-shot start and ephemeral secret slots. See [preparation gates](preparation-gates.md) and [workload secrets](workload-secrets.md). |
 | Result collection | Automatic by default; an immutable manual policy waits for `/collect` and reports selected-output byte progress. |
 | Attempt logs | Bounded pages for an explicit original attempt with current read authority. Best effort: transient failures and long replay latency remain possible. |
 | Execution deadlines | Optional immutable absolute UTC deadline on supported paths, with enforcement in the remote runner and SSH container supervisor. See [execution deadlines](execution-deadlines.md). |

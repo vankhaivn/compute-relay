@@ -115,9 +115,20 @@ def argv(value, maximum=64):
 
 def validate(m):
     fields(m, ("manifest_version", "job_id", "attempt_id", "attempt_nonce", "bundle", "inputs",
-               "input_manifest_sha256", "execution", "resources", "network", "timeouts", "outputs"), ("limits", "execution_control"))
+               "input_manifest_sha256", "execution", "resources", "network", "timeouts", "outputs"), ("limits", "execution_control", "workload_secrets"))
     if "execution_control" in m:
         require(m["execution_control"] == "prepare_then_start")
+    if "workload_secrets" in m:
+        require(m.get("execution_control") == "prepare_then_start")
+        slots = m["workload_secrets"]
+        require(type(slots) is list and 1 <= len(slots) <= 8)
+        names = set()
+        for slot in slots:
+            fields(slot, ("name", "exposure"))
+            require(type(slot["name"]) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,31}", slot["name"]))
+            require(slot["name"] not in names)
+            names.add(slot["name"])
+            require(slot["exposure"] in ("file", "file_and_local_process_arguments"))
     require(m["manifest_version"] == VERSION)
     for key in ("job_id", "attempt_id"):
         require(type(m[key]) is str and ID.fullmatch(m[key]))
@@ -214,7 +225,7 @@ def apply_start(manifest, manifest_raw, control_raw, now):
     control = strict_json(control_raw, 4096)
     fields(control, ("version", "job_id", "attempt_id", "attempt_nonce", "manifest_sha256",
                      "authorization_id", "readiness_revision", "max_remote_wall_seconds",
-                     "execution_deadline", "start_before"))
+                     "execution_deadline", "start_before"), ("secrets",))
     require(control["version"] == "compute-relay/start/v1")
     for key in ("job_id", "attempt_id", "attempt_nonce"):
         require(control[key] == manifest[key])
@@ -232,6 +243,16 @@ def apply_start(manifest, manifest_raw, control_raw, now):
         except ValueError as exc:
             raise Failure() from exc
     require(bounds["start_before"] <= bounds["execution_deadline"])
+    require(("workload_secrets" in manifest) == ("secrets" in control))
+    if "secrets" in control:
+        secret = control["secrets"]
+        fields(secret, ("authorization_id", "expires_at", "slots"))
+        require(type(secret["authorization_id"]) is str and ID.fullmatch(secret["authorization_id"]))
+        require(secret["slots"] == manifest["workload_secrets"])
+        raw = secret["expires_at"]
+        require(type(raw) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", raw))
+        expires = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        require(expires.year > 1 and expires.timestamp() >= bounds["execution_deadline"])
     if now >= bounds["start_before"]:
         raise Failure("REMOTE_TIMEOUT", "execution", "Explicit start authority expired")
     budgets = manifest["timeouts"]

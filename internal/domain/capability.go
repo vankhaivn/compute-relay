@@ -21,6 +21,7 @@ const (
 	CapabilityQuotaReporting       CapabilityName = "quota_reporting"
 	CapabilityExecutionTimeout     CapabilityName = "execution_timeout"
 	CapabilitySeparateStart        CapabilityName = "separate_prepare_start"
+	CapabilityEphemeralSecrets     CapabilityName = "ephemeral_workload_secrets"
 	CapabilityAbsoluteDeadline     CapabilityName = "absolute_execution_deadline"
 	CapabilityRemoteNetworkControl CapabilityName = "remote_network_control"
 	CapabilityStrongIdentity       CapabilityName = "strong_execution_identity"

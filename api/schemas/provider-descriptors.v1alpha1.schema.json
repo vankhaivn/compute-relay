@@ -121,6 +121,9 @@
                   "unsupported",
                   "unknown"
                 ]
+              },
+              "ephemeral_workload_secrets": {
+                "$ref": "common.v1alpha1.schema.json#/$defs/capability_support"
               }
             }
           },

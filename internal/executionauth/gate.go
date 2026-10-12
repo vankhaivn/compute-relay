@@ -9,6 +9,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 const (
@@ -40,16 +41,17 @@ func (r PrepareRequest) Validate() error {
 }
 
 type StartRequest struct {
-	AttemptID            domain.AttemptID    `json:"attempt_id"`
-	ReadinessRevision    domain.SHA256Digest `json:"readiness_revision"`
-	MaxRemoteWallSeconds int64               `json:"max_remote_wall_seconds"`
-	ExecutionDeadline    string              `json:"execution_deadline"`
-	AuthorizeCompute     bool                `json:"authorize_compute"`
+	SecretAuthorizationID domain.OperationID  `json:"secret_authorization_id,omitempty"`
+	AttemptID             domain.AttemptID    `json:"attempt_id"`
+	ReadinessRevision     domain.SHA256Digest `json:"readiness_revision"`
+	MaxRemoteWallSeconds  int64               `json:"max_remote_wall_seconds"`
+	ExecutionDeadline     string              `json:"execution_deadline"`
+	AuthorizeCompute      bool                `json:"authorize_compute"`
 }
 
 func (r StartRequest) Validate() error {
 	_, ok := canonicalTime(r.ExecutionDeadline)
-	if !r.AttemptID.Valid() || !r.ReadinessRevision.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > 86400 || !ok || !r.AuthorizeCompute {
+	if r.SecretAuthorizationID != "" && !r.SecretAuthorizationID.Valid() || !r.AttemptID.Valid() || !r.ReadinessRevision.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > 86400 || !ok || !r.AuthorizeCompute {
 		return ErrRequest
 	}
 	return nil
@@ -95,7 +97,14 @@ func ParsePrepare(raw []byte) (PrepareRequest, error) {
 }
 func ParseStart(raw []byte) (StartRequest, error) {
 	var r StartRequest
-	if gateParse(raw, []string{"attempt_id", "readiness_revision", "max_remote_wall_seconds", "execution_deadline", "authorize_compute"}, &r) != nil || r.Validate() != nil {
+	if workloadsecret.StrictDecode(raw, MaxRequestBytes, &r) != nil || r.Validate() != nil {
+		return StartRequest{}, ErrRequest
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return StartRequest{}, ErrRequest
+	}
+	if _, present := fields["secret_authorization_id"]; present && !r.SecretAuthorizationID.Valid() {
 		return StartRequest{}, ErrRequest
 	}
 	return r, nil
@@ -154,11 +163,12 @@ func (g Gate) Expired(now time.Time) bool {
 
 // Readiness is a durable observation; reading it never performs provider calls.
 type Readiness struct {
-	AttemptID       domain.AttemptID    `json:"attempt_id"`
-	State           string              `json:"state"`
-	Revision        domain.SHA256Digest `json:"revision,omitempty"`
-	ObservedAt      *time.Time          `json:"observed_at"`
-	ReadyUntil      string              `json:"ready_until,omitempty"`
-	StagedBytes     int64               `json:"staged_bytes"`
-	RequiredActions []string            `json:"required_actions"`
+	Secrets         *workloadsecret.Readiness `json:"secrets,omitempty"`
+	AttemptID       domain.AttemptID          `json:"attempt_id"`
+	State           string                    `json:"state"`
+	Revision        domain.SHA256Digest       `json:"revision,omitempty"`
+	ObservedAt      *time.Time                `json:"observed_at"`
+	ReadyUntil      string                    `json:"ready_until,omitempty"`
+	StagedBytes     int64                     `json:"staged_bytes"`
+	RequiredActions []string                  `json:"required_actions"`
 }

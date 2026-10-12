@@ -18,8 +18,8 @@ No release has been published. This summarizes the current pre-release feature s
   configurable host limits, Python-free SSH-only serving on macOS and requested remote cleanup.
 - Optional immutable absolute execution deadlines with remote runner enforcement and SSH engine
   clock-skew checks on advertised-capability hosts; see [execution deadline limits](docs/execution-deadlines.md).
-- Optional SSH preparation and start gates that keep workload execution behind a separate
-  one-shot authorization; see [preparation gates](docs/preparation-gates.md).
+- Optional SSH preparation and start gates with separately supplied ephemeral workload secrets;
+  see [preparation gates](docs/preparation-gates.md) and [workload secrets](docs/workload-secrets.md).
 - Reproducible macOS arm64 companion bundles.
 
 See [current status](docs/status.md) for limits.

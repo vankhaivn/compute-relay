@@ -38,6 +38,7 @@ type Field struct {
 	MaxBytes  int    `json:"max_bytes"`
 }
 type Capabilities struct {
+	EphemeralSecrets string   `json:"ephemeral_workload_secrets,omitempty"`
 	Accelerators     []string `json:"accelerators"`
 	RemoteCancel     string   `json:"remote_cancel"`
 	Quota            string   `json:"quota"`

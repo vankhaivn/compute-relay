@@ -141,6 +141,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	}
 	if managed != nil {
 		cfg.Connections, cfg.Authorizations = managed.connections, managed.authorizations
+		cfg.Secrets = managed.secrets
 	}
 	server, err := api.NewServer(cfg, h.access, objectService, h.store.Ready)
 	if err != nil {
@@ -163,6 +164,9 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	}
 	if managed != nil {
 		extra = append(extra, func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) })
+		if managed.secrets != nil {
+			extra = append(extra, managed.secrets.Run)
+		}
 	}
 	return runProviderServices(ctx, server, listener, mode, listening, announce, dispatcher, collector, extra...)
 }

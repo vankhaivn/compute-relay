@@ -31,7 +31,7 @@ func (a *managedKaggleAdapter) Descriptor() connections.Descriptor {
 	return connections.Descriptor{
 		Type: "kaggle", Label: "Kaggle",
 		Fields:       []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: credentials.MaxBytes}},
-		Capabilities: connections.Capabilities{Accelerators: []string{a.config.accelerator()}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "unsupported", SeparateStart: "unsupported"},
+		Capabilities: connections.Capabilities{EphemeralSecrets: "unsupported", Accelerators: []string{a.config.accelerator()}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "unsupported", SeparateStart: "unsupported"},
 	}
 }
 

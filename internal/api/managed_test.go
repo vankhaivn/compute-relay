@@ -26,6 +26,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 const managedSecret = "synthetic-managed-secret-canary"
@@ -173,6 +174,16 @@ func setupManagedHTTP(t *testing.T, configured bool, adapters ...connections.Ada
 	cfg.Listen, cfg.Jobs = ln.Addr().String(), jobs
 	if configured {
 		cfg.Connections, cfg.Authorizations = f.service, authorizations
+		pool, err := workloadsecret.NewPool(bytes.Repeat([]byte{11}, 32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(pool.Close)
+		cfg.Secrets, err = workloadsecret.New(access, store, pool, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		authorizations.WithSecrets(pool)
 	}
 	cfg.WorkspaceRate = api.Rate{PerSecond: 10000, Burst: 10000}
 	cfg.GlobalRate = cfg.WorkspaceRate

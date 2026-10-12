@@ -15,6 +15,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/statefs"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 var ErrState = errors.New("local runtime state is missing, locked or inconsistent; preserve the directory")
@@ -40,12 +41,13 @@ type Status struct {
 // Administrative commands require exclusive host access, not a token granting
 // an application an HTTP administration route.
 type Host struct {
-	root     *statefs.Root
-	store    *sqlite.Store
-	inputs   *blobfs.Store
-	results  *blobfs.Store
-	access   *auth.Service
-	identity layout
+	secretPool *workloadsecret.Pool
+	root       *statefs.Root
+	store      *sqlite.Store
+	inputs     *blobfs.Store
+	results    *blobfs.Store
+	access     *auth.Service
+	identity   layout
 }
 
 func Initialize(ctx context.Context, path string) (status Status, err error) {
@@ -140,6 +142,9 @@ func open(ctx context.Context, path string, create bool) (_ *Host, err error) {
 }
 
 func (h *Host) Close() error {
+	if h != nil && h.secretPool != nil {
+		h.secretPool.Close()
+	}
 	if h == nil {
 		return nil
 	}

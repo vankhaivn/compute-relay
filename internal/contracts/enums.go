@@ -133,6 +133,7 @@ func domainEnums() map[string][]string {
 			domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
 			domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
 			domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart,
+			domain.CapabilityEphemeralSecrets,
 		),
 	}
 }
