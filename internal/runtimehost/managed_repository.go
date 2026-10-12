@@ -74,10 +74,13 @@ func (r managedAuthorizationRepository) AuthorizeExecution(ctx context.Context, 
 
 type managedDispatchStore interface {
 	dispatch.Repository
+	dispatch.CancellationRepository
 	ClaimNextManaged(context.Context, string, time.Time) (scheduler.Result, error)
 	ClaimRecoveryManaged(context.Context, string, time.Time) (*scheduler.Claim, error)
 }
 type managedDispatchRepository struct{ managedDispatchStore }
+
+var _ dispatch.CancellationRepository = managedDispatchRepository{}
 
 // Claims have no retained provider outcome; a later poll can safely retry them.
 func (r managedDispatchRepository) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
@@ -108,6 +111,11 @@ func (r managedDispatchRepository) FreezeInput(ctx context.Context, handle dispa
 func (r managedDispatchRepository) CommitDispatch(ctx context.Context, handle dispatch.Handle, action dispatch.Action, now time.Time) (dispatch.Work, error) {
 	return retryManagedClock(ctx, now, func(at time.Time) (dispatch.Work, error) {
 		return r.managedDispatchStore.CommitDispatch(ctx, handle, action, at)
+	})
+}
+func (r managedDispatchRepository) CommitCancellation(ctx context.Context, handle dispatch.Handle, operation domain.OperationID, action dispatch.CancellationAction, now time.Time) (dispatch.Work, error) {
+	return retryManagedClock(ctx, now, func(at time.Time) (dispatch.Work, error) {
+		return r.managedDispatchStore.CommitCancellation(ctx, handle, operation, action, at)
 	})
 }
 func (r managedDispatchRepository) RenewDispatch(ctx context.Context, handle dispatch.Handle, now time.Time) (dispatch.Handle, error) {
