@@ -129,11 +129,33 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())
 	}
 	var verified Verification
-	verifyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	timeout := 60 * time.Second
+	if op.Action == "install_image" {
+		timeout = 5 * time.Minute
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	err = s.vault.WithSecret(verifyCtx, record.CredentialKey, func(secret []byte) error {
 		var err error
-		verified, err = adapter.Verify(verifyCtx, secret)
+		if op.Action == "install_image" {
+			installer, ok := adapter.(ImageInstaller)
+			if !ok || record.Installation == nil {
+				return ErrUnsupported
+			}
+			recoverOnly := record.Stage == "installing"
+			if !recoverOnly {
+				started, beginErr := s.repo.BeginConnectionInstall(verifyCtx, op.ID, s.now().UTC())
+				if beginErr != nil {
+					return beginErr
+				}
+				recoverOnly = !started
+			}
+			verified, err = installer.InstallImage(verifyCtx, secret, record, recoverOnly)
+		} else if bound, ok := adapter.(BoundVerifier); ok && record.CanonicalAccount != "" {
+			verified, err = bound.VerifyBound(verifyCtx, secret, record.CanonicalAccount)
+		} else {
+			verified, err = adapter.Verify(verifyCtx, secret)
+		}
 		return err
 	})
 	if ctx.Err() != nil {
@@ -141,6 +163,12 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	}
 	if err != nil {
 		problem := "provider_unavailable"
+		if op.Action == "install_image" {
+			problem = "image_installation_unknown"
+			if errors.Is(err, ErrUnsupported) {
+				problem = "unsupported_provider"
+			}
+		}
 		if errors.Is(err, ErrCredentialRejected) {
 			problem = "credential_rejected"
 		}
@@ -169,13 +197,17 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	if profile.Validate() != nil {
 		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())
 	}
-	var runtimeConfig []byte
-	if configured, ok := adapter.(RuntimeConfigurator); ok {
-		candidate := configured.RuntimeConfig()
-		if _, err := jsonwire.Object(candidate, 8192); err != nil {
+	runtimeConfig := verified.RuntimeConfig
+	if len(runtimeConfig) == 0 {
+		if configured, ok := adapter.(RuntimeConfigurator); ok {
+			runtimeConfig = configured.RuntimeConfig()
+		}
+	}
+	if len(runtimeConfig) > 0 {
+		if _, err := jsonwire.Object(runtimeConfig, 8192); err != nil {
 			return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())
 		}
-		runtimeConfig = append([]byte(nil), candidate...)
+		runtimeConfig = append([]byte(nil), runtimeConfig...)
 	}
 	return true, s.repo.FinishConnection(ctx, record, Completion{Verification: verified, Profile: profile, RuntimeConfig: runtimeConfig, Now: s.now().UTC()})
 }

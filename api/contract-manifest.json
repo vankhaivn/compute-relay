@@ -202,7 +202,8 @@
         "examples/connection-request.remove.valid.json",
         "examples/connection-request.create-configured.valid.json",
         "examples/connection-request.configure.valid.json",
-        "examples/connection-request.configure-host.valid.json"
+        "examples/connection-request.configure-host.valid.json",
+        "examples/connection-request.install-image.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection-request.caller-account.json",
@@ -238,14 +239,17 @@
         "examples/connection.unknown-quota.valid.json",
         "examples/connection.disabled.valid.json",
         "examples/connection.configured.valid.json",
-        "examples/connection.host.valid.json"
+        "examples/connection.host.valid.json",
+        "examples/connection.image-ready.valid.json",
+        "examples/connection.image-missing.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection.secret-echo.json",
         "examples/invalid/connection.unknown-balance.json",
         "examples/invalid/connection.disabled-selection.json",
         "examples/invalid/connection.unverified-selection.json",
-        "examples/invalid/connection.host-architecture.json"
+        "examples/invalid/connection.host-architecture.json",
+        "examples/invalid/connection.missing-image-id.json"
       ]
     },
     {
@@ -253,7 +257,8 @@
       "valid": [
         "examples/connection-operation.accepted.valid.json",
         "examples/connection-operation.failed.valid.json",
-        "examples/connection-operation.configure-succeeded.valid.json"
+        "examples/connection-operation.configure-succeeded.valid.json",
+        "examples/connection-operation.image-unknown.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection-operation.failed-without-problem.json",

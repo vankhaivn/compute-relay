@@ -18,14 +18,15 @@ import (
 // managedSSHAdapter connects an operator-owned Docker host reached over SSH. Every
 // field is write-only: the endpoint travels with the login in one vault entry.
 type managedSSHAdapter struct {
-	config ManagedServeConfig
-	verify func(context.Context, []byte) (sshhost.HostVerification, error)
+	config  ManagedServeConfig
+	verify  func(context.Context, []byte, string) (sshhost.HostVerification, error)
+	install func(context.Context, []byte, string, string, domain.OperationID, bool) (sshhost.HostVerification, error)
 }
 
 var _ connections.Adapter = (*managedSSHAdapter)(nil)
 
 func newManagedSSHAdapter(config ManagedServeConfig) *managedSSHAdapter {
-	return &managedSSHAdapter{config: config, verify: sshhost.VerifyHostDetails}
+	return &managedSSHAdapter{config: config, verify: sshhost.VerifyManagedHostBound, install: sshhost.InstallImage}
 }
 
 func (*managedSSHAdapter) Descriptor() connections.Descriptor {
@@ -61,15 +62,60 @@ func (*managedSSHAdapter) Encode(fields map[string]string) ([]byte, error) {
 // Verify proves the login, the host key and a Linux Docker engine. An operator-owned
 // host reports no quota; CPU work then runs with an explicit unknown-quota warning.
 func (a *managedSSHAdapter) Verify(ctx context.Context, raw []byte) (connections.Verification, error) {
-	host, err := a.verify(ctx, raw)
+	host, err := a.verify(ctx, raw, "")
+	return sshVerification(raw, host, err)
+}
+
+func (a *managedSSHAdapter) VerifyBound(ctx context.Context, raw []byte, account string) (connections.Verification, error) {
+	host, err := a.verify(ctx, raw, account)
+	return sshVerification(raw, host, err)
+}
+
+func sshVerification(raw []byte, host sshhost.HostVerification, err error) (connections.Verification, error) {
 	if errors.Is(err, sshhost.ErrCredentialReject) || errors.Is(err, sshhost.ErrHostKeyMismatch) {
 		return connections.Verification{}, connections.ErrCredentialRejected
+	}
+	if errors.Is(err, sshhost.ErrImageInstallationUnknown) {
+		return connections.Verification{}, connections.ErrImageInstallationUnknown
 	}
 	if err != nil || !domain.ObjectID(host.Account).Valid() {
 		return connections.Verification{}, connections.ErrUnavailable
 	}
-	return connections.Verification{CanonicalAccount: host.Account, Host: &connections.HostEvidence{HostKeyFingerprint: host.HostKey, OS: host.OS, Architecture: host.Architecture},
-		Quota: provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "cpu", Source: "operator_host"}}, nil
+	endpoint, err := sshhost.ParseEndpoint(raw)
+	if err != nil {
+		return connections.Verification{}, connections.ErrUnavailable
+	}
+	image := &connections.ImageEvidence{Status: "missing", RecipeSHA256: sshhost.ImageRecipeDigest()}
+	var runtimeConfig []byte
+	if host.ImageID != "" {
+		image.Status, image.ID = "ready", host.ImageID
+		runtimeConfig, _ = json.Marshal(managedSSHRuntimeConfig{Version: 2, Image: host.ImageID, Architecture: host.Architecture,
+			RecipeSHA256: image.RecipeSHA256, CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes})
+	}
+	verified := connections.Verification{CanonicalAccount: host.Account,
+		Host:          &connections.HostEvidence{HostKeyFingerprint: host.HostKey, OS: host.OS, Architecture: host.Architecture, Image: image},
+		RuntimeConfig: runtimeConfig, SelectionUnavailable: host.ImageID == "",
+		Quota: provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "cpu", Source: "operator_host"}}
+	if verified.Host.Validate() != nil {
+		return connections.Verification{}, connections.ErrUnavailable
+	}
+	return verified, nil
+}
+
+func (*managedSSHAdapter) PlanImageInstallation(connection connections.Connection) (connections.ImageInstallation, error) {
+	if connection.Authentication != "verified" || connection.Host == nil || connection.Host.Image == nil ||
+		connection.Host.Validate() != nil || connection.Host.Image.RecipeSHA256 != sshhost.ImageRecipeDigest() {
+		return connections.ImageInstallation{}, connections.ErrRequest
+	}
+	return connections.ImageInstallation{RecipeSHA256: sshhost.ImageRecipeDigest(), Architecture: connection.Host.Architecture}, nil
+}
+
+func (a *managedSSHAdapter) InstallImage(ctx context.Context, raw []byte, record connections.Record, recoverOnly bool) (connections.Verification, error) {
+	if record.Installation == nil || record.Installation.Validate() != nil || record.Installation.RecipeSHA256 != sshhost.ImageRecipeDigest() || a.install == nil {
+		return connections.Verification{}, connections.ErrUnsupported
+	}
+	host, err := a.install(ctx, raw, record.CanonicalAccount, record.Installation.Architecture, record.Operation.ID, recoverOnly)
+	return sshVerification(raw, host, err)
 }
 
 func (a *managedSSHAdapter) Profile(binding domain.ProviderBinding, accountScope string) admission.Profile {
@@ -87,21 +133,32 @@ func (*managedSSHAdapter) ValidateConfiguration(c connections.Configuration) err
 }
 
 type managedSSHRuntimeConfig struct {
-	Version int    `json:"schema_version"`
-	Image   string `json:"image"`
-}
-
-// RuntimeConfig freezes the standard image digest into each verified revision.
-func (*managedSSHAdapter) RuntimeConfig() []byte {
-	raw, _ := json.Marshal(managedSSHRuntimeConfig{Version: 1, Image: sshhost.StandardImage})
-	return raw
+	Version      int    `json:"schema_version"`
+	Image        string `json:"image"`
+	Architecture string `json:"architecture,omitempty"`
+	RecipeSHA256 string `json:"recipe_sha256,omitempty"`
+	CPUs         string `json:"cpus,omitempty"`
+	MemoryBytes  int64  `json:"memory_bytes,omitempty"`
 }
 
 func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
 	var config managedSSHRuntimeConfig
 	fields, err := jsonwire.Object(raw, 8192)
-	if err != nil || jsonwire.Fields(fields, []string{"schema_version", "image"}, nil) != nil || json.Unmarshal(raw, &config) != nil ||
-		config.Version != 1 || !sshhost.ValidImage(config.Image) {
+	if err != nil || json.Unmarshal(raw, &config) != nil {
+		return managedSSHRuntimeConfig{}, ErrRequest
+	}
+	switch config.Version {
+	case 1:
+		if jsonwire.Fields(fields, []string{"schema_version", "image"}, nil) != nil || !sshhost.ValidImage(config.Image) {
+			return managedSSHRuntimeConfig{}, ErrRequest
+		}
+	case 2:
+		if jsonwire.Fields(fields, []string{"schema_version", "image", "architecture", "recipe_sha256"}, []string{"cpus", "memory_bytes"}) != nil ||
+			!sshhost.ValidImageID(config.Image) || !sshhost.SupportedArchitecture(config.Architecture) || !domain.SHA256Digest(config.RecipeSHA256).Valid() ||
+			!sshhost.ValidResourceLimits(config.CPUs, config.MemoryBytes) {
+			return managedSSHRuntimeConfig{}, ErrRequest
+		}
+	default:
 		return managedSSHRuntimeConfig{}, ErrRequest
 	}
 	return config, nil
@@ -122,7 +179,7 @@ func (h *Host) managedSSHProvider(resolver ports.CredentialResolver, binding con
 	snapshot := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 	adapter, err := sshhost.NewAdapter(sshhost.Config{InstanceID: profile.Binding.ProviderInstanceID, Account: binding.CanonicalAccount,
 		CredentialRef: ports.CredentialRef(profile.CredentialRef), AllowInternet: profile.AllowRemoteInternet,
-		MaxWallSeconds: profile.MaxRemoteWallSeconds, Image: frozen.Image, MaxProcesses: profile.MaxProcesses}, snapshot, resolver, h.inputs, clock{})
+		MaxWallSeconds: profile.MaxRemoteWallSeconds, Image: frozen.Image, MaxProcesses: profile.MaxProcesses, Architecture: frozen.Architecture, ImageRecipeSHA256: frozen.RecipeSHA256, CPUs: frozen.CPUs, MemoryBytes: frozen.MemoryBytes}, snapshot, resolver, h.inputs, clock{})
 	if err != nil {
 		return nil, ErrRequest
 	}

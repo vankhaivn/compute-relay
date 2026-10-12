@@ -184,15 +184,22 @@ func (s *Store) ListConnections(ctx context.Context, w domain.WorkspaceID, token
 func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID) (connections.Record, error) {
 	var r connections.Record
 	var receipt, status, updated string
+	var installation []byte
 	var problem sql.NullString
 	var wall sql.NullInt64
 	var maxActive, maxProcesses int
-	err := tx.QueryRowContext(ctx, `SELECT o.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes FROM managed_connection_operations o JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses)
+	err := tx.QueryRowContext(ctx, `SELECT o.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation FROM managed_connection_operations o JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
 	if err != nil {
 		return r, dbError(err)
+	}
+	if len(installation) > 0 {
+		r.Installation = &connections.ImageInstallation{}
+		if len(installation) > 1024 || json.Unmarshal(installation, r.Installation) != nil || r.Installation.Validate() != nil {
+			return r, ErrCorrupt
+		}
 	}
 	if len(receipt) > 4096 || json.Unmarshal([]byte(receipt), &r.Operation) != nil || r.Operation.ID != id {
 		return r, ErrCorrupt

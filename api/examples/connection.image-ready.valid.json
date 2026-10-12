@@ -1,0 +1,50 @@
+{
+  "connection_id": "con_fixture",
+  "workspace_id": "ws_fixture",
+  "revision": 1,
+  "provider_type": "ssh",
+  "label": "Example connection",
+  "authentication": "verified",
+  "credential_present": true,
+  "new_work": "enabled",
+  "account_id": "account_fixture",
+  "selection": {
+    "profile": "con_fixture_r1",
+    "configuration_revision": "r1",
+    "max_remote_wall_seconds": 600,
+    "allow_remote_internet": false,
+    "accelerator": "cpu",
+    "max_active_attempts": 2,
+    "max_processes": 256
+  },
+  "quotas": [
+    {
+      "status": "known",
+      "resource": "gpu",
+      "unit": "seconds",
+      "remaining": 600,
+      "observed_at": "2026-10-07T00:00:00Z",
+      "precision": "lower_bound"
+    },
+    {
+      "status": "unknown",
+      "resource": "cpu",
+      "unit": "seconds",
+      "remaining": null,
+      "observed_at": null,
+      "precision": "unknown"
+    }
+  ],
+  "active_attempts": 0,
+  "updated_at": "2026-10-07T00:00:00Z",
+  "host": {
+    "host_key_fingerprint": "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU",
+    "os": "linux",
+    "architecture": "amd64",
+    "image": {
+      "status": "ready",
+      "recipe_sha256": "2ff1563710389a0970c1746b4f812d0958e1c92367f2f9ff8120e6ac486ec417",
+      "id": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  }
+}

@@ -20,6 +20,9 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 	if in.Configuration != nil && (in.Configuration.Validate() != nil || in.Action != "create" && in.Action != "configure") || in.Action == "configure" && in.Configuration == nil {
 		return result, connections.ErrRequest
 	}
+	if (in.Action == "install_image") != (in.Installation != nil) || in.Installation != nil && in.Installation.Validate() != nil {
+		return result, connections.ErrRequest
+	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return result, err
@@ -67,7 +70,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			if err != nil {
 				return err
 			}
-		case "check", "replace_credential", "disable", "enable", "remove", "configure":
+		case "check", "replace_credential", "disable", "enable", "remove", "configure", "install_image":
 			prior, err = loadManaged(ctx, tx, in.Workspace, id)
 			if err != nil {
 				return err
@@ -76,6 +79,9 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 				return connections.ErrConflict
 			}
 			if (in.Action == "replace_credential") != in.Secret {
+				return connections.ErrRequest
+			}
+			if in.Action == "install_image" && (prior.account == "" || prior.credential == "" || prior.view.Host == nil || prior.view.Host.Architecture != in.Installation.Architecture) {
 				return connections.ErrRequest
 			}
 			if in.Action == "remove" {
@@ -128,6 +134,13 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			}
 			op.Status = "succeeded"
 		}
+		installation := []byte{}
+		if in.Installation != nil {
+			installation, err = json.Marshal(in.Installation)
+			if err != nil {
+				return ErrInvalid
+			}
+		}
 		receiptBytes, err := json.Marshal(op)
 		if err != nil {
 			return ErrInvalid
@@ -144,7 +157,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 				return dbError(err)
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, in.Fingerprint, stage, op.Status, credentialKey, string(receiptBytes), stamp, stamp)
+		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,created_at,updated_at,installation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, in.Fingerprint, stage, op.Status, credentialKey, string(receiptBytes), stamp, stamp, installation)
 		if err != nil {
 			return dbError(err)
 		}

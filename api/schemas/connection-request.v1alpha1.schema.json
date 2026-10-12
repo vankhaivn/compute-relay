@@ -81,7 +81,8 @@
             "disable",
             "enable",
             "remove",
-            "configure"
+            "configure",
+            "install_image"
           ]
         },
         "expected_revision": {

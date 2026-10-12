@@ -70,6 +70,17 @@ func TestManagedConfigurationMigrationPreservesOperationsAndConstraints(t *testi
 	if _, err = db.Exec(`UPDATE managed_connections SET max_remote_wall_seconds=0 WHERE connection_id='con_old'`); err == nil {
 		t.Fatal("invalid wall-time stored")
 	}
+	var imagePlan, hostEvidence []byte
+	var active, processes int
+	if err = db.QueryRow(`SELECT installation FROM managed_connection_operations WHERE operation_id='op_old'`).Scan(&imagePlan); err != nil || len(imagePlan) != 0 {
+		t.Fatal("migration invented an image installation", err)
+	}
+	if err = db.QueryRow(`SELECT host_evidence,max_active_attempts,max_processes FROM managed_connections WHERE connection_id='con_old'`).Scan(&hostEvidence, &active, &processes); err != nil || len(hostEvidence) != 0 || active != 0 || processes != 0 {
+		t.Fatal("migration invented host evidence or limits", err)
+	}
+	if _, err = db.Exec(`UPDATE managed_connection_operations SET installation=X'01' WHERE operation_id='op_old'`); err == nil {
+		t.Fatal("image installation plan is mutable")
+	}
 	if err = integrity(ctx, db); err != nil {
 		t.Fatal(err)
 	}

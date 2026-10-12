@@ -33,7 +33,8 @@
         "disable",
         "enable",
         "remove",
-        "configure"
+        "configure",
+        "install_image"
       ]
     },
     "status": {
@@ -68,7 +69,8 @@
             "account_changed",
             "active_work",
             "stale_revision",
-            "unsupported_provider"
+            "unsupported_provider",
+            "image_installation_unknown"
           ]
         }
       ]

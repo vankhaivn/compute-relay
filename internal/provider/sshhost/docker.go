@@ -112,6 +112,9 @@ type imageInfo struct {
 	ID           string `json:"Id"`
 	OS           string `json:"Os"`
 	Architecture string `json:"Architecture"`
+	Config       struct {
+		Labels map[string]string `json:"Labels"`
+	} `json:"Config"`
 }
 
 func (d docker) inspectImage(ctx context.Context, ref string) (imageInfo, bool, error) {
@@ -185,6 +188,7 @@ func (d docker) inspect(ctx context.Context, name string) (containerInfo, bool, 
 type containerSpec struct {
 	Name        string
 	Image       string
+	Platform    string
 	Labels      map[string]string
 	Internet    bool
 	CPUs        string
@@ -201,6 +205,9 @@ func (s containerSpec) args() []string {
 	args := []string{"container", "create", "--name", s.Name, "--user", "65534:65534", "--network", network,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", strconv.Itoa(s.PIDs),
 		"--restart", "no", "--stop-timeout", "30", "--workdir", "/relay"}
+	if s.Platform != "" {
+		args = append(args, "--platform", s.Platform)
+	}
 	// Optional limits; without them the engine's own VM or cgroup bounds the attempt.
 	if s.MemoryBytes > 0 {
 		memory := strconv.FormatInt(s.MemoryBytes, 10)

@@ -182,6 +182,21 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	if kind == "create" && s.adapters[req.ProviderType] == nil {
 		return Operation{}, ErrUnsupported
 	}
+	if !replay && req.Action == "install_image" {
+		current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection, s.now().UTC())
+		if err != nil {
+			return Operation{}, err
+		}
+		installer, ok := s.adapters[current.ProviderType].(ImageInstaller)
+		if !ok {
+			return Operation{}, ErrUnsupported
+		}
+		plan, err := installer.PlanImageInstallation(current)
+		if err != nil || plan.Validate() != nil {
+			return Operation{}, ErrRequest
+		}
+		input.Installation = &plan
+	}
 	if !replay {
 		record, err = s.repo.AcceptConnection(ctx, input)
 		if err != nil {

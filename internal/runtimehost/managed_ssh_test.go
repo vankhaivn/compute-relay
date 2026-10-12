@@ -19,7 +19,7 @@ const (
 
 // sshFixtureVerify stands in for a live login: the password selects the outcome and the
 // presented host key.
-func sshFixtureVerify(_ context.Context, raw []byte) (sshhost.HostVerification, error) {
+func sshFixtureVerify(_ context.Context, raw []byte, _ string) (sshhost.HostVerification, error) {
 	endpoint, err := sshhost.ParseEndpoint(raw)
 	if err != nil {
 		return sshhost.HostVerification{}, err
@@ -34,7 +34,7 @@ func sshFixtureVerify(_ context.Context, raw []byte) (sshhost.HostVerification, 
 		return sshhost.HostVerification{}, sshhost.ErrCredentialReject
 	}
 	account, err := sshhost.Account(target)
-	return sshhost.HostVerification{Account: account, HostKey: target.HostKey, OS: "linux", Architecture: "amd64"}, err
+	return sshhost.HostVerification{Account: account, HostKey: target.HostKey, OS: "linux", Architecture: "amd64", ImageID: "sha256:" + strings.Repeat("1", 64)}, err
 }
 
 func (f *managedTestFixture) sshConnection(t *testing.T, key, password string) (connections.Operation, connections.Connection) {
@@ -75,7 +75,7 @@ func TestManagedSSHConnectionPublishesAnOperatorManagedCPUProvider(t *testing.T)
 		t.Fatal(err)
 	}
 	if saved.Profile.CostClass != admission.CostOperatorManaged || saved.Profile.Accelerator != "cpu" ||
-		!strings.HasPrefix(saved.CanonicalAccount, "ssh-") || !strings.Contains(string(saved.RuntimeConfig), sshhost.StandardImage) {
+		!strings.HasPrefix(saved.CanonicalAccount, "ssh-") || !strings.Contains(string(saved.RuntimeConfig), "sha256:"+strings.Repeat("1", 64)) {
 		t.Fatalf("saved = %+v", saved)
 	}
 	p, err := f.host.managedProvider(f.config, f.services.connections, saved)

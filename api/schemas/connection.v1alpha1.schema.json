@@ -315,6 +315,53 @@
                 "amd64",
                 "arm64"
               ]
+            },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "recipe_sha256"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "missing",
+                    "ready"
+                  ]
+                },
+                "recipe_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "ready"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "id"
+                    ]
+                  },
+                  "else": {
+                    "not": {
+                      "required": [
+                        "id"
+                      ]
+                    }
+                  }
+                }
+              ]
             }
           }
         }

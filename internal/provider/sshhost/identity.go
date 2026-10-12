@@ -107,6 +107,9 @@ func ParseEndpoint(raw []byte) (Endpoint, error) {
 	if decoder.Decode(&stored) != nil || decoder.More() || stored.Version != 1 {
 		return Endpoint{}, ErrRequest
 	}
+	if stored.MemoryMiB != 0 && (stored.MemoryMiB < 64 || stored.MemoryMiB > 1<<20) {
+		return Endpoint{}, ErrRequest
+	}
 	endpoint := Endpoint{
 		Target:     Target{Host: stored.Host, Port: stored.Port, User: stored.Username, HostKey: stored.HostKey},
 		Credential: Credential{PrivateKey: []byte(stored.PrivateKey), Passphrase: []byte(stored.Passphrase), Password: []byte(stored.Password)},
@@ -121,16 +124,21 @@ func ParseEndpoint(raw []byte) (Endpoint, error) {
 	if stored.DockerPath != "" && (!path.IsAbs(stored.DockerPath) || path.Clean(stored.DockerPath) != stored.DockerPath || !safeArg.MatchString(stored.DockerPath)) {
 		return Endpoint{}, ErrRequest
 	}
-	if stored.CPUs != "" {
-		cpus, err := strconv.ParseFloat(stored.CPUs, 64)
-		if !cpuLimit.MatchString(stored.CPUs) || err != nil || cpus <= 0 || math.IsInf(cpus, 0) {
-			return Endpoint{}, ErrRequest
-		}
-	}
-	if stored.MemoryMiB != 0 && (stored.MemoryMiB < 64 || stored.MemoryMiB > 1<<20) {
+	if !ValidResourceLimits(endpoint.CPUs, endpoint.MemoryBytes) {
 		return Endpoint{}, ErrRequest
 	}
 	return endpoint, nil
+}
+
+// ValidResourceLimits validates optional non-secret frozen container limits.
+func ValidResourceLimits(cpus string, memoryBytes int64) bool {
+	if cpus != "" {
+		value, err := strconv.ParseFloat(cpus, 64)
+		if !cpuLimit.MatchString(cpus) || err != nil || value <= 0 || math.IsInf(value, 0) {
+			return false
+		}
+	}
+	return memoryBytes == 0 || memoryBytes >= 64<<20 && memoryBytes <= 1<<40 && memoryBytes%(1<<20) == 0
 }
 
 // Account is the canonical host identity: the pinned host-key fingerprint plus a digest

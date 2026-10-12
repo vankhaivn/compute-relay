@@ -7,6 +7,7 @@ type HostVerification struct {
 	Account      string
 	HostKey      string
 	OS           string
+	ImageID      string
 	Architecture string
 }
 

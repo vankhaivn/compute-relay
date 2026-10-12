@@ -22,7 +22,7 @@ func (s *Store) NextConnectionOperation(ctx context.Context, now time.Time) (con
 	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
 		var id string
 		cutoff := now.Add(-30 * time.Second).UTC().Format(time.RFC3339Nano)
-		err := tx.QueryRowContext(ctx, `SELECT operation_id FROM managed_connection_operations WHERE (stage='ready' AND (status!='failed' OR updated_at<?)) OR (stage='waiting_secret' AND updated_at<?) ORDER BY CASE stage WHEN 'ready' THEN 0 ELSE 1 END,created_at,operation_id LIMIT 1`, cutoff, cutoff).Scan(&id)
+		err := tx.QueryRowContext(ctx, `SELECT operation_id FROM managed_connection_operations WHERE (stage IN ('ready','installing') AND (status!='failed' OR updated_at<?)) OR (stage='waiting_secret' AND updated_at<?) ORDER BY CASE stage WHEN 'ready' THEN 0 ELSE 1 END,created_at,operation_id LIMIT 1`, cutoff, cutoff).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -49,7 +49,7 @@ func (s *Store) NextConnectionOperation(ctx context.Context, now time.Time) (con
 }
 func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, problem string, now time.Time) error {
 	switch problem {
-	case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "active_work", "stale_revision", "unsupported_provider":
+	case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
 	default:
 		return ErrInvalid
 	}
@@ -113,7 +113,7 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 		if result.Problem == "credential_rejected" {
 			authState = "rejected"
 		}
-		if op.Action == "replace_credential" && credential != "" && account != "" {
+		if (op.Action == "replace_credential" || op.Action == "install_image") && credential != "" && account != "" {
 			authState = "verified"
 		}
 		if current.CredentialKey != "" && current.CredentialKey != credential {
@@ -139,7 +139,7 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 				return dbError(err)
 			}
 		default:
-			if current.Stage != "ready" || result.Verification.CanonicalAccount == "" || result.Profile.Validate() != nil || result.Profile.Binding != connections.ProfileBinding(op.ConnectionID, op.ConnectionRevision) || result.Profile.CredentialRef != "vault:"+op.ConnectionID {
+			if (current.Stage != "ready" && !(op.Action == "install_image" && current.Stage == "installing")) || result.Verification.CanonicalAccount == "" || result.Profile.Validate() != nil || result.Profile.Binding != connections.ProfileBinding(op.ConnectionID, op.ConnectionRevision) || result.Profile.CredentialRef != "vault:"+op.ConnectionID {
 				return ErrInvalid
 			}
 			expectedScope := connections.AccountScope(current.ProviderType, result.Verification.CanonicalAccount)
@@ -173,7 +173,7 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 			if op.Action == "enable" {
 				newWork = "enabled"
 			}
-			if newWork == "enabled" {
+			if newWork == "enabled" && !result.Verification.SelectionUnavailable {
 				encoded, err := json.Marshal(result.Profile)
 				if err != nil || len(encoded) > 8192 {
 					return ErrInvalid
