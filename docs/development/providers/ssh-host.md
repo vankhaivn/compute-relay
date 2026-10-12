@@ -22,13 +22,39 @@ safe set. macOS non-interactive sessions omit `/usr/local/bin`. The adapter ther
 absolute Docker CLI, either configured or the first executable candidate, with its directory
 first on `PATH` so credential helpers resolve.
 
+## Image installation
+
+The embedded [Dockerfile](../../../internal/provider/sshhost/image/Dockerfile) pins its base digest
+and contains only image metadata. Its content hash is the recipe identity. Verification inspects
+a recipe-specific tag and publishes the fingerprint, engine platform and image status; a missing
+image cannot produce a new selection.
+
+`install_image` freezes the recipe and architecture in its durable operation. The worker commits
+an `installing` barrier before sending one build with a Dockerfile-only tar context, fixed labels,
+fixed tags, `--pull=false`, `--network=none` and an explicit platform. `--network=none` governs
+build steps; fetching a missing base still needs registry access. The worker deadline is five
+minutes. A lost outcome only permits inspection of that operation's tag and labels. Absence
+remains `image_installation_unknown`, never permission to build again. An explicit `check` can
+later discover the recipe image without mutation.
+
+Version-2 runtime policy freezes the resulting image ID, recipe SHA256, engine architecture,
+CPU and memory bounds. Version-1 runtime policy remains readable for historical jobs. Migration retires its admission
+aliases without rewriting frozen profiles; recheck and installation publish new version-2 selections. Neither
+upgrading the repository recipe nor replacing a credential reinterprets a frozen version-2 job.
+Docker images and build cache are retained; attempt cleanup removes only its container.
+
+The build-context and image-inspection contracts follow the Docker documentation reviewed
+2026-10-12: [tar contexts](https://docs.docker.com/build/concepts/context/),
+[build options](https://docs.docker.com/reference/cli/docker/image/build/) and
+[image inspection](https://docs.docker.com/reference/cli/docker/image/inspect/).
+
 ## Attempt lifecycle
 
 | Port | Docker evidence |
 |---|---|
-| Check / VerifyBinding | Exact frozen binding, pinned login and `docker version`. Verification also requires the engine OS to be `linux`. |
+| Check / VerifyBinding | Exact frozen binding, pinned login and `docker version`. Connection verification records a `linux` engine with `amd64` or `arm64` architecture. |
 | Validate | CPU accelerator, wall bound and internet policy from the frozen profile; GPU and other unsupported required capabilities are refused. |
-| Prepare | Pull the digest-pinned image if missing. Refuse an existing container name, then `container create` with the hardened specification and identity labels. Stream one tar archive into it: the root-owned runner, `manifest.json`, and the bundle and inputs, each length- and digest-checked while streamed. Write `/relay/staged.json` last. Any failure removes the container this call created. |
+| Prepare | Require the frozen installed image ID, recipe and architecture; never install. Legacy version-1 profiles retain digest-based pulling. Refuse an existing container name, then `container create` with the hardened specification and identity labels. Stream one tar archive into it: the root-owned runner, `manifest.json`, and the bundle and inputs, each length- and digest-checked while streamed. Write `/relay/staged.json` last. Any failure removes the container this call created. |
 | ReconcilePreparation | Found only for the labelled container whose marker matches the operation, plan and container ID. |
 | Submit | Inspect, then `container start` by ID. A missing or mismatched container is rejected. An already-started container, or a failure after the start command, is unknown. |
 | ReconcileSubmission | Found only when Docker reports a start time. |
@@ -50,6 +76,8 @@ execution timeout, remote network control, strong identity, remote cancellation,
 running and after completion. Unsupported: GPU, quota reporting, custom containers and
 retained sessions.
 
-- One attempt per canonical account at a time; capacity does not grow with credentials.
+- One attempt per canonical account by default; configurable up to 64, also bounded by local workers.
+  All retained aliases share the lowest limit; active attempts retain older lower limits.
+- Process limits default to 4096 and accept 1–65536. CPU, memory and process limits are frozen.
 - The engine's own VM or cgroup bounds an attempt without operator limits.
 - No automatic retry, cleanup, image rebuild or host substitution.

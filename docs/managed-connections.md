@@ -14,7 +14,12 @@ serve, issue separate private tokens for ordinary job operations, connection man
 tokens outside an ordinary job-producing process. Token issuance remains local administration
 and requires the server to be stopped.
 
-Use an absolute Python executable containing the repository's locked Kaggle client:
+For SSH-only use on macOS, `compute-relay serve --root /absolute/private/runtime --managed`
+uses the native Keychain backend and needs no Python. It defaults to CPU and advertises only
+SSH. It refuses to start if non-removed Kaggle connections are saved in that installation.
+
+For Kaggle and SSH together, use an absolute Python executable containing the repository's
+locked Kaggle client:
 
 ```sh
 compute-relay serve --root /absolute/private/runtime \
@@ -31,8 +36,13 @@ GPU. Changing the service flag does not rewrite saved connections or jobs; expli
 connection to publish a new selection under that configuration.
 Managed flags cannot be mixed with standalone Kaggle flags. No flag grants an attempt permit.
 The machine shape applies only to Kaggle. SSH host connections are always CPU, and the wall and
-internet flags apply to both types. The Keychain backend needs the Python executable even when
-only SSH hosts are used.
+internet flags apply to both types. The native backend and legacy Python backend use the same
+protected item names and bytes. macOS still controls which executable may read each item;
+switching backends or updating a binary can require a new grant in Keychain Access. Both backends
+refuse interactive prompts while serving and never modify access lists or recreate inaccessible
+credentials. Keep the previously working mode until the intended binary is authorized for all
+items of this installation, including the request-fingerprint key. See Apple's
+[per-app Keychain access instructions](https://support.apple.com/en-gb/guide/mac-help/kychn002/26/mac/26).
 
 Check authenticated `/v1/info` for `managed_connections`, `connection_configuration` and
 `attempt_authorization`, then
@@ -54,8 +64,11 @@ managed adapter's existing startup default applies. Creation still discovers and
 account asynchronously.
 
 Under the same workspace prefix, `POST /connections/{id}/actions` accepts an `expected_revision`
-plus `check`, `replace_credential`, `configure`, `disable`, `enable` or `remove`. Only replacement
-accepts credentials. `configure` requires a `configuration` object with the same bounded field;
+plus `check`, `replace_credential`, `configure`, `disable`, `enable`, `remove`, or the SSH
+`install_image` action. Only replacement
+accepts credentials. SSH configuration also accepts `max_active_attempts` (1–64) and
+`max_processes` (1–65536); omission preserves saved limits. `configure` requires a `configuration`
+object with `max_remote_wall_seconds`;
 for example:
 
 ```json

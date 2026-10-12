@@ -1,7 +1,7 @@
 # Managed connections and execution authorization
 
-The extension contract for a locally managed companion. Only the `--managed-python` serve
-composition advertises these routes and the `managed_connections`, `connection_configuration`
+The extension contract for a locally managed companion. The `--managed` and `--managed-python` serve
+compositions advertise these routes and the `managed_connections`, `connection_configuration`
 and `attempt_authorization` features; clients check the features they use instead of assuming
 support from the API version. A saved connection is not proof of authentication, capacity or a
 runnable provider.
@@ -18,7 +18,7 @@ an HTTP handler.
 | `GET /connections` | read | At most 100 non-removed, sanitized connections; local only. |
 | `GET /connections/{id}` | read | Current revision, availability, immutable selection and cached quota. |
 | `POST /connections` | manage | Label, provider type and write-only credential fields; optional wall-time override; asynchronous account discovery. |
-| `POST /connections/{id}/actions` | manage | Explicit check, credential replacement, configure, disable, enable or removal. |
+| `POST /connections/{id}/actions` | manage | Explicit check, credential replacement, configure, disable, enable, removal or image installation. |
 | `GET /connection-operations/{id}` | manage | Current durable administration status; no secret/reference or raw provider error. |
 | `POST /jobs/{id}/authorize` | execute | Authorize exactly the explicit frozen attempt and wall-time bound. |
 | `GET /jobs/{id}/authorizations/{id}` | execute | Read current durable authorization state. |
@@ -40,6 +40,8 @@ limits allowed. Request bodies, raw helper output and credential values are neve
 Creation may include `configuration.max_remote_wall_seconds` (1–86400); omission keeps the
 startup default. `"action":"configure"` requires `expected_revision` and that `configuration`
 object; other actions reject `configuration`, and only credential replacement accepts credentials.
+SSH configuration also accepts `max_active_attempts` (1–64) and `max_processes` (1–65536);
+providers that cannot enforce these reject them. Omitted optional limits preserve saved values.
 Configure commits the new policy, revision and a terminal `succeeded` receipt in one transaction,
 without a provider call, authentication, enablement or restart. It is rejected while another
 operation is pending, and an unverified connection still has no admission selection.
@@ -56,14 +58,14 @@ that reaches another host fails as `account_changed`. Discovery, quota inspectio
 availability are separate facts. No check allocates compute or creates provider resources.
 
 Every accepted mutation reserves a new monotonic connection revision and gates new admission
-until its outcome is known. A successful verified connection publishes a unique immutable
+until its outcome is known. A verified connection with all required runtime assets available publishes a unique immutable
 profile name for that revision, returned as `selection.profile`. Existing job JSON remains
 unchanged: the caller copies this exact name into `profile`. The generated alias is never
 reused or repointed. Publishing a later revision disables the earlier admission alias in the
 same transaction; previously admitted jobs retain their frozen original profile/account.
 Admission checks alias eligibility transactionally, so a request using a stale selection
 cannot race a connection change. An exact admission replay still returns its original receipt.
-The published profile also freezes its adapter runtime configuration, including machine shape;
+The published profile also freezes its adapter runtime configuration, including machine shape or installed image ID, platform and container limits;
 changing startup defaults cannot reinterpret an existing job. Removed connections remain
 addressable by ID as sanitized tombstones and are omitted from the bounded active list.
 
@@ -71,7 +73,9 @@ The wall-time override is persisted separately from the frozen profile and survi
 action. Configure publishes a new immutable selection for future admissions when the connection
 has one; existing jobs, attempts and grants keep their original profile and bound. The connection
 projection returns the optional `configuration` object, omitted when the startup default applies.
-Provider session and capacity limits still apply independently.
+Provider session and capacity limits still apply independently. SSH defaults to one concurrent
+attempt and 4096 processes per container. Retained aliases share their lowest configured
+capacity limit; active attempts also retain older, lower frozen limits.
 
 The account ID is an opaque Relay identity, not a credential or provider username. Provider
 and canonical account together define the shared quota/capacity key. Two connections for the
@@ -80,6 +84,21 @@ time and a conservative lower bound after reservations. Unknown/stale quota has 
 capacity, never a manufactured number. The managed default blocks new GPU authorization when
 quota is unknown, stale or insufficient; cached availability alone never guarantees dispatch.
 There is no account rotation, fallback, pooling or automated selection.
+
+## Explicit image installation
+
+An adapter can expose image installation after read-only account verification. The SSH adapter
+publishes `host.host_key_fingerprint`, `host.os`, `host.architecture` and `host.image` as the last
+successful evidence. A failed recheck retains that evidence; it does not prove current reachability.
+Image evidence includes the recipe SHA256 and, when installed, its immutable ID. A missing image
+leaves `selection` null.
+
+`install_image` requires manage scope, the expected connection revision and an idempotency key.
+Acceptance freezes the recipe and architecture. Before sending a build, the worker durably
+consumes the operation's single installation permit. Recovery only inspects the exact operation
+image; an absent or unreadable result is `image_installation_unknown`, with no automatic rebuild.
+An explicit later `check` can observe a completed image. A worker deadline is not evidence that
+the engine has stopped. This action never creates a job execution permit.
 
 ## Credential storage and crash recovery
 

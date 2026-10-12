@@ -8,14 +8,14 @@ The current implementation boundary. No public release is available.
 |---|---|---|
 | Local admission | `serve` with no provider flags | Authenticated loopback uploads, admission, status and control receipts, and reads of already published artifacts. Reports `local-admission-only`, `dispatch_enabled=false`; no provider effects. |
 | Explicit Kaggle | complete `--provider-*` flags, an enabled `free_allowance` profile and a finite attempt budget | Verifies the account read-only at startup, then runs one dispatch worker and one collector. Reports `kaggle-workers`, `dispatch_enabled=true`. Once the budget is consumed, new jobs stay queued while started attempts are still observed and collected. |
-| Managed | `--managed-python` | Connection API with Relay-owned macOS Keychain credentials for Kaggle accounts and [SSH hosts](ssh-hosts.md), explicit CPU or GPU selections and multiple-account workers. Startup performs no account check; each new attempt needs a durable authorization through the API. See [managed connections](managed-connections.md). |
+| Managed | `--managed` (SSH only) or `--managed-python` (Kaggle and SSH) | Connection API with Relay-owned macOS Keychain credentials for Kaggle accounts and [SSH hosts](ssh-hosts.md), explicit CPU or GPU selections and multiple-account workers. Startup performs no account check; each new attempt needs a durable authorization through the API. See [managed connections](managed-connections.md). |
 
 ## Available now
 
 | Surface | Current behavior |
 |---|---|
 | Main binary | Installation, workspace and token administration, immutable admission profiles, bundle tools and application HTTP commands. |
-| SSH host provider | CPU attempts in hardened per-attempt Docker containers on an operator-owned host, with a pinned host key, a digest-pinned standard image, confirmed cancellation and live logs. |
+| SSH host provider | CPU attempts in hardened per-attempt Docker containers on an operator-owned host, with visible pinned host keys, verified engine platforms, explicit standard-image installation, configurable concurrency/process limits, confirmed cancellation and live logs. |
 | Native companion | Reproducible macOS arm64 candidate bundle with its own locked Python client, checksum-verified create-new installation and relocation discovery. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation and submission intents, restart reconciliation, explicit controls and verified collection. |
 | Preparation progress | While `preparing`, status reports input bytes handed to the provider staging upload. Observational only. |

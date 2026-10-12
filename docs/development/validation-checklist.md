@@ -123,16 +123,18 @@ check one connection, grant one authorization for one attempt, then observe, col
 for that attempt. Stopping serve mid-attempt and restarting it on the same root checks
 reconciliation without a second submission.
 
-**V09 — SSH host.** First run the local engine check on a machine with Docker; it pulls the
-standard image and runs containers through an in-process SSH server:
+**V09 — SSH host.** First run the local engine check on a machine with Docker; it explicitly installs the repository image for the managed pipeline, retains the legacy
+base-image fixture, and runs containers through an in-process SSH server:
 
 ```sh
 COMPUTE_RELAY_SSH_DOCKER_E2E=1 go test -count=1 -run 'TestRealDockerOverSSH|TestManagedSSHDockerPipeline' ./internal/provider/sshhost ./internal/runtimehost
 ```
 
-Set `COMPUTE_RELAY_SSH_DOCKER_PLATFORM=linux/amd64` on an arm64 machine to repeat it for an Intel
-target. Then, with approval for the exact host, follow [SSH hosts](../ssh-hosts.md): verify a
-password and a key connection with the host's own fingerprint and refuse a wrong one, run one
+The managed pipeline uses the engine's verified architecture. An Intel claim requires an
+amd64 engine; `COMPUTE_RELAY_SSH_DOCKER_PLATFORM=linux/amd64` only selects emulation for the
+legacy `TestRealDockerOverSSH` fixture. Then, with approval for the exact host, follow [SSH hosts](../ssh-hosts.md): verify a
+password and a key connection with the host's own fingerprint and refuse a wrong one, explicitly
+install the repository image and confirm the resulting frozen image ID, run one
 authorized CPU job to a published result across a Relay restart, cancel a second authorized job,
 and request cleanup for each attempt. Confirm on the host that no `compute-relay-` container
 remains.
