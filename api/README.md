@@ -75,11 +75,20 @@ POST /v1/workspaces/{w}/jobs/{j}/prepare
 GET  /v1/workspaces/{w}/jobs/{j}/readiness
 POST /v1/workspaces/{w}/jobs/{j}/start
 GET  /v1/workspaces/{w}/jobs/{j}/gate-authorizations/{authorization_id}
+POST /v1/workspaces/{w}/jobs/{j}/workload-secrets
+GET  /v1/workspaces/{w}/jobs/{j}/workload-secrets/{authorization_id}
+POST /v1/workspaces/{w}/jobs/{j}/workload-secrets/{authorization_id}/revoke
 ```
 
 Optional `execution_control=prepare_then_start` uses separate finite staging and compute
 authorities on providers advertising `separate_prepare_start`. Gate POSTs and receipt reads need
 `execute` scope; readiness needs `read`. See [preparation gates](../docs/preparation-gates.md).
+
+Managed SSH providers may also advertise `ephemeral_workload_secrets`. Declare slot names and
+exposure modes on the gated job, then supply values after readiness is `ready`; all three secret
+routes need `execute` scope, and writes require an `Idempotency-Key`. The start request binds the
+returned `secret_authorization_id`. Values are base64 on the wire and are never part of durable
+job or authorization receipts; see [workload secrets](../docs/workload-secrets.md).
 
 ## Important semantics
 

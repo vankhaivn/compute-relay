@@ -115,6 +115,13 @@ and `authorize_compute: true`. Read receipts at
 `/v1/workspaces/{w}/jobs/{job_id}/gate-authorizations/{authorization_id}` with `execute` scope.
 See [preparation gates](preparation-gates.md) for the complete contract.
 
+When the managed SSH host advertises `ephemeral_workload_secrets`, a gated job may declare
+`workload_secrets` slot names and exposure modes. After readiness reports `ready`, supply the
+base64 values with `POST .../workload-secrets`, read the receipt with `GET .../{authorization_id}`
+or revoke it with `POST .../{authorization_id}/revoke`; all three require `execute` scope and
+writes require an `Idempotency-Key`. Include the returned `secret_authorization_id` in `/start`. See
+[workload secrets](workload-secrets.md) for limits, restart and exposure behavior.
+
 New jobs may add `"result_collection": "manual"` to wait for an explicit `job collect` after
 remote completion. Check `/v1/info` for `manual_result_collection` before opting in. Omission
 or `"automatic"` keeps automatic collection. The accepted policy is immutable and also applies

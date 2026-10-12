@@ -12,6 +12,7 @@ are under [development](development/README.md).
 | Manage connections from a local application | **[Managed connections](managed-connections.md)** |
 | Run CPU jobs in Docker on my own machine over SSH | **[SSH hosts](ssh-hosts.md)** |
 | Stage an SSH attempt before explicitly starting it | [Preparation gates](preparation-gates.md) |
+| Supply temporary secret values to a gated SSH workload | [Workload secrets](workload-secrets.md) |
 | Bound time-sensitive execution across queueing and disconnects | [Execution deadlines](execution-deadlines.md) |
 | Administer the runtime, workspaces and tokens | [Local runtime](local-runtime.md) |
 | Package code and upload inputs | [Bundles and import](packaging-and-import.md) |

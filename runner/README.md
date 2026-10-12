@@ -33,7 +33,7 @@ There is no overwrite, resume or automatic retry of a payload.
 | `python/relay_runner/deadline.py` | Immutable deadline checks against UTC and Linux `CLOCK_BOOTTIME`. |
 | `python/relay_runner/main.py` | Preparation, setup, resource checks, execution and finalization. |
 | `manifest.schema.json` / `examples/` | Adapter-to-runner contract `compute-relay/runner/v1`. |
-| `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the six modules. |
+| `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the seven modules. |
 | `check.py` / `tests/` | Offline checks and repository-owned CPU fixtures. |
 
 The [Kaggle execution component](../docs/development/providers/kaggle-execution.md) constructs the remote
