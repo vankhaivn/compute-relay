@@ -1,7 +1,8 @@
 # Managed connections
 
 Managed mode lets a local application administer provider connections while the server is
-running. The initial adapter is Kaggle and its protected credential backend is macOS Keychain.
+running. The adapters are Kaggle and [SSH hosts](ssh-hosts.md); the protected credential backend
+is macOS Keychain.
 Ordinary `serve` and the explicit environment-configured [Kaggle mode](kaggle-runtime.md)
 remain separate modes. Managed startup does not check an account or authorize compute.
 
@@ -29,6 +30,9 @@ machine shape to Kaggle. This is an explicit configuration, never a fallback fro
 GPU. Changing the service flag does not rewrite saved connections or jobs; explicitly check a
 connection to publish a new selection under that configuration.
 Managed flags cannot be mixed with standalone Kaggle flags. No flag grants an attempt permit.
+The machine shape applies only to Kaggle. SSH host connections are always CPU, and the wall and
+internet flags apply to both types. The Keychain backend needs the Python executable even when
+only SSH hosts are used.
 
 Check authenticated `/v1/info` for `managed_connections`, `connection_configuration` and
 `attempt_authorization`, then
@@ -40,8 +44,9 @@ backend can still deny an actual operation. Local readiness is not provider auth
 
 Render the descriptor's write-only credential fields in the application's local secret-entry
 surface. Send credential JSON only in an authenticated POST body; never place it in a URL,
-command argument, diagnostic output or job bundle. The initial Kaggle descriptor takes a token
-and discovers the account itself. The application does not need to ask for a provider username.
+command argument, diagnostic output or job bundle. The Kaggle descriptor takes a token and
+discovers the account itself. The application does not need to ask for a provider username.
+The SSH descriptor takes the host, user and one login; see [SSH hosts](ssh-hosts.md).
 
 `POST /connections` accepts `provider_type`, `label` and `credentials`, with an optional
 `configuration` containing `max_remote_wall_seconds` from 1 through 86400. If omitted, the

@@ -10,6 +10,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
@@ -28,6 +29,20 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 			return
 		}
 		record, err := h.config.Operations.Get(r.Context(), p, workspace, domain.OperationID(segments[4]))
+		if errors.Is(err, operations.ErrNotFound) && h.config.Cleanup != nil {
+			// Cleanup receipts share the operation identifier namespace.
+			cleaned, cleanupErr := h.config.Cleanup.Get(r.Context(), p, workspace, domain.OperationID(segments[4]))
+			if cleanupErr != nil {
+				controlError(w, r, cleanupErr)
+				return
+			}
+			if cleaned.Validate() != nil || cleaned.Operation.WorkspaceID != workspace || string(cleaned.Operation.ID) != segments[4] {
+				controlError(w, r, errors.New("invalid operation record"))
+				return
+			}
+			respond(w, http.StatusOK, cleanupView(cleaned))
+			return
+		}
 		if err != nil {
 			controlError(w, r, err)
 			return
@@ -50,9 +65,13 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 			kind = domain.OperationReconcile
 		case "collect":
 			kind = domain.OperationCollect
+		case "cleanup":
+			if h.config.Cleanup != nil {
+				kind = domain.OperationCleanup
+			}
 		}
 	}
-	if !operations.Supported(kind) {
+	if kind != domain.OperationCleanup && !operations.Supported(kind) {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "control route not implemented")
 		return
 	}
@@ -93,6 +112,20 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 		mapError(w, r, err) // No operation was admitted before the body was read.
 		return
 	}
+	if kind == domain.OperationCleanup {
+		cleaned, err := h.config.Cleanup.Submit(r.Context(), p, workspace, job, keys[0], body)
+		if err != nil {
+			controlError(w, r, err)
+			return
+		}
+		if cleaned.Validate() != nil || cleaned.Operation.WorkspaceID != workspace || cleaned.Operation.JobID != job {
+			controlError(w, r, errors.New("invalid operation receipt"))
+			return
+		}
+		w.Header().Set("Location", operationLocation(cleaned.Operation))
+		respond(w, http.StatusAccepted, cleanupView(cleaned))
+		return
+	}
 	record, err := h.config.Operations.Submit(r.Context(), p, workspace, job, kind, keys[0], body)
 	if err != nil {
 		controlError(w, r, err)
@@ -106,8 +139,10 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 	respond(w, http.StatusAccepted, controlView(record))
 }
 
-func controlLocation(r operations.Record) string {
-	return "/v1/workspaces/" + url.PathEscape(string(r.Operation.WorkspaceID)) + "/operations/" + url.PathEscape(string(r.Operation.ID))
+func controlLocation(r operations.Record) string { return operationLocation(r.Operation) }
+
+func operationLocation(op domain.Operation) string {
+	return "/v1/workspaces/" + url.PathEscape(string(op.WorkspaceID)) + "/operations/" + url.PathEscape(string(op.ID))
 }
 
 // Do not serialize the repository record, reason, token identity, request hashes,
@@ -124,10 +159,26 @@ func controlView(r operations.Record) map[string]any {
 	if r.NewAttemptID != "" {
 		view["new_attempt_id"] = r.NewAttemptID
 	}
-	if p := op.Failure; p != nil {
-		view["problem"] = map[string]any{"code": p.Code, "message": p.Message, "stage": p.Stage, "safe_operation_retry": p.SafeOperationRetry, "compute_may_have_started": p.ComputeMayHaveStarted, "recommended_action": p.RecommendedAction}
-	}
+	view["problem"] = publicOperationProblem(op.Failure)
 	return view
+}
+
+// cleanupView never serializes the request reason, ledger identity or provider reference.
+func cleanupView(r cleanup.Record) map[string]any {
+	op := r.Operation
+	return map[string]any{
+		"operation_id": op.ID, "workspace_id": op.WorkspaceID, "job_id": op.JobID, "attempt_id": op.AttemptID,
+		"kind": op.Kind, "status": op.Status, "revision": op.Revision, "created_at": op.CreatedAt, "updated_at": op.UpdatedAt,
+		"effect": r.Effect, "remote_termination_confirmed": false, "replay": r.Replay, "problem": publicOperationProblem(op.Failure),
+		"links": map[string]string{"self": operationLocation(op), "job": "/v1/workspaces/" + url.PathEscape(string(op.WorkspaceID)) + "/jobs/" + url.PathEscape(string(op.JobID))},
+	}
+}
+
+func publicOperationProblem(p *domain.Problem) any {
+	if p == nil {
+		return nil
+	}
+	return map[string]any{"code": p.Code, "message": p.Message, "stage": p.Stage, "safe_operation_retry": p.SafeOperationRetry, "compute_may_have_started": p.ComputeMayHaveStarted, "recommended_action": p.RecommendedAction}
 }
 
 func controlError(w http.ResponseWriter, r *http.Request, err error) {
@@ -144,6 +195,8 @@ func controlError(w http.ResponseWriter, r *http.Request, err error) {
 		jobError(w, r, err)
 	case errors.Is(err, operations.ErrUnresolved):
 		controlProblem(w, r, 409, domain.CodeRemoteExecutionUnresolved, domain.RecommendedActionReconcile, "Remote execution is unresolved; reconcile the existing attempt without submitting another execution.")
+	case errors.Is(err, cleanup.ErrUncollected):
+		controlProblem(w, r, 409, domain.CodeIllegalStateTransition, domain.RecommendedActionCollect, "Results for this attempt were never collected; collect them first, or repeat the cleanup with discard_uncollected set to true.")
 	case errors.Is(err, operations.ErrCollect):
 		controlProblem(w, r, 409, domain.CodeIllegalStateTransition, domain.RecommendedActionCollect, "Execution succeeded; recover this attempt's results with collect, not compute retry.")
 	case errors.Is(err, operations.ErrInputs):

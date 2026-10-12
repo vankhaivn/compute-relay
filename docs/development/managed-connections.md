@@ -50,7 +50,9 @@ A descriptor defines credential field names, labels, required/write-only status 
 bounds, plus capability support. Consumers render these definitions without importing provider
 SDKs. The adapter rejects fields it does not declare. The initial Kaggle descriptor accepts an
 API token and discovers the canonical account through authenticated read-only introspection;
-the caller does not supply an account name. Discovery, quota inspection and credential-store
+the caller does not supply an account name. The SSH host descriptor accepts the endpoint and one
+login; its canonical account pins the verified host key and login endpoint, so a replacement
+that reaches another host fails as `account_changed`. Discovery, quota inspection and credential-store
 availability are separate facts. No check allocates compute or creates provider resources.
 
 Every accepted mutation reserves a new monotonic connection revision and gates new admission

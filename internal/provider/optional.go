@@ -13,6 +13,10 @@ var (
 	ErrLogCursorReset   = errors.New("log cursor continuity reset")
 )
 
+// ErrCleanupUnsupported marks an adapter that cannot apply remote cleanup. Callers record
+// an explicit failure and preserve the owned resources; it is never treated as success.
+var ErrCleanupUnsupported = errors.New("remote cleanup apply is unsupported by this adapter")
+
 func (outcome CancellationOutcome) Validate() error {
 	switch outcome.Status {
 	case domain.CancellationConfirmed:

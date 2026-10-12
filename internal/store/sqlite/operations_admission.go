@@ -208,6 +208,14 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if !errors.Is(err, sql.ErrNoRows) {
 			return dbError(err)
 		}
+		// A pending explicit cleanup owns the attempt's remote resource until it settles.
+		var cleaning bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))`, string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID)).Scan(&cleaning); err != nil {
+			return dbError(err)
+		}
+		if cleaning {
+			return operations.ErrBusy
+		}
 		if c.Kind == domain.OperationRetryCompute {
 			proof, err := retryInputs(ctx, tx, c.WorkspaceID, allowed, c.JobID, c.Request.AttemptID)
 			if err != nil {

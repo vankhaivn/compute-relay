@@ -70,6 +70,7 @@ func TestReleasedMigrationsAreFrozen(t *testing.T) {
 		"0012_collection_progress.sql 1856d9995c682f374c040307df13fbe2b911cda27d6dde40c5349b27772400df",
 		"0013_connection_configuration.sql 521a2da75f70fd51e47d3c17640c70261a35dcc81c2dc098a69cde618dd123e0",
 		"0014_preparation_progress.sql cefc2b8c6f80a12c1e0104b90b0f1dd7d2b50b38d209ec0df1a81db16e415fe6",
+		"0015_remote_cleanup.sql f49f069e0e9090f68d9f715046ed7d9f373c841ec4b2d35c6417ed52a5ede8b8",
 	}
 	if len(migrations) < len(released) {
 		t.Fatalf("released migrations removed: %d < %d", len(migrations), len(released))

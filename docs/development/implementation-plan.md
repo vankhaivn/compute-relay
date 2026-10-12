@@ -29,8 +29,8 @@ fallback. Missing optional capabilities stay unsupported or unknown rather than 
 | M1-07 | Deliberately lost provider acknowledgement is a distinct fault qualification; normal restart/reconciliation does not claim to induce that ambiguity. |
 | M1-08 | Record the provider support/blocked capability mapping for a release decision. |
 
-Large multi-page output, exact hardware release and remote cleanup apply remain explicit limits in
-the provider guides. Credential authorization never implies authorization for GPU use, destructive
+Large multi-page output, exact hardware release and Kaggle remote cleanup apply remain explicit
+limits in the provider guides. Credential authorization never implies authorization for GPU use, destructive
 cleanup, public data or paid capacity.
 
 ## M5 — Product integration
@@ -43,6 +43,8 @@ cleanup, public data or paid capacity.
 | M5-04 | Verify and document a GPU smoke job plus a small pinned open-access LLM batch example. Depends on verified environment/model terms. |
 | M5-05 | Thin Node.js, Python and Go HTTP clients handling receipts, unknown states, explicit controls and checked downloads. Depends on M5-04. |
 | M5-06 | Clean-install/build guide, optional unprivileged container and platform packaging. Depends on M5-01–M5-05. |
+| M5-07 | Qualify the SSH host provider (SSH-01–SSH-04) on the operator's Mac Intel host: password and key logins, one CPU attempt across a Relay restart, a cancelled attempt and requested cleanup of both, using [V09](validation-checklist.md). |
+| M5-08 | SSH host follow-ups: a Keychain backend that lets SSH-only managed serve start without Python, the pinned host-key fingerprint in connection status, and a configurable attempt limit per host. |
 
 ## M6 — Release acceptance
 

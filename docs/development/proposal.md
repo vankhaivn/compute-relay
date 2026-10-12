@@ -208,6 +208,8 @@ Do not make arbitrary OCI images a mandatory part of the common execution contra
 
 A second production provider is not required to release MVP. The fake provider and boundary tests must demonstrate that the architecture is not a Kaggle wrapper disguised by renaming classes.
 
+> **Amendment (2026-10-12, owner-approved):** An operator-owned Docker host reached over SSH is a required first-release provider alongside Kaggle. See [ADR-0028](decisions/0028-ssh-docker-host-provider.md) and requirements SSH-01–SSH-04.
+
 Retained sessions should remain a documented future resource model. They must not force the MVP to implement queues inside remote notebooks or a permanent remote worker.
 
 ## 5. Terminology and integration model
@@ -2021,6 +2023,8 @@ A small real vertical slice plus strong failure semantics is more valuable than 
 Add a new provider only after verifying its supported API, permitted use, execution environment, data transport, account/cost model, cancellation, and identity semantics. Do not assume every free notebook product can act as an unattended batch service.
 
 A future provider may be local GPU, operator-controlled SSH compute, a legitimate free compute allowance, or another documented execution service. These are architectural possibilities, not recommendations that any particular service currently satisfies the requirements.
+
+> **Amendment (2026-10-12):** Operator-controlled SSH compute is no longer future work; [ADR-0028](decisions/0028-ssh-docker-host-provider.md) defines it for CPU jobs in Docker.
 
 Keep free-only reference behavior. Paid capacity support would be an explicit separate product/configuration decision, never a fallback hidden behind an existing free profile.
 

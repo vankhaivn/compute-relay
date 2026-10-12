@@ -10,6 +10,8 @@ live-provider support promise. See [current status](status.md) for implemented f
 |---|---|---|
 | Go | 1.27.1 | `go.mod`, Go workflow |
 | SQLite / matching libc | modernc SQLite 1.58.0 / libc 1.75.6 | `go.mod`, `go.sum` |
+| SSH client | golang.org/x/crypto 0.55.0 | `go.mod`, `go.sum` |
+| SSH host standard image | `python:3.11-slim-bookworm` pinned by index digest | `StandardImage` in `internal/provider/sshhost/docker.go` |
 | Python client | 3.11.16 | `tools/kaggle-client/.python-version`, client workflow |
 | uv | 0.12.13 | Client `pyproject.toml` and wrappers |
 | Kaggle CLI / SDK | 2.2.4 / 0.1.35 | Client `pyproject.toml`, `uv.lock` |
@@ -35,6 +37,7 @@ share only the minimal sanitized values needed by a focused issue/PR.
 | Artifact destination | Private same-filesystem temporary file and create-only hard link; unsupported hard links fail rather than overwrite. |
 | Permissions | Native private Unix permissions or protected Windows ACLs. The same-user operator remains trusted. |
 | Remote runner | Linux process-group and signal semantics. Windows/macOS support refers to the local host, not remote workload execution. |
+| SSH host | SSH server with password, keyboard-interactive or key login; a Docker engine reporting a `linux` server OS that the login can use; ED25519 host key preferred for pinning. See [SSH hosts](ssh-hosts.md). |
 | Storage durability | Database-only backup excludes blobs. Shared/network filesystems and arbitrary power-loss guarantees are unverified. |
 
 See [local runtime](local-runtime.md), [artifact delivery](artifact-delivery.md),

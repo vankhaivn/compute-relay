@@ -3,6 +3,7 @@ package kaggle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 
@@ -55,7 +56,7 @@ var (
 
 	ErrRuntimeBinding = errors.New("runtime provider binding does not match the configured immutable profile")
 	ErrRuntimeBudget  = errors.New("runtime provider mutation budget exhausted; restart only with explicit authorization after resolving uncertain attempts")
-	ErrRuntimeCleanup = errors.New("runtime remote cleanup apply is unavailable; preserve owned resources and recovery evidence")
+	ErrRuntimeCleanup = fmt.Errorf("runtime remote cleanup apply is unavailable; preserve owned resources and recovery evidence: %w", provider.ErrCleanupUnsupported)
 )
 
 // NewRuntimeAdapter creates one immutable Kaggle provider revision. maxAttempts

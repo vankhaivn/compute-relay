@@ -5,13 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
 	runnerassets "github.com/vankhaivn/compute-relay/runner"
 )
 
@@ -76,42 +75,14 @@ func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy Executi
 	if closedObject([]byte(prepared.Resource), &ref) != nil || !positiveDecimal(ref.DatasetID) || ref.Version != 1 || ref.Reference != c.AccountName+"/"+stage.request.Slug || ref.Marker != stage.request.MarkerSHA256 {
 		return none, ErrExecutionIdentity
 	}
-	req, err := admission.Parse(plan.Job.Specification)
-	if err != nil {
-		return none, ErrConfig
-	}
-	spec := req.Spec()
-	if spec.Profile != plan.Job.Binding.Profile || spec.Bundle.ObjectID != plan.Job.Inputs.Bundle.ID || spec.Timeouts.RemoteWallSeconds != plan.Job.WallSeconds || plan.Job.WallSeconds > policy.MaxWallSeconds || len(spec.Inputs) != len(plan.Job.Inputs.Inputs) {
+	manifest, spec, err := runnerplan.Build(plan)
+	if err != nil || plan.Job.WallSeconds > policy.MaxWallSeconds {
 		return none, ErrConfig
 	}
 	gpu := spec.Resources.Accelerator == "gpu"
 	if (gpu && policy.MachineShape == "") || (!gpu && policy.MachineShape != "") || (spec.Network.RemoteInternet == "required" && !policy.AllowInternet) {
 		return none, ErrConfig
 	}
-	// Copy only remote execution fields from the already strictly validated JSON.
-	// Labels, source URLs, profile names and credential references are not embedded.
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(req.Canonical(), &fields) != nil {
-		return none, ErrConfig
-	}
-	manifest := map[string]any{
-		"manifest_version": "compute-relay/runner/v1", "job_id": plan.Job.Identity.JobID,
-		"attempt_id": plan.Job.Identity.AttemptID, "attempt_nonce": plan.Job.Identity.Nonce,
-		"input_manifest_sha256": plan.Job.Identity.InputManifestSHA256,
-		"bundle":                map[string]any{"path": "code.bin", "bytes": plan.Job.Inputs.Bundle.Bytes, "sha256": plan.Job.Inputs.Bundle.SHA256},
-	}
-	for _, key := range []string{"execution", "outputs", "resources", "network", "timeouts"} {
-		manifest[key] = fields[key]
-	}
-	inputs := make([]map[string]any, 0, len(spec.Inputs))
-	for i, in := range spec.Inputs {
-		frozen := plan.Job.Inputs.Inputs[i]
-		if in.Source.Kind != "object" || in.Source.ObjectID != frozen.Object.ID || in.Name != frozen.Name || in.Target != frozen.Target {
-			return none, ErrConfig
-		}
-		inputs = append(inputs, map[string]any{"name": in.Name, "target": in.Target, "path": fmt.Sprintf("input-%03d.bin", i), "bytes": frozen.Object.Bytes, "sha256": frozen.Object.SHA256})
-	}
-	manifest["inputs"] = inputs
 	modules, err := runnerassets.Sources()
 	if err != nil {
 		return none, ErrConfig

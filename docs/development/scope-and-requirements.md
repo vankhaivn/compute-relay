@@ -91,7 +91,8 @@ least one requirement ID. A requirement may have several tests, but no required 
 may depend solely on a live provider test when deterministic offline validation is possible.
 
 The initial matrix intentionally does not assign optional retained sessions, dashboards,
-SDK generation, a second production provider, or workflow DAGs to an MVP milestone.
+SDK generation, a second production provider, or workflow DAGs to an MVP milestone. The owner
+later added the SSH host provider to the first release; see the extension below.
 
 ## Managed companion extension
 
@@ -106,3 +107,17 @@ refines PRD-03/PRD-08 and SEC-01 without weakening existing immutable-job and re
 | MGT-04 | One durable finite permit per managed attempt, consumed before mutations; startup and recovery never refill it. | Restart/claim faults, ambiguous response and new retry without a grant. |
 
 [Managed connections](managed-connections.md) owns the detailed API and fault obligations.
+
+## SSH host extension
+
+The accepted [ADR-0028](decisions/0028-ssh-docker-host-provider.md) adds an operator-owned Docker
+host reached over SSH as a first-release provider, by owner decision on 2026-10-12. It refines
+PRD-04 sequencing and keeps PRD-08, SEC-01 and MGT-01–MGT-04.
+
+| ID | Requirement | Verification |
+|---|---|---|
+| SSH-01 | Keep the SSH endpoint and login only in the protected vault and pin the host key before credentials are offered; a changed host or key is refused. | Host-key mismatch before authentication, account pinning and same-account replacement tests. |
+| SSH-02 | Run each attempt in its own hardened container from a digest-pinned image, with network only when the frozen policy allows it. | Container create arguments, staged byte verification and a local engine run. |
+| SSH-03 | Map submission, observation, cancellation, logs and artifacts to Docker's own evidence for the exact container, without restarting ambiguous work. | Start-failure ambiguity, reconciliation, exit mapping and confirmed-stop tests. |
+| SSH-04 | Delete remote attempt data only through a requested cleanup of the exact stopped container. | Dry-run, apply, repeat and foreign-container refusal tests. |
+
