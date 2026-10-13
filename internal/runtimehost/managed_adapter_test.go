@@ -22,7 +22,7 @@ func TestManagedKaggleDescriptorAndCredentialEncodingAreClosed(t *testing.T) {
 	descriptor := adapter.Descriptor()
 	if descriptor.Type != "kaggle" || len(descriptor.Fields) != 1 || descriptor.Fields[0].Name != "api_token" ||
 		!descriptor.Fields[0].WriteOnly || !descriptor.Fields[0].Required || descriptor.Fields[0].MaxBytes != 8192 ||
-		descriptor.Capabilities.RemoteCancel != "unsupported" || descriptor.Capabilities.Quota != "supported" || descriptor.Capabilities.AbsoluteDeadline != "unsupported" {
+		descriptor.Capabilities.RemoteCleanup != "supported" || descriptor.Capabilities.RemoteCancel != "unsupported" || descriptor.Capabilities.Quota != "supported" || descriptor.Capabilities.AbsoluteDeadline != "unsupported" {
 		t.Fatal("invalid installed descriptor")
 	}
 	for _, fields := range []map[string]string{

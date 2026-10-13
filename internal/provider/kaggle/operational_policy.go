@@ -32,8 +32,9 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 			Reason: "offline components exist; full integration and account-scoped live acceptance remain required"}
 		switch name {
 		case domain.CapabilityRemoteCleanup:
-			cap.Support = domain.CapabilitySupportUnsupported
-			cap.Reason = "the pinned SDK cannot condition dataset or kernel deletion on immutable identity and version"
+			cap.Support = domain.CapabilitySupportSupported
+			cap.Reason = "explicit cleanup verifies original identity before name-based deletion"
+			cap.Conditions = []string{nameBasedDeleteWarning, "requires accept_name_based_delete; live deletion remains unqualified"}
 		case domain.CapabilityRemoteCancellation:
 			cap.Support = domain.CapabilitySupportUnsupported
 			cap.Reason = "this batch reference has no verified kernel-session ID; manual cancellation is required"

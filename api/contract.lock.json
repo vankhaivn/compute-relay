@@ -23,13 +23,13 @@
     },
     {
       "path": "api/examples/cleanup-preview.valid.json",
-      "sha256": "796c333d1d06028a55d319e7719340ea3ac224caebc3a41d4cdd3e108b2f2e08",
-      "bytes": 788
+      "sha256": "444168975b5c0b888ea8fb701492560dd8db2dbd97ff64e0c4c1e383ae11ffe3",
+      "bytes": 1033
     },
     {
       "path": "api/examples/cleanup-request.discard.valid.json",
-      "sha256": "2f65940b2407dd4b992a6406bd04fae380b460028ee1f2427a45ec5dbe45492e",
-      "bytes": 104
+      "sha256": "dbd1d889d21ebe819293d60759ccd101f1ff355eb79271a8aa226ae3cd6ea93a",
+      "bytes": 140
     },
     {
       "path": "api/examples/cleanup-request.valid.json",
@@ -788,8 +788,8 @@
     },
     {
       "path": "api/openapi.json",
-      "sha256": "2ea3ec9095bad31fbe073e754d96406f843633dcebd03701571efa90fa0a4947",
-      "bytes": 81072
+      "sha256": "3cf8dbc3cc9d2a3922fe5311eda59be885f1fd00bf4fc2dee39d435845171b7f",
+      "bytes": 81616
     },
     {
       "path": "api/schemas/artifact.v1alpha1.schema.json",
@@ -803,13 +803,13 @@
     },
     {
       "path": "api/schemas/cleanup-preview.v1alpha1.schema.json",
-      "sha256": "4305e51d422f842f57db82638c824f78812ef6d4f583d71d315aa613d88b7759",
-      "bytes": 4583
+      "sha256": "3ff195f261ef6dbb2fd0a60428eb196a89b883cdfd249924346a028c04882e6e",
+      "bytes": 5448
     },
     {
       "path": "api/schemas/cleanup-request.v1alpha1.schema.json",
-      "sha256": "58202d3ac6686050ba842710d76d10795aa9fc8a6485f60461e6640681567f3a",
-      "bytes": 928
+      "sha256": "57e2c76a4d3c734abd0809eb09049f80e3cb7e1afbe6fe94fecae6b0c208ea54",
+      "bytes": 1316
     },
     {
       "path": "api/schemas/common.v1alpha1.schema.json",

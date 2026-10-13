@@ -41,6 +41,15 @@ Uncollected outputs require the explicit body field `"discard_uncollected":true`
 may be included as a Boolean query parameter to preview that choice. A prepared attempt that
 never started, including a definitively rejected submission, does not require output discard.
 
+Kaggle targets show `name_based_delete: true` and a `warning` in the preview. Kaggle deletes by
+owner/name: if someone replaces the resource after Relay checks it, the replacement may be deleted,
+including its versions and outputs. Renaming can leave the original object undeleted even when
+the recorded name is absent. To accept these risks, add `"accept_name_based_delete":true` to
+the cleanup body. The same Boolean query parameter previews eligibility with that acceptance;
+it does not authorize deletion. Omission or false retains the target with
+`name_based_delete_not_accepted`. Acceptance never permits deletion of a resource already known
+to have a different ID, version, ownership marker or source.
+
 Active or unknown execution, unresolved creation/submission, current worker leases, pending
 controls/collection, named input/job/attempt holds and a reference shared with another attempt
 prevent cleanup. A ready preparation still held for start is ineligible. The worker checks these
@@ -53,7 +62,7 @@ its `resources` outcomes:
 |---|---|
 | `pending` | No deletion intent has been committed for this resource. |
 | `running` | A fenced deletion intent exists; its result may still be unknown. |
-| `deleted` | The adapter confirmed deletion of the original target. |
+| `deleted` | The adapter confirmed deletion; name-based targets retain the replacement risk shown in the preview. |
 | `absent` | The adapter confirmed the original target is already absent. |
 | `retained` | This resource was excluded or refused without a new deletion. |
 | `failed` | Access was refused; no deletion was confirmed. |
@@ -65,7 +74,8 @@ with individual outcomes intact. A failed operation can therefore contain a conf
 Pending, applied or uncertain cleanup blocks collection from the affected remote data.
 
 The same key replays its original receipt. After a lost acknowledgement, restart recovers only
-the original targets under a new lease fence. A terminal failure needs an explicit new request
+the original targets under a new lease fence. For name-based deletion, recovery only reads and
+never repeats the delete RPC. A terminal failure needs an explicit new request
 to try cleanup again; that request preserves the old operation and target evidence. Neither
 recovery path prepares, starts or retries compute.
 
@@ -74,7 +84,7 @@ recovery path prepares, starts or retries compute.
 | Provider | Scope and conditions |
 |---|---|
 | SSH | Deletes only the recorded stopped container by its full immutable ID on the recorded Docker engine. Requires frozen SSH host/account identity, preparation receipt, plan and matching ownership labels. Never forces removal or removes volumes. |
-| Kaggle | Lists recorded private staging dataset and execution kernel identities, but retains both with `conditional_delete_unavailable`. SDK 0.1.35 addresses deletion by owner/name without an immutable ID/version precondition. A preceding read cannot protect against replacement before deletion. |
+| Kaggle | Requires `accept_name_based_delete=true`. Verifies the recorded account, numeric ID, name, version 1 and privacy, plus the dataset marker bytes or kernel source hash. Requires terminal kernel status. Deletes the whole object by owner/name; replacement between check and deletion remains possible. |
 
 SSH cleanup removes the container's writable data, including staged copies and outputs. Original
 host inputs, bind-mount contents, shared/named volumes, other containers, images and build cache
@@ -82,8 +92,10 @@ remain. Workload output cannot supply a host deletion path. Old SSH receipts wit
 engine ID remain readable but are retained with `engine_identity_not_recorded`; the current
 engine cannot retroactively prove the original one.
 
-Kaggle deletion scope across historical versions and outputs is not live-qualified. No deletion
-RPC is called, and no name-based fallback exists. See the dated
+Kaggle deletion and its scope across historical versions and outputs are not live-qualified.
+Relay accepts only version-1 targets and confirms deletion through an explicit subsequent 404.
+A permission denial, including Kaggle's missing-name 403, is insufficient: the outcome remains
+unknown and staging is retained if execution deletion was not confirmed. See the dated
 [Kaggle API limitation](development/providers/kaggle-operations.md#remote-cleanup) and
 [SSH implementation boundary](development/providers/ssh-host.md#remote-cleanup).
 

@@ -91,6 +91,9 @@ func verifyCleanupLease(ctx context.Context, tx *sql.Tx, w cleanup.Work, now tim
 	if row.record.Operation.Status != domain.OperationRunning || row.record.Operation.Revision != w.Record.Operation.Revision {
 		return cleanupRow{}, cleanup.ErrLeaseLost
 	}
+	if row.request.AcceptNameBasedDelete != w.AcceptNameBasedDelete {
+		return cleanupRow{}, operations.ErrChanged
+	}
 	return row, nil
 }
 
