@@ -46,12 +46,13 @@ cleanup, public data or paid capacity.
 
 ## Parallel execution qualification
 
-[Issue 93](https://github.com/vankhaivn/compute-relay/issues/93) requires separate bounded live
-Kaggle and Intel SSH concurrency evidence: two independently authorized jobs running while a
-third waits, shared host capacity across LAN/Tailscale and password/key paths, restart/uncertainty
-reservations, isolated logs and verified outputs. Record actual versions and aggregate resource
-limits. Offline scheduler/adapter tests and existing single-job evidence do not complete this
-qualification; it needs its own finite compute authorization.
+[Issue 93](https://github.com/vankhaivn/compute-relay/issues/93) still requires bounded live Intel
+SSH concurrency evidence: two independently authorized jobs running while a third waits, shared
+host capacity across LAN/Tailscale and password/key paths, restart/uncertainty reservations,
+isolated logs and verified outputs. Record actual versions and aggregate resource limits.
+[Current status](../status.md) records the qualified Kaggle CPU envelope. Offline scheduler/adapter
+tests and existing single-job SSH evidence do not complete shared-host qualification; it needs
+its own finite compute authorization.
 
 ## M6 — Release acceptance
 
