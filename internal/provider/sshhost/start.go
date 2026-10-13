@@ -154,7 +154,11 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		if !owned(info, plan.Job.Identity) || info.Started() || info.Config.Labels[labelPrefix+"preparation"] != string(operation) || info.Config.Labels[labelPrefix+"plan"] != string(plan.Digest()) {
 			return ErrIdentity
 		}
-		p := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID), Private: true}
+		engine := info.Config.Labels[labelPrefix+"engine"]
+		if err := d.verifyEngine(ctx, engine); err != nil {
+			return err
+		}
+		p := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID, engine), Private: true}
 		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, 4096)
 		if err != nil {
 			return err
@@ -165,7 +169,7 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 			return nil
 		}
 		var staged marker
-		if json.Unmarshal(raw, &staged) != nil || staged.Preparation != operation || staged.Plan != plan.Digest() || staged.Container != info.ID || staged.Manifest != provider.Digest(rawManifest) || !staged.Verification.Valid() {
+		if json.Unmarshal(raw, &staged) != nil || staged.Preparation != operation || staged.Plan != plan.Digest() || staged.Container != info.ID || staged.EngineID != engine || staged.Manifest != provider.Digest(rawManifest) || !staged.Verification.Valid() {
 			return ErrIdentity
 		}
 		image, found, err := d.inspectImage(ctx, a.config.Image)
@@ -216,7 +220,8 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 	}
 	raw, found, err := readFile(ctx, d, info.ID, stagedMarker, 4096)
 	var m marker
-	if err != nil || !found || json.Unmarshal(raw, &m) != nil || m != (marker{Preparation: p.PreparationID, Plan: p.PlanSHA256, Container: info.ID, Verification: p.VerificationSHA256, Manifest: p.ManifestSHA256}) {
+	ref, refErr := decodeRef(p.Resource, p.Identity)
+	if refErr != nil || err != nil || !found || json.Unmarshal(raw, &m) != nil || m != (marker{Preparation: p.PreparationID, Plan: p.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: p.VerificationSHA256, Manifest: p.ManifestSHA256}) {
 		return ErrIdentity
 	}
 	raw, found, err = readFile(ctx, d, info.ID, "/relay/manifest.json", maxManifestBytes)

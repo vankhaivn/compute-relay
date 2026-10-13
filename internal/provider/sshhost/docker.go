@@ -35,6 +35,7 @@ var DockerCandidates = []string{
 var ErrRemoteDocker = errors.New("remote Docker command failed")
 
 var pinnedImage = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:-]{0,200}@sha256:[0-9a-f]{64}$`)
+var engineIdentity = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:-]{15,127}$`)
 
 // ValidImage accepts only an image reference pinned by digest.
 func ValidImage(ref string) bool { return pinnedImage.MatchString(ref) }
@@ -124,6 +125,30 @@ func (d docker) systemTime(ctx context.Context) (time.Time, error) {
 		return time.Time{}, ErrRemoteDocker
 	}
 	return at, nil
+}
+
+func (d docker) engineID(ctx context.Context) (string, error) {
+	var out bytes.Buffer
+	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 256}, "info", "--format", "{{.ID}}")
+	id := strings.TrimSpace(out.String())
+	if err != nil || result.ExitCode != 0 || !engineIdentity.MatchString(id) {
+		return "", ErrRemoteDocker
+	}
+	return id, nil
+}
+
+func (d docker) verifyEngine(ctx context.Context, expected string) error {
+	if expected == "" {
+		return nil // Legacy observation remains readable; resource cleanup refuses it.
+	}
+	current, err := d.engineID(ctx)
+	if err != nil {
+		return err
+	}
+	if current != expected {
+		return ErrIdentity
+	}
+	return nil
 }
 
 type imageInfo struct {
