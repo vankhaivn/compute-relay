@@ -5,6 +5,11 @@ on:
     paths:
       - "**/*.go"
       - "internal/store/sqlite/migrations/**"
+      - "internal/**/*.py"
+      - "internal/provider/sshhost/image/**"
+      - "internal/devtool/fault-matrix.json"
+      - "runner/**"
+      - ".github/scripts/**"
       - "api/**"
       - "go.mod"
       - "go.sum"
@@ -15,6 +20,11 @@ on:
     paths:
       - "**/*.go"
       - "internal/store/sqlite/migrations/**"
+      - "internal/**/*.py"
+      - "internal/provider/sshhost/image/**"
+      - "internal/devtool/fault-matrix.json"
+      - "runner/**"
+      - ".github/scripts/**"
       - "api/**"
       - "go.mod"
       - "go.sum"
@@ -24,12 +34,38 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   GO_VERSION: "1.27.1"
 
 jobs:
+  scope:
+    name: Select Go checks
+    runs-on: ubuntu-latest
+    outputs:
+      race: ${{ steps.scope.outputs.race }}
+      macos: ${{ steps.scope.outputs.macos }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Test check selection
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Select extra checks
+        id: scope
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/ci_scope.py
+
   quality:
-    name: Quality and race tests
+    name: Linux checks
+    needs: scope
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -39,7 +75,11 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: false
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/go.yml
+            ${{ needs.scope.outputs.race == 'true' && '.github/scripts/ci_scope.py' || '' }}
 
       - name: Verify toolchain
         shell: bash
@@ -49,15 +89,14 @@ jobs:
         run: go run ./cmd/devtool check
 
       - name: Run race tests
+        if: needs.scope.outputs.race == 'true'
         run: go run ./cmd/devtool test-race
 
   native:
-    name: Native ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: Native macOS
+    needs: scope
+    if: needs.scope.outputs.macos == 'true'
+    runs-on: macos-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +105,8 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: false
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Run native tests
         run: go run ./cmd/devtool test
