@@ -32,12 +32,33 @@ type cleanupTarget struct {
 	remote    provider.RemoteReference
 	binding   provider.BindingSnapshot
 	collected bool
+	resources []cleanup.Resource
 }
 
 // eligibleCleanup applies every admission rule inside the caller's transaction. The
 // per-attempt resource is created during preparation, so the target is always the exact
 // staging ledger entry; an executed attempt is addressed by its recorded execution reference.
 func eligibleCleanup(ctx context.Context, tx *sql.Tx, target admission.Record, discard bool, now time.Time, self domain.OperationID) (cleanupTarget, error) {
+	result, err := eligibleCleanupAttempt(ctx, tx, target, discard, now, self)
+	if err != nil {
+		return result, err
+	}
+	result.resources, err = cleanupResources(ctx, tx, target)
+	if err != nil {
+		return result, err
+	}
+	if len(result.resources) == 0 {
+		return result, operations.ErrState
+	}
+	for _, r := range result.resources {
+		if r.Reason != "" {
+			return result, operations.ErrUnresolved
+		}
+	}
+	return result, nil
+}
+
+func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Record, discard bool, now time.Time, self domain.OperationID) (cleanupTarget, error) {
 	var result cleanupTarget
 	w, job, attempt := string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID)
 	at := now.UnixMilli()
@@ -47,8 +68,11 @@ func eligibleCleanup(ctx context.Context, tx *sql.Tx, target admission.Record, d
  WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1 AND l.until_ms>?)
  OR EXISTS(SELECT 1 FROM collection_leases WHERE workspace_id=? AND job_id=? AND attempt_id=? AND held=1 AND until_ms>?)
  OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))
- OR EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)`,
-		w, job, attempt, at, w, job, attempt, at, w, job, attempt, w, job, attempt, string(self)).Scan(&busy)
+ OR EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)
+ OR EXISTS(SELECT 1 FROM retention_holds h WHERE h.workspace_id=? AND h.active=1 AND
+ ((h.target_kind='job' AND h.target_id=?) OR (h.target_kind='attempt' AND h.target_id=?) OR
+ (h.target_kind='input' AND EXISTS(SELECT 1 FROM job_objects o WHERE o.workspace_id=h.workspace_id AND o.job_id=? AND o.object_id=h.target_id))))`,
+		w, job, attempt, at, w, job, attempt, at, w, job, attempt, w, job, attempt, string(self), w, job, attempt, job).Scan(&busy)
 	if err != nil {
 		return result, dbError(err)
 	}
@@ -123,7 +147,8 @@ func eligibleCleanup(ctx context.Context, tx *sql.Tx, target admission.Record, d
 // was requested or applied. It never changes an existing control.
 func pendingCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID) error {
 	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running','succeeded'))`, string(w), string(job), string(attempt)).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_operations c WHERE workspace_id=? AND job_id=? AND attempt_id=? AND
+ (status IN ('accepted','running','succeeded') OR EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id AND r.state IN ('running','deleted','absent','unknown'))))`, string(w), string(job), string(attempt)).Scan(&exists); err != nil {
 		return dbError(err)
 	}
 	if exists {
@@ -252,6 +277,13 @@ func (s *Store) ReadCleanup(ctx context.Context, w domain.WorkspaceID, token str
 		}
 		row, err := loadCleanup(ctx, tx, w, id)
 		result = row.record
+		if err != nil {
+			return err
+		}
+		resources, err := loadCleanupResources(ctx, tx, result.Operation)
+		for _, resource := range resources {
+			result.Resources = append(result.Resources, resource.Result)
+		}
 		return err
 	})
 	if err != nil {
@@ -326,6 +358,9 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 		}
 		r := cleanup.Record{Operation: op, Effect: cleanup.Pending}
 		if err = insertCleanup(ctx, tx, c, r, plan.resource); err != nil {
+			return err
+		}
+		if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
 			return err
 		}
 		if err = saveCleanupReceipt(ctx, tx, c, r); err != nil {

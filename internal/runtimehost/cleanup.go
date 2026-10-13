@@ -38,3 +38,19 @@ func (r managedCleanupRepository) ClaimCleanup(ctx context.Context, now time.Tim
 func (r managedCleanupRepository) CompleteCleanup(ctx context.Context, work cleanup.Work, outcome cleanup.Outcome, now time.Time) error {
 	return retryManagedWrite(ctx, now, func(at time.Time) error { return r.managedCleanupStore.CompleteCleanup(ctx, work, outcome, at) })
 }
+
+func (r managedCleanupRepository) BeginCleanupResource(ctx context.Context, work cleanup.Work, resource cleanup.ResourceWork, now time.Time) error {
+	repo, ok := r.managedCleanupStore.(cleanup.ResourceRepository)
+	if !ok {
+		return cleanup.ErrInvalid
+	}
+	return retryManagedWrite(ctx, now, func(at time.Time) error { return repo.BeginCleanupResource(ctx, work, resource, at) })
+}
+
+func (r managedCleanupRepository) CompleteCleanupResource(ctx context.Context, work cleanup.Work, result cleanup.ResourceResult, now time.Time) error {
+	repo, ok := r.managedCleanupStore.(cleanup.ResourceRepository)
+	if !ok {
+		return cleanup.ErrInvalid
+	}
+	return retryManagedWrite(ctx, now, func(at time.Time) error { return repo.CompleteCleanupResource(ctx, work, result, at) })
+}
