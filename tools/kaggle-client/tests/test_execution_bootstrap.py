@@ -1,4 +1,4 @@
-"""Bootstrap wiring with inert fixture modules, never an admitted workload."""
+"""Bootstrap imports and inert entry points, never an admitted workload."""
 import hashlib
 import importlib.util
 from pathlib import Path
@@ -41,6 +41,8 @@ class ExecutionBootstrapTests(unittest.TestCase):
             "modules": {
                 "__init__.py": "VERSION = 'fixture'\n",
                 "contract.py": "from . import VERSION\n",
+                "deadline.py": "from .contract import VERSION\n",
+                "secrets.py": "from .deadline import VERSION\n",
                 "files.py": "from .contract import VERSION\n",
                 "process.py": "from .files import VERSION\n",
                 "main.py": (
@@ -163,6 +165,29 @@ class ExecutionBootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "already installed"):
             self.run_bootstrap()
         self.assertEqual(len(main.calls), 1)
+
+    def test_current_runner_dependency_graph_loads_before_entry(self):
+        sources = ROOT / "runner/python/relay_runner"
+        self.payload["modules"] = {path.name: path.read_text() for path in sources.glob("*.py")}
+        # Keep every real import and definition; only the workload entry is inert.
+        self.payload["modules"]["main.py"] += (
+            "\nfixture_calls = []\n"
+            "def execute(manifest, staging, root, network, stopped):\n"
+            "    fixture_calls.append((staging, root, network, stopped()))\n"
+            "    return {'phase': 'completed'}\n"
+        )
+        self.run_bootstrap()
+        main = sys.modules[PACKAGE + ".main"]
+        secrets = sys.modules[PACKAGE + ".secrets"]
+        deadline = sys.modules[PACKAGE + ".deadline"]
+        self.assertIs(main.secrets, secrets)
+        self.assertIs(main.Bound, deadline.Bound)
+        self.assertIs(secrets.Bound, deadline.Bound)
+        self.assertIs(sys.modules[PACKAGE + ".files"].SecretFound, secrets.SecretFound)
+        self.assertIs(sys.modules[PACKAGE + ".process"].Redactor, secrets.Redactor)
+        self.assertEqual(main.fixture_calls,
+                         [(self.staging.resolve(), self.root / "working" / "relay-result", "disabled", False)])
+        self.assertFalse((self.root / "working").exists())
 
     def test_failure_and_cancellation_restore_signal_handlers(self):
         for fault in ("phase", "exception", "cancellation"):

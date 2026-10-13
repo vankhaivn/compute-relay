@@ -77,6 +77,11 @@
       "sha256": "57b52770ed5cc7a51f452aa2d656e4f1263a789ebce6707c24b611324826cf42"
     },
     {
+      "path": "runner/tests/test_kaggle_bootstrap.py",
+      "bytes": 2448,
+      "sha256": "9bd02458af523b46aa12d1fa367b5d228c1021d81231a66f78dff90e2e986fcf"
+    },
+    {
       "path": "runner/tests/test_mirror.py",
       "bytes": 1617,
       "sha256": "6d6f6d6581f0f9fa83a2b05941332c44661be3d127414a4d0c49632e328b8644"

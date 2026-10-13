@@ -95,7 +95,7 @@ def run_remote(payload):
     package.__path__ = []
     package.__package__ = package_name
     sys.modules[package_name] = package
-    for name in ("__init__", "contract", "files", "process", "main"):
+    for name in ("__init__", "contract", "deadline", "secrets", "files", "process", "main"):
         if name == "__init__":
             module = package
         else:
