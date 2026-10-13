@@ -185,6 +185,10 @@ func TestCleanupWorkerFailuresAreExplicit(t *testing.T) {
 			p.err = fmt.Errorf("adapter-secret-canary: %w", provider.ErrCleanupUnsupported)
 		}, domain.CodeUnsupportedCapability, domain.RecommendedActionInspectProvider, 0},
 		{"adapter returns no evidence", func(p *cleanupProbe) { p.result = &provider.CleanupOutcome{WouldDelete: true} }, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
+		{"contradictory deletion and access refusal", func(p *cleanupProbe) {
+			p.result = &provider.CleanupOutcome{Deleted: true}
+			p.err = provider.Problem(domain.CodeProviderAccessDenied, domain.FailureStageAuthentication, "private-access-canary")
+		}, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f, id := uncollectedFixture(t)

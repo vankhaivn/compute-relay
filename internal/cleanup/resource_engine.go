@@ -139,6 +139,9 @@ func callCleanupResource(ctx context.Context, cleaner provider.ResourceCleaner, 
 		result.State, result.Reason = ResourceAbsent, "absence_confirmed"
 		return result, Outcome{}
 	}
+	if err != nil && (outcome.Deleted || outcome.AlreadyAbsent || outcome.WouldDelete) {
+		return result, failed // Contradictory evidence cannot establish a safe refusal.
+	}
 	if errors.Is(err, provider.ErrCleanupUnsupported) {
 		result.State, result.Reason = ResourceRetained, "resource_cleanup_unsupported"
 		return result, failure(domain.CodeUnsupportedCapability, "the adapter retained an unsupported cleanup target", domain.RecommendedActionInspectProvider)
