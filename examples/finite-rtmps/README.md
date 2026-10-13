@@ -75,7 +75,7 @@ python3 examples/finite-rtmps/controller.py \
   observe --pages 5
 ```
 
-Observation returns job/readiness state and bounded progress records when available. Missing, old, or unavailable logs do not prove inactivity, receiver failure, or successful delivery. The application/operator remains responsible for external session finalization, credential revocation, receiver health, and destination visibility. If the controller disappears, a separate durable finalizer is needed to ensure the application session is finalized.
+Observation returns job/readiness state and bounded progress records when available. The session remembers when an attempt's completed log has been fully read, including across controller restarts. Missing, old, or unavailable logs do not prove inactivity, receiver failure, or successful delivery. The application/operator remains responsible for external session finalization, credential revocation, receiver health, and destination visibility. If the controller disappears, a separate durable finalizer is needed to ensure the application session is finalized.
 
 To request cancellation, then observe until the original attempt is confirmed inactive. Cancellation is intent; it is not proof that the process stopped:
 
