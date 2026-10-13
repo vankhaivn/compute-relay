@@ -49,7 +49,7 @@ func (s *Store) NextConnectionOperation(ctx context.Context, now time.Time) (con
 }
 func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, problem string, now time.Time) error {
 	switch problem {
-	case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
+	case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "resource_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
 	default:
 		return ErrInvalid
 	}
@@ -145,6 +145,13 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 			expectedScope := connections.AccountScope(current.ProviderType, result.Verification.CanonicalAccount)
 			if result.Profile.AccountScope != expectedScope || account != "" && account != result.Verification.CanonicalAccount {
 				return connections.ErrConflict
+			}
+			resource := result.Verification.Resource
+			if resource == nil && result.Profile.ResourceScope != "" || resource != nil && result.Profile.ResourceScope != resource.ID {
+				return ErrInvalid
+			}
+			if err = bindManagedResource(ctx, tx, expectedScope, resource); err != nil {
+				return err
 			}
 			if host := result.Verification.Host; host != nil {
 				if host.Validate() != nil {

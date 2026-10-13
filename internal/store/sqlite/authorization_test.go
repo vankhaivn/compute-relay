@@ -32,12 +32,15 @@ func (r managedDispatchRepository) ClaimRecovery(ctx context.Context, owner stri
 	return r.Store.ClaimRecoveryManaged(ctx, owner, now)
 }
 
-func managedFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
+func managedFixture(t testing.TB, scenario fake.Scenario, maxActive ...int) *dispatchFixture {
 	t.Helper()
 	f := newDispatchFixture(t, scenario)
 	f.profile.Binding.ConfigurationRevision = "managed"
 	f.profile.Binding.ProviderInstanceID = "con_fixture"
 	f.profile.CredentialRef = "vault:con_fixture"
+	if len(maxActive) == 1 {
+		f.profile.MaxActiveAttempts = maxActive[0]
+	}
 	seedAuthorizationConnection(t, f, "a", "con_fixture")
 	if err := f.s.PutProfile(context.Background(), f.profile, true); err != nil {
 		t.Fatal(err)

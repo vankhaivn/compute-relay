@@ -34,7 +34,7 @@ func sshFixtureVerify(_ context.Context, raw []byte, _ string) (sshhost.HostVeri
 		return sshhost.HostVerification{}, sshhost.ErrCredentialReject
 	}
 	account, err := sshhost.Account(target)
-	return sshhost.HostVerification{Account: account, HostKey: target.HostKey, OS: "linux", Architecture: "amd64", ImageID: "sha256:" + strings.Repeat("1", 64)}, err
+	return sshhost.HostVerification{Account: account, HostKey: target.HostKey, OS: "linux", Architecture: "amd64", ImageID: "sha256:" + strings.Repeat("1", 64), MachineID: strings.Repeat("2", 64), EngineID: strings.Repeat("3", 64)}, err
 }
 
 func (f *managedTestFixture) sshConnection(t *testing.T, key, password string) (connections.Operation, connections.Connection) {

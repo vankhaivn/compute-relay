@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/connections"
@@ -20,7 +21,7 @@ import (
 type managedSSHAdapter struct {
 	config  ManagedServeConfig
 	verify  func(context.Context, []byte, string) (sshhost.HostVerification, error)
-	install func(context.Context, []byte, string, string, domain.OperationID, bool) (sshhost.HostVerification, error)
+	install func(context.Context, []byte, string, string, string, domain.OperationID, bool) (sshhost.HostVerification, error)
 }
 
 var _ connections.Adapter = (*managedSSHAdapter)(nil)
@@ -47,7 +48,8 @@ func (*managedSSHAdapter) Descriptor() connections.Descriptor {
 			field(sshhost.FieldCPUs, "CPU limit per job", false, 6),
 			field(sshhost.FieldMemoryMiB, "Memory limit per job (MiB)", false, 8),
 		},
-		Capabilities: connections.Capabilities{RemoteCleanup: "supported", EphemeralSecrets: "supported", Accelerators: []string{"cpu"}, RemoteCancel: "supported", Quota: "unsupported", AbsoluteDeadline: "supported", SeparateStart: "supported"},
+		Capabilities: connections.Capabilities{RemoteCleanup: "supported", EphemeralSecrets: "supported", Accelerators: []string{"cpu"}, RemoteCancel: "supported", Quota: "unsupported", AbsoluteDeadline: "supported", SeparateStart: "supported",
+			Concurrency: &connections.ConcurrencyCapability{Support: "supported", Scope: "resource", Minimum: 1, Maximum: 64, Default: 1}},
 	}
 }
 
@@ -78,7 +80,7 @@ func sshVerification(raw []byte, host sshhost.HostVerification, err error) (conn
 	if errors.Is(err, sshhost.ErrImageInstallationUnknown) {
 		return connections.Verification{}, connections.ErrImageInstallationUnknown
 	}
-	if err != nil || !domain.ObjectID(host.Account).Valid() {
+	if err != nil || !domain.ObjectID(host.Account).Valid() || !domain.SHA256Digest(host.MachineID).Valid() || !domain.SHA256Digest(host.EngineID).Valid() {
 		return connections.Verification{}, connections.ErrUnavailable
 	}
 	endpoint, err := sshhost.ParseEndpoint(raw)
@@ -89,10 +91,11 @@ func sshVerification(raw []byte, host sshhost.HostVerification, err error) (conn
 	var runtimeConfig []byte
 	if host.ImageID != "" {
 		image.Status, image.ID = "ready", host.ImageID
-		runtimeConfig, _ = json.Marshal(managedSSHRuntimeConfig{Version: 2, Image: host.ImageID, Architecture: host.Architecture,
-			RecipeSHA256: image.RecipeSHA256, CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes})
+		runtimeConfig, _ = json.Marshal(managedSSHRuntimeConfig{Version: 3, Image: host.ImageID, Architecture: host.Architecture,
+			RecipeSHA256: image.RecipeSHA256, CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, MachineID: host.MachineID, EngineID: host.EngineID})
 	}
 	verified := connections.Verification{CanonicalAccount: host.Account,
+		Resource:      &connections.ResourceIdentity{Kind: "machine", ID: "resource_" + host.MachineID},
 		Host:          &connections.HostEvidence{HostKeyFingerprint: host.HostKey, OS: host.OS, Architecture: host.Architecture, Image: image},
 		RuntimeConfig: runtimeConfig, SelectionUnavailable: host.ImageID == "",
 		Quota: provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "cpu", Source: "operator_host"}}
@@ -111,10 +114,15 @@ func (*managedSSHAdapter) PlanImageInstallation(connection connections.Connectio
 }
 
 func (a *managedSSHAdapter) InstallImage(ctx context.Context, raw []byte, record connections.Record, recoverOnly bool) (connections.Verification, error) {
-	if record.Installation == nil || record.Installation.Validate() != nil || record.Installation.RecipeSHA256 != sshhost.ImageRecipeDigest() || a.install == nil {
+	if record.Installation == nil || record.Installation.Validate() != nil || record.Installation.RecipeSHA256 != sshhost.ImageRecipeDigest() || a.install == nil ||
+		record.Resource == nil && !recoverOnly || record.Resource != nil && (record.Resource.Validate() != nil || record.Resource.Kind != "machine") {
 		return connections.Verification{}, connections.ErrUnsupported
 	}
-	host, err := a.install(ctx, raw, record.CanonicalAccount, record.Installation.Architecture, record.Operation.ID, recoverOnly)
+	machineID := ""
+	if record.Resource != nil {
+		machineID = strings.TrimPrefix(record.Resource.ID, "resource_")
+	}
+	host, err := a.install(ctx, raw, record.CanonicalAccount, machineID, record.Installation.Architecture, record.Operation.ID, recoverOnly)
 	return sshVerification(raw, host, err)
 }
 
@@ -139,6 +147,8 @@ type managedSSHRuntimeConfig struct {
 	RecipeSHA256 string `json:"recipe_sha256,omitempty"`
 	CPUs         string `json:"cpus,omitempty"`
 	MemoryBytes  int64  `json:"memory_bytes,omitempty"`
+	MachineID    string `json:"machine_id,omitempty"`
+	EngineID     string `json:"engine_id,omitempty"`
 }
 
 func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
@@ -152,8 +162,15 @@ func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
 		if jsonwire.Fields(fields, []string{"schema_version", "image"}, nil) != nil || !sshhost.ValidImage(config.Image) {
 			return managedSSHRuntimeConfig{}, ErrRequest
 		}
-	case 2:
-		if jsonwire.Fields(fields, []string{"schema_version", "image", "architecture", "recipe_sha256"}, []string{"cpus", "memory_bytes"}) != nil ||
+	case 2, 3:
+		required := []string{"schema_version", "image", "architecture", "recipe_sha256"}
+		if config.Version == 3 {
+			required = append(required, "machine_id", "engine_id")
+			if !domain.SHA256Digest(config.MachineID).Valid() || !domain.SHA256Digest(config.EngineID).Valid() {
+				return managedSSHRuntimeConfig{}, ErrRequest
+			}
+		}
+		if jsonwire.Fields(fields, required, []string{"cpus", "memory_bytes"}) != nil ||
 			!sshhost.ValidImageID(config.Image) || !sshhost.SupportedArchitecture(config.Architecture) || !domain.SHA256Digest(config.RecipeSHA256).Valid() ||
 			!sshhost.ValidResourceLimits(config.CPUs, config.MemoryBytes) {
 			return managedSSHRuntimeConfig{}, ErrRequest
@@ -173,13 +190,21 @@ func (h *Host) managedSSHProvider(resolver ports.CredentialResolver, binding con
 	if err != nil {
 		return nil, err
 	}
+	if binding.Resource != nil {
+		if binding.Resource.Validate() != nil || binding.Resource.Kind != "machine" || frozen.MachineID != "" && "resource_"+frozen.MachineID != binding.Resource.ID {
+			return nil, ErrRequest
+		}
+		frozen.MachineID = strings.TrimPrefix(binding.Resource.ID, "resource_")
+	} else if frozen.Version == 3 {
+		return nil, ErrRequest
+	}
 	if _, ok := credentials.VaultReference(ports.CredentialRef(profile.CredentialRef)); !ok {
 		return nil, ErrRequest
 	}
 	snapshot := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 	adapter, err := sshhost.NewAdapter(sshhost.Config{InstanceID: profile.Binding.ProviderInstanceID, Account: binding.CanonicalAccount,
 		CredentialRef: ports.CredentialRef(profile.CredentialRef), AllowInternet: profile.AllowRemoteInternet,
-		MaxWallSeconds: profile.MaxRemoteWallSeconds, Image: frozen.Image, MaxProcesses: profile.MaxProcesses, Architecture: frozen.Architecture, ImageRecipeSHA256: frozen.RecipeSHA256, CPUs: frozen.CPUs, MemoryBytes: frozen.MemoryBytes}, snapshot, resolver, h.inputs, clock{})
+		MaxWallSeconds: profile.MaxRemoteWallSeconds, Image: frozen.Image, MaxProcesses: profile.MaxProcesses, Architecture: frozen.Architecture, ImageRecipeSHA256: frozen.RecipeSHA256, CPUs: frozen.CPUs, MemoryBytes: frozen.MemoryBytes, MachineID: frozen.MachineID, EngineID: frozen.EngineID}, snapshot, resolver, h.inputs, clock{})
 	if err != nil {
 		return nil, ErrRequest
 	}

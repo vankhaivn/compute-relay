@@ -20,6 +20,10 @@ func (s *Service) descriptors() []Descriptor {
 		d := adapter.Descriptor()
 		d.Fields = append([]Field(nil), d.Fields...)
 		d.Capabilities.Accelerators = append([]string(nil), d.Capabilities.Accelerators...)
+		if d.Capabilities.Concurrency != nil {
+			copy := *d.Capabilities.Concurrency
+			d.Capabilities.Concurrency = &copy
+		}
 		d.CredentialStorage = "available"
 		if s.vault == nil {
 			d.CredentialStorage = "unsupported"
@@ -183,8 +187,21 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	if record.CanonicalAccount != "" && record.CanonicalAccount != verified.CanonicalAccount {
 		return true, s.repo.FailConnection(ctx, op.ID, "account_changed", s.now().UTC())
 	}
+	if verified.Resource != nil && verified.Resource.Validate() != nil {
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", s.now().UTC())
+	}
+	if capability := adapter.Descriptor().Capabilities.Concurrency; capability != nil &&
+		(capability.Scope == "resource") != (verified.Resource != nil) {
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", s.now().UTC())
+	}
+	if record.Resource != nil && (verified.Resource == nil || *record.Resource != *verified.Resource) {
+		return true, s.repo.FailConnection(ctx, op.ID, "resource_changed", s.now().UTC())
+	}
 	profile := adapter.Profile(ProfileBinding(op.ConnectionID, op.ConnectionRevision), AccountScope(record.ProviderType, verified.CanonicalAccount))
 	profile.CredentialRef = "vault:" + op.ConnectionID
+	if verified.Resource != nil {
+		profile.ResourceScope = verified.Resource.ID
+	}
 	if record.Configuration != nil {
 		profile.MaxRemoteWallSeconds = record.Configuration.MaxRemoteWallSeconds
 		if record.Configuration.MaxActiveAttempts != 0 {

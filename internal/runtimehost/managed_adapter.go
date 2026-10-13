@@ -30,8 +30,9 @@ var _ connections.Adapter = (*managedKaggleAdapter)(nil)
 func (a *managedKaggleAdapter) Descriptor() connections.Descriptor {
 	return connections.Descriptor{
 		Type: "kaggle", Label: "Kaggle",
-		Fields:       []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: credentials.MaxBytes}},
-		Capabilities: connections.Capabilities{RemoteCleanup: "supported", EphemeralSecrets: "unsupported", Accelerators: []string{a.config.accelerator()}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "unsupported", SeparateStart: "unsupported"},
+		Fields: []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: credentials.MaxBytes}},
+		Capabilities: connections.Capabilities{RemoteCleanup: "supported", EphemeralSecrets: "unsupported", Accelerators: []string{a.config.accelerator()}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "unsupported", SeparateStart: "unsupported",
+			Concurrency: &connections.ConcurrencyCapability{Support: "supported", Scope: "account", Minimum: 1, Maximum: 64, Default: 1}},
 	}
 }
 
@@ -64,7 +65,15 @@ func (a *managedKaggleAdapter) Profile(binding domain.ProviderBinding, accountSc
 	profile.MaxRemoteWallSeconds = a.config.MaxRemoteWallSeconds
 	profile.AllowRemoteInternet = a.config.AllowRemoteInternet
 	profile.Accelerator = a.config.accelerator()
+	profile.MaxActiveAttempts = 1
 	return profile
+}
+
+func (*managedKaggleAdapter) ValidateConfiguration(c connections.Configuration) error {
+	if c.MaxProcesses != 0 {
+		return connections.ErrRequest
+	}
+	return c.Validate()
 }
 
 type managedKaggleRuntimeConfig struct {

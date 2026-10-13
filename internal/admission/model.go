@@ -29,6 +29,7 @@ type Profile struct {
 	Accelerator       string `json:"accelerator,omitempty"`
 	MaxActiveAttempts int    `json:"max_active_attempts,omitempty"`
 	MaxProcesses      int    `json:"max_processes,omitempty"`
+	ResourceScope     string `json:"resource_scope,omitempty"`
 }
 
 // Cost classes name who pays for compute. Neither is a paid-provider class: free
@@ -46,7 +47,10 @@ func (p Profile) Validate() error {
 		p.CostClass != CostFreeAllowance && p.CostClass != CostOperatorManaged || p.MaxRemoteWallSeconds < 1 || p.MaxRemoteWallSeconds > 86400 || p.MaxBundleBytes < 1 || p.MaxBundleBytes > 100<<20 || p.MaxInputBytes < 1 || p.MaxInputBytes > 4<<30 {
 		return ErrRequirements
 	}
-	if p.MaxActiveAttempts < 0 || p.MaxActiveAttempts > 64 || p.MaxProcesses < 0 || p.MaxProcesses > 65536 || (p.MaxActiveAttempts > 0 || p.MaxProcesses > 0) && p.CostClass != CostOperatorManaged {
+	if p.MaxActiveAttempts < 0 || p.MaxActiveAttempts > 64 || p.MaxProcesses < 0 || p.MaxProcesses > 65536 || p.MaxProcesses > 0 && p.CostClass != CostOperatorManaged {
+		return ErrRequirements
+	}
+	if p.ResourceScope != "" && (!strings.HasPrefix(p.ResourceScope, "resource_") || !domain.SHA256Digest(strings.TrimPrefix(p.ResourceScope, "resource_")).Valid()) {
 		return ErrRequirements
 	}
 	for i, c := range p.Binding.Profile {
@@ -142,6 +146,13 @@ type Record struct {
 	Problem     *domain.Problem
 	Collection  *domain.CollectionStatus
 	Preparation *domain.PreparationStatus
+	Scheduling  *SchedulingStatus
+}
+
+// SchedulingStatus is an observational queue decision for the original attempt.
+// It carries no provider account, credential or other workspace identifiers.
+type SchedulingStatus struct {
+	Reason string `json:"reason"`
 }
 
 type Requirement struct {

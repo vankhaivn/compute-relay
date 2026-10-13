@@ -114,7 +114,7 @@
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 64,
-                  "description": "Maximum concurrent attempts for an operator host; aliases share the lowest retained limit."
+                  "description": "Frozen local concurrency limit; account and verified resource aliases share the most restrictive applicable limit. Default 1."
                 },
                 "max_processes": {
                   "type": "integer",
@@ -364,6 +364,172 @@
               ]
             }
           }
+        },
+        "concurrency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "resource",
+            "configured_limit",
+            "effective_limit",
+            "active_attempts",
+            "wait_reason"
+          ],
+          "properties": {
+            "scope": {
+              "enum": [
+                "account",
+                "resource"
+              ]
+            },
+            "resource": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "resource_id"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+                    },
+                    "resource_id": {
+                      "type": "string",
+                      "pattern": "^resource_[0-9a-f]{64}$"
+                    }
+                  },
+                  "description": "Opaque verified scheduling resource. Native machine identifiers and connection endpoints are never exposed."
+                }
+              ]
+            },
+            "configured_limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "effective_limit": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64
+                }
+              ]
+            },
+            "active_attempts": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              ]
+            },
+            "wait_reason": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "enum": [
+                    "connection_unverified",
+                    "resource_identity_unverified",
+                    "resource_reservation_unresolved",
+                    "scheduler_clock_unavailable",
+                    "scheduler_paused",
+                    "account_disabled",
+                    "worker_limit",
+                    "account_capacity",
+                    "resource_capacity"
+                  ]
+                }
+              ]
+            }
+          },
+          "description": "Local shared scheduling snapshot. Claimed preparation, prepared holds and possibly active remote attempts reserve capacity; an unclaimed authorization does not. Null capacity is unknown, never unlimited. Worker occupancy is a separate gate. This is not provider quota or a per-job authorization decision.",
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "scope": {
+                    "const": "account"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "resource": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "effective_limit": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "active_attempts": {
+                    "type": "null"
+                  },
+                  "wait_reason": {
+                    "enum": [
+                      "connection_unverified",
+                      "resource_identity_unverified",
+                      "resource_reservation_unresolved",
+                      "scheduler_clock_unavailable"
+                    ]
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "active_attempts": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "scope": {
+                    "const": "resource"
+                  },
+                  "resource": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "effective_limit": {
+                    "type": "null"
+                  },
+                  "active_attempts": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
         }
       },
       "allOf": [

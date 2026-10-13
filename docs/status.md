@@ -17,6 +17,7 @@ The current implementation boundary. No public release is available.
 | Main binary | Installation, workspace and token administration, immutable admission profiles, bundle tools and application HTTP commands. |
 | SSH host provider | CPU attempts in hardened per-attempt Docker containers on an operator-owned host, with visible pinned host keys, verified engine platforms, explicit standard-image installation, configurable concurrency/process limits, confirmed cancellation and live logs. |
 | Native companion | Reproducible macOS arm64 candidate bundle with its own locked Python client, checksum-verified create-new installation and relocation discovery. |
+| Batch concurrency | Managed Kaggle and SSH advertise local limits of 1–64, default 1; verified SSH machine identity shares one budget across connection paths. Effective limits and queue reasons are public. Finite CPU concurrency is live-qualified on Kaggle and one Intel SSH host. |
 | Durable work | Fair scheduling, fenced claims, one-shot preparation and submission intents, restart reconciliation, explicit controls and verified collection. |
 | Preparation progress | While `preparing`, status reports input bytes handed to the provider staging upload. Observational only. |
 | Preparation gates | Managed SSH supports opt-in stopped-container preparation, readiness, one-shot start and ephemeral secret slots. See [preparation gates](preparation-gates.md) and [workload secrets](workload-secrets.md). |
@@ -41,6 +42,18 @@ Offline tests are not live-provider evidence. Live evidence so far:
   [Kaggle feasibility](development/research/kaggle-feasibility.md).
 - A finite CPU probe on the native companion qualified running log delivery, original-cursor
   reconnect and complete ordered replay.
+- A [2026-10-13 managed Kaggle CPU qualification](https://github.com/vankhaivn/compute-relay/pull/95)
+  covers two overlapping finite synthetic payloads and a third waiting on shared account capacity
+  across two workspaces. It also covers Relay restart, capacity release before manual collection,
+  complete ordered logs and verified outputs for each original attempt.
+- A [2026-10-13 shared SSH capacity qualification](https://github.com/vankhaivn/compute-relay/pull/95)
+  on one macOS Intel host with Docker 29.6.1/Linux amd64 covers overlapping finite CPU jobs through
+  LAN and Tailscale, a third waiting across workspaces, credential changes and Relay restart.
+  Prepared holds and a reduction from two slots to one were qualified through Tailscale IP and
+  DNS aliases: existing execution survived the reduction, the never-started hold kept the next
+  job queued, and confirmed cleanup released its slot. Each container used one CPU, 256 MiB,
+  128 processes and no workload network, with a 180-second execution ceiling. Logs and outputs
+  remained isolated and verified; the later checks did not repeat the physical LAN run.
 - A 2026-10-12 SSH qualification on one macOS Intel host with Docker 29.6.1 and Linux amd64
   containers covers LAN password access and Tailscale password/unencrypted Ed25519-key access.
   The envelope includes file credentials without Python, explicit standard-image installation,
@@ -72,6 +85,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 
 ## Known limits
 
+- Parallel execution evidence covers finite synthetic CPU payloads under one Kaggle account and
+  on one Intel SSH host. GPU concurrency and concurrent heavy workloads remain unqualified;
+  higher configured limits are not a throughput guarantee.
 - Provider timeout enforcement is separate from local and runner deadlines.
 - Host sleep, VM clock behavior and reboot remain unqualified for execution deadlines. Software
   cannot act on a powered-off or suspended host; expiry is observed after it resumes.

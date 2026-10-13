@@ -38,13 +38,42 @@ type Field struct {
 	MaxBytes  int    `json:"max_bytes"`
 }
 type Capabilities struct {
-	RemoteCleanup    string   `json:"remote_cleanup,omitempty"`
-	EphemeralSecrets string   `json:"ephemeral_workload_secrets,omitempty"`
-	Accelerators     []string `json:"accelerators"`
-	RemoteCancel     string   `json:"remote_cancel"`
-	Quota            string   `json:"quota"`
-	SeparateStart    string   `json:"separate_prepare_start,omitempty"`
-	AbsoluteDeadline string   `json:"absolute_execution_deadline,omitempty"`
+	RemoteCleanup    string                 `json:"remote_cleanup,omitempty"`
+	EphemeralSecrets string                 `json:"ephemeral_workload_secrets,omitempty"`
+	Accelerators     []string               `json:"accelerators"`
+	RemoteCancel     string                 `json:"remote_cancel"`
+	Quota            string                 `json:"quota"`
+	SeparateStart    string                 `json:"separate_prepare_start,omitempty"`
+	AbsoluteDeadline string                 `json:"absolute_execution_deadline,omitempty"`
+	Concurrency      *ConcurrencyCapability `json:"concurrency,omitempty"`
+}
+
+// ConcurrencyCapability describes local policy configuration, not provider quota
+// or a guarantee that the provider can allocate that many executions.
+type ConcurrencyCapability struct {
+	Support string `json:"support"`
+	Scope   string `json:"scope"`
+	Minimum int    `json:"minimum"`
+	Maximum int    `json:"maximum"`
+	Default int    `json:"default"`
+}
+
+func (c ConcurrencyCapability) Validate() error {
+	if c.Support != "supported" || c.Scope != "account" && c.Scope != "resource" || c.Minimum < 1 || c.Maximum > 64 || c.Minimum > c.Default || c.Default > c.Maximum {
+		return ErrRequest
+	}
+	return nil
+}
+
+// ConcurrencyStatus counts claimed preparation and potentially active execution.
+// Unknown identity or pre-upgrade reservations keep effective capacity null.
+type ConcurrencyStatus struct {
+	Scope           string            `json:"scope"`
+	Resource        *ResourceIdentity `json:"resource"`
+	ConfiguredLimit int               `json:"configured_limit"`
+	EffectiveLimit  *int              `json:"effective_limit"`
+	ActiveAttempts  *int              `json:"active_attempts"`
+	WaitReason      *string           `json:"wait_reason"`
 }
 type Descriptor struct {
 	Type              string       `json:"type"`
@@ -91,6 +120,7 @@ type Quota struct {
 	Precision     string     `json:"precision"`
 }
 type Connection struct {
+	Concurrency       *ConcurrencyStatus `json:"concurrency,omitempty"`
 	Host              *HostEvidence      `json:"host,omitempty"`
 	ID                string             `json:"connection_id"`
 	Workspace         domain.WorkspaceID `json:"workspace_id"`
@@ -128,6 +158,21 @@ type Verification struct {
 	Host                 *HostEvidence
 	RuntimeConfig        []byte
 	SelectionUnavailable bool
+	Resource             *ResourceIdentity
+}
+
+// ResourceIdentity is verified adapter evidence, separate from the login account.
+// IDs are opaque; native machine identifiers never enter public or durable state.
+type ResourceIdentity struct {
+	Kind string `json:"kind"`
+	ID   string `json:"resource_id"`
+}
+
+func (r ResourceIdentity) Validate() error {
+	if !domain.ObjectID(r.Kind).Valid() || !strings.HasPrefix(r.ID, "resource_") || !domain.SHA256Digest(strings.TrimPrefix(r.ID, "resource_")).Valid() {
+		return ErrRequest
+	}
+	return nil
 }
 
 // HostEvidence is the last successfully verified public host identity and platform.
@@ -215,6 +260,7 @@ type Record struct {
 	ActorTokenID        string
 	Configuration       *Configuration
 	Installation        *ImageInstallation
+	Resource            *ResourceIdentity
 }
 type Accept struct {
 	Workspace        domain.WorkspaceID
@@ -265,4 +311,5 @@ type RuntimeBinding struct {
 	CanonicalAccount string            `json:"-"`
 	Profile          admission.Profile `json:"-"`
 	RuntimeConfig    []byte            `json:"-"`
+	Resource         *ResourceIdentity `json:"-"`
 }

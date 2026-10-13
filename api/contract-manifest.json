@@ -52,13 +52,16 @@
         "examples/job-status.awaiting-collection.valid.json",
         "examples/job-status.collection-progress.valid.json",
         "examples/job-status.collection-discovery.valid.json",
-        "examples/job-status.preparation-progress.valid.json"
+        "examples/job-status.preparation-progress.valid.json",
+        "examples/job-status.resource-wait.valid.json"
       ],
       "invalid": [
         "examples/invalid/job-status.false-success.json",
         "examples/invalid/job-status.negative-progress.json",
         "examples/invalid/job-status.negative-preparation-progress.json",
-        "examples/invalid/job-status.automatic-awaiting-request.json"
+        "examples/invalid/job-status.automatic-awaiting-request.json",
+        "examples/invalid/job-status.unknown-scheduling-reason.json",
+        "examples/invalid/job-status.running-with-queue-reason.json"
       ]
     },
     {
@@ -230,10 +233,12 @@
     {
       "schema": "schemas/provider-descriptors.v1alpha1.schema.json",
       "valid": [
-        "examples/provider-descriptors.fixture.valid.json"
+        "examples/provider-descriptors.fixture.valid.json",
+        "examples/provider-descriptors.concurrency.valid.json"
       ],
       "invalid": [
-        "examples/invalid/provider-descriptors.readable-secret.json"
+        "examples/invalid/provider-descriptors.readable-secret.json",
+        "examples/invalid/provider-descriptors.excess-concurrency.json"
       ]
     },
     {
@@ -246,7 +251,10 @@
         "examples/connection.configured.valid.json",
         "examples/connection.host.valid.json",
         "examples/connection.image-ready.valid.json",
-        "examples/connection.image-missing.valid.json"
+        "examples/connection.image-missing.valid.json",
+        "examples/connection.resource-capacity.valid.json",
+        "examples/connection.unresolved-resource.valid.json",
+        "examples/connection.account-capacity.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection.secret-echo.json",
@@ -254,7 +262,10 @@
         "examples/invalid/connection.disabled-selection.json",
         "examples/invalid/connection.unverified-selection.json",
         "examples/invalid/connection.host-architecture.json",
-        "examples/invalid/connection.missing-image-id.json"
+        "examples/invalid/connection.missing-image-id.json",
+        "examples/invalid/connection.unknown-capacity-reason.json",
+        "examples/invalid/connection.raw-resource-identity.json",
+        "examples/invalid/connection.unknown-capacity-count.json"
       ]
     },
     {
@@ -263,7 +274,8 @@
         "examples/connection-operation.accepted.valid.json",
         "examples/connection-operation.failed.valid.json",
         "examples/connection-operation.configure-succeeded.valid.json",
-        "examples/connection-operation.image-unknown.valid.json"
+        "examples/connection-operation.image-unknown.valid.json",
+        "examples/connection-operation.resource-changed.valid.json"
       ],
       "invalid": [
         "examples/invalid/connection-operation.failed-without-problem.json",

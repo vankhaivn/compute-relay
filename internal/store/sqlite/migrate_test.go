@@ -71,6 +71,12 @@ func TestReleasedMigrationsAreFrozen(t *testing.T) {
 		"0013_connection_configuration.sql 521a2da75f70fd51e47d3c17640c70261a35dcc81c2dc098a69cde618dd123e0",
 		"0014_preparation_progress.sql cefc2b8c6f80a12c1e0104b90b0f1dd7d2b50b38d209ec0df1a81db16e415fe6",
 		"0015_remote_cleanup.sql f49f069e0e9090f68d9f715046ed7d9f373c841ec4b2d35c6417ed52a5ede8b8",
+		"0016_host_evidence.sql d7e6de95216edde30e285f65519b03929975f4d404c596b22b2423a970c9da11",
+		"0017_execution_limits.sql 55c1e35f710ae013377fb8593e11ae7acb88576f5229b660c20c7f60a00ba67c",
+		"0018_image_installation.sql 96399646976406dd8afb6a77ead738f41402d952c79b6554fe22d1ea3aa8f015",
+		"0019_execution_gates.sql c4ef339a684c860a2f950c068227723279424e5d934acc00bd7b2abe988862cb",
+		"0020_workload_secrets.sql e4eb39f7cbd07af139d136eb8f81af26cf970844fe46bcc767545732885b148a",
+		"0021_cleanup_resources.sql 18d1a698cf1617f23b01ecef1f26b7081ee7a2561eed71443e1f6de7d0595d6b",
 	}
 	if len(migrations) < len(released) {
 		t.Fatalf("released migrations removed: %d < %d", len(migrations), len(released))

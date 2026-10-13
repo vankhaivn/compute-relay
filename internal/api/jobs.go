@@ -90,6 +90,9 @@ func jobStatus(record admission.Record) map[string]any {
 	if record.Preparation != nil {
 		status["preparation"] = record.Preparation
 	}
+	if record.Scheduling != nil {
+		status["scheduling"] = record.Scheduling
+	}
 	if p := record.Problem; p != nil {
 		// Only a closed reason is public; other details and internal causes stay private.
 		problem := map[string]any{"code": p.Code, "message": p.Message, "stage": p.Stage, "safe_operation_retry": p.SafeOperationRetry, "compute_may_have_started": p.ComputeMayHaveStarted, "recommended_action": p.RecommendedAction}

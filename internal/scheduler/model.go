@@ -95,6 +95,9 @@ const (
 	Paused                Reason = "scheduler_paused"
 	WorkerLimit           Reason = "worker_limit"
 	AccountLimit          Reason = "account_capacity"
+	ResourceLimit         Reason = "resource_capacity"
+	ResourceUnverified    Reason = "resource_identity_unverified"
+	ResourceUnresolved    Reason = "resource_reservation_unresolved"
 	AccountDisabled       Reason = "account_disabled"
 	WorkspaceDisabled     Reason = "workspace_disabled"
 	Deferred              Reason = "local_preparation_deferred"
@@ -108,17 +111,22 @@ const (
 
 type QueueStatus struct {
 	Identity
-	Sequence     int64
-	AccountScope string
-	Reason       Reason
-	Warning      Reason
-	NotBefore    time.Time
+	Sequence      int64
+	AccountScope  string
+	ResourceScope string
+	Reason        Reason
+	Warning       Reason
+	NotBefore     time.Time
 }
 type View struct {
-	MaxWorkers          int
-	LiveWorkers         int
-	AccountReservations map[string]int
-	Heads               []QueueStatus
+	MaxWorkers           int
+	LiveWorkers          int
+	AccountReservations  map[string]int
+	ResourceReservations map[string]int
+	ActiveAccountLimits  map[string]int
+	ActiveResourceLimits map[string]int
+	UnresolvedResources  map[string]bool
+	Heads                []QueueStatus
 }
 type Result struct {
 	Claim *Claim

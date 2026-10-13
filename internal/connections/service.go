@@ -45,6 +45,9 @@ func New(access *auth.Service, repo Repository, vault credentials.Vault, adapter
 		if !providerTypePattern.MatchString(d.Type) || service.adapters[d.Type] != nil || len(d.Fields) == 0 || len(d.Fields) > 16 {
 			return nil, ErrUnavailable
 		}
+		if d.Capabilities.Concurrency != nil && d.Capabilities.Concurrency.Validate() != nil {
+			return nil, ErrUnavailable
+		}
 		seen := map[string]bool{}
 		for _, field := range d.Fields {
 			if field.Name == "" || seen[field.Name] || !field.WriteOnly || field.MaxBytes < 1 || field.MaxBytes > 16384 {
@@ -77,14 +80,42 @@ func (s *Service) Get(ctx context.Context, p auth.Principal, w domain.WorkspaceI
 	if err != nil {
 		return Connection{}, err
 	}
-	return s.repo.ReadConnection(ctx, w, p.TokenID(), id, s.now().UTC())
+	c, err := s.repo.ReadConnection(ctx, w, p.TokenID(), id, s.now().UTC())
+	return s.project(c), err
 }
 func (s *Service) List(ctx context.Context, p auth.Principal, w domain.WorkspaceID) ([]Connection, error) {
 	p, err := s.require(ctx, p, w, auth.Read)
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.ListConnections(ctx, w, p.TokenID(), s.now().UTC())
+	items, err := s.repo.ListConnections(ctx, w, p.TokenID(), s.now().UTC())
+	for i := range items {
+		items[i] = s.project(items[i])
+	}
+	return items, err
+}
+
+func (s *Service) project(c Connection) Connection {
+	a := s.adapters[c.ProviderType]
+	if a == nil {
+		return c
+	}
+	capabilities := a.Descriptor().Capabilities
+	if capabilities.Quota == "unsupported" {
+		c.Quotas = []Quota{}
+	}
+	if capability := capabilities.Concurrency; capability != nil {
+		if c.Concurrency == nil {
+			limit := capability.Default
+			if c.Configuration != nil && c.Configuration.MaxActiveAttempts != 0 {
+				limit = c.Configuration.MaxActiveAttempts
+			}
+			reason := "connection_unverified"
+			c.Concurrency = &ConcurrencyStatus{ConfiguredLimit: limit, WaitReason: &reason}
+		}
+		c.Concurrency.Scope = capability.Scope
+	}
+	return c
 }
 func (s *Service) Operation(ctx context.Context, p auth.Principal, w domain.WorkspaceID, id domain.OperationID) (Operation, error) {
 	p, err := s.require(ctx, p, w, auth.Manage)

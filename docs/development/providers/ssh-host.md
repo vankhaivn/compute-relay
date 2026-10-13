@@ -22,6 +22,15 @@ safe set. macOS non-interactive sessions omit `/usr/local/bin`. The adapter ther
 absolute Docker CLI, either configured or the first executable candidate, with its directory
 first on `PATH` so credential helpers resolve.
 
+Machine capacity is separate from the pinned login account. Native Linux machine ID or macOS
+platform UUID is read through SSH and converted to an application-specific HMAC-SHA256 identity;
+raw IDs never enter durable or public state. Local Unix-socket Docker endpoints are resolved and
+pinned in memory for the operation, with `DOCKER_CONTEXT`/`DOCKER_HOST` cleared for subsequent
+commands. Remote Docker contexts are refused. A derived daemon ID freezes the actual engine,
+while all local engines on the native host share its resource budget. Changed machine identity
+fails connection recheck as `resource_changed`; changed machine/daemon identity cannot retarget
+an accepted attempt. See [ADR-0033](../decisions/0033-shared-scheduling-resource-concurrency.md).
+
 ## Image installation
 
 The embedded [Dockerfile](../../../internal/provider/sshhost/image/Dockerfile) pins its base digest
@@ -37,10 +46,13 @@ minutes. A lost outcome only permits inspection of that operation's tag and labe
 remains `image_installation_unknown`, never permission to build again. An explicit `check` can
 later discover the recipe image without mutation.
 
-Version-2 runtime policy freezes the resulting image ID, recipe SHA256, engine architecture,
-CPU and memory bounds. Version-1 runtime policy remains readable for historical jobs. Migration retires its admission
-aliases without rewriting frozen profiles; recheck and installation publish new version-2 selections. Neither
-upgrading the repository recipe nor replacing a credential reinterprets a frozen version-2 job.
+Version-3 runtime policy freezes the resulting image ID, recipe SHA256, engine architecture,
+CPU/memory bounds and derived machine/daemon IDs. Versions 1 and 2 remain readable for historical
+jobs. Migration retires legacy admission aliases without rewriting frozen profiles; recheck and
+installation publish version-3 selections. An unresolved active legacy attempt keeps a conservative
+machine reservation until confirmed inactive, even after metadata recheck. A legacy queued attempt
+records its resource at the first verified post-upgrade claim. Recovery continues against original
+identities. Changing the recipe, credential or current Docker context never reinterprets a frozen job.
 Docker images and build cache are retained; attempt cleanup removes only its container.
 
 The build-context and image-inspection contracts follow the Docker documentation reviewed
@@ -105,8 +117,10 @@ execution timeout, remote network control, strong identity, remote cancellation,
 running and after completion. Unsupported: GPU, quota reporting, custom containers and
 retained sessions.
 
-- One attempt per canonical account by default; configurable up to 64, also bounded by local workers.
-  All retained aliases share the lowest limit; active attempts retain older lower limits.
+- One attempt per machine by default; configurable up to 64, with stricter account limits retained.
+  All retained machine aliases share the lowest limit across workspaces; active attempts retain
+  older lower limits. Local worker occupancy is a separate preparation gate.
 - Process limits default to 4096 and accept 1–65536. CPU, memory and process limits are frozen.
-- The engine's own VM or cgroup bounds an attempt without operator limits.
+- Budget the sum of per-container limits across concurrent work against host and engine/VM
+  capacity. Without operator limits, only the engine's VM or cgroup bounds apply.
 - No automatic retry, cleanup, image rebuild or host substitution.

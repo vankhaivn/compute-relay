@@ -42,7 +42,7 @@ func TestImageInstallationBuildsOnlyThePinnedRepositoryRecipe(t *testing.T) {
 		t.Fatal("verification installed an image", before, err)
 	}
 	op := domain.OperationID("op_image_fixture")
-	installed, err := InstallImage(ctx, raw, before.Account, before.Architecture, op, false)
+	installed, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, false)
 	if err != nil || installed.ImageID != fakeImageID || fake.builds != 1 {
 		t.Fatal("installation failed", installed, err)
 	}
@@ -50,7 +50,7 @@ func TestImageInstallationBuildsOnlyThePinnedRepositoryRecipe(t *testing.T) {
 	if err != nil || checked.ImageID != installed.ImageID || fake.builds != 1 {
 		t.Fatal("check rebuilt or changed the image", checked, err)
 	}
-	recovered, err := InstallImage(ctx, raw, before.Account, before.Architecture, op, true)
+	recovered, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, true)
 	if err != nil || recovered != installed || fake.builds != 1 {
 		t.Fatal("recovery rebuilt the image", recovered, err)
 	}
@@ -99,17 +99,17 @@ func TestImageInstallationUnknownRecoversWithoutAnotherBuild(t *testing.T) {
 		return Result{}, false
 	}
 	op := domain.OperationID("op_lost_image_response")
-	if _, err = InstallImage(ctx, raw, before.Account, before.Architecture, op, false); !errors.Is(err, ErrImageInstallationUnknown) {
+	if _, err = InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, false); !errors.Is(err, ErrImageInstallationUnknown) {
 		t.Fatal("lost inspection became success", err)
 	}
 	fake.mu.Lock()
 	fake.fail = nil
 	fake.mu.Unlock()
-	installed, err := InstallImage(ctx, raw, before.Account, before.Architecture, op, true)
+	installed, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, true)
 	if err != nil || installed.ImageID != fakeImageID || fake.builds != 1 {
 		t.Fatal("recovery repeated installation", installed, err)
 	}
-	if _, err = InstallImage(ctx, raw, before.Account, before.Architecture, "op_not_started", true); !errors.Is(err, ErrImageInstallationUnknown) || fake.builds != 1 {
+	if _, err = InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_not_started", true); !errors.Is(err, ErrImageInstallationUnknown) || fake.builds != 1 {
 		t.Fatal("absence authorized a new build", err)
 	}
 	fake.mu.Lock()
@@ -117,7 +117,7 @@ func TestImageInstallationUnknownRecoversWithoutAnotherBuild(t *testing.T) {
 	image.Config.Labels[imageOperationLabel] = "op_someone_else"
 	fake.images[operationImageTag(op)] = image
 	fake.mu.Unlock()
-	if _, err = InstallImage(ctx, raw, before.Account, before.Architecture, op, true); !errors.Is(err, ErrIdentity) || fake.builds != 1 {
+	if _, err = InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, true); !errors.Is(err, ErrIdentity) || fake.builds != 1 {
 		t.Fatal("another operation image was adopted", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestImageInstallationRejectsChangedPlatformBeforeBuilding(t *testing.T) {
 	fake.mu.Lock()
 	fake.platform = "linux/arm64"
 	fake.mu.Unlock()
-	if _, err = InstallImage(ctx, raw, before.Account, before.Architecture, "op_changed_platform", false); !errors.Is(err, ErrIdentity) || fake.builds != 0 {
+	if _, err = InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_changed_platform", false); !errors.Is(err, ErrIdentity) || fake.builds != 0 {
 		t.Fatal("changed architecture built an image", err)
 	}
 }
@@ -182,7 +182,7 @@ func TestImageInstallationNonzeroExitUsesImageEvidence(t *testing.T) {
 	fake.mu.Lock()
 	fake.buildExit = 137
 	fake.mu.Unlock()
-	installed, err := InstallImage(ctx, raw, before.Account, before.Architecture, "op_nonzero_installed", false)
+	installed, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_nonzero_installed", false)
 	if err != nil || installed.ImageID != fakeImageID || fake.builds != 1 {
 		t.Fatal("CLI exit hid an installed image", installed, err)
 	}
@@ -194,7 +194,7 @@ func TestImageInstallationNonzeroExitUsesImageEvidence(t *testing.T) {
 		return Result{}, false
 	}
 	fake.mu.Unlock()
-	if _, err := InstallImage(ctx, raw, before.Account, before.Architecture, "op_nonzero_absent", false); !errors.Is(err, ErrImageInstallationUnknown) {
+	if _, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_nonzero_absent", false); !errors.Is(err, ErrImageInstallationUnknown) {
 		t.Fatal("nonzero CLI proved an absent outcome", err)
 	}
 }
@@ -229,5 +229,26 @@ func TestManagedHostRecheckPinsPreviouslyVerifiedKey(t *testing.T) {
 	}
 	if again, err := VerifyManagedHostBound(ctx, raw, verified.Account); err != nil || again.Account != verified.Account {
 		t.Fatal("verified key could not be rechecked", err)
+	}
+}
+
+func TestImageInstallationPinsMachineAndLegacyRecoveryNeverBuilds(t *testing.T) {
+	fake, raw := imageHost(t)
+	ctx := context.Background()
+	before, err := VerifyManagedHost(ctx, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallImage(ctx, raw, before.Account, "", before.Architecture, "op_legacy_install", false); !errors.Is(err, ErrRequest) || fake.builds != 0 {
+		t.Fatal("missing machine identity allowed a new build", err)
+	}
+	if _, err := InstallImage(ctx, raw, before.Account, "", before.Architecture, "op_legacy_install", true); !errors.Is(err, ErrImageInstallationUnknown) || fake.builds != 0 {
+		t.Fatal("legacy recovery rebuilt missing image", err)
+	}
+	fake.mu.Lock()
+	fake.machineID = strings.Repeat("b", 32)
+	fake.mu.Unlock()
+	if _, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_changed_machine", false); !errors.Is(err, ErrResourceIdentity) || fake.builds != 0 {
+		t.Fatal("changed machine built an image", err)
 	}
 }

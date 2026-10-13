@@ -51,12 +51,12 @@ func attachGate(t testing.TB, f *dispatchFixture) {
 		t.Fatal(err)
 	}
 }
-func gateFixture(t testing.TB, mode fake.SubmitMode) *dispatchFixture {
+func gateFixture(t testing.TB, mode fake.SubmitMode, maxActive ...int) *dispatchFixture {
 	t.Helper()
 	scenario := fake.DefaultScenario()
 	scenario.SeparateStart = true
 	scenario.Mode = mode
-	f := managedFixture(t, scenario)
+	f := managedFixture(t, scenario, maxActive...)
 	attachGate(t, f)
 	return f
 }
@@ -407,7 +407,7 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 }
 
 func TestExecutionGateReadyYieldsWorkerButPreservesAccountCapacity(t *testing.T) {
-	f := gateFixture(t, fake.Accept)
+	f := gateFixture(t, fake.Accept, 2)
 	settings := scheduler.DefaultSettings()
 	settings.MaxWorkers, settings.MaxActivePerAccount = 1, 2
 	if err := f.s.ConfigureScheduler(context.Background(), settings); err != nil {

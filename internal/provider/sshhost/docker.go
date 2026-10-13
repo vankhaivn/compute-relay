@@ -49,6 +49,7 @@ type executor interface {
 type docker struct {
 	exec   executor
 	binary string
+	host   string
 }
 
 func (d docker) env() map[string]string {
@@ -56,7 +57,13 @@ func (d docker) env() map[string]string {
 }
 
 func (d docker) run(ctx context.Context, stdin io.Reader, stdout io.Writer, args ...string) (Result, error) {
-	return d.exec.Run(ctx, d.env(), append([]string{d.binary}, args...), stdin, stdout)
+	command := []string{d.binary}
+	if d.host != "" {
+		// Freeze this call's verified local socket instead of allowing an ambient
+		// context change to redirect a later command in the same operation.
+		command = []string{"/usr/bin/env", "-u", "DOCKER_CONTEXT", "-u", "DOCKER_HOST", d.binary, "--host", d.host}
+	}
+	return d.exec.Run(ctx, d.env(), append(command, args...), stdin, stdout)
 }
 
 // findDocker returns the configured path or the first executable candidate.

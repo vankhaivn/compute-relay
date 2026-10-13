@@ -46,6 +46,10 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 			return err
 		}
 		result.Preparation, err = readPreparationStatus(ctx, tx, result)
+		if err != nil {
+			return err
+		}
+		result.Scheduling, err = readSchedulingStatus(ctx, tx, result, time.Now().UTC())
 		return err
 	})
 	if err != nil {

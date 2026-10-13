@@ -12,7 +12,8 @@ No release has been published. This summarizes the current pre-release feature s
 - Automatic local deletion of expired input and result bytes while provider workers run.
 - Kaggle provider adapter behind an explicit, finitely authorized `serve` mode.
 - Managed connections with write-only credentials in a private file or optional macOS Keychain,
-  shared account capacity and durable per-attempt execution authorization.
+  configurable batch concurrency, shared account/machine capacity, effective limits and queue
+  reasons, and durable per-attempt execution authorization.
 - SSH host connections that run CPU jobs in isolated Docker containers on an operator-owned
   machine, with visible pinned host keys, verified architecture, explicit image installation,
   configurable host limits, Python-free SSH-only serving on macOS and requested remote cleanup.

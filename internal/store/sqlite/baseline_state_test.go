@@ -30,7 +30,7 @@ import (
 )
 
 // State written by the compatibility baseline. Installed applications upgrade such state in
-// place, so later revisions must open it and answer these reads and replays identically.
+// place, so later revisions must preserve these fields and exact replay receipts.
 // The directory is write-once: a deliberate new baseline gets a new directory.
 const baselineDir = "testdata/baseline-9591372"
 
@@ -68,6 +68,20 @@ func TestBaselineStateReadsAndReplaysUnchanged(t *testing.T) {
 	defer s.Close()
 	handler := baselineHandler(t, s)
 	for _, want := range fixture.Requests {
+		// Scheduling is an intentional additive status contract. Keep the stored
+		// baseline untouched and assert each new field as well as every old field.
+		reason := map[string]string{"granted status": "account_capacity", "queued status": "workspace_fifo"}[want.Name]
+		if reason != "" {
+			var expected map[string]any
+			if err := json.Unmarshal(want.Response, &expected); err != nil {
+				t.Fatal(err)
+			}
+			expected["scheduling"] = map[string]string{"reason": reason}
+			want.Response, err = json.Marshal(expected)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		status, got := baselineCall(t, handler, fixture.Token, want)
 		if status != want.Status || !sameJSON(t, got, want.Response) {
 			t.Errorf("%s: %s %s changed\nstatus %d want %d\n got %s\nwant %s", want.Name, want.Method, want.Path, status, want.Status, got, want.Response)

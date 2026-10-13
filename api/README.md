@@ -63,6 +63,12 @@ the existing job envelope through immutable selection profiles and separate `man
 scopes. An absent `selection.accelerator` on an older selection means unreported, not the current
 descriptor's default.
 
+Optional `capabilities.concurrency` advertises the local configuration range and account/resource
+scope. Connection `concurrency` reports configured/effective limits, verified resource association,
+execution reservations and a capacity gate; queued/blocked managed jobs expose `scheduling.reason`.
+Unknown limits/counts are null. These observations grant no compute authority and do not promise
+provider capacity. See [concurrency guidance](../docs/managed-connections.md#configure-and-observe-concurrency).
+
 ```text
 GET  /v1/workspaces/{w}/providers
 GET  /v1/workspaces/{w}/connections
