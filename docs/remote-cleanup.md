@@ -92,10 +92,12 @@ remain. Workload output cannot supply a host deletion path. Old SSH receipts wit
 engine ID remain readable but are retained with `engine_identity_not_recorded`; the current
 engine cannot retroactively prove the original one.
 
-Kaggle deletion and its scope across historical versions and outputs are not live-qualified.
-Relay accepts only version-1 targets and confirms deletion through an explicit subsequent 404.
-A permission denial, including Kaggle's missing-name 403, is insufficient: the outcome remains
-unknown and staging is retained if execution deletion was not confirmed. See the dated
+Kaggle cleanup is qualified for unchanged private version-1 kernels and staging datasets on one
+account. A validated, error-free synchronous delete response followed by Kaggle's missing-name
+403 retains the confirmed deletion; an explicit subsequent 404 also confirms deletion. A 403
+alone, including recovery after a lost acknowledgement, remains unknown and retains staging if
+execution deletion was not confirmed. Historical versions and physical provider garbage collection
+remain outside the qualified scope. See the dated
 [Kaggle API limitation](development/providers/kaggle-operations.md#remote-cleanup) and
 [SSH implementation boundary](development/providers/ssh-host.md#remote-cleanup).
 

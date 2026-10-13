@@ -90,8 +90,11 @@ Docker references reviewed 2026-10-13:
 An isolated Docker 29.1.3 Linux-amd64 engine under emulation with loopback SSH qualified preview,
 active refusal and exact stopped-container deletion on 2026-10-13. Before/after inventories and
 content hashes confirmed preservation of bind files, named and anonymous volumes, images,
-unrelated containers and local inputs/results. Live lost-acknowledgement, restart and repeat
-cleanup remain unqualified. See
+unrelated containers and local inputs/results. A deliberately withheld deletion acknowledgement,
+reopening the original runtime and repeating the request also qualified recovery against the
+original immutable targets, with one deletion command and preservation of a replacement at the
+old name. Lease expiry used a controlled clock. These checks do not qualify a native remote host.
+See [recovery evidence in #97](https://github.com/vankhaivn/compute-relay/issues/97),
 [bounded evidence in PR #98](https://github.com/vankhaivn/compute-relay/pull/98) and
 [remote cleanup](../../remote-cleanup.md).
 

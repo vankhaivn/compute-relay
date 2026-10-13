@@ -57,8 +57,15 @@ Offline tests are not live-provider evidence. Live evidence so far:
 - A 2026-10-13 isolated Docker 29.1.3 Linux-amd64 engine under emulation, accessed through
   loopback SSH, qualified read-only cleanup preview, active-container refusal and removal of the
   original stopped container. Bind files, named and anonymous volumes, images, unrelated
-  containers and verified local inputs/results were preserved. This does not qualify a native
-  remote host or cleanup recovery after a lost acknowledgement.
+  containers and verified local inputs/results were preserved. Cleanup after a deliberately lost
+  acknowledgement, reopening the original runtime and repeating the request preserved the original
+  operation and immutable targets; a replacement at the old container name survived. This does
+  not qualify a native remote host.
+- Private version-1 Kaggle kernel/dataset cleanup on 2026-10-13 qualified the shipped SDK leaf
+  against original identity evidence, synchronous delete completion and read-only lost-response
+  recovery. Final owner inventories were empty; unreadable targets without a received completion
+  remained unknown. The full account-scoped public cleanup API, historical versions and physical
+  provider garbage collection remain unqualified. See [#97](https://github.com/vankhaivn/compute-relay/issues/97).
 
 Another account, environment or workload needs its own scoped qualification before support is
 claimed. Use the [validation checklist](development/validation-checklist.md).
@@ -74,9 +81,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
   outcomes. SSH deletion requires original container and engine identity; older receipts without
   engine evidence are retained. Kaggle name-based deletion requires explicit acceptance of the
   replacement risk shown in preview; changed identities still refuse deletion and uncertain
-  recovery only reads. These checks have offline coverage;
-  live lost-acknowledgement/restart/repeat cleanup and private Kaggle cleanup qualification remain
-  pending.
+  recovery only reads. Kaggle targets are restricted to private version-1 objects; a missing-name
+  403 without a received delete completion remains unknown. Live evidence is bounded to the
+  environments above.
 - SSH host qualification covers one macOS Intel host over LAN and Tailscale. Encrypted private
   keys, host sleep, Docker-engine restarts, other Tailscale network paths and Linux VPS hosts remain
   unqualified live.

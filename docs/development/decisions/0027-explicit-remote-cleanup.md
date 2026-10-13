@@ -58,7 +58,9 @@ unacknowledged deletion into a known retained outcome. Terminal failure requires
 request, preserving old history and targets. Local verified results retain their own retention
 policy. Admission-only serve accepts intent but runs no worker.
 
-Provider support and live qualification remain separate. Kaggle mutation acknowledgements require
-a subsequent explicit absence read; HTTP 403 or an ambiguous response stays unknown. Whole-object
-scope and live fault behavior remain unqualified. Live cleanup still requires the authorization
-in the [validation checklist](../validation-checklist.md).
+Provider support and live qualification remain separate. For Kaggle, a validated synchronous
+delete completion is distinct from an accepted or ambiguous response. A subsequent missing-name
+403 preserves that completion but never independently proves absence; without a received
+completion, recovery stays unknown. This follows the pinned official client's synchronous delete
+contract, reviewed 2026-10-13 in the [provider guide](../providers/kaggle-operations.md#remote-cleanup).
+Live cleanup still requires the authorization in the [validation checklist](../validation-checklist.md).
