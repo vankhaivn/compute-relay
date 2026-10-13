@@ -37,7 +37,7 @@ cleanup, public data or paid capacity.
 
 | Task | Work remaining / acceptance |
 |---|---|
-| M5-01 | Public provider quota and broader product hardening; establish a reviewed immutable-target Kaggle deletion mechanism and qualify bounded remote cleanup with Linux-amd64 sentinels and private provider resources ([#97](https://github.com/vankhaivn/compute-relay/issues/97)). Preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
+| M5-01 | Public provider quota and broader product hardening; establish a reviewed immutable-target Kaggle deletion mechanism, qualify private provider resources, and complete live SSH lost-acknowledgement/restart/repeat cleanup checks ([#97](https://github.com/vankhaivn/compute-relay/issues/97)). Preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
 | M5-02 | Strict TOML runtime configuration, precedence, paths, safe defaults and validated examples; exclude secret values. |
 | M5-03 | Doctor with separate local/read-only/explicit-compute modes. Depends on M5-02. |
 | M5-04 | Verify and document a GPU smoke job plus a small pinned open-access LLM batch example. Depends on verified environment/model terms. |

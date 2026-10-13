@@ -47,6 +47,11 @@ Offline tests are not live-provider evidence. Live evidence so far:
   verified artifacts, cancellation and exact cleanup of completed and never-started containers.
   Absolute-deadline enforcement stopped a TERM-ignoring payload and child while Relay was offline,
   then recovered the original timeout result and cleaned up that container after restart.
+- A 2026-10-13 isolated Docker 29.1.3 Linux-amd64 engine under emulation, accessed through
+  loopback SSH, qualified read-only cleanup preview, active-container refusal and removal of the
+  original stopped container. Bind files, named and anonymous volumes, images, unrelated
+  containers and verified local inputs/results were preserved. This does not qualify a native
+  remote host or cleanup recovery after a lost acknowledgement.
 
 Another account, environment or workload needs its own scoped qualification before support is
 claimed. Use the [validation checklist](development/validation-checklist.md).
@@ -61,8 +66,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 - [Remote cleanup](remote-cleanup.md) has a bounded attempt preview and durable per-resource
   outcomes. SSH deletion requires original container and engine identity; older receipts without
   engine evidence are retained. Kaggle resources remain unsupported because the pinned deletion
-  API lacks an immutable-target precondition. The expanded safety checks have offline coverage;
-  disposable Linux-amd64 sentinel and private Kaggle cleanup qualification remain pending.
+  API lacks an immutable-target precondition. Expanded safety checks have offline coverage;
+  live lost-acknowledgement/restart/repeat cleanup and private Kaggle cleanup qualification remain
+  pending.
 - SSH host qualification covers one macOS Intel host over LAN and Tailscale. Encrypted private
   keys, host sleep, Docker-engine restarts, other Tailscale network paths and Linux VPS hosts remain
   unqualified live.
