@@ -1,0 +1,64 @@
+{
+  "workspace_id": "app",
+  "job_id": "job_example",
+  "attempt_id": "att_example",
+  "observed_at": "2026-10-13T00:00:00Z",
+  "eligible": false,
+  "reason": "conditional_delete_unavailable",
+  "resources": [
+    {
+      "resource_id": "res_execution_example",
+      "purpose": "execution",
+      "target_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target": {
+        "kind": "kernel",
+        "id": "123456",
+        "name": "operator/cre-example",
+        "version": "1",
+        "scope": "kernel_object",
+        "support": "unsupported",
+        "reason": "conditional_delete_unavailable",
+        "bytes": null
+      },
+      "eligible": false,
+      "observation": "not_checked",
+      "reason": "conditional_delete_unavailable"
+    },
+    {
+      "resource_id": "res_execution_example",
+      "purpose": "execution",
+      "target_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target": {
+        "kind": "kernel",
+        "id": "123456",
+        "name": "operator/cre-example",
+        "version": "1",
+        "scope": "kernel_object",
+        "support": "unsupported",
+        "reason": "conditional_delete_unavailable",
+        "bytes": null
+      },
+      "eligible": false,
+      "observation": "not_checked",
+      "reason": "conditional_delete_unavailable"
+    },
+    {
+      "resource_id": "res_execution_example",
+      "purpose": "execution",
+      "target_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target": {
+        "kind": "kernel",
+        "id": "123456",
+        "name": "operator/cre-example",
+        "version": "1",
+        "scope": "kernel_object",
+        "support": "unsupported",
+        "reason": "conditional_delete_unavailable",
+        "bytes": null
+      },
+      "eligible": false,
+      "observation": "not_checked",
+      "reason": "conditional_delete_unavailable"
+    }
+  ]
+}

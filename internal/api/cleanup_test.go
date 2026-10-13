@@ -159,7 +159,9 @@ func TestCleanupHTTPAdmissionGuardsWithStore(t *testing.T) {
 	f.call(t, "POST", path, "a", "", body, 400)
 	f.call(t, "POST", path, "read", "cleanup-read-scope", body, 403)
 	f.call(t, "POST", path, "b", "cleanup-foreign", body, 403)
-	f.call(t, "GET", path, "a", "", "", 405)
+	f.call(t, "GET", path, "a", "", "", 400)
+	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID), "a", "", "", 200)
+	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID), "read", "", "", 403)
 	f.call(t, "GET", "/v1/workspaces/a/operations/op_missing", "a", "", "", 404)
 	_, b = f.call(t, "GET", "/v1/info", "a", "", "", 200)
 	if !bytes.Contains(b, []byte(`"`+api.FeatureJobCleanup+`"`)) {

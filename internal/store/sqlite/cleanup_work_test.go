@@ -21,14 +21,19 @@ import (
 // and can replace the adapter result; it never deletes anything outside the fake.
 type cleanupProbe struct {
 	*probeProvider
-	mu        sync.Mutex
-	requests  []provider.CleanupRequest
-	verifyErr error
-	result    *provider.CleanupOutcome
-	err       error
+	mu           sync.Mutex
+	requests     []provider.CleanupRequest
+	verifyErr    error
+	result       *provider.CleanupOutcome
+	err          error
+	verifyHook   func()
+	resourceHook func(context.Context, provider.CleanupResourceRequest) (provider.CleanupOutcome, error)
 }
 
 func (p *cleanupProbe) VerifyBinding(ctx context.Context, b provider.BindingSnapshot) error {
+	if p.verifyHook != nil {
+		p.verifyHook()
+	}
 	if p.verifyErr != nil {
 		return p.verifyErr
 	}
@@ -51,6 +56,32 @@ func (p *cleanupProbe) Cleanup(ctx context.Context, r provider.CleanupRequest) (
 		return result, p.err
 	}
 	return p.probeProvider.Cleanup(ctx, r)
+}
+
+func (p *cleanupProbe) CleanupResource(ctx context.Context, request provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
+	if request.Mode == provider.CleanupDryRun {
+		if p.resourceHook != nil {
+			return p.resourceHook(ctx, request)
+		}
+		return p.probeProvider.CleanupResource(ctx, request)
+	}
+	var running int
+	if err := p.store.db.QueryRowContext(ctx, `SELECT count(*) FROM cleanup_resources WHERE resource_id=? AND state='running'`, string(request.LedgerID)).Scan(&running); err != nil || running < 1 {
+		panic("resource cleanup called without durable intent")
+	}
+	p.mu.Lock()
+	p.requests = append(p.requests, request.CleanupRequest)
+	p.mu.Unlock()
+	if p.resourceHook != nil {
+		return p.resourceHook(ctx, request)
+	}
+	if p.result != nil || p.err != nil {
+		if p.result != nil {
+			return *p.result, p.err
+		}
+		return provider.CleanupOutcome{}, p.err
+	}
+	return p.probeProvider.CleanupResource(ctx, request)
 }
 
 type cleanupResolver struct{ p provider.Provider }
@@ -101,8 +132,8 @@ func TestCleanupWorkerDeletesOnceAndKeepsReceipts(t *testing.T) {
 		t.Fatal("deletion was not recorded", current, err)
 	}
 	j := f.journal(t, id)
-	want := provider.CleanupRequest{Remote: *j.Remote, LedgerID: stagingLedger(t, f, id), CreationOperationID: j.PreparationID, ResultsCollected: true, Mode: provider.CleanupApply}
-	if len(probe.requests) != 1 || probe.requests[0] != want || f.backend.Stats().CleanupCalls != 1 {
+	want := provider.CleanupRequest{Remote: *j.Remote, LedgerID: domain.ProviderResourceID("res_execution_" + string(j.Remote.Identity.IntentID)), CreationOperationID: j.PreparationID, ResultsCollected: true, Mode: provider.CleanupApply}
+	if len(probe.requests) != 2 || probe.requests[0] != want || probe.requests[1].LedgerID != stagingLedger(t, f, id) || f.backend.Stats().CleanupCalls != 2 {
 		t.Fatal("cleanup did not apply exactly the recorded ownership", probe.requests)
 	}
 	if worked, err := engine.RunOnce(ctx); worked || err != nil {
@@ -148,12 +179,16 @@ func TestCleanupWorkerFailuresAreExplicit(t *testing.T) {
 		action domain.RecommendedAction
 		calls  int
 	}{
-		{"adapter refuses uncollected results", func(*cleanupProbe) {}, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
+		{"adapter outcome unknown", func(p *cleanupProbe) { p.err = errors.New("provider-secret-canary") }, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
 		{"binding verification fails", func(p *cleanupProbe) { p.verifyErr = errors.New("binding-secret-canary") }, domain.CodeRemoteIdentityMismatch, domain.RecommendedActionInspectProvider, 0},
 		{"adapter unsupported", func(p *cleanupProbe) {
 			p.err = fmt.Errorf("adapter-secret-canary: %w", provider.ErrCleanupUnsupported)
 		}, domain.CodeUnsupportedCapability, domain.RecommendedActionInspectProvider, 0},
 		{"adapter returns no evidence", func(p *cleanupProbe) { p.result = &provider.CleanupOutcome{WouldDelete: true} }, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
+		{"contradictory deletion and access refusal", func(p *cleanupProbe) {
+			p.result = &provider.CleanupOutcome{Deleted: true}
+			p.err = provider.Problem(domain.CodeProviderAccessDenied, domain.FailureStageAuthentication, "private-access-canary")
+		}, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f, id := uncollectedFixture(t)
@@ -177,10 +212,16 @@ func TestCleanupWorkerFailuresAreExplicit(t *testing.T) {
 			if f.backend.Stats().CleanupCalls != c.calls {
 				t.Fatal("unexpected provider deletion", f.backend.Stats().CleanupCalls)
 			}
-			// A failed cleanup never blocks recovery or an explicit new request.
+			// A known refusal allows collection. An uncertain mutation must keep
+			// collection blocked, even though the attempt-wide receipt failed.
 			controls, cp, _ := controlService(t, f, "a", auth.Operate)
-			if _, err = controls.Submit(ctx, cp, "a", id.JobID, domain.OperationCollect, "collect-after-failure", controlRequest(id.AttemptID)); err != nil {
-				t.Fatal("failed cleanup blocked collection", err)
+			_, err = controls.Submit(ctx, cp, "a", id.JobID, domain.OperationCollect, "collect-after-failure", controlRequest(id.AttemptID))
+			if c.code == domain.CodeProviderStateUnknown {
+				if !errors.Is(err, operations.ErrState) {
+					t.Fatal("unknown cleanup permitted collection", err)
+				}
+			} else if err != nil {
+				t.Fatal("known refusal blocked collection", err)
 			}
 		})
 	}
@@ -256,6 +297,7 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.Failed}, f.clock.Now()); !errors.Is(err, ErrInvalid) {
 		t.Fatal("failure without a problem accepted", err)
 	}
+	finishCleanupResourceFixtures(t, f, *second)
 	if err = f.s.CompleteCleanup(ctx, *second, deleted, f.clock.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -268,5 +310,20 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 	}
 	if f.backend.Stats().CleanupCalls != 0 {
 		t.Fatal("store claims called the provider")
+	}
+}
+
+// Store-only tests attest a result only after committing each fenced resource intent.
+func finishCleanupResourceFixtures(t *testing.T, f *dispatchFixture, w cleanup.Work) {
+	t.Helper()
+	for _, item := range w.Resources {
+		if err := f.s.BeginCleanupResource(context.Background(), w, item, f.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		result := item.Result
+		result.State, result.Reason = cleanup.ResourceDeleted, "fixture_deletion_confirmed"
+		if err := f.s.CompleteCleanupResource(context.Background(), w, result, f.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

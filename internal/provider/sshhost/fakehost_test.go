@@ -48,6 +48,7 @@ type fakeHost struct {
 	buildInput    []byte
 	platform      string
 	engineTime    time.Time
+	engineID      string
 	image         bool
 	registry      bool // pull succeeds
 	containers    map[string]*fakeContainer
@@ -61,7 +62,7 @@ type fakeHost struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{}}
+	return &fakeHost{t: t, image: true, platform: "linux/amd64", engineID: "fixture-engine-000000000001", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{}}
 }
 
 func (h *fakeHost) Close() error {
@@ -152,6 +153,9 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 		}
 	}
 	switch {
+	case slices.Equal(args, []string{"info", "--format", "{{.ID}}"}):
+		_, _ = io.WriteString(stdout, h.engineID)
+		return Result{}, nil
 	case slices.Equal(args, []string{"info", "--format", "{{.SystemTime}}"}):
 		_, _ = io.WriteString(stdout, h.engineTime.Format(time.RFC3339Nano))
 		return Result{}, nil

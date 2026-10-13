@@ -15,8 +15,8 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
-// controls only admits or reads durable local records. Provider calls and transfer
-// work are never executed by an HTTP handler. All existing middleware runs first.
+// Mutation routes only admit durable local records. Cleanup GET may perform a
+// bounded provider dry run, never apply. All existing middleware runs first.
 func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
 	if h.config.Operations == nil {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "durable controls are not configured")
@@ -75,8 +75,15 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "control route not implemented")
 		return
 	}
+	if kind == domain.OperationCleanup && r.Method == http.MethodGet {
+		h.cleanupPreview(w, r, p, workspace, domain.JobID(segments[4]))
+		return
+	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
+		if kind == domain.OperationCleanup && h.config.Cleanup.PreviewAvailable() {
+			w.Header().Set("Allow", "GET, POST")
+		}
 		respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "controls require an explicit POST")
 		return
 	}
@@ -163,15 +170,20 @@ func controlView(r operations.Record) map[string]any {
 	return view
 }
 
-// cleanupView never serializes the request reason, ledger identity or provider reference.
+// cleanupView exposes typed resource outcomes, never the request reason, full ownership
+// identity or opaque provider reference.
 func cleanupView(r cleanup.Record) map[string]any {
 	op := r.Operation
-	return map[string]any{
+	view := map[string]any{
 		"operation_id": op.ID, "workspace_id": op.WorkspaceID, "job_id": op.JobID, "attempt_id": op.AttemptID,
 		"kind": op.Kind, "status": op.Status, "revision": op.Revision, "created_at": op.CreatedAt, "updated_at": op.UpdatedAt,
 		"effect": r.Effect, "remote_termination_confirmed": false, "replay": r.Replay, "problem": publicOperationProblem(op.Failure),
 		"links": map[string]string{"self": operationLocation(op), "job": "/v1/workspaces/" + url.PathEscape(string(op.WorkspaceID)) + "/jobs/" + url.PathEscape(string(op.JobID))},
 	}
+	if len(r.Resources) > 0 {
+		view["resources"] = r.Resources
+	}
+	return view
 }
 
 func publicOperationProblem(p *domain.Problem) any {

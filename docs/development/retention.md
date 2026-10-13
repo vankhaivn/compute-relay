@@ -2,8 +2,8 @@
 
 Expiry, local deletion and remote cleanup are different operations. Serve modes with provider
 workers run the local sweep below with the default policy; admission-only serve does not. Remote
-apply and staging cleanup are not implemented by the preview path; explicit attempt-scoped
-deletion is the separate [cleanup control](operations.md#remote-cleanup).
+deletion is never authorized by the preview path; explicit attempt-scoped apply uses the separate
+[cleanup control](operations.md#remote-cleanup).
 
 ## Eligibility and holds
 
@@ -50,20 +50,17 @@ Open handles can delay deletion; POSIX readers can outlive unlink. Expiry preven
 opens, not bytes already delivered. This is not secure physical erasure or a hostile-host sandbox.
 Keep root identity files with whole-store backups/moves; see [storage](storage.md).
 
-## Remote preview only
+## Remote preview and explicit cleanup
 
-The operate-authorized preview service selects an exact owned execution ledger entry and verifies
-frozen account/binding, identity, terminal/publication evidence and all pins. It calls only dry-run
-cleanup and rechecks current authority/pins/plan before recording the observation. Contradictory
-or deletion-claiming responses fail. `would_delete` is not a reusable apply permit;
-`already_absent` is an observation, not a fabricated deletion event.
-
-The execution cleanup port cannot establish safe dataset staging cleanup. Staging entries remain
-retained with `staging_preview_unavailable`. Prefix matching never proves ownership; cleanup never
-substitutes for cancellation. Exact-target live cleanup requires a separately reviewed procedure
-and explicit authorization in the [validation checklist](validation-checklist.md).
+The public [attempt preview](../remote-cleanup.md) lists original staging and execution resources
+with bounded typed targets, support and exclusion reasons. It may perform dry-run checks and
+rechecks current authority and the complete inventory afterward. It never records deletion intent.
+The older retention component's execution-only preview remains read-only and cannot prove staging
+cleanup eligibility; it is not the public attempt inventory.
 
 The [cleanup control](operations.md#remote-cleanup) is the only remote apply path. It is an
-explicit owner request for one attempt, never a sweep: retention neither creates nor consumes it,
-and a preview result is not an input to it. A succeeded cleanup does not expire local results or
-change their retention windows.
+explicit request for one attempt, never a sweep: retention neither creates nor consumes it,
+and a preview result is not an input to it. Pending controls, shared references and named
+input/job/attempt holds block apply. A succeeded cleanup does not expire local results or change
+their retention windows. Exact-target live cleanup requires the separate authorization in the
+[validation checklist](validation-checklist.md).

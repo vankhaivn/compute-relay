@@ -114,6 +114,14 @@
     },
     "new_attempt_id": {
       "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "resources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "$ref": "cleanup-preview.v1alpha1.schema.json#/$defs/result"
+      }
     }
   },
   "oneOf": [
@@ -368,6 +376,48 @@
         "properties": {
           "problem": {
             "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "resources"
+        ]
+      },
+      "then": {
+        "properties": {
+          "kind": {
+            "const": "cleanup"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "cleanup"
+          },
+          "status": {
+            "const": "succeeded"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "resources": {
+            "items": {
+              "properties": {
+                "state": {
+                  "enum": [
+                    "deleted",
+                    "absent"
+                  ]
+                }
+              }
+            }
           }
         }
       }

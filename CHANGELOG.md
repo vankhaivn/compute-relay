@@ -21,5 +21,7 @@ No release has been published. This summarizes the current pre-release feature s
 - Optional SSH preparation and start gates with separately supplied ephemeral workload secrets;
   see [preparation gates](docs/preparation-gates.md) and [workload secrets](docs/workload-secrets.md).
 - Reproducible macOS arm64 companion bundles.
+- Attempt-scoped remote cleanup previews, per-resource outcomes and SSH deletion bound to the
+  original container and Docker engine; unsupported targets remain explicitly retained.
 
 See [current status](docs/status.md) for limits.

@@ -25,12 +25,16 @@ import (
 )
 
 func controlOperationSchema(t *testing.T) *jsonschema.Schema {
+	return cleanupWireSchema(t, "control-operation.v1alpha1.schema.json")
+}
+
+func cleanupWireSchema(t *testing.T, name string) *jsonschema.Schema {
 	t.Helper()
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("source path unavailable")
 	}
-	path := filepath.ToSlash(filepath.Join(filepath.Dir(source), "..", "..", "..", "api", "schemas", "control-operation.v1alpha1.schema.json"))
+	path := filepath.ToSlash(filepath.Join(filepath.Dir(source), "..", "..", "..", "api", "schemas", name))
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
@@ -63,6 +67,7 @@ func serveCleanupFixture(t *testing.T, f *dispatchFixture) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cleanups = cleanups.WithPreviewResolver(cleanupResolver{f.adapter})
 	inputs, err := objects.New(access, f.blobs, f.s)
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +87,33 @@ func serveCleanupFixture(t *testing.T, f *dispatchFixture) (string, string) {
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 	return "http://" + listener.Addr().String(), secret.Reveal()
+}
+
+func TestCleanupHTTPPreviewUsesBoundedPublishedContract(t *testing.T) {
+	f, id := collectedFixture(t)
+	endpoint, token := serveCleanupFixture(t, f)
+	path := endpoint + "/v1/workspaces/a/jobs/" + string(id.JobID) + "/cleanup"
+	query := "?attempt_id=" + string(id.AttemptID)
+	_, raw := cleanupHTTP(t, "GET", path+query, token, "", "", 200)
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupWireSchema(t, "cleanup-preview.v1alpha1.schema.json").Validate(value); err != nil {
+		t.Fatal("preview violates published contract", err, string(raw))
+	}
+	resources, ok := value["resources"].([]any)
+	if !ok || len(resources) != 2 || value["eligible"] != true || controlCount(t, f.s, "SELECT count(*) FROM cleanup_operations") != 0 {
+		t.Fatal("preview changed state or omitted candidates", string(raw))
+	}
+	for _, invalid := range []string{
+		"", "?attempt_id=", "?attempt_id=a&attempt_id=b", query + "&discard_uncollected=1", query + "&discard_uncollected=true&discard_uncollected=false",
+		query + "&remote_ref=foreign", query + "&discard_uncollected=", query + "&attempt_id=x", query + "&x=y;z",
+	} {
+		cleanupHTTP(t, "GET", path+invalid, token, "", "", 400)
+	}
+	cleanupHTTP(t, "POST", path+query, token, "query-not-permit", string(cleanupBody(id.AttemptID, false, "")), 400)
+	cleanupHTTP(t, "GET", path+query, token, "", "{}", 400)
 }
 
 func cleanupHTTP(t *testing.T, method, endpoint, token, key, body string, want int) (http.Header, []byte) {
