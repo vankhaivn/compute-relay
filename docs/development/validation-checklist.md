@@ -139,6 +139,25 @@ authorized CPU job to a published result across a Relay restart, cancel a second
 and request cleanup for each attempt. Confirm on the host that no `compute-relay-` container
 remains.
 
+For cleanup response-loss and restart qualification, separately authorize a disposable Linux-amd64
+Docker daemon running inside an exact container, an image installation and one CPU job with a
+120-second remote wall limit. The daemon must start without containers. Supply its full 64-character
+container ID and a new absolute evidence directory:
+
+```sh
+COMPUTE_RELAY_CLEANUP_DOCKER_CONTAINER='<full-disposable-engine-container-id>' \
+COMPUTE_RELAY_CLEANUP_EVIDENCE='/absolute/private/new-cleanup-evidence' \
+go test -count=1 -timeout 20m -run '^TestManagedSSHCleanupRecovery$' ./internal/runtimehost
+```
+
+This opt-in check runs real Docker commands through loopback SSH, withholds a completed deletion's
+response, reopens the original runtime, advances the lease clock and recovers only the original
+IDs. It checks idempotent replay, preservation of a replacement at the old name, unrelated volume
+and container contents, image inventory and verified local inputs/results. It leaves private
+evidence and disposable-engine fixtures for inspection, including on failure. Review exact engine
+and volume identities before separately authorized teardown; never use prune or reuse an
+interrupted evidence directory. Ordinary tests and CI skip this live check.
+
 **Gaps needing a reviewed procedure.** Do not invent commands for these; record them as
 `blocked-procedure` until a bounded plan and approval exist:
 

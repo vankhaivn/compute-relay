@@ -85,7 +85,7 @@ by this path. No fabricated account-check time or unconditional batch readiness 
 
 ## Remote cleanup
 
-The composed runtime supports explicit name-based cleanup with offline evidence. Preview exposes
+The composed runtime supports explicit name-based cleanup. Preview exposes
 recorded private staging dataset and execution kernel IDs, names and versions, unknown size,
 `name_based_delete: true` and a replacement-risk warning. Apply requires durable
 `accept_name_based_delete=true`; otherwise targets are retained. The adapter verifies the exact
@@ -103,16 +103,27 @@ Primary-source review on 2026-10-13, pinned SDK 0.1.35:
   contains user and kernel slug;
   [its service](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/services/kernels_api_service.py)
   forwards that request to deletion.
+- The [official API client 2.2.4](https://github.com/Kaggle/kaggle-api/blob/v2.2.4/src/kaggle/api/kaggle_api_extended.py)
+  treats the typed delete call as synchronous completion: dataset deletion returns success and
+  kernel deletion reports completion after the call returns.
 
 Neither request carries an immutable resource ID/version or compare-and-delete precondition.
 A verified GET followed by one of these calls could delete a replacement object using the same
 name. The SDK's object-addressed delete surface also does not establish a version-scoped cleanup
-contract. Whole-object effects on historical versions and kernel outputs remain unqualified live;
-the explicit acceptance covers the replacement race, not a known mismatch. Each resource permits
-one delete RPC per running intent, with no transport retry. A successful delete response requires
-a subsequent explicit 404 before Relay records `deleted`. HTTP 403, including Kaggle's special
-missing-name denial, cannot establish absence. Lost-acknowledgement recovery only reads the
-original name/identity; if it remains present or unreadable, the outcome stays unknown. See
+contract. The explicit acceptance covers the replacement race, not a known mismatch. Each resource
+permits one delete RPC per running intent, with no transport retry. Relay validates HTTP 200 and
+the closed, error-free delete response, then reads the target again. An explicit 404 confirms
+deletion; Kaggle's post-delete 403 retains the preceding synchronous completion. A still-present
+target or other contradictory response remains unknown. HTTP 403 alone cannot establish absence.
+Lost-acknowledgement recovery only reads the original name/identity; if it remains present or
+unreadable, the outcome stays unknown.
+
+Live qualification on 2026-10-13 covers whole-object deletion of private version-1 kernels and
+datasets, synchronous completion and read-only recovery after deliberately lost completion on
+one account. This evidence covers the shipped SDK leaf, not the full public cleanup API against
+that account. Historical versions and physical reclamation of provider output bytes remain
+unqualified.
+See [qualification evidence in #97](https://github.com/vankhaivn/compute-relay/issues/97) and
 [remote cleanup](../../remote-cleanup.md) for operation and recovery semantics.
 
 ## Process boundary
