@@ -44,16 +44,6 @@ destructive cleanup, public data or paid capacity.
 | M5-05 | Thin Node.js, Python and Go HTTP clients handling receipts, unknown states, explicit controls and checked downloads. Depends on M5-04. |
 | M5-06 | Clean-install/build guide, optional unprivileged container and platform packaging. Depends on M5-01–M5-05. |
 
-## Parallel execution qualification
-
-[Issue 93](https://github.com/vankhaivn/compute-relay/issues/93) still requires bounded live Intel
-SSH concurrency evidence: two independently authorized jobs running while a third waits, shared
-host capacity across LAN/Tailscale and password/key paths, restart/uncertainty reservations,
-isolated logs and verified outputs. Record actual versions and aggregate resource limits.
-[Current status](../status.md) records the qualified Kaggle CPU envelope. Offline scheduler/adapter
-tests and existing single-job SSH evidence do not complete shared-host qualification; it needs
-its own finite compute authorization.
-
 ## M6 — Release acceptance
 
 | Task | Work remaining / acceptance |
