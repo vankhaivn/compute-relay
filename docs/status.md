@@ -72,8 +72,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
   is not observable.
 - [Remote cleanup](remote-cleanup.md) has a bounded attempt preview and durable per-resource
   outcomes. SSH deletion requires original container and engine identity; older receipts without
-  engine evidence are retained. Kaggle resources remain unsupported because the pinned deletion
-  API lacks an immutable-target precondition. Expanded safety checks have offline coverage;
+  engine evidence are retained. Kaggle name-based deletion requires explicit acceptance of the
+  replacement risk shown in preview; changed identities still refuse deletion and uncertain
+  recovery only reads. These checks have offline coverage;
   live lost-acknowledgement/restart/repeat cleanup and private Kaggle cleanup qualification remain
   pending.
 - SSH host qualification covers one macOS Intel host over LAN and Tailscale. Encrypted private
