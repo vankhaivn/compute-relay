@@ -29,11 +29,13 @@ PowerShell/CMD equivalents are in `scripts/`. The hook supplements CI; it does n
 
 ```sh
 go run ./cmd/devtool check
-go run ./cmd/devtool test-race
 ```
 
 Use [toolchain guidance](docs/development/go-toolchain.md) and narrow component tests during
-implementation. A PR states the behavior changed, exact checks and results, unrun checks with
+implementation. Full race and native macOS CI are manual checks for concurrency investigations,
+platform changes or release validation, not routine PR requirements. Run
+`go run ./cmd/devtool test-race` locally when that deeper validation is needed.
+A PR states the behavior changed, exact checks and results, unrun checks with
 reasons, credential or provider effects and remaining risks. Fake-provider/SDK fixtures are not
 live evidence.
 
