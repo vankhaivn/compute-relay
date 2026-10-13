@@ -22,6 +22,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   offline:
     name: Linux CPU fixtures and contracts
@@ -46,6 +50,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.1"
-          cache: false
+          cache: true
+          cache-dependency-path: go.sum
       - name: Validate actual runner result bytes against public schemas
         run: go test ./internal/contracts -run TestRunner -count=1

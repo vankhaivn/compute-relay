@@ -96,8 +96,44 @@
             "null"
           ],
           "minimum": 0
+        },
+        "name_based_delete": {
+          "type": "boolean",
+          "description": "Deletion uses the verified owner/name and requires explicit acceptance of the replacement race."
+        },
+        "warning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "not": {
+            "pattern": "[\u0000-\u001f\u007f-\u009f]"
+          }
         }
-      }
+      },
+      "dependentRequired": {
+        "warning": [
+          "name_based_delete"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name_based_delete": {
+                "const": true
+              }
+            },
+            "required": [
+              "name_based_delete"
+            ]
+          },
+          "then": {
+            "required": [
+              "warning"
+            ]
+          }
+        }
+      ]
     },
     "resource": {
       "type": "object",

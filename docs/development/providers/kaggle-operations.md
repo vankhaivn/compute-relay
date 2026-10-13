@@ -85,10 +85,13 @@ by this path. No fabricated account-check time or unconditional batch readiness 
 
 ## Remote cleanup
 
-The adapter advertises `remote_cleanup=unsupported`. The attempt preview exposes recorded private
-staging dataset and execution kernel IDs, names and versions separately, with unknown size and
-`conditional_delete_unavailable`. Apply records retained outcomes without loading credentials or
-calling a deletion RPC. Execution must settle before any staging deletion is permitted.
+The composed runtime supports explicit name-based cleanup with offline evidence. Preview exposes
+recorded private staging dataset and execution kernel IDs, names and versions, unknown size,
+`name_based_delete: true` and a replacement-risk warning. Apply requires durable
+`accept_name_based_delete=true`; otherwise targets are retained. The adapter verifies the exact
+account, numeric ID, canonical name, version 1, privacy and original dataset-marker bytes or kernel
+source hash. Active or unresolved kernels are retained. Execution deletion must be confirmed
+before staging deletion. No new preparation, submission or quota reservation occurs.
 
 Primary-source review on 2026-10-13, pinned SDK 0.1.35:
 
@@ -105,8 +108,11 @@ Neither request carries an immutable resource ID/version or compare-and-delete p
 A verified GET followed by one of these calls could delete a replacement object using the same
 name. The SDK's object-addressed delete surface also does not establish a version-scoped cleanup
 contract. Whole-object effects on historical versions and kernel outputs remain unqualified live;
-no safe whole-attempt support is inferred from the existence of these methods. A supported
-immutable-target mechanism is required before this adapter can enable deletion. See
+the explicit acceptance covers the replacement race, not a known mismatch. Each resource permits
+one delete RPC per running intent, with no transport retry. A successful delete response requires
+a subsequent explicit 404 before Relay records `deleted`. HTTP 403, including Kaggle's special
+missing-name denial, cannot establish absence. Lost-acknowledgement recovery only reads the
+original name/identity; if it remains present or unreadable, the outcome stays unknown. See
 [remote cleanup](../../remote-cleanup.md) for operation and recovery semantics.
 
 ## Process boundary

@@ -32,9 +32,10 @@ var (
 // Request always names the intended attempt. DiscardUncollected is an explicit owner
 // confirmation; omitted and false are the same canonical request. Reason is non-secret.
 type Request struct {
-	AttemptID          domain.AttemptID `json:"attempt_id"`
-	DiscardUncollected bool             `json:"discard_uncollected"`
-	Reason             string           `json:"reason,omitempty"`
+	AttemptID             domain.AttemptID `json:"attempt_id"`
+	DiscardUncollected    bool             `json:"discard_uncollected"`
+	AcceptNameBasedDelete bool             `json:"accept_name_based_delete,omitempty"`
+	Reason                string           `json:"reason,omitempty"`
 }
 
 func (r Request) Validate() error {
@@ -84,10 +85,14 @@ func Parse(raw []byte) (Request, error) {
 			} else {
 				r.Reason = text
 			}
-		case "discard_uncollected":
+		case "discard_uncollected", "accept_name_based_delete":
 			switch string(value) {
 			case "true":
-				r.DiscardUncollected = true
+				if key == "discard_uncollected" {
+					r.DiscardUncollected = true
+				} else {
+					r.AcceptNameBasedDelete = true
+				}
 			case "false":
 			default:
 				return Request{}, operations.ErrRequest

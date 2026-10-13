@@ -157,11 +157,12 @@ func (s *Store) claimCleanup(ctx context.Context, now time.Time, ttl time.Durati
 			return dbError(err)
 		}
 		work := cleanup.Work{
-			Lease:     cleanup.Lease{WorkspaceID: w, OperationID: id, Generation: generation, Fence: fence, Until: until},
-			Record:    current,
-			Binding:   plan.binding,
-			Request:   provider.CleanupRequest{Remote: plan.remote, LedgerID: plan.resource, CreationOperationID: plan.creation, ResultsCollected: plan.collected, Mode: provider.CleanupApply},
-			Resources: resources,
+			Lease:                 cleanup.Lease{WorkspaceID: w, OperationID: id, Generation: generation, Fence: fence, Until: until},
+			Record:                current,
+			Binding:               plan.binding,
+			Request:               provider.CleanupRequest{Remote: plan.remote, LedgerID: plan.resource, CreationOperationID: plan.creation, ResultsCollected: plan.collected, Mode: provider.CleanupApply},
+			Resources:             resources,
+			AcceptNameBasedDelete: row.request.AcceptNameBasedDelete,
 		}
 		if !work.Valid() {
 			return ErrCorrupt

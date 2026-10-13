@@ -36,6 +36,7 @@ type RuntimeAdapter struct {
 	components    map[provider.Identity]*runtimeComponents
 	makeExecutor  func(*Stager, ExecutionPolicy, provider.Plan, provider.Prepared, bool) (*Executor, error)
 	makeArtifacts func(*Executor, ArtifactPolicy) (*ArtifactReader, error)
+	runCleanup    func(context.Context, Config, string, []byte, cleanupRequest) (cleanupResponse, error)
 }
 
 type runtimeComponents struct {
@@ -107,6 +108,7 @@ func NewRuntimeAdapter(
 		stager: stager, monitor: monitor, authorized: make(map[provider.Identity]bool),
 		components:   make(map[provider.Identity]*runtimeComponents),
 		makeExecutor: NewExecutor, makeArtifacts: NewArtifactReader,
+		runCleanup: runCleanup,
 	}, nil
 }
 

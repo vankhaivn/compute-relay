@@ -28,8 +28,13 @@ func TestOperationalCapabilitiesAreIndependentAndNotLiveEvidence(t *testing.T) {
 	if first.Support(domain.CapabilityEphemeralSecrets) != domain.CapabilitySupportUnsupported {
 		t.Fatal("unsupported workload secret delivery advertised")
 	}
-	if first.Support(domain.CapabilityRemoteCleanup) != domain.CapabilitySupportUnsupported {
-		t.Fatal("slug-only deletion advertised as safe cleanup")
+	if first.Support(domain.CapabilityRemoteCleanup) != domain.CapabilitySupportSupported {
+		t.Fatal("explicit name-based cleanup was not advertised")
+	}
+	for _, cap := range first.Capabilities {
+		if cap.Name == domain.CapabilityRemoteCleanup && (len(cap.Conditions) != 2 || cap.Conditions[0] != nameBasedDeleteWarning) {
+			t.Fatal("cleanup capability omitted replacement warning", cap)
+		}
 	}
 	for i := range first.Capabilities {
 		first.Capabilities[i].Reason = "changed"

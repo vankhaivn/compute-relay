@@ -8,12 +8,14 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 func TestParseIsStrictAndCanonical(t *testing.T) {
 	for _, raw := range []string{
 		`{"attempt_id":"att_1"}`,
 		`{"attempt_id":"att_1","discard_uncollected":false}`,
+		`{"attempt_id":"att_1","accept_name_based_delete":false}`,
 		`{"reason":"","discard_uncollected":false,"attempt_id":"att_1"}`,
 	} {
 		r, err := Parse([]byte(raw))
@@ -29,6 +31,7 @@ func TestParseIsStrictAndCanonical(t *testing.T) {
 		``, `null`, `[]`, `{}`, `{"attempt_id":null}`, `{"attempt_id":1}`, `{"attempt_id":""}`,
 		`{"attempt_id":"att_1","attempt_id":"att_2"}`, `{"attempt_id":"att_1","discard_uncollected":"true"}`,
 		`{"attempt_id":"att_1","discard_uncollected":null}`, `{"attempt_id":"att_1","discard_uncollected":1}`,
+		`{"attempt_id":"att_1","accept_name_based_delete":null}`, `{"attempt_id":"att_1","accept_name_based_delete":"true"}`, `{"attempt_id":"att_1","accept_name_based_delete":true,"accept_name_based_delete":false}`,
 		`{"attempt_id":"att_1","reason":null}`, `{"attempt_id":"att_1","reason":"line\nbreak"}`,
 		`{"attempt_id":"att_1","unknown":true}`, `{"attempt_id":"att_1"}{}`, `{"attempt_id":"att_1"} x`,
 		`{"attempt_id":"att_1","reason":"` + strings.Repeat("r", 513) + `"}`, "{\"attempt_id\":\"att_1\",\"reason\":\"\xff\"}",
@@ -47,7 +50,7 @@ func TestDigestBindsJobAndEveryField(t *testing.T) {
 		r   Request
 	}{
 		{"job_1", base}, {"job_2", base}, {"job_1", Request{AttemptID: "att_2"}},
-		{"job_1", Request{AttemptID: "att_1", DiscardUncollected: true}}, {"job_1", Request{AttemptID: "att_1", Reason: "why"}},
+		{"job_1", Request{AttemptID: "att_1", DiscardUncollected: true}}, {"job_1", Request{AttemptID: "att_1", Reason: "why"}}, {"job_1", Request{AttemptID: "att_1", AcceptNameBasedDelete: true}},
 	} {
 		digest, err := c.r.Digest(c.job)
 		if err != nil || len(digest) != 64 || seen[digest] {
@@ -111,5 +114,17 @@ func TestRecordStatusEffectMatrix(t *testing.T) {
 	orphan.AttemptID = ""
 	if (Record{Operation: orphan, Effect: Pending}).Validate() == nil {
 		t.Fatal("cleanup without an attempt accepted")
+	}
+}
+
+func TestNameBasedAcceptancePreservesLegacyDigest(t *testing.T) {
+	r, err := Parse([]byte(`{"attempt_id":"att_1","accept_name_based_delete":true}`))
+	if err != nil || !r.AcceptNameBasedDelete {
+		t.Fatal(r, err)
+	}
+	old := []byte(`{"version":"cleanup/v1","job_id":"job_1","kind":"cleanup","request":{"attempt_id":"att_1","discard_uncollected":false}}`)
+	digest, err := (Request{AttemptID: "att_1"}).Digest("job_1")
+	if err != nil || digest != string(provider.Digest(old)) {
+		t.Fatal("old persisted hash changed", digest, err)
 	}
 }

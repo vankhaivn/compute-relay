@@ -56,7 +56,7 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 						result.State, result.Reason = ResourceRetained, "eligibility_changed"
 						failed = failure(domain.CodeIllegalStateTransition, "cleanup eligibility changed before deletion; the resource was retained", domain.RecommendedActionRetryRead)
 					} else {
-						result, failed = callCleanupResource(call, cleaner, item)
+						result, failed = callCleanupResource(call, cleaner, item, w.AcceptNameBasedDelete)
 					}
 				}
 			}
@@ -111,6 +111,10 @@ func inspectCleanupResource(ctx context.Context, cleaner provider.ResourceCleane
 		result.State, result.Reason = ResourceRetained, description.Reason
 		return result, failure(domain.CodeUnsupportedCapability, "exact-target cleanup is unavailable for this resource; inspect its retained reason", domain.RecommendedActionInspectProvider)
 	}
+	if description.NameBasedDelete && !w.AcceptNameBasedDelete {
+		result.State, result.Reason = ResourceRetained, "name_based_delete_not_accepted"
+		return result, failure(domain.CodeUnsupportedCapability, description.Warning+" Set accept_name_based_delete to confirm this risk.", domain.RecommendedActionInspectProvider)
+	}
 	if verifier.VerifyBinding(ctx, w.Binding) != nil {
 		result.State, result.Reason = ResourceRetained, "binding_unverified"
 		return result, failure(domain.CodeRemoteIdentityMismatch, "the frozen provider binding could not be verified; this resource was retained", domain.RecommendedActionInspectProvider)
@@ -119,7 +123,7 @@ func inspectCleanupResource(ctx context.Context, cleaner provider.ResourceCleane
 	return result, Outcome{}
 }
 
-func callCleanupResource(ctx context.Context, cleaner provider.ResourceCleaner, item ResourceWork) (result ResourceResult, failed Outcome) {
+func callCleanupResource(ctx context.Context, cleaner provider.ResourceCleaner, item ResourceWork, acceptNameBasedDelete bool) (result ResourceResult, failed Outcome) {
 	result = item.Result
 	result.State, result.Reason = ResourceUnknown, "provider_outcome_unknown"
 	failed = failure(domain.CodeProviderStateUnknown, "remote cleanup returned no confirmed outcome; preserve the original targets for recovery", domain.RecommendedActionInspectProvider)
@@ -130,6 +134,8 @@ func callCleanupResource(ctx context.Context, cleaner provider.ResourceCleaner, 
 	}()
 	request := item.Resource.Request
 	request.Mode = provider.CleanupApply
+	request.AcceptNameBasedDelete = acceptNameBasedDelete
+	request.RecoverOnly = item.Result.State == ResourceRunning
 	outcome, err := cleaner.CleanupResource(ctx, request)
 	if err == nil && outcome.Deleted && !outcome.AlreadyAbsent && !outcome.WouldDelete {
 		result.State, result.Reason = ResourceDeleted, "deletion_confirmed"

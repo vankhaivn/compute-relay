@@ -24,9 +24,12 @@ Do not assume a successful local import proves GPU availability or compatible re
 
 ## Host and filesystem requirements
 
-Go CI runs native tests/builds on Linux, macOS and Windows; the client workflow separately
-checks its locked environment on those operating systems. Check the actual job log for runner
-architecture. Cross-compilation or one OS job does not qualify every amd64/arm64 combination.
+Routine Go and client CI run on Linux. Manually starting either workflow adds its macOS checks;
+the Go workflow also adds full race tests. Windows CI is disabled, and a green routine PR does
+not provide current macOS or Windows validation. Platform implementations and local commands
+remain available. See the [CI policy](development/go-toolchain.md#dependency-changes-and-ci).
+Check the actual job log for runner architecture. Cross-compilation or one OS job does not
+qualify every amd64/arm64 combination.
 Record the exact OS/architecture, filesystem and tool versions in the private operator record;
 share only the minimal sanitized values needed by a focused issue/PR.
 
