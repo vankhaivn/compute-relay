@@ -102,6 +102,13 @@ func (s *Store) claimCleanup(ctx context.Context, now time.Time, ttl time.Durati
 			if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
 				return err
 			}
+			if op.Status == domain.OperationRunning {
+				// The old attempt-wide callback may already have affected any target.
+				// A missing per-resource intent is not proof that deletion never began.
+				if _, err = tx.ExecContext(ctx, `UPDATE cleanup_resources SET state='running',reason='legacy_delete_intent_recovered' WHERE workspace_id=? AND operation_id=?`, string(w), string(id)); err != nil {
+					return dbError(err)
+				}
+			}
 			resources, err = loadCleanupResources(ctx, tx, op)
 			if err != nil {
 				return err
@@ -176,6 +183,19 @@ func failCleanup(ctx context.Context, tx *sql.Tx, before cleanup.Record, now tim
 		return ErrInvalid
 	}
 	p = p.WithRetrySemantics(false, false).WithRecommendedAction(domain.RecommendedActionRetryRead)
+	if before.Operation.Status == domain.OperationRunning {
+		var pinned bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_resources WHERE workspace_id=? AND operation_id=?)`, string(before.Operation.WorkspaceID), string(before.Operation.ID)).Scan(&pinned); err != nil {
+			return dbError(err)
+		}
+		if !pinned {
+			p, err = domain.NewProblem(domain.CodeProviderStateUnknown, "The earlier attempt-wide deletion outcome is unknown and current eligibility prevents recovery; no further deletion was attempted.", domain.FailureStageObservation)
+			if err != nil {
+				return ErrInvalid
+			}
+			p = p.WithRetrySemantics(false, false).WithRecommendedAction(domain.RecommendedActionInspectProvider)
+		}
+	}
 	next, err := before.Operation.Transition(domain.OperationFailed, &p, now)
 	if err != nil {
 		return ErrInvalid

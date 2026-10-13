@@ -148,7 +148,10 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
 func pendingCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID) error {
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_operations c WHERE workspace_id=? AND job_id=? AND attempt_id=? AND
- (status IN ('accepted','running','succeeded') OR EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id AND r.state IN ('running','deleted','absent','unknown'))))`, string(w), string(job), string(attempt)).Scan(&exists); err != nil {
+ (status IN ('accepted','running','succeeded')
+ OR EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id AND r.state IN ('running','deleted','absent','unknown'))
+ OR (status='failed' AND json_extract(c.record,'$.Operation.Failure.Code')=?
+ AND NOT EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id))))`, string(w), string(job), string(attempt), string(domain.CodeProviderStateUnknown)).Scan(&exists); err != nil {
 		return dbError(err)
 	}
 	if exists {

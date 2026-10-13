@@ -427,3 +427,56 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanupLegacyUnknownEffectsBlockCollectionAfterUpgrade(t *testing.T) {
+	ctx := context.Background()
+	for _, phase := range []string{"running_binding_refused", "running_new_hold", "already_failed_unknown"} {
+		t.Run(phase, func(t *testing.T) {
+			f, id := uncollectedFixture(t)
+			_, principal, receipt := admitCleanup(t, f, id, "legacy-uncertainty", true)
+			if phase == "already_failed_unknown" {
+				worker, probe := cleanupWorker(t, f)
+				probe.err = errors.New("lost legacy deletion acknowledgement")
+				runCleanup(t, worker)
+			} else if work, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Second); err != nil || work == nil {
+				t.Fatal(err)
+			}
+			// Released schema 20 has only the attempt-wide running/failed receipt;
+			// it cannot say which resources the old callback may already have deleted.
+			f.root = copyFixtureAtSchema(t, f.s, 20)
+			f.restart(t)
+			f.clock.advance(2 * time.Second)
+			if phase == "running_new_hold" {
+				if err := f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "keep", true, f.clock.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			worker, probe := cleanupWorker(t, f)
+			probe.verifyErr = errors.New("legacy binding unavailable")
+			if _, err := worker.RunOnce(ctx); err != nil {
+				t.Fatal(err)
+			}
+			current, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+			if err != nil || current.Operation.Status != domain.OperationFailed || current.Operation.Failure == nil || current.Operation.Failure.Code != domain.CodeProviderStateUnknown {
+				t.Fatal("upgrade turned an unacknowledged call into a known refusal", current, err)
+			}
+			if phase == "running_binding_refused" {
+				if len(current.Resources) != 2 || current.Resources[0].State != cleanup.ResourceUnknown || current.Resources[1].State != cleanup.ResourceUnknown {
+					t.Fatal("legacy attempt-wide call lost its possible effects", current.Resources)
+				}
+			}
+			if phase == "running_new_hold" {
+				if err := f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "keep", false, f.clock.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			controls, cp, _ := controlService(t, f, "a", auth.Operate)
+			if _, err := controls.Submit(ctx, cp, "a", id.JobID, domain.OperationCollect, "legacy-collect", controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrState) {
+				t.Fatal("unresolved legacy deletion permitted collection", err)
+			}
+			if len(probe.requests) != 0 || f.backend.Stats().CleanupCalls != 0 {
+				t.Fatal("upgrade changed remote data")
+			}
+		})
+	}
+}
