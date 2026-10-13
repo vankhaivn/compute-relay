@@ -52,18 +52,16 @@ jsonschema/v6 `v6.0.3` and modernc SQLite `v1.58.0`; the driver requires the pin
 [ADR-0008](decisions/0008-sqlite-durability-and-backup.md) for source references.
 Review migrations, locking, backup and native tests when changing the storage stack.
 
-Go CI always runs the full ordinary checks and CGo-free build on Linux when relevant source,
-embedded assets or CI configuration change. PRs also run the full race suite for runtime,
-provider, storage and shared-core changes; presentation/CLI, packaging and contract-only changes
-use ordinary tests. Native macOS tests/builds run for platform, filesystem, credential, storage,
-packaging, CLI and Kaggle-process changes. Dependencies and CI selection changes exercise both
-extra checks. Relevant pushes to `main` run both regardless of the PR classification. The exact
-path policy and its regression tests live in [ci_scope.py](../../.github/scripts/ci_scope.py).
+PRs and relevant pushes to `main` run ordinary checks and the CGo-free build on Linux.
+Full race tests and native macOS tests/builds run only when the Go workflow is started manually
+with **Run workflow**. Use those deeper checks for concurrency investigations, platform changes
+or release validation; they are not routine PR requirements.
 
 Go dependency/build caches are enabled; unchanged tests can reuse Go's valid result cache.
 The named fault matrix and actual runner-result contract checks still run uncached. New PR
 commits cancel superseded workflow runs. Separate workflows check the locked
-[Kaggle client](../../tools/kaggle-client/README.md) on Linux/macOS and the
+[Kaggle client](../../tools/kaggle-client/README.md) on Linux, adding macOS only when that workflow
+is started manually, and the
 [runner](../../runner/README.md) on Linux. Windows CI is disabled; Windows compatibility changes
 require explicit native validation. CI uses no live account credential or GPU.
 
