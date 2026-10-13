@@ -39,7 +39,7 @@ func (a *Adapter) CleanupResource(ctx context.Context, request provider.CleanupR
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "container ownership no longer matches the original receipt")
 	}
 	if errors.Is(err, ErrNotDone) {
-		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageObservation, "container activity does not permit cleanup")
+		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "container activity does not permit cleanup")
 	}
 	return outcome, err
 }

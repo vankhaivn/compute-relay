@@ -111,6 +111,26 @@ func TestResourceCleanupRunningRaceAndLostAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestResourceCleanupRefusesActiveContainerWithValidProblem(t *testing.T) {
+	for _, state := range []string{"running", "paused", "restarting"} {
+		t.Run(state, func(t *testing.T) {
+			h := newHarness(t)
+			request := resourceCleanupRequest(t, h)
+			container := h.host.container(t)
+			container.status = state
+			h.host.calls = nil
+			out, err := h.adapter.CleanupResource(context.Background(), request)
+			var problem domain.Problem
+			if !errors.As(err, &problem) || problem.Code != domain.CodeRemoteExecutionUnresolved || problem.Stage != domain.FailureStageOperation {
+				t.Fatalf("active cleanup did not return the defined operation problem: %+v, %v", problem, err)
+			}
+			if out != (provider.CleanupOutcome{}) || h.host.commands("rm") != 0 || h.host.containers[container.name] != container || container.status != state {
+				t.Fatal("active cleanup changed the container or claimed success", out)
+			}
+		})
+	}
+}
+
 func TestResourceCleanupDescriptionReportsUnknownSize(t *testing.T) {
 	h := newHarness(t)
 	request := resourceCleanupRequest(t, h)
