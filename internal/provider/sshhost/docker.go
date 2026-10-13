@@ -217,7 +217,14 @@ func (d docker) inspect(ctx context.Context, name string) (containerInfo, bool, 
 	}
 	var containers []containerInfo
 	if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &containers) != nil || len(containers) != 1 ||
-		containers[0].ID == "" || containers[0].Name != "/"+name {
+		containers[0].ID == "" {
+		return containerInfo{}, false, ErrRemoteDocker
+	}
+	if containerID.MatchString(name) {
+		if containers[0].ID != name {
+			return containerInfo{}, false, ErrRemoteDocker
+		}
+	} else if containers[0].Name != "/"+name {
 		return containerInfo{}, false, ErrRemoteDocker
 	}
 	return containers[0], true, nil

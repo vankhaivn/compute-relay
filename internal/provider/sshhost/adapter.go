@@ -299,7 +299,7 @@ func decodeRef(resource string, id provider.Identity) (containerRef, error) {
 	var ref containerRef
 	decoder := json.NewDecoder(strings.NewReader(resource))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&ref) != nil || decoder.More() || ref.Container != containerName(id) || !containerID.MatchString(ref.ID) {
+	if decoder.Decode(&ref) != nil || decoder.Decode(new(any)) != io.EOF || ref.Container != containerName(id) || !containerID.MatchString(ref.ID) {
 		return containerRef{}, ErrIdentity
 	}
 	return ref, nil
@@ -1156,9 +1156,15 @@ func (a *Adapter) Cleanup(ctx context.Context, request provider.CleanupRequest) 
 	if request.Remote.Validate() != nil || !resourceKey.MatchString(id.ResourceKey) || id.InstanceID != a.config.InstanceID {
 		return provider.CleanupOutcome{}, ErrIdentity
 	}
+	ref, err := decodeRef(request.Remote.Resource, id)
+	if err != nil || request.Remote.Version != ref.ID && request.Remote.Version != "prepared" {
+		return provider.CleanupOutcome{}, ErrIdentity
+	}
 	var outcome provider.CleanupOutcome
-	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
-		info, found, err := d.inspect(ctx, containerName(id))
+	err = a.withDocker(ctx, func(d docker, _ Endpoint) error {
+		// A name may be reused with copied labels. Only the ID from the original
+		// creation receipt can be inspected or passed to Docker removal.
+		info, found, err := d.inspect(ctx, ref.ID)
 		if err != nil {
 			return err
 		}
@@ -1166,7 +1172,7 @@ func (a *Adapter) Cleanup(ctx context.Context, request provider.CleanupRequest) 
 			outcome.AlreadyAbsent = true
 			return nil
 		}
-		if !owned(info, id) || info.Config.Labels[labelPrefix+"preparation"] != string(request.CreationOperationID) {
+		if info.ID != ref.ID || info.Name != "/"+ref.Container || !owned(info, id) || info.Config.Labels[labelPrefix+"preparation"] != string(request.CreationOperationID) {
 			return ErrIdentity
 		}
 		if info.State.Running || !exited(info) && info.State.Status != "created" {
