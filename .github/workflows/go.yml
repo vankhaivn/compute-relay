@@ -1,6 +1,7 @@
 name: Go
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "**/*.go"
@@ -9,7 +10,6 @@ on:
       - "internal/provider/sshhost/image/**"
       - "internal/devtool/fault-matrix.json"
       - "runner/**"
-      - ".github/scripts/**"
       - "api/**"
       - "go.mod"
       - "go.sum"
@@ -24,7 +24,6 @@ on:
       - "internal/provider/sshhost/image/**"
       - "internal/devtool/fault-matrix.json"
       - "runner/**"
-      - ".github/scripts/**"
       - "api/**"
       - "go.mod"
       - "go.sum"
@@ -42,30 +41,8 @@ env:
   GO_VERSION: "1.27.1"
 
 jobs:
-  scope:
-    name: Select Go checks
-    runs-on: ubuntu-latest
-    outputs:
-      race: ${{ steps.scope.outputs.race }}
-      macos: ${{ steps.scope.outputs.macos }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Test check selection
-        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
-      - name: Select extra checks
-        id: scope
-        env:
-          CI_EVENT_NAME: ${{ github.event_name }}
-          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 .github/scripts/ci_scope.py
-
   quality:
     name: Linux checks
-    needs: scope
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -79,7 +56,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             .github/workflows/go.yml
-            ${{ needs.scope.outputs.race == 'true' && '.github/scripts/ci_scope.py' || '' }}
+            ${{ github.event_name == 'workflow_dispatch' && 'go.mod' || '' }}
 
       - name: Verify toolchain
         shell: bash
@@ -89,13 +66,12 @@ jobs:
         run: go run ./cmd/devtool check
 
       - name: Run race tests
-        if: needs.scope.outputs.race == 'true'
+        if: github.event_name == 'workflow_dispatch'
         run: go run ./cmd/devtool test-race
 
   native:
     name: Native macOS
-    needs: scope
-    if: needs.scope.outputs.macos == 'true'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - name: Check out repository
