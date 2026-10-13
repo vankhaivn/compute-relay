@@ -327,9 +327,10 @@ def observe(args, api, session):
     ready = api.request("GET", base + "/readiness")
     records, started = [], time.monotonic()
     cursor = session.state.get("log_cursors", {}).get(attempt, "")
-    availability = "unavailable"
+    complete = session.state.get("log_complete", {}).get(attempt, False)
+    availability = "after_completion" if complete else "unavailable"
     try:
-        for _ in range(args.pages):
+        for _ in range(0 if complete else args.pages):
             query = {"attempt_id": attempt, "limit": 100}
             if cursor:
                 query["cursor"] = cursor
@@ -348,9 +349,12 @@ def observe(args, api, session):
                 except (ValueError, TypeError):
                     pass
             previous, cursor = cursor, page["next_cursor"]
-            session.state.setdefault("log_cursors", {})[attempt] = cursor
+            # An empty terminal cursor means EOF, not permission to replay from the beginning.
+            session.state.setdefault("log_cursors", {})[attempt] = cursor or previous
+            if availability == "after_completion" and not cursor:
+                session.state.setdefault("log_complete", {})[attempt] = True
             session.save()
-            if not page["lines"] or cursor == previous:
+            if not cursor or not page["lines"] or cursor == previous:
                 break
     except Failure as exc:
         availability = str(exc)

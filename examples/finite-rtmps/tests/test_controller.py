@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import controller as c
@@ -66,6 +67,26 @@ class FakeAPI:
         if route.endswith("/cleanup"):
             return {"links": {"self": self.base + "/operations/op_cleanup"}}
         raise AssertionError("unexpected request")
+
+
+class PagedLogAPI(FakeAPI):
+    def __init__(self, count, availability="after_completion"):
+        super().__init__()
+        self.records = [{"schema_version": 1, "event": "progress", "elapsed_ms": index * 10000,
+                         "frames": index * 300, "output_time_us": index * 10000000} for index in range(count)]
+        self.availability = availability
+        self.log_calls = 0
+
+    def request(self, method, route, *args, **kwargs):
+        if method == "GET" and "/logs?" in route:
+            self.log_calls += 1
+            query = parse_qs(urlsplit(route).query)
+            offset = int(query.get("cursor", ["0"])[0])
+            end = min(offset + int(query["limit"][0]), len(self.records))
+            cursor = str(end) if end < len(self.records) or self.availability == "live" else ""
+            return {"attempt_id": "att_original", "availability": self.availability,
+                    "lines": [json.dumps(record) for record in self.records[offset:end]], "next_cursor": cursor}
+        return super().request(method, route, *args, **kwargs)
 
 
 class ControllerTests(unittest.TestCase):
@@ -142,6 +163,45 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(session.state["log_cursors"]["att_original"], "original-cursor")
             self.assertEqual(result["receiver_health"], "not_observed")
             self.assertTrue(all(call[0] == "GET" for call in api.calls))
+
+    def test_completed_log_pagination_stops_and_survives_session_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session, api = self.fixture(directory), PagedLogAPI(205)
+            result = c.observe(argparse.Namespace(pages=100), api, session)
+            self.assertEqual(len(result["records"]), 205)
+            self.assertEqual(result["records"], api.records)
+            self.assertEqual(api.log_calls, 3)
+            restarted = c.Session(Path(directory))
+            result = c.observe(argparse.Namespace(pages=100), api, restarted)
+            self.assertEqual(result["records"], [])
+            self.assertEqual(result["log_availability"], "after_completion")
+            self.assertEqual(api.log_calls, 3)
+
+    def test_page_budget_resumes_before_completed_log_end(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session, api = self.fixture(directory), PagedLogAPI(205)
+            first = c.observe(argparse.Namespace(pages=1), api, session)
+            self.assertEqual(first["records"], api.records[:100])
+            restarted = c.Session(Path(directory))
+            rest = c.observe(argparse.Namespace(pages=100), api, restarted)
+            self.assertEqual(first["records"] + rest["records"], api.records)
+            self.assertEqual(api.log_calls, 3)
+
+    def test_live_log_tail_waits_for_new_records_and_terminal_page(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session, api = self.fixture(directory), PagedLogAPI(2, "live")
+            first = c.observe(argparse.Namespace(pages=100), api, session)
+            self.assertEqual(first["records"], api.records)
+            restarted = c.Session(Path(directory))
+            empty = c.observe(argparse.Namespace(pages=100), api, restarted)
+            self.assertEqual(empty["records"], [])
+            api.records.append({"schema_version": 1, "event": "stopped", "reason": "deadline"})
+            api.availability = "after_completion"
+            final = c.observe(argparse.Namespace(pages=100), api, restarted)
+            self.assertEqual(final["records"], api.records[-1:])
+            calls = api.log_calls
+            self.assertEqual(c.observe(argparse.Namespace(pages=100), api, c.Session(Path(directory)))["records"], [])
+            self.assertEqual(api.log_calls, calls)
 
     def test_unknown_activity_and_expired_continuation_never_create_attempt(self):
         for kind in ("active", "unknown", "expired"):
