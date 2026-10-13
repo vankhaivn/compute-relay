@@ -113,7 +113,7 @@ class CleanupSDKTests(unittest.TestCase):
 
     def test_uncertain_delete_is_not_reissued_by_recovery(self):
         for kind in ("kernel", "dataset"):
-            for fault in ("lost_ack", "202", "delete_error", "post403", "still_present"):
+            for fault in ("lost_ack", "202", "delete_error", "still_present"):
                 with self.subTest(kind=kind, fault=fault):
                     self.setUp()
                     if kind == "dataset": self.dataset()
@@ -122,6 +122,19 @@ class CleanupSDKTests(unittest.TestCase):
                     self.assertEqual(self.deletes, 1)
                     self.run_bridge("recover")
                     self.assertEqual(self.deletes, 1)
+
+    def test_completed_delete_survives_provider_missing_name_403(self):
+        for kind in ("kernel", "dataset"):
+            with self.subTest(kind=kind):
+                self.setUp()
+                if kind == "dataset": self.dataset()
+                self.fault = "post403"
+                self.assertEqual(self.run_bridge(), "deleted")
+                self.assertEqual(self.deletes, 1)
+                # Without the received completion response, the same 403 is
+                # ambiguous. A fresh recovery process must not repeat deletion.
+                self.assertEqual(self.run_bridge("recover"), "unknown")
+                self.assertEqual(self.deletes, 1)
 
     def test_predelete_replacement_access_and_activity_are_retained(self):
         for fault, expected in (("account", "identity_mismatch"), ("second_read", "identity_mismatch"), ("403", "unknown"), ("404", "absent")):

@@ -34,7 +34,7 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 		case domain.CapabilityRemoteCleanup:
 			cap.Support = domain.CapabilitySupportSupported
 			cap.Reason = "explicit cleanup verifies original identity before name-based deletion"
-			cap.Conditions = []string{nameBasedDeleteWarning, "requires accept_name_based_delete; live deletion remains unqualified"}
+			cap.Conditions = []string{nameBasedDeleteWarning, "requires accept_name_based_delete and unchanged private version-1 targets"}
 		case domain.CapabilityRemoteCancellation:
 			cap.Support = domain.CapabilitySupportUnsupported
 			cap.Reason = "this batch reference has no verified kernel-session ID; manual cancellation is required"

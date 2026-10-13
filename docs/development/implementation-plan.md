@@ -29,15 +29,15 @@ fallback. Missing optional capabilities stay unsupported or unknown rather than 
 | M1-07 | Deliberately lost provider acknowledgement is a distinct fault qualification; normal restart/reconciliation does not claim to induce that ambiguity. |
 | M1-08 | Record the provider support/blocked capability mapping for a release decision. |
 
-Large multi-page output, exact hardware release and live Kaggle remote cleanup qualification remain explicit
-limits in the provider guides. Credential authorization never implies authorization for GPU use, destructive
-cleanup, public data or paid capacity.
+Large multi-page output, exact hardware release and historical-version cleanup remain explicit
+limits in the provider guides. Credential authorization never implies authorization for GPU use,
+destructive cleanup, public data or paid capacity.
 
 ## M5 — Product integration
 
 | Task | Work remaining / acceptance |
 |---|---|
-| M5-01 | Public provider quota and broader product hardening; qualify explicit Kaggle name-based deletion, whole-object scope and uncertainty recovery using private provider resources, and complete live SSH lost-acknowledgement/restart/repeat cleanup checks ([#97](https://github.com/vankhaivn/compute-relay/issues/97)). Preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
+| M5-01 | Public provider quota and broader product hardening. Preserve frozen configuration, one-shot intents, authority and shutdown ownership. |
 | M5-02 | Strict TOML runtime configuration, precedence, paths, safe defaults and validated examples; exclude secret values. |
 | M5-03 | Doctor with separate local/read-only/explicit-compute modes. Depends on M5-02. |
 | M5-04 | Verify and document a GPU smoke job plus a small pinned open-access LLM batch example. Depends on verified environment/model terms. |
