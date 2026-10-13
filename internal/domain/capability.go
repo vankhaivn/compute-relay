@@ -16,6 +16,7 @@ const (
 	CapabilityGPU                  CapabilityName = "gpu"
 	CapabilityPrivateInputStaging  CapabilityName = "private_input_staging"
 	CapabilityRemoteCancellation   CapabilityName = "remote_cancellation"
+	CapabilityRemoteCleanup        CapabilityName = "remote_cleanup"
 	CapabilityLogsWhileRunning     CapabilityName = "logs_while_running"
 	CapabilityLogsAfterCompletion  CapabilityName = "logs_after_completion"
 	CapabilityQuotaReporting       CapabilityName = "quota_reporting"

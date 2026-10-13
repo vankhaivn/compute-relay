@@ -34,6 +34,15 @@ func (upgradedResourceSSHAdapter) ValidateConfiguration(c connections.Configurat
 }
 
 func TestResourceMigrationPreservesOldUnknownReservationsAndQueuedBindings(t *testing.T) {
+	for _, version := range []int{20, 21} {
+		t.Run(fmt.Sprintf("schema_%d", version), func(t *testing.T) {
+			testResourceMigrationPreservesOldReservations(t, version)
+		})
+	}
+}
+
+func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
+	t.Helper()
 	f := newManagedStateFixture(t)
 	ctx := context.Background()
 	legacy := preResourceSSHAdapter{legacySSHStateAdapter{f.discovery}}
@@ -95,7 +104,7 @@ func TestResourceMigrationPreservesOldUnknownReservationsAndQueuedBindings(t *te
 		schedulerSetState(t, f.s, id, state)
 	}
 	queued, queuedOriginal := admit(lan, "legacy-queued-job")
-	oldPath := copyFixtureAtSchema(t, f.s, 20)
+	oldPath := copyFixtureAtSchema(t, f.s, version)
 	if err := f.s.Close(); err != nil {
 		t.Fatal(err)
 	}

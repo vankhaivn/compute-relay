@@ -93,6 +93,35 @@ func (s *Store) claimCleanup(ctx context.Context, now time.Time, ttl time.Durati
 		if plan.resource != row.resource {
 			return ErrCorrupt
 		}
+		resources, err := loadCleanupResources(ctx, tx, op)
+		if err != nil {
+			return err
+		}
+		if len(resources) == 0 {
+			// Upgrade an older pending operation without changing its original targets.
+			if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
+				return err
+			}
+			if op.Status == domain.OperationRunning {
+				// The old attempt-wide callback may already have affected any target.
+				// A missing per-resource intent is not proof that deletion never began.
+				if _, err = tx.ExecContext(ctx, `UPDATE cleanup_resources SET state='running',reason='legacy_delete_intent_recovered' WHERE workspace_id=? AND operation_id=?`, string(w), string(id)); err != nil {
+					return dbError(err)
+				}
+			}
+			resources, err = loadCleanupResources(ctx, tx, op)
+			if err != nil {
+				return err
+			}
+		}
+		if len(resources) != len(plan.resources) {
+			return ErrCorrupt
+		}
+		for i, resource := range resources {
+			if resource.Result.Fingerprint != plan.resources[i].Fingerprint() || resource.Result.ResourceID != plan.resources[i].Request.LedgerID {
+				return ErrCorrupt
+			}
+		}
 		current := row.record
 		if op.Status == domain.OperationAccepted {
 			next, err := op.Transition(domain.OperationRunning, nil, now)
@@ -128,10 +157,11 @@ func (s *Store) claimCleanup(ctx context.Context, now time.Time, ttl time.Durati
 			return dbError(err)
 		}
 		work := cleanup.Work{
-			Lease:   cleanup.Lease{WorkspaceID: w, OperationID: id, Generation: generation, Fence: fence, Until: until},
-			Record:  current,
-			Binding: plan.binding,
-			Request: provider.CleanupRequest{Remote: plan.remote, LedgerID: plan.resource, CreationOperationID: plan.creation, ResultsCollected: plan.collected, Mode: provider.CleanupApply},
+			Lease:     cleanup.Lease{WorkspaceID: w, OperationID: id, Generation: generation, Fence: fence, Until: until},
+			Record:    current,
+			Binding:   plan.binding,
+			Request:   provider.CleanupRequest{Remote: plan.remote, LedgerID: plan.resource, CreationOperationID: plan.creation, ResultsCollected: plan.collected, Mode: provider.CleanupApply},
+			Resources: resources,
 		}
 		if !work.Valid() {
 			return ErrCorrupt
@@ -145,21 +175,41 @@ func (s *Store) claimCleanup(ctx context.Context, now time.Time, ttl time.Durati
 	return result, nil
 }
 
-// failCleanup settles a request whose attempt is no longer eligible. Nothing was sent.
+// failCleanup settles a request whose attempt is no longer eligible. A recovered
+// running resource keeps an unknown outcome; confirmed earlier outcomes stay intact.
 func failCleanup(ctx context.Context, tx *sql.Tx, before cleanup.Record, now time.Time) error {
-	p, err := domain.NewProblem(domain.CodeIllegalStateTransition, "The attempt is no longer eligible for remote cleanup; nothing was deleted. Read its current state before requesting cleanup again.", domain.FailureStageOperation)
+	p, err := domain.NewProblem(domain.CodeIllegalStateTransition, "The attempt is no longer eligible for remote cleanup; no further deletion was attempted. Inspect its resource outcomes before requesting cleanup again.", domain.FailureStageOperation)
 	if err != nil {
 		return ErrInvalid
 	}
 	p = p.WithRetrySemantics(false, false).WithRecommendedAction(domain.RecommendedActionRetryRead)
+	if before.Operation.Status == domain.OperationRunning {
+		var pinned bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_resources WHERE workspace_id=? AND operation_id=?)`, string(before.Operation.WorkspaceID), string(before.Operation.ID)).Scan(&pinned); err != nil {
+			return dbError(err)
+		}
+		if !pinned {
+			p, err = domain.NewProblem(domain.CodeProviderStateUnknown, "The earlier attempt-wide deletion outcome is unknown and current eligibility prevents recovery; no further deletion was attempted.", domain.FailureStageObservation)
+			if err != nil {
+				return ErrInvalid
+			}
+			p = p.WithRetrySemantics(false, false).WithRecommendedAction(domain.RecommendedActionInspectProvider)
+		}
+	}
 	next, err := before.Operation.Transition(domain.OperationFailed, &p, now)
 	if err != nil {
 		return ErrInvalid
 	}
+	_, err = tx.ExecContext(ctx, `UPDATE cleanup_resources SET state=CASE state WHEN 'running' THEN 'unknown' ELSE 'retained' END,
+ reason=CASE state WHEN 'running' THEN 'prior_delete_outcome_unknown' ELSE 'eligibility_changed' END
+ WHERE workspace_id=? AND operation_id=? AND state IN ('pending','running')`, string(before.Operation.WorkspaceID), string(before.Operation.ID))
+	if err != nil {
+		return dbError(err)
+	}
 	return saveCleanup(ctx, tx, before, cleanup.Record{Operation: next, Effect: cleanup.Failed})
 }
 
-// CompleteCleanup records the outcome of the one apply call made under w's fence.
+// CompleteCleanup records the aggregate of the resource outcomes under w's fence.
 func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.Outcome, now time.Time) error {
 	now = now.UTC()
 	if !w.Valid() || !o.Valid() {
@@ -189,6 +239,22 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 		}
 		if now.Before(before.Operation.UpdatedAt) {
 			return scheduler.ErrClock
+		}
+		resources, err := loadCleanupResources(ctx, tx, before.Operation)
+		if err != nil {
+			return err
+		}
+		allConfirmed, anyDeleted := true, false
+		for _, resource := range resources {
+			if resource.Result.State == cleanup.ResourcePending || resource.Result.State == cleanup.ResourceRunning ||
+				o.Effect != cleanup.Failed && !resource.Result.State.Confirmed() {
+				return ErrInvalid
+			}
+			allConfirmed = allConfirmed && resource.Result.State.Confirmed()
+			anyDeleted = anyDeleted || resource.Result.State == cleanup.ResourceDeleted
+		}
+		if len(resources) > 0 && (allConfirmed != (o.Effect != cleanup.Failed) || allConfirmed && (anyDeleted != (o.Effect == cleanup.RemoteDeleted))) {
+			return ErrInvalid
 		}
 		status := domain.OperationSucceeded
 		if o.Effect == cleanup.Failed {

@@ -121,6 +121,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		}()
 	}
 	var cleaner *cleanup.Engine
+	cleanups = cleanups.WithPreviewResolver(cleanupResolver)
 	if cleanupRepo != nil {
 		if cleaner, err = cleanupEngine(cleanupRepo, cleanupResolver); err != nil {
 			return err

@@ -74,12 +74,38 @@ The build-context and image-inspection contracts follow the Docker documentation
 | Cancel | Too late if exited. Otherwise record `/relay/cancel-requested.json`, `container stop --time 30`, and confirm only when Docker reports the container exited. |
 | ListArtifacts / FetchArtifact | Exited container only. Lists `control/` runner files with measured digests and `outputs/` entries declared by the runner result. A fetch copies one regular file within the listed length and verifies its digest; links fail. |
 | ReadLogs | `container logs` stdout, which the runner mirrors from the payload. Pages are complete lines, and the cursor binds the remote identity and a line offset. Standard error is collected as `control/stderr.log`. |
-| Cleanup | Only the stopped, labelled container whose preparation label equals the ledger creation operation. Dry run reports `WouldDelete`; apply runs `container rm` without force. A missing container is `AlreadyAbsent`. |
+| Cleanup | Verify the original engine and full container ID, preparation receipt, plan and ownership labels. Dry run reports `WouldDelete`; apply runs `container rm ID` without force or volume removal. Absence is confirmed only on the original engine. |
 
 The container command is `timeout -k 30 <wall+60> python3 -E -s /relay/runner/run.py`. Its
 arguments are the manifest, staging root, a new work root under `/relay`, and the network mode
 that matches the frozen policy. The runner enforces the job budget, and the host-side timeout
 bounds a runner that stops responding.
+
+## Remote cleanup
+
+New preparation receipts, markers and immutable container labels include the Docker engine ID.
+Cleanup requires the frozen SSH host key/account, original engine, full container ID and matching
+installation, workspace, job, attempt, nonce, preparation and plan evidence. It never resolves a
+name to a replacement deletion target. Older receipts without engine evidence remain readable
+for observation but cleanup retains them with `engine_identity_not_recorded`.
+
+Deletion is exactly `docker container rm ID`, without `--force` or `--volumes`. A container that
+starts between inspection and removal is refused by Docker. There is no recursive host-file
+operation, prune or path derived from workload output. Host bind-mount contents, volumes, original
+inputs, unrelated containers, installed images and build cache remain outside the deletion scope.
+SSH staging and execution ledger rows may identify the same container; after one confirmed
+deletion, the second row must independently confirm absence of that original ID and engine.
+
+Docker references reviewed 2026-10-13:
+[engine information](https://docs.docker.com/reference/cli/docker/system/info/) and
+[container removal](https://docs.docker.com/reference/cli/docker/container/rm/).
+An isolated Docker 29.1.3 Linux-amd64 engine under emulation with loopback SSH qualified preview,
+active refusal and exact stopped-container deletion on 2026-10-13. Before/after inventories and
+content hashes confirmed preservation of bind files, named and anonymous volumes, images,
+unrelated containers and local inputs/results. Live lost-acknowledgement, restart and repeat
+cleanup remain unqualified. See
+[bounded evidence in PR #98](https://github.com/vankhaivn/compute-relay/pull/98) and
+[remote cleanup](../../remote-cleanup.md).
 
 ## Capabilities and limits
 

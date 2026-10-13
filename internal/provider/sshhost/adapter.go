@@ -184,7 +184,7 @@ func (a *Adapter) Describe() provider.Descriptor {
 	d := provider.Descriptor{Type: ProviderType, InstanceID: a.config.InstanceID, Version: Version}
 	for _, name := range []domain.CapabilityName{
 		domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell, domain.CapabilityGPU,
-		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning,
+		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityRemoteCleanup, domain.CapabilityLogsWhileRunning,
 		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityExecutionTimeout,
 		domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
 		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets,
@@ -214,6 +214,8 @@ func (a *Adapter) Describe() provider.Descriptor {
 			c.Reason = "containers have no network unless the frozen policy allows internet"
 		case domain.CapabilityRemoteCancellation:
 			c.Reason = "Docker stops the container and reports its exit"
+		case domain.CapabilityRemoteCleanup:
+			c.Reason = "explicit cleanup of the original stopped container with recorded engine identity; host files, volumes and images are preserved"
 		case domain.CapabilityStrongIdentity:
 			c.Reason = "container name, ID and labels bind the exact attempt"
 		}
@@ -278,7 +280,8 @@ func containerName(id provider.Identity) string { return containerPrefix + id.Re
 func labels(plan provider.Plan, operation domain.OperationID) map[string]string {
 	id := plan.Job.Identity
 	result := map[string]string{labelPrefix + "installation": string(id.InstallationID), labelPrefix + "instance": string(id.InstanceID),
-		labelPrefix + "attempt": string(id.AttemptID), labelPrefix + "preparation": string(operation), labelPrefix + "plan": string(plan.Digest())}
+		labelPrefix + "attempt": string(id.AttemptID), labelPrefix + "preparation": string(operation), labelPrefix + "plan": string(plan.Digest()),
+		labelPrefix + "workspace": string(id.WorkspaceID), labelPrefix + "job": string(id.JobID), labelPrefix + "nonce": id.Nonce}
 	if req, err := admission.Parse(plan.Job.Specification); err == nil {
 		if req.Spec().Timeouts.ExecutionDeadline != "" {
 			result[labelPrefix+"execution-deadline"] = req.Spec().Timeouts.ExecutionDeadline
@@ -304,10 +307,15 @@ func exited(info containerInfo) bool {
 type containerRef struct {
 	Container string `json:"container"`
 	ID        string `json:"id"`
+	EngineID  string `json:"engine_id,omitempty"`
 }
 
-func encodeRef(name, id string) string {
-	raw, _ := json.Marshal(containerRef{Container: name, ID: id})
+func encodeRef(name, id string, engine ...string) string {
+	ref := containerRef{Container: name, ID: id}
+	if len(engine) == 1 {
+		ref.EngineID = engine[0]
+	}
+	raw, _ := json.Marshal(ref)
 	return string(raw)
 }
 
@@ -315,7 +323,7 @@ func decodeRef(resource string, id provider.Identity) (containerRef, error) {
 	var ref containerRef
 	decoder := json.NewDecoder(strings.NewReader(resource))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&ref) != nil || decoder.More() || ref.Container != containerName(id) || !containerID.MatchString(ref.ID) {
+	if decoder.Decode(&ref) != nil || decoder.Decode(new(any)) != io.EOF || ref.Container != containerName(id) || !containerID.MatchString(ref.ID) || ref.EngineID != "" && !engineIdentity.MatchString(ref.EngineID) {
 		return containerRef{}, ErrIdentity
 	}
 	return ref, nil
@@ -325,6 +333,7 @@ type marker struct {
 	Preparation  domain.OperationID  `json:"preparation_id"`
 	Plan         domain.SHA256Digest `json:"plan_sha256"`
 	Container    string              `json:"container_id"`
+	EngineID     string              `json:"engine_id,omitempty"`
 	Verification domain.SHA256Digest `json:"verification_sha256,omitempty"`
 	Manifest     domain.SHA256Digest `json:"manifest_sha256,omitempty"`
 }
@@ -353,6 +362,10 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 	}
 	var prepared provider.Prepared
 	err = a.withDocker(ctx, func(d docker, endpoint Endpoint) error {
+		engine, err := d.engineID(ctx)
+		if err != nil {
+			return err
+		}
 		// The digest-pinned image is pulled once per host; the job network policy
 		// governs the container, not the engine's registry access.
 		image, found, err := d.inspectImage(ctx, a.config.Image)
@@ -396,14 +409,16 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		if spec.SeparateStart() {
 			command = append(command, "--start-control", startControlPath)
 		}
-		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: labels(plan, operation), Internet: mode == "required",
+		ownedLabels := labels(plan, operation)
+		ownedLabels[labelPrefix+"engine"] = engine
+		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: ownedLabels, Internet: mode == "required",
 			SecretTmpfs: len(spec.WorkloadSecrets) > 0,
 			CPUs:        endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
 			Command: command})
 		if err != nil {
 			return err
 		}
-		proof := marker{Preparation: operation, Plan: plan.Digest(), Container: id}
+		proof := marker{Preparation: operation, Plan: plan.Digest(), Container: id, EngineID: engine}
 		if err = a.stage(ctx, d, id, plan, modules, manifestJSON); err == nil && spec.SeparateStart() {
 			var info containerInfo
 			var exists bool
@@ -425,7 +440,7 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 			return err
 		}
 		prepared = provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(),
-			Resource: encodeRef(name, id), Ready: true, Private: true, VerificationSHA256: proof.Verification, ManifestSHA256: proof.Manifest}
+			Resource: encodeRef(name, id, engine), Ready: true, Private: true, VerificationSHA256: proof.Verification, ManifestSHA256: proof.Manifest}
 		return nil
 	})
 	if err != nil {
@@ -589,11 +604,15 @@ func (a *Adapter) ReconcilePreparation(ctx context.Context, plan provider.Plan, 
 		if err != nil || !found || json.Unmarshal(raw, &staged) != nil {
 			return err
 		}
-		if staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID}) {
+		engine := info.Config.Labels[labelPrefix+"engine"]
+		if err := d.verifyEngine(ctx, engine); err != nil {
+			return err
+		}
+		if staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine}) {
 			return nil
 		}
 		observation = provider.PreparationObservation{Status: provider.ReconciliationFound, Prepared: &provider.Prepared{
-			Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID), Ready: true, Private: true}}
+			Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID, engine), Ready: true, Private: true}}
 		return nil
 	})
 	if err != nil {
@@ -635,6 +654,9 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 	}
 	outcome, sent := rejected("host_unavailable"), false
 	err = a.withDocker(ctx, func(d docker, _ Endpoint) error {
+		if err := d.verifyEngine(ctx, ref.EngineID); err != nil {
+			return err
+		}
 		info, found, err := d.inspect(ctx, ref.Container)
 		switch {
 		case err != nil:
@@ -745,8 +767,12 @@ func (a *Adapter) ReconcileSubmission(ctx context.Context, id provider.Identity)
 			return ErrIdentity
 		}
 		if info.Started() {
+			engine := info.Config.Labels[labelPrefix+"engine"]
+			if err := d.verifyEngine(ctx, engine); err != nil {
+				return err
+			}
 			result = provider.Reconciliation{Status: provider.ReconciliationFound,
-				Remote: &provider.RemoteReference{Identity: id, Resource: encodeRef(name, info.ID), Version: info.ID}}
+				Remote: &provider.RemoteReference{Identity: id, Resource: encodeRef(name, info.ID, engine), Version: info.ID}}
 		}
 		return nil
 	})
@@ -761,6 +787,9 @@ func inspectRemote(ctx context.Context, d docker, remote provider.RemoteReferenc
 	ref, err := decodeRef(remote.Resource, remote.Identity)
 	if err != nil || remote.Version != ref.ID {
 		return containerInfo{}, ErrIdentity
+	}
+	if err := d.verifyEngine(ctx, ref.EngineID); err != nil {
+		return containerInfo{}, err
 	}
 	info, found, err := d.inspect(ctx, ref.Container)
 	if err != nil {
@@ -1165,6 +1194,10 @@ func (c *lineCollector) line() {
 // Cleanup deletes only the attempt's own labelled, stopped container. Repeating an
 // apply after deletion reports AlreadyAbsent.
 func (a *Adapter) Cleanup(ctx context.Context, request provider.CleanupRequest) (provider.CleanupOutcome, error) {
+	return a.cleanup(ctx, request, "")
+}
+
+func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupRequest, plan domain.SHA256Digest) (provider.CleanupOutcome, error) {
 	if request.Mode != provider.CleanupDryRun && request.Mode != provider.CleanupApply || !request.LedgerID.Valid() || !request.CreationOperationID.Valid() {
 		return provider.CleanupOutcome{}, ErrRequest
 	}
@@ -1172,9 +1205,21 @@ func (a *Adapter) Cleanup(ctx context.Context, request provider.CleanupRequest) 
 	if request.Remote.Validate() != nil || !resourceKey.MatchString(id.ResourceKey) || id.InstanceID != a.config.InstanceID {
 		return provider.CleanupOutcome{}, ErrIdentity
 	}
+	ref, err := decodeRef(request.Remote.Resource, id)
+	if err != nil || request.Remote.Version != ref.ID && request.Remote.Version != "prepared" {
+		return provider.CleanupOutcome{}, ErrIdentity
+	}
+	if ref.EngineID == "" {
+		return provider.CleanupOutcome{}, provider.ErrCleanupUnsupported
+	}
 	var outcome provider.CleanupOutcome
-	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
-		info, found, err := d.inspect(ctx, containerName(id))
+	err = a.withDocker(ctx, func(d docker, _ Endpoint) error {
+		// A name may be reused with copied labels. Only the ID from the original
+		// creation receipt can be inspected or passed to Docker removal.
+		if err := d.verifyEngine(ctx, ref.EngineID); err != nil {
+			return err
+		}
+		info, found, err := d.inspect(ctx, ref.ID)
 		if err != nil {
 			return err
 		}
@@ -1182,8 +1227,17 @@ func (a *Adapter) Cleanup(ctx context.Context, request provider.CleanupRequest) 
 			outcome.AlreadyAbsent = true
 			return nil
 		}
-		if !owned(info, id) || info.Config.Labels[labelPrefix+"preparation"] != string(request.CreationOperationID) {
+		if info.ID != ref.ID || info.Name != "/"+ref.Container || !owned(info, id) || info.Config.Labels[labelPrefix+"preparation"] != string(request.CreationOperationID) {
 			return ErrIdentity
+		}
+		if plan != "" && info.Config.Labels[labelPrefix+"plan"] != string(plan) {
+			return ErrIdentity
+		}
+		if ref.EngineID != "" {
+			l := info.Config.Labels
+			if l[labelPrefix+"engine"] != ref.EngineID || l[labelPrefix+"workspace"] != string(id.WorkspaceID) || l[labelPrefix+"job"] != string(id.JobID) || l[labelPrefix+"nonce"] != id.Nonce {
+				return ErrIdentity
+			}
 		}
 		if info.State.Running || !exited(info) && info.State.Status != "created" {
 			return ErrNotDone

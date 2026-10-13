@@ -38,9 +38,10 @@ type Repository interface {
 }
 
 type Service struct {
-	access *auth.Service
-	repo   Repository
-	clock  ports.Clock
+	access          *auth.Service
+	repo            Repository
+	clock           ports.Clock
+	previewResolver Resolver
 }
 
 func NewService(access *auth.Service, repo Repository, clock ports.Clock) (*Service, error) {

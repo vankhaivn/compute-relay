@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay attempt cleanup preview v1alpha1",
+  "description": "Operate-authorized read-only inventory of original ledger targets. Target descriptions are observations, not mutation permits. Unknown byte sizes remain null.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace_id",
+    "job_id",
+    "attempt_id",
+    "observed_at",
+    "eligible",
+    "reason",
+    "resources"
+  ],
+  "properties": {
+    "workspace_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"
+    },
+    "job_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/job_id"
+    },
+    "attempt_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"
+    },
+    "observed_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "eligible": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,95}$",
+      "maxLength": 96
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "name",
+        "version",
+        "scope",
+        "support",
+        "reason",
+        "bytes"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$",
+          "maxLength": 256
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$",
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$",
+          "maxLength": 256
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$",
+          "maxLength": 256
+        },
+        "scope": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,95}$",
+          "maxLength": 96
+        },
+        "support": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/capability_support"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,95}$",
+          "maxLength": 96
+        },
+        "bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_id",
+        "purpose",
+        "target_sha256",
+        "target",
+        "eligible",
+        "observation",
+        "reason"
+      ],
+      "properties": {
+        "resource_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+        },
+        "purpose": {
+          "enum": [
+            "execution",
+            "staging"
+          ]
+        },
+        "target_sha256": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/sha256"
+        },
+        "target": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/target"
+            }
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "observation": {
+          "enum": [
+            "not_checked",
+            "present",
+            "absent",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,95}$",
+          "maxLength": 96
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_id",
+        "purpose",
+        "target_sha256",
+        "state",
+        "reason"
+      ],
+      "properties": {
+        "resource_id": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+        },
+        "purpose": {
+          "enum": [
+            "execution",
+            "staging"
+          ]
+        },
+        "target_sha256": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/sha256"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "running",
+            "deleted",
+            "absent",
+            "retained",
+            "failed",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,95}$",
+          "maxLength": 96
+        }
+      }
+    }
+  }
+}

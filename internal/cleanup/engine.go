@@ -28,14 +28,27 @@ func (l Lease) Valid() bool {
 // Work is rebuilt from the durable ledger and dispatch journal at claim time. Request
 // always uses CleanupApply; ResultsCollected is the local attestation, never a guess.
 type Work struct {
-	Lease   Lease
-	Record  Record
-	Binding provider.BindingSnapshot
-	Request provider.CleanupRequest
+	Lease     Lease
+	Record    Record
+	Binding   provider.BindingSnapshot
+	Request   provider.CleanupRequest
+	Resources []ResourceWork
 }
 
 func (w Work) Valid() bool {
 	op, id := w.Record.Operation, w.Request.Remote.Identity
+	if len(w.Resources) > MaxResources {
+		return false
+	}
+	seen := map[domain.ProviderResourceID]bool{}
+	for _, resource := range w.Resources {
+		q, r := resource.Resource.Request, resource.Result
+		if !q.Valid() || !r.Valid() || resource.Resource.Reason != "" || resource.Resource.Fingerprint() != r.Fingerprint || q.LedgerID != r.ResourceID ||
+			q.Remote.Identity != id || q.Purpose != r.Purpose || seen[r.ResourceID] {
+			return false
+		}
+		seen[r.ResourceID] = true
+	}
 	return w.Lease.Valid() && w.Record.Validate() == nil && !w.Record.Replay && op.Status == domain.OperationRunning &&
 		op.ID == w.Lease.OperationID && op.WorkspaceID == w.Lease.WorkspaceID && w.Binding.Valid() &&
 		w.Request.Remote.Validate() == nil && id.WorkspaceID == op.WorkspaceID && id.JobID == op.JobID && id.AttemptID == op.AttemptID &&
@@ -111,9 +124,9 @@ func New(repo WorkRepository, resolver Resolver, clock Clock, cfg Config) (*Engi
 	return &Engine{repo: repo, resolver: resolver, clock: clock, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
 }
 
-// RunOnce makes at most one Cleanup apply call. If the process stops after that call but
-// before the outcome commits, lease expiry lets a later pass apply the same request again;
-// adapters must therefore report an already deleted resource as AlreadyAbsent.
+// RunOnce processes one bounded attempt inventory. If the process stops after a call
+// but before its outcome commits, lease expiry permits the original target again;
+// adapters must therefore prove absence of an already deleted resource.
 func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 	select {
 	case e.slots <- struct{}{}:
@@ -130,7 +143,15 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 	}
 	call, cancel := context.WithTimeout(ctx, e.config.Timeout)
 	defer cancel()
-	outcome := e.apply(call, *w)
+	var outcome Outcome
+	if len(w.Resources) > 0 {
+		outcome, err = e.applyResources(ctx, call, *w)
+		if err != nil {
+			return true, err
+		}
+	} else {
+		outcome = e.apply(call, *w)
+	}
 	if ctx.Err() != nil {
 		// Shutdown leaves the running claim for lease-expiry recovery.
 		return true, ctx.Err()

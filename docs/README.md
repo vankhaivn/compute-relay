@@ -19,4 +19,5 @@ are under [development](development/README.md).
 | Configure profiles, validate/admit jobs and issue controls | [Application CLI](application-cli.md) |
 | Read or download published results | [Artifact delivery](artifact-delivery.md) |
 | Recover safely after an uncertain response or state | [Recovery](recovery.md) |
+| Inspect and explicitly delete an attempt's remote data | [Remote cleanup](remote-cleanup.md) |
 | Check toolchains, hosts and filesystem assumptions | [Compatibility](compatibility.md) |

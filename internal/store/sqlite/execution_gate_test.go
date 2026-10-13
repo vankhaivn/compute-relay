@@ -397,6 +397,7 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 	if controlCount(t, f.s, "SELECT count(*) FROM preparation_authorizations WHERE storage_released=0") != 1 {
 		t.Fatal("cleanup request guessed released storage")
 	}
+	finishCleanupResourceFixtures(t, f, *w)
 	if err = f.s.CompleteCleanup(ctx, *w, cleanup.Outcome{Effect: cleanup.RemoteDeleted}, f.clock.Now()); err != nil {
 		t.Fatal(err)
 	}

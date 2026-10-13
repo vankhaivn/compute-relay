@@ -42,6 +42,7 @@ POST /v1/workspaces/{w}/jobs/{j}/retry
 POST /v1/workspaces/{w}/jobs/{j}/reconcile
 POST /v1/workspaces/{w}/jobs/{j}/collect
 POST /v1/workspaces/{w}/jobs/{j}/cleanup
+GET  /v1/workspaces/{w}/jobs/{j}/cleanup?attempt_id={attempt_id}
 GET  /v1/workspaces/{w}/operations/{operation_id}
 GET  /v1/workspaces/{w}/jobs/{j}/artifacts
 GET  /v1/workspaces/{w}/jobs/{j}/artifacts/{artifact_id}
@@ -111,7 +112,11 @@ original receipt; GET reads current state. Cancellation is intent, reconcile obs
 requests transfer-only work. Cleanup (feature `job_cleanup`) requests deletion of one settled
 attempt's remote resources; uncollected results need `discard_uncollected=true`. Its receipts use
 kind `cleanup` and settle as `remote_deleted`, `already_absent` or `failed` only after a provider
-worker applies them; see [controls](../docs/development/operations.md#remote-cleanup). Optional JobSpec `result_collection=manual` freezes explicit result
+worker applies them. Current GET receipts include bounded per-resource outcomes; success requires
+confirmed deletion or absence for every target. The `job_cleanup_preview` feature adds an
+`operate`-authorized GET on the cleanup route with explicit `attempt_id` and optional Boolean
+`discard_uncollected`. It lists exact candidates/exclusions without creating intent. See
+[remote cleanup](../docs/remote-cleanup.md). Optional JobSpec `result_collection=manual` freezes explicit result
 collection; omission keeps automatic behavior. Check the runtime's `manual_result_collection`
 feature before admitting manual jobs. Additive status `collection` separates terminal waiting,
 pending/active transfer, verification and published availability; [collection](../docs/development/collection.md)

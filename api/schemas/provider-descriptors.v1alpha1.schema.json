@@ -162,6 +162,13 @@
                   }
                 },
                 "description": "Local concurrency policy range; not a promise of provider session capacity or quota. Omission means unknown support."
+              },
+              "remote_cleanup": {
+                "enum": [
+                  "supported",
+                  "unsupported",
+                  "unknown"
+                ]
               }
             }
           },

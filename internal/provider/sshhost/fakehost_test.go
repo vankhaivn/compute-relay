@@ -181,6 +181,9 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 	case slices.Equal(args, []string{"info", "--format", "{{json .ID}}"}):
 		_ = json.NewEncoder(stdout).Encode(h.engineID)
 		return Result{}, nil
+	case slices.Equal(args, []string{"info", "--format", "{{.ID}}"}):
+		_, _ = io.WriteString(stdout, h.engineID)
+		return Result{}, nil
 	case slices.Equal(args, []string{"info", "--format", "{{.SystemTime}}"}):
 		_, _ = io.WriteString(stdout, h.engineTime.Format(time.RFC3339Nano))
 		return Result{}, nil

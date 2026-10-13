@@ -1,7 +1,7 @@
 // Package cleanup admits and applies explicit, attempt-scoped deletion of the remote data a
 // provider adapter created for one attempt. HTTP admission only commits durable intent; a
-// separately composed engine makes one fenced Cleanup apply call per pass against the
-// attempt's frozen binding. Nothing is ever deleted automatically.
+// separately composed engine records fenced per-resource outcomes against the attempt's
+// frozen binding. Nothing is ever deleted automatically.
 package cleanup
 
 import (
@@ -139,10 +139,21 @@ type Record struct {
 	Operation domain.Operation
 	Effect    Effect
 	Replay    bool
+	Resources []ResourceResult `json:"-"`
 }
 
 func (r Record) Validate() error {
 	op := r.Operation
+	if len(r.Resources) > MaxResources {
+		return ErrInvalid
+	}
+	seen := map[domain.ProviderResourceID]bool{}
+	for _, resource := range r.Resources {
+		if !resource.Valid() || seen[resource.ResourceID] {
+			return ErrInvalid
+		}
+		seen[resource.ResourceID] = true
+	}
 	if op.Validate() != nil || op.Kind != domain.OperationCleanup || !op.JobID.Valid() || !op.AttemptID.Valid() || !r.Effect.Valid() {
 		return ErrInvalid
 	}
