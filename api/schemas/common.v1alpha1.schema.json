@@ -377,7 +377,8 @@
         "custom_container",
         "retained_sessions",
         "separate_prepare_start",
-        "ephemeral_workload_secrets"
+        "ephemeral_workload_secrets",
+        "remote_cleanup"
       ]
     },
     "workspace_id": {

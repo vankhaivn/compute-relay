@@ -58,24 +58,21 @@ with an automatic new key. See [recovery](../recovery.md) and [retention](retent
 
 ## Remote cleanup
 
-`POST .../jobs/{j}/cleanup` takes `attempt_id`, optional `discard_uncollected` (default `false`)
-and an optional reason, under the same key, replay and coalescing rules. Acceptance only records
-intent; `pending` is not deletion. Admission targets the attempt's staging ledger entry with a
-recorded resource reference and refuses (409) while a scheduler or collection lease is held, a
-control is accepted or running, remote activity is not inactive, execution with submission intent
-is unknown or non-terminal, the submission journal is unresolved, or orchestration is not terminal
-(`needs_attention` counts only with terminal execution and inactive remote activity). Unresolved
-remote execution returns `REMOTE_EXECUTION_UNRESOLVED`. Results never collected and verified
-locally require `discard_uncollected=true`; otherwise the 409 recommends collect. A prepared,
-never-submitted attempt is eligible.
+[Remote cleanup](../remote-cleanup.md) documents the attempt preview, explicit POST and
+per-resource outcomes. Admission snapshots every eligible owned staging/execution resource
+from the original ledger and refuses incomplete/shared identities, active or unresolved work,
+held leases, pending controls/collection and named retention holds. Uncollected outputs require
+`discard_uncollected=true`. Prepared never-started attempts remain eligible once settled.
 
-A pending cleanup blocks other controls on the attempt; a pending or succeeded cleanup blocks new
-collection tickets. Explicit Kaggle and managed worker modes run a worker that commits `running`
-under a fenced lease, rechecks eligibility, verifies the attempt's frozen binding and makes one
-adapter apply call per pass; a request that is no longer eligible fails without a provider call. Succeeded receipts
-report `remote_deleted` or `already_absent`; errors, including an adapter without cleanup support
-such as Kaggle's today, become failed receipts that preserve the resources. If the process stops
-after the provider call but before the outcome commits, a later pass may apply the same request
-again after the lease expires; adapters report an already deleted resource as absent. A failed
-cleanup never blocks a new request. Admission-only serve runs no worker. Nothing is deleted
-automatically; see [ADR-0027](decisions/0027-explicit-remote-cleanup.md).
+Provider workers claim under a fenced lease and process execution before staging. Before each
+call they verify the frozen provider binding, recheck current eligibility and commit that
+resource's immutable target and running intent. An unresolved execution outcome retains staging.
+Each outcome commits under the same fence; whole-attempt success requires every target to be
+confirmed deleted or absent. A partial or unknown failure keeps collection blocked, while a
+known refusal before any deletion permits it.
+
+A process stop leaves running intents recoverable against their original targets after lease
+expiry. A terminal failure permits an explicit new cleanup request without rewriting prior
+outcomes. Matching-key replay remains the original receipt. Admission-only serve runs no apply
+worker. Neither preview nor retention creates cleanup intent. See
+[ADR-0027](decisions/0027-explicit-remote-cleanup.md).

@@ -165,12 +165,15 @@ POST /v1/workspaces/{w}/jobs/{job_id}/cleanup
 {"attempt_id": "att_…"}
 ```
 
-The 202 receipt starts as `pending`; read it with `GET /v1/workspaces/{w}/operations/{id}` until it
-reports `remote_deleted` or `already_absent`. The attempt must be finished and its results
+Preview the same route with `GET .../cleanup?attempt_id={attempt_id}` first to inspect recorded
+targets, eligibility and retained reasons. The 202 receipt starts as `pending`; read it with
+`GET /v1/workspaces/{w}/operations/{id}` until it reports `remote_deleted` or `already_absent`.
+The attempt must be finished and its results
 collected; add `"discard_uncollected": true` only to delete results you never collected. Relay
-removes only the stopped container labelled for that attempt and never forces removal. The
-standard image stays on the host. See [remote cleanup](development/operations.md#remote-cleanup)
-for eligibility and failure receipts.
+removes only the original stopped container by its full ID on the recorded engine, after matching
+its creation receipt and ownership labels. It never forces removal. Host files, volumes and the
+standard image stay on the host. Receipts without an original engine ID remain retained. See
+[remote cleanup](remote-cleanup.md) for eligibility and failure receipts.
 
 ## Troubleshooting
 

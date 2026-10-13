@@ -64,6 +64,7 @@ const FeatureManualResultCollection = "manual_result_collection"
 // FeatureJobCleanup advertises durable cleanup admission. Like collect, an accepted
 // request is applied only by a separately composed provider worker.
 const FeatureJobCleanup = "job_cleanup"
+const FeatureJobCleanupPreview = "job_cleanup_preview"
 
 func DefaultConfig() Config {
 	return Config{
@@ -158,11 +159,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	isArtifact := artifactPath(r.URL.Path)
 	isLogs := logPath(r.URL.Path)
+	isCleanupPreview := r.Method == http.MethodGet && cleanupPreviewPath(r.URL.Path)
 	queryLimit := 512
 	if isLogs {
 		queryLimit = 2048
 	}
-	if r.URL.RawQuery != "" && !isArtifact && !isLogs || len(r.URL.Path) > 2048 || r.URL.RawPath != "" || len(r.URL.RawQuery) > queryLimit {
+	if r.URL.RawQuery != "" && !isArtifact && !isLogs && !isCleanupPreview || len(r.URL.Path) > 2048 || r.URL.RawPath != "" || len(r.URL.RawQuery) > queryLimit {
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "unexpected query or encoded path")
 		return
 	}
@@ -245,6 +247,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if h.config.Cleanup != nil {
 				features = append(features, FeatureJobCleanup)
+				if h.config.Cleanup.PreviewAvailable() {
+					features = append(features, FeatureJobCleanupPreview)
+				}
 			}
 		}
 		if h.config.Connections != nil {

@@ -129,7 +129,7 @@ func (p *Basic) Describe() provider.Descriptor {
 	for _, name := range []domain.CapabilityName{domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
 		domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
 		domain.CapabilityStrongIdentity, domain.CapabilityGPU, domain.CapabilityRemoteCancellation,
-		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets} {
+		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets, domain.CapabilityRemoteCleanup} {
 		support := domain.CapabilitySupportSupported
 		switch name {
 		case domain.CapabilityEphemeralSecrets:

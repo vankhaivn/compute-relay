@@ -51,6 +51,11 @@ Offline tests are not live-provider evidence. Live evidence so far:
   Short finite RTMPS tests on that host over Tailscale verified 1080p H.264/AAC stream copy,
   TLS certificate and hostname validation, media stalls and receiver disconnects with Relay offline,
   original-attempt preservation through an SSH outage, and explicit continuation under the original deadline.
+- A 2026-10-13 isolated Docker 29.1.3 Linux-amd64 engine under emulation, accessed through
+  loopback SSH, qualified read-only cleanup preview, active-container refusal and removal of the
+  original stopped container. Bind files, named and anonymous volumes, images, unrelated
+  containers and verified local inputs/results were preserved. This does not qualify a native
+  remote host or cleanup recovery after a lost acknowledgement.
 
 Another account, environment or workload needs its own scoped qualification before support is
 claimed. Use the [validation checklist](development/validation-checklist.md).
@@ -62,9 +67,12 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
   cannot act on a powered-off or suspended host; expiry is observed after it resumes.
 - Batch cancellation is manual-required without a verified session target; exact hardware release
   is not observable.
-- Explicit attempt-scoped remote cleanup is admitted and applied by provider-mode workers. The SSH
-  host adapter deletes the attempt's stopped container; Kaggle cleanup requests settle as failed
-  and preserve resources. Nothing is cleaned up automatically.
+- [Remote cleanup](remote-cleanup.md) has a bounded attempt preview and durable per-resource
+  outcomes. SSH deletion requires original container and engine identity; older receipts without
+  engine evidence are retained. Kaggle resources remain unsupported because the pinned deletion
+  API lacks an immutable-target precondition. Expanded safety checks have offline coverage;
+  live lost-acknowledgement/restart/repeat cleanup and private Kaggle cleanup qualification remain
+  pending.
 - SSH host qualification covers one macOS Intel host over LAN and Tailscale. Encrypted private
   keys, host sleep, Docker-engine restarts, other Tailscale network paths and Linux VPS hosts remain
   unqualified live.

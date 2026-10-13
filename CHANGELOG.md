@@ -23,5 +23,7 @@ No release has been published. This summarizes the current pre-release feature s
 - A [finite RTMPS example](examples/finite-rtmps/README.md) with a pinned runtime, public API
   controller, stream-copy pacing and a remote media-progress watchdog.
 - Reproducible macOS arm64 companion bundles.
+- Attempt-scoped remote cleanup previews, per-resource outcomes and SSH deletion bound to the
+  original container and Docker engine; unsupported targets remain explicitly retained.
 
 See [current status](docs/status.md) for limits.
