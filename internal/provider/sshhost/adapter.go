@@ -168,7 +168,7 @@ func (a *Adapter) Describe() provider.Descriptor {
 	d := provider.Descriptor{Type: ProviderType, InstanceID: a.config.InstanceID, Version: Version}
 	for _, name := range []domain.CapabilityName{
 		domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell, domain.CapabilityGPU,
-		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning,
+		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityRemoteCleanup, domain.CapabilityLogsWhileRunning,
 		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityExecutionTimeout,
 		domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
 		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets,
@@ -198,6 +198,8 @@ func (a *Adapter) Describe() provider.Descriptor {
 			c.Reason = "containers have no network unless the frozen policy allows internet"
 		case domain.CapabilityRemoteCancellation:
 			c.Reason = "Docker stops the container and reports its exit"
+		case domain.CapabilityRemoteCleanup:
+			c.Reason = "explicit cleanup of the original stopped container with recorded engine identity; host files, volumes and images are preserved"
 		case domain.CapabilityStrongIdentity:
 			c.Reason = "container name, ID and labels bind the exact attempt"
 		}

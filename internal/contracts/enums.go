@@ -134,6 +134,7 @@ func domainEnums() map[string][]string {
 			domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
 			domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart,
 			domain.CapabilityEphemeralSecrets,
+			domain.CapabilityRemoteCleanup,
 		),
 	}
 }

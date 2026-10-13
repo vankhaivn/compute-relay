@@ -23,7 +23,7 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting,
 		domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
 		domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
-		domain.CapabilityRetainedSessions, domain.CapabilityEphemeralSecrets,
+		domain.CapabilityRetainedSessions, domain.CapabilityEphemeralSecrets, domain.CapabilityRemoteCleanup,
 	}
 	d := provider.Descriptor{Type: "kaggle", InstanceID: domain.ProviderInstanceID(c.InstanceID), Version: ClientVersion + "/sdk-" + SDKVersion}
 	for _, name := range names {
@@ -31,6 +31,9 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 			Evidence: domain.EvidenceImplementedOffline, ClientVersion: d.Version,
 			Reason: "offline components exist; full integration and account-scoped live acceptance remain required"}
 		switch name {
+		case domain.CapabilityRemoteCleanup:
+			cap.Support = domain.CapabilitySupportUnsupported
+			cap.Reason = "the pinned SDK cannot condition dataset or kernel deletion on immutable identity and version"
 		case domain.CapabilityRemoteCancellation:
 			cap.Support = domain.CapabilitySupportUnsupported
 			cap.Reason = "this batch reference has no verified kernel-session ID; manual cancellation is required"
