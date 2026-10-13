@@ -51,6 +51,9 @@ Offline tests are not live-provider evidence. Live evidence so far:
   Short finite RTMPS tests on that host over Tailscale verified 1080p H.264/AAC stream copy,
   TLS certificate and hostname validation, media stalls and receiver disconnects with Relay offline,
   original-attempt preservation through an SSH outage, and explicit continuation under the original deadline.
+  An eight-hour qualification on 2026-10-13 verified real-time delivery with the application and
+  Relay offline, retained receiver samples matching the source's encoded payloads, complete ordered
+  log replay, verified artifacts, canary exclusion and exact cleanup of the original resources.
 - A 2026-10-13 isolated Docker 29.1.3 Linux-amd64 engine under emulation, accessed through
   loopback SSH, qualified read-only cleanup preview, active-container refusal and removal of the
   original stopped container. Bind files, named and anonymous volumes, images, unrelated
@@ -76,8 +79,9 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
 - SSH host qualification covers one macOS Intel host over LAN and Tailscale. Encrypted private
   keys, host sleep, Docker-engine restarts, other Tailscale network paths and Linux VPS hosts remain
   unqualified live.
-- Finite RTMPS qualification currently covers short runs over Tailscale with a controlled receiver
-  on the target host. Multi-hour delivery, RTMPS over LAN and public ingest routes remain unqualified.
+- Finite RTMPS qualification covers eight-hour H.264/AAC stream copy over Tailscale control access
+  with a controlled receiver on the target host. Longer delivery, RTMPS over LAN and public ingest
+  routes remain unqualified; the 24-hour admission ceiling is not a tested duration.
 - Direct HTTPS input is not composed into `serve`; upload immutable inputs first.
 
 Remaining product work is in the [implementation plan](development/implementation-plan.md).
