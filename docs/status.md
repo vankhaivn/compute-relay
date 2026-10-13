@@ -58,9 +58,11 @@ claimed. Use the [validation checklist](development/validation-checklist.md).
   cannot act on a powered-off or suspended host; expiry is observed after it resumes.
 - Batch cancellation is manual-required without a verified session target; exact hardware release
   is not observable.
-- Explicit attempt-scoped remote cleanup is admitted and applied by provider-mode workers. The SSH
-  host adapter deletes the attempt's stopped container; Kaggle cleanup requests settle as failed
-  and preserve resources. Nothing is cleaned up automatically.
+- [Remote cleanup](remote-cleanup.md) has a bounded attempt preview and durable per-resource
+  outcomes. SSH deletion requires original container and engine identity; older receipts without
+  engine evidence are retained. Kaggle resources remain unsupported because the pinned deletion
+  API lacks an immutable-target precondition. The expanded safety checks have offline coverage;
+  disposable Linux-amd64 sentinel and private Kaggle cleanup qualification remain pending.
 - SSH host qualification covers one macOS Intel host over LAN and Tailscale. Encrypted private
   keys, host sleep, Docker-engine restarts, other Tailscale network paths and Linux VPS hosts remain
   unqualified live.

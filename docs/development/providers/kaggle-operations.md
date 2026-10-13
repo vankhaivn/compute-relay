@@ -83,6 +83,32 @@ completed-log components are conditional offline support. Bounded running replay
 offline, while account-scoped live availability and provider timeout enforcement remain unknown. Current batch cancellation, custom containers and retained sessions are unsupported
 by this path. No fabricated account-check time or unconditional batch readiness is supplied.
 
+## Remote cleanup
+
+The adapter advertises `remote_cleanup=unsupported`. The attempt preview exposes recorded private
+staging dataset and execution kernel IDs, names and versions separately, with unknown size and
+`conditional_delete_unavailable`. Apply records retained outcomes without loading credentials or
+calling a deletion RPC. Execution must settle before any staging deletion is permitted.
+
+Primary-source review on 2026-10-13, pinned SDK 0.1.35:
+
+- [DeleteDataset request](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/datasets/types/dataset_api_service.py)
+  contains owner and dataset slug;
+  [its service](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/datasets/services/dataset_api_service.py)
+  forwards that request to deletion.
+- [DeleteKernel request](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/types/kernels_api_service.py)
+  contains user and kernel slug;
+  [its service](https://github.com/Kaggle/kaggle-sdk-python/blob/v0.1.35/kagglesdk/kernels/services/kernels_api_service.py)
+  forwards that request to deletion.
+
+Neither request carries an immutable resource ID/version or compare-and-delete precondition.
+A verified GET followed by one of these calls could delete a replacement object using the same
+name. The SDK's object-addressed delete surface also does not establish a version-scoped cleanup
+contract. Whole-object effects on historical versions and kernel outputs remain unqualified live;
+no safe whole-attempt support is inferred from the existence of these methods. A supported
+immutable-target mechanism is required before this adapter can enable deletion. See
+[remote cleanup](../../remote-cleanup.md) for operation and recovery semantics.
+
 ## Process boundary
 
 Monitor uses the pinned SDK's version-bound private session/read guard without running its mutation
