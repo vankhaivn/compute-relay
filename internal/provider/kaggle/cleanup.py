@@ -225,7 +225,16 @@ def operate(r, token, mode):
                 allowed = {"errorMessage"} if kernel else {"error"}
                 if set(guard.last) - allowed or any(value not in (None, "") for value in guard.last.values()):
                     return result("unknown")
-                return result("unknown" if read() else "deleted")
+                try:
+                    return result("unknown" if read() else "deleted")
+                except requests.exceptions.HTTPError as exc:
+                    # The pinned API's synchronous Delete response confirms
+                    # completion. Kaggle can then hide the missing name with
+                    # 403. Keep that confirmation; 403 alone (including after
+                    # a lost acknowledgement) remains unknown in read().
+                    if getattr(exc.response, "status_code", None) == 403:
+                        return result("deleted")
+                    raise
         except core.IdentityMismatch:
             return result("unknown" if guard.delete_sent else "identity_mismatch")
         except Exception:
