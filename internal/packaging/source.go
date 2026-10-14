@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -56,8 +57,9 @@ type savedFile struct {
 	stamp os.FileInfo
 }
 type directory struct {
-	name  string
-	stamp os.FileInfo
+	name     string
+	stamp    os.FileInfo
+	children []string
 }
 type Plan struct {
 	project *Project
@@ -142,13 +144,14 @@ func (p *Project) Prepare(ctx context.Context, includes []string) (*Plan, error)
 			return ErrUnavailable
 		}
 		if stamp.IsDir() {
-			plan.dirs = append(plan.dirs, directory{name, stamp})
+			dir := directory{name: name, stamp: stamp}
 			for {
 				children, err := f.ReadDir(128)
 				if err != nil && err != io.EOF {
 					return ErrUnavailable
 				}
 				for _, child := range children {
+					dir.children = append(dir.children, child.Name())
 					if e := walk(name+"/"+child.Name(), depth+1); e != nil {
 						return e
 					}
@@ -161,6 +164,8 @@ func (p *Project) Prepare(ctx context.Context, includes []string) (*Plan, error)
 			if err != nil || !safefs.Unchanged(stamp, after) {
 				return ErrChanged
 			}
+			sort.Strings(dir.children)
+			plan.dirs = append(plan.dirs, dir)
 			return nil
 		}
 		if len(plan.files) >= p.limits.MaxFiles || stamp.Size() < 0 || stamp.Size() > p.limits.MaxExpandedBytes-plan.preview.ExpandedBytes {
@@ -218,9 +223,13 @@ func (p *Plan) checkTree(ctx context.Context) error {
 		if err != nil {
 			return ErrChanged
 		}
+		// Metadata can stay unchanged when membership changes within one clock tick.
+		// Read at most the recorded count plus one, so a growing tree stays bounded.
+		children, readErr := f.Readdirnames(len(d.children) + 1)
 		info, err := f.Stat()
 		_ = f.Close()
-		if err != nil || !safefs.Unchanged(d.stamp, info) {
+		sort.Strings(children)
+		if err != nil || readErr != nil && readErr != io.EOF || !safefs.Unchanged(d.stamp, info) || !slices.Equal(children, d.children) {
 			return ErrChanged
 		}
 	}
