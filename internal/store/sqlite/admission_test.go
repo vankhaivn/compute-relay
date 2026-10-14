@@ -16,7 +16,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/ports"
 )
 
 const admissionJSON = `{"api_version":"compute-connector/v1alpha1","name":"offline-admission","profile":"default-gpu","bundle":{"object_id":"code"},"execution":{"kind":"python","command":["python","never-executed.py"]},"inputs":[{"name":"data","source":{"kind":"object","object_id":"data"},"target":"data.txt"}],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":2,"finalization_grace_seconds":2}}`
@@ -305,54 +304,6 @@ func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 	}
 	if tableCount(t, f.s, "jobs") != 0 {
 		t.Fatal("rejected request committed")
-	}
-}
-func TestAttemptStateAndEventCommitAtomically(t *testing.T) {
-	f := newAdmission(t)
-	ctx := context.Background()
-	r := submit(t, f, "state-event-key")
-	before, err := f.s.LoadAttempt(ctx, "a", r.JobID, r.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := before.State
-	state.Orchestration = domain.OrchestrationPreparing
-	after, err := before.Transition(state, before.UpdatedAt.Add(time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	change := ports.AttemptChange{WorkspaceID: "a", Before: before, After: after, Event: domain.Event{ID: "evt_next", Sequence: 2, WorkspaceID: "a", JobID: r.JobID, AttemptID: r.AttemptID, Type: domain.EventInputsReady, OccurredAt: after.UpdatedAt}}
-	if err = f.s.CommitAttempt(ctx, change); err != nil {
-		t.Fatal(err)
-	}
-	if err = f.s.CommitAttempt(ctx, change); !errors.Is(err, ErrConflict) {
-		t.Fatal("stale revision accepted", err)
-	}
-	latest, err := f.s.LoadAttempt(ctx, "a", r.JobID, r.AttemptID)
-	if err != nil || latest != after || tableCount(t, f.s, "events") != 2 {
-		t.Fatal("state/event not paired", err)
-	}
-	state = after.State
-	state.Orchestration = domain.OrchestrationState("blocked")
-	next, err := after.Transition(state, after.UpdatedAt.Add(time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	change.Before = after
-	change.After = next
-	change.Event.Sequence = 3
-	change.Event.OccurredAt = next.UpdatedAt
-	// Reusing evt_next violates event uniqueness AFTER the state UPDATE and must roll it back.
-	if err = f.s.CommitAttempt(ctx, change); !errors.Is(err, ErrConflict) {
-		t.Fatal("event uniqueness failure accepted", err)
-	}
-	latest, err = f.s.LoadAttempt(ctx, "a", r.JobID, r.AttemptID)
-	if err != nil || latest != after || tableCount(t, f.s, "events") != 2 {
-		t.Fatal("event failure left state update", err)
-	}
-	replay := submit(t, f, "state-event-key")
-	if !replay.Replay || replay.Status != "queued" {
-		t.Fatal("original receipt rewritten with current state")
 	}
 }
 func TestDiskFullAdmissionLeavesNoPartialRows(t *testing.T) {

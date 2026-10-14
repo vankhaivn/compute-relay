@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -21,7 +20,7 @@ func scanRetention(t *testing.T, f *dispatchFixture) {
 	}
 }
 
-func TestRetentionActiveAndManualPinsSurviveAgeAndRestart(t *testing.T) {
+func TestRetentionActivePinsAndExpirySurviveRestart(t *testing.T) {
 	ctx := context.Background()
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
@@ -35,33 +34,11 @@ func TestRetentionActiveAndManualPinsSurviveAgeAndRestart(t *testing.T) {
 		t.Fatal("unreferenced input window not applied")
 	}
 	cancelControl(t, f, service, principal, id)
-	for _, hold := range []string{"one", "two"} {
-		if err := f.s.SetRetentionHold(ctx, "a", "job", string(id.JobID), hold, true, f.clock.Now()); err != nil {
-			t.Fatal(err)
-		}
-	}
 	f.clock.advance(8 * 24 * time.Hour)
 	f.restart(t)
 	scanRetention(t, f)
-	if controlCount(t, f.s, "SELECT count(*) FROM retention_inventory WHERE workspace_id='a' AND expired_at IS NOT NULL") != 0 {
-		t.Fatal("restart lost manual hold")
-	}
-	if err := f.s.SetRetentionHold(ctx, "a", "job", string(id.JobID), "one", false, f.clock.Now()); err != nil {
-		t.Fatal(err)
-	}
-	scanRetention(t, f)
-	if controlCount(t, f.s, "SELECT count(*) FROM retention_inventory WHERE workspace_id='a' AND expired_at IS NOT NULL") != 0 {
-		t.Fatal("one release removed another hold")
-	}
-	if err := f.s.SetRetentionHold(ctx, "a", "job", string(id.JobID), "two", false, f.clock.Now()); err != nil {
-		t.Fatal(err)
-	}
-	scanRetention(t, f)
 	if controlCount(t, f.s, "SELECT count(*) FROM retention_inventory WHERE workspace_id='a' AND expired_at IS NOT NULL") != 2 {
 		t.Fatal("eligible inputs did not expire")
-	}
-	if err := f.s.SetRetentionHold(ctx, "a", "input", "data", "late", true, f.clock.Now()); !errors.Is(err, retention.ErrExpired) {
-		t.Fatal("hold resurrected expired bytes", err)
 	}
 	if _, err := f.s.db.Exec(`INSERT INTO job_objects SELECT workspace_id,job_id,'extra',object_id,bytes,sha256 FROM job_objects WHERE workspace_id='a' AND role='bundle'`); err == nil {
 		t.Fatal("SQL allowed new reference after tombstone")

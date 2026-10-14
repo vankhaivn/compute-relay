@@ -84,6 +84,10 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		}
 	}
 	for _, name := range tables {
+		// These unused tables were retired at schema 23; older fixtures need empty tables.
+		if name == "retention_holds" || name == "retention_audit" || name == "cleanup_previews" {
+			continue
+		}
 		if _, err := tx.Exec("DELETE FROM " + quote(name)); err != nil {
 			t.Fatal("clear fixture table", name, err)
 		}

@@ -183,7 +183,7 @@ func TestControlsConcurrentRetryKeepsFrozenHistoryAndNewIdentity(t *testing.T) {
 	if current.Attempt.Number != 2 || current.Attempt.ID != first.NewAttemptID || current.AttemptNonce == old.AttemptNonce || current.Profile != old.Profile || !reflect.DeepEqual(current.Objects, old.Objects) || string(current.Request.Canonical()) != string(old.Request.Canonical()) {
 		t.Fatal("retry changed immutable inputs/binding or reused the nonce")
 	}
-	historical, err := f.s.LoadAttempt(context.Background(), "a", id.JobID, id.AttemptID)
+	historical, _, err := loadAttempt(context.Background(), f.s.db, "a", id.JobID, id.AttemptID)
 	if err != nil || historical != old.Attempt {
 		t.Fatal("retry rewrote historical attempt", err)
 	}
@@ -438,13 +438,6 @@ func TestControlsCollectIsTransferOnlyAndReconcileNeverSubmits(t *testing.T) {
 	again, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCollect, "collect-another-key", controlRequest(id.AttemptID))
 	if err != nil || again.Operation.ID != collect.Operation.ID {
 		t.Fatal("parallel collection ticket duplicated", err)
-	}
-	pending, err := f.s.PendingCollections(context.Background(), 10)
-	if err != nil || len(pending) != 1 || pending[0].Operation.ID != collect.Operation.ID {
-		t.Fatal("durable collection queue missing", err)
-	}
-	if _, err = f.s.CompleteCollectionOperation(context.Background(), "a", collect.Operation.ID, collect.Operation.Revision, f.clock.Now()); !errors.Is(err, operations.ErrState) {
-		t.Fatal("unverified results were acknowledged", err)
 	}
 	if f.state(t, id).Result != domain.ResultNotAvailable || probe.calls.Load() != 0 || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 || controlCount(t, f.s, "SELECT count(*) FROM submission_intents") != 1 {
 		t.Fatal("control replay started compute or invented artifacts")

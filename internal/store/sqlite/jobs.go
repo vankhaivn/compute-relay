@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -13,10 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/ports"
 )
-
-var _ ports.Store = (*Store)(nil)
 
 func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID string, id domain.JobID) (admission.Record, error) {
 	if !w.Valid() || !id.Valid() {
@@ -173,68 +169,4 @@ func loadAttempt(ctx context.Context, q queryer, w domain.WorkspaceID, j domain.
 		return domain.Attempt{}, "", ErrCorrupt
 	}
 	return a, nonce, nil
-}
-func (s *Store) LoadAttempt(ctx context.Context, w domain.WorkspaceID, j domain.JobID, id domain.AttemptID) (domain.Attempt, error) {
-	if !w.Valid() || !j.Valid() || !id.Valid() {
-		return domain.Attempt{}, admission.ErrNotFound
-	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return domain.Attempt{}, err
-	}
-	defer done()
-	a, _, err := loadAttempt(ctx, s.db, w, j, id)
-	return a, err
-}
-
-// CommitAttempt implements the existing M2-04 CAS port. A failed revision or event
-// sequence leaves BOTH state and events untouched. Operation-linked events await the
-// durable operations table in M3-05. Once a scheduler lease has existed, callers
-// must use fenced orchestration instead of this legacy unfenced port.
-// No provider call or retry is made.
-func (s *Store) CommitAttempt(ctx context.Context, c ports.AttemptChange) error {
-	if c.Validate() != nil || c.Event.OperationID != "" || c.After.Revision > math.MaxInt64 || c.Event.Sequence > math.MaxInt64 {
-		return ErrInvalid
-	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		if err := checkUnfencedAttempt(ctx, tx, c.WorkspaceID, c.Before.JobID, c.Before.ID); err != nil {
-			return err
-		}
-		before, _, err := loadAttempt(ctx, tx, c.WorkspaceID, c.Before.JobID, c.Before.ID)
-		if err != nil {
-			return err
-		}
-		if before != c.Before {
-			return ErrConflict
-		}
-		var sequence uint64
-		if err = tx.QueryRowContext(ctx, "SELECT COALESCE(max(sequence),0) FROM events WHERE workspace_id=? AND job_id=?", string(c.WorkspaceID), string(c.After.JobID)).Scan(&sequence); err != nil {
-			return dbError(err)
-		}
-		if sequence == math.MaxInt64 || c.Event.Sequence != sequence+1 {
-			return ErrConflict
-		}
-		state, err := json.Marshal(c.After.State)
-		if err != nil {
-			return ErrInvalid
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE attempts SET state=?,orchestration=?,revision=?,updated_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND revision=?`, string(state), string(c.After.State.Orchestration), c.After.Revision, c.After.UpdatedAt.UTC().Format(time.RFC3339Nano), string(c.WorkspaceID), string(c.After.JobID), string(c.After.ID), c.Before.Revision)
-		if err != nil {
-			return dbError(err)
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return dbError(err)
-		}
-		if n != 1 {
-			return ErrConflict
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO events VALUES(?,?,?,?,?,?,?,?)`, string(c.WorkspaceID), string(c.After.JobID), string(c.Event.ID), c.Event.Sequence, string(c.Event.AttemptID), string(c.Event.OperationID), string(c.Event.Type), c.Event.OccurredAt.UTC().Format(time.RFC3339Nano))
-		return dbError(err)
-	})
 }

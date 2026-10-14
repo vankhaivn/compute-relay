@@ -125,8 +125,8 @@ func TestRejectNewerTamperedAndForeignDatabases(t *testing.T) {
 		})
 	}
 }
-func TestMissingDatabaseAndInterruptedRestoreDoNotCreateFreshIdentity(t *testing.T) {
-	for _, name := range []string{"missing", "empty", "restoring"} {
+func TestMissingDatabaseDoesNotCreateFreshIdentity(t *testing.T) {
+	for _, name := range []string{"missing", "empty"} {
 		t.Run(name, func(t *testing.T) {
 			s, path := newStore(t)
 			s.Close()
@@ -138,10 +138,6 @@ func TestMissingDatabaseAndInterruptedRestoreDoNotCreateFreshIdentity(t *testing
 				}
 			case "empty":
 				if err := os.Truncate(db, 0); err != nil {
-					t.Fatal(err)
-				}
-			case "restoring":
-				if err := statefs.WriteNew(db+".restore", []byte("unfinished")); err != nil {
 					t.Fatal(err)
 				}
 			}

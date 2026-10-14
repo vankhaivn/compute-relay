@@ -68,11 +68,8 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
  WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1 AND l.until_ms>?)
  OR EXISTS(SELECT 1 FROM collection_leases WHERE workspace_id=? AND job_id=? AND attempt_id=? AND held=1 AND until_ms>?)
  OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))
- OR EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)
- OR EXISTS(SELECT 1 FROM retention_holds h WHERE h.workspace_id=? AND h.active=1 AND
- ((h.target_kind='job' AND h.target_id=?) OR (h.target_kind='attempt' AND h.target_id=?) OR
- (h.target_kind='input' AND EXISTS(SELECT 1 FROM job_objects o WHERE o.workspace_id=h.workspace_id AND o.job_id=? AND o.object_id=h.target_id))))`,
-		w, job, attempt, at, w, job, attempt, at, w, job, attempt, w, job, attempt, string(self), w, job, attempt, job).Scan(&busy)
+ OR EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)`,
+		w, job, attempt, at, w, job, attempt, at, w, job, attempt, w, job, attempt, string(self)).Scan(&busy)
 	if err != nil {
 		return result, dbError(err)
 	}

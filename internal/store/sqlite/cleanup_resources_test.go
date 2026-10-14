@@ -64,9 +64,9 @@ func TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestCleanupPreviewRechecksAuthorityAndHoldsAfterReads(t *testing.T) {
+func TestCleanupPreviewRechecksAuthorityAfterReads(t *testing.T) {
 	ctx := context.Background()
-	for _, change := range []string{"revoke", "hold"} {
+	for _, change := range []string{"revoke"} {
 		t.Run(change, func(t *testing.T) {
 			f, id := collectedFixture(t)
 			service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
@@ -78,15 +78,9 @@ func TestCleanupPreviewRechecksAuthorityAndHoldsAfterReads(t *testing.T) {
 				}
 				if !changed {
 					changed = true
-					if change == "hold" {
-						if err := f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "review", true, f.clock.Now()); err != nil {
-							t.Fatal(err)
-						}
-					} else {
-						access, _ := auth.New(f.s, f.s, nil)
-						if err := access.Revoke(ctx, principal.TokenID()); err != nil {
-							t.Fatal(err)
-						}
+					access, _ := auth.New(f.s, f.s, nil)
+					if err := access.Revoke(ctx, principal.TokenID()); err != nil {
+						t.Fatal(err)
 					}
 				}
 				return probe.probeProvider.CleanupResource(ctx, request)
@@ -103,61 +97,8 @@ func TestCleanupPreviewRechecksAuthorityAndHoldsAfterReads(t *testing.T) {
 	}
 }
 
-func TestCleanupRetainsHeldResourcesAtEveryGate(t *testing.T) {
-	ctx := context.Background()
-	for _, kind := range []string{"job", "attempt", "input"} {
-		t.Run(kind, func(t *testing.T) {
-			f, id := collectedFixture(t)
-			target := map[string]string{"job": string(id.JobID), "attempt": string(id.AttemptID), "input": "data"}[kind]
-			if err := f.s.SetRetentionHold(ctx, "a", kind, target, "keep", true, f.clock.Now()); err != nil {
-				t.Fatal(err)
-			}
-			service, principal := cleanupService(t, f, "a", auth.Operate)
-			preview, err := service.WithPreviewResolver(cleanupResolver{f.adapter}).Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
-			if err != nil || preview.Eligible || preview.Reason != "active_lease_or_control" || len(preview.Resources) != 2 {
-				t.Fatal("held inventory was not excluded", preview, err)
-			}
-			if _, err := service.Submit(ctx, principal, "a", id.JobID, "held-request", cleanupBody(id.AttemptID, false, "")); !errors.Is(err, operations.ErrBusy) {
-				t.Fatal("hold did not block admission", err)
-			}
-			if f.backend.Stats().CleanupCalls != 0 {
-				t.Fatal("held resource reached provider")
-			}
-		})
-	}
-	for _, afterExecution := range []bool{false, true} {
-		t.Run(map[bool]string{false: "before first mutation", true: "between resources"}[afterExecution], func(t *testing.T) {
-			f, id := collectedFixture(t)
-			service, principal, receipt := admitCleanup(t, f, id, "hold-race", false)
-			worker, probe := cleanupWorker(t, f)
-			checks := 0
-			probe.verifyHook = func() {
-				checks++
-				if checks == 1 && !afterExecution || checks == 2 && afterExecution {
-					if err := f.s.SetRetentionHold(ctx, "a", "job", string(id.JobID), "late", true, f.clock.Now()); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			runCleanup(t, worker)
-			current, err := service.Get(ctx, principal, "a", receipt.Operation.ID)
-			wantCalls := 0
-			if afterExecution {
-				wantCalls = 1
-			}
-			if err != nil || current.Operation.Status != domain.OperationFailed || len(current.Resources) != 2 ||
-				len(probe.requests) != wantCalls || current.Resources[1].State != cleanup.ResourceRetained {
-				t.Fatal("late hold did not stop the next mutation", current, probe.requests, err)
-			}
-			if afterExecution && current.Resources[0].State != cleanup.ResourceDeleted {
-				t.Fatal("hold erased confirmed deletion", current.Resources)
-			}
-		})
-	}
-}
-
 func TestCleanupLostAcknowledgementRecoversOriginalTargets(t *testing.T) {
-	for _, recovery := range []string{"absence", "binding refusal", "new hold"} {
+	for _, recovery := range []string{"absence", "binding refusal"} {
 		t.Run(recovery, func(t *testing.T) {
 			f, id := collectedFixture(t)
 			_, principal, receipt := admitCleanup(t, f, id, "lost-ack", false)
@@ -185,13 +126,8 @@ func TestCleanupLostAcknowledgementRecoversOriginalTargets(t *testing.T) {
 			if recovery == "binding refusal" {
 				probe.verifyErr = errors.New("unavailable binding")
 			}
-			if recovery == "new hold" {
-				if err := f.s.SetRetentionHold(context.Background(), "a", "attempt", string(id.AttemptID), "late", true, f.clock.Now()); err != nil {
-					t.Fatal(err)
-				}
-			}
 			worked, err := worker.RunOnce(context.Background())
-			if err != nil || !worked && recovery != "new hold" {
+			if err != nil || !worked {
 				t.Fatal("restart did not settle cleanup", worked, err)
 			}
 			after, err := f.s.ReadCleanup(context.Background(), "a", principal.TokenID(), receipt.Operation.ID)
@@ -431,7 +367,7 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 
 func TestCleanupLegacyUnknownEffectsBlockCollectionAfterUpgrade(t *testing.T) {
 	ctx := context.Background()
-	for _, phase := range []string{"running_binding_refused", "running_new_hold", "already_failed_unknown"} {
+	for _, phase := range []string{"running_binding_refused", "already_failed_unknown"} {
 		t.Run(phase, func(t *testing.T) {
 			f, id := uncollectedFixture(t)
 			_, principal, receipt := admitCleanup(t, f, id, "legacy-uncertainty", true)
@@ -447,11 +383,6 @@ func TestCleanupLegacyUnknownEffectsBlockCollectionAfterUpgrade(t *testing.T) {
 			f.root = copyFixtureAtSchema(t, f.s, 20)
 			f.restart(t)
 			f.clock.advance(2 * time.Second)
-			if phase == "running_new_hold" {
-				if err := f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "keep", true, f.clock.Now()); err != nil {
-					t.Fatal(err)
-				}
-			}
 			worker, probe := cleanupWorker(t, f)
 			probe.verifyErr = errors.New("legacy binding unavailable")
 			if _, err := worker.RunOnce(ctx); err != nil {
@@ -464,11 +395,6 @@ func TestCleanupLegacyUnknownEffectsBlockCollectionAfterUpgrade(t *testing.T) {
 			if phase == "running_binding_refused" {
 				if len(current.Resources) != 2 || current.Resources[0].State != cleanup.ResourceUnknown || current.Resources[1].State != cleanup.ResourceUnknown {
 					t.Fatal("legacy attempt-wide call lost its possible effects", current.Resources)
-				}
-			}
-			if phase == "running_new_hold" {
-				if err := f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "keep", false, f.clock.Now()); err != nil {
-					t.Fatal(err)
 				}
 			}
 			controls, cp, _ := controlService(t, f, "a", auth.Operate)

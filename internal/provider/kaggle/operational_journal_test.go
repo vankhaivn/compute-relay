@@ -217,7 +217,8 @@ func TestOperationalM3ManualCancellationPreservesActivityAndReceipt(t *testing.T
 	if err != nil || current.Operation.Status != domain.OperationManualRequired || current.Effect != operations.ManualRequired || adapter.cancelCalls != 0 {
 		t.Fatal("unsupported capability invoked cancel or claimed success", current, err, adapter.cancelCalls)
 	}
-	attempt, err := f.store.LoadAttempt(ctx, "workspace", f.receipt.JobID, f.receipt.AttemptID)
+	record, err := f.store.ReadJob(ctx, "workspace", actor.TokenID(), f.receipt.JobID)
+	attempt := record.Attempt
 	if err != nil || attempt.State.Cancellation != domain.CancellationManual || attempt.State.Execution != domain.ExecutionRunning || attempt.State.RemoteActivity != domain.RemoteActivityActive || attempt.State.Orchestration.Terminal() {
 		t.Fatal("manual action fabricated remote termination", attempt.State, err)
 	}
@@ -233,7 +234,8 @@ func TestOperationalM3ManualCancellationPreservesActivityAndReceipt(t *testing.T
 	if err != nil || !reflect.DeepEqual(later.Operation, current.Operation) || later.Effect != current.Effect {
 		t.Fatal("completion rewrote control history", err)
 	}
-	attempt, err = f.store.LoadAttempt(ctx, "workspace", f.receipt.JobID, f.receipt.AttemptID)
+	record, err = f.store.ReadJob(ctx, "workspace", actor.TokenID(), f.receipt.JobID)
+	attempt = record.Attempt
 	if err != nil || attempt.State.Execution != domain.ExecutionSucceeded || attempt.State.Cancellation == domain.CancellationConfirmed || attempt.State.ReleaseEvidence != domain.ReleaseEvidenceNotObservable || x.saves != 1 {
 		t.Fatal("completion/cancel evidence conflated", err)
 	}

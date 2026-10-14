@@ -14,7 +14,7 @@ func TestRetentionExpiryEventIsAtomicAndSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	f, id, adapter, blobs := collectionFixture(t)
 	runCollection(t, collectionEngine(t, f, adapter, blobs, f.s))
-	before, err := f.s.LoadAttempt(ctx, id.WorkspaceID, id.JobID, id.AttemptID)
+	before, _, err := loadAttempt(ctx, f.s.db, id.WorkspaceID, id.JobID, id.AttemptID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestRetentionExpiryEventIsAtomicAndSurvivesRestart(t *testing.T) {
 	}
 	f.clock.advance(8 * 24 * time.Hour)
 	// Failure to record the job event must roll back state, every tombstone in
-	// this page, the audit and the scan cursor; no deletion permit may escape.
+	// this page and the scan cursor; no deletion permit may escape.
 	if _, err := f.s.db.Exec(`CREATE TRIGGER fail_expiry_event BEFORE INSERT ON events WHEN NEW.type='result.expired' BEGIN SELECT RAISE(ABORT,'injected expiry event failure'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -33,14 +33,13 @@ func TestRetentionExpiryEventIsAtomicAndSurvivesRestart(t *testing.T) {
 	if err == nil || report != (retention.SweepReport{}) {
 		t.Fatal("failed expiry event returned a committed report", report, err)
 	}
-	after, err := f.s.LoadAttempt(ctx, id.WorkspaceID, id.JobID, id.AttemptID)
+	after, _, err := loadAttempt(ctx, f.s.db, id.WorkspaceID, id.JobID, id.AttemptID)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("event rollback changed the attempt", err)
 	}
 	if controlCount(t, f.s, "SELECT count(*) FROM events") != events ||
 		controlCount(t, f.s, "SELECT count(*) FROM retention_inventory WHERE expired_at IS NOT NULL") != 0 ||
 		controlCount(t, f.s, "SELECT count(*) FROM retention_expirations") != 0 ||
-		controlCount(t, f.s, "SELECT count(*) FROM retention_audit WHERE action='expire'") != 0 ||
 		controlCount(t, f.s, "SELECT inventory_seq FROM retention_cursor WHERE singleton=1") != 0 {
 		t.Fatal("expiry transaction partially committed")
 	}
@@ -48,7 +47,7 @@ func TestRetentionExpiryEventIsAtomicAndSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	scanRetention(t, f)
-	after, err = f.s.LoadAttempt(ctx, id.WorkspaceID, id.JobID, id.AttemptID)
+	after, _, err = loadAttempt(ctx, f.s.db, id.WorkspaceID, id.JobID, id.AttemptID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -276,14 +276,18 @@ func TestArtifactsM3PublicationUsesScopedVerifiedBytesAndOriginalReceipt(t *test
 	if _, _, err := reader.Open(ctx, actor, "workspace", f.x.f.receipt.JobID, "foreign", result.Files[0].ID); err == nil {
 		t.Fatal("foreign attempt exposed artifacts")
 	}
+	record, err := f.x.f.store.ReadJob(ctx, "workspace", actor.TokenID(), f.x.f.receipt.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := f.x.f.store.RevokeToken(ctx, actor.TokenID()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reader.Read(ctx, actor, "workspace", f.x.f.receipt.JobID, f.x.f.receipt.AttemptID); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("revoked credential exposed artifacts", err)
 	}
-	attempt, err := f.x.f.store.LoadAttempt(ctx, "workspace", f.x.f.receipt.JobID, f.x.f.receipt.AttemptID)
-	if err != nil || attempt.State.Result != domain.ResultAvailable || attempt.State.Orchestration != domain.OrchestrationSucceeded || attempt.State.ReleaseEvidence != domain.ReleaseEvidenceNotObservable {
+	attempt := record.Attempt
+	if attempt.State.Result != domain.ResultAvailable || attempt.State.Orchestration != domain.OrchestrationSucceeded || attempt.State.ReleaseEvidence != domain.ReleaseEvidenceNotObservable {
 		t.Fatal("publication changed execution/release evidence", err)
 	}
 	f.noNewCompute(t)

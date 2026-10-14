@@ -88,9 +88,6 @@ func TestRetentionLostAcknowledgementsRecoverWithoutCompute(t *testing.T) {
 			if controlCount(t, f.s, "SELECT count(*) FROM retention_inventory WHERE expired_at IS NOT NULL AND deleted_at IS NULL") != 0 {
 				t.Fatal("recovery lost pending deletion")
 			}
-			if controlCount(t, f.s, "SELECT count(*) FROM retention_audit WHERE action='delete'") != controlCount(t, f.s, "SELECT count(*) FROM retention_inventory WHERE deleted_at IS NOT NULL") {
-				t.Fatal("acknowledgement replay duplicated audit facts")
-			}
 			assertNoNewCompute(t, f)
 		})
 	}
@@ -115,11 +112,11 @@ func TestRetentionExpiryRollbackAndActualDiskFull(t *testing.T) {
 				if _, err := f.s.db.Exec(fmt.Sprintf("PRAGMA max_page_count=%d", pages+16)); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.s.db.Exec(`CREATE TRIGGER retention_fault BEFORE INSERT ON retention_audit BEGIN INSERT INTO retention_full_fixture VALUES(zeroblob(4194304)); END`); err != nil {
+				if _, err := f.s.db.Exec(`CREATE TRIGGER retention_fault BEFORE UPDATE OF expired_at ON retention_inventory BEGIN INSERT INTO retention_full_fixture VALUES(zeroblob(4194304)); END`); err != nil {
 					t.Fatal(err)
 				}
 			} else {
-				if _, err := f.s.db.Exec(`CREATE TRIGGER retention_fault BEFORE INSERT ON retention_audit BEGIN SELECT RAISE(ABORT,'synthetic retention rollback'); END`); err != nil {
+				if _, err := f.s.db.Exec(`CREATE TRIGGER retention_fault BEFORE UPDATE OF expired_at ON retention_inventory BEGIN SELECT RAISE(ABORT,'synthetic retention rollback'); END`); err != nil {
 					t.Fatal(err)
 				}
 			}

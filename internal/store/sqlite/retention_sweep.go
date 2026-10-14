@@ -97,6 +97,6 @@ func (s *Store) CompleteRetention(ctx context.Context, d retention.Deletion, now
 		if _, err := tx.ExecContext(ctx, `UPDATE retention_inventory SET deleted_at=? WHERE inventory_seq=? AND deleted_at IS NULL`, now.UTC().Format(time.RFC3339Nano), item.sequence); err != nil {
 			return dbError(err)
 		}
-		return retentionAudit(ctx, tx, d.Object.WorkspaceID, string(d.Kind), string(d.Object.ID), "delete", now)
+		return nil
 	})
 }

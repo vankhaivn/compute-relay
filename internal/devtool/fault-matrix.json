@@ -284,8 +284,8 @@
       "scenario": "Cleanup is retried after the remote resource is already absent.",
       "tests": [
         {
-          "file": "internal/store/sqlite/retention_cleanup_test.go",
-          "name": "TestCleanupPreviewUsesLedgerAndNeverApplies"
+          "file": "internal/store/sqlite/cleanup_resources_test.go",
+          "name": "TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation"
         },
         {
           "file": "internal/store/sqlite/cleanup_work_test.go",

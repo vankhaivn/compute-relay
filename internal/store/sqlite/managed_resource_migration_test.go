@@ -155,7 +155,11 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	if err != nil || retained.Profile != queuedOriginal.Profile || retained.Job != queuedOriginal.Job {
 		t.Fatal("queued admission was rewritten", err)
 	}
-	view, err := f.s.InspectScheduler(ctx, f.clock.Now())
+	snapshot, err := f.s.ClaimNextManaged(ctx, "inspect-upgraded-reservation", f.clock.Now())
+	if err != nil || snapshot.Claim != nil {
+		t.Fatal("claimed attempt became schedulable again", snapshot, err)
+	}
+	view := snapshot.View
 	if err != nil || view.UnresolvedResources["machine"] || view.ResourceReservations["resource_"+strings.Repeat("a", 64)] != 1 {
 		t.Fatal("post-upgrade claim lost its durable verified association", view, err)
 	}

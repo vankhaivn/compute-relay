@@ -272,7 +272,7 @@ func (f *dispatchFixture) journal(t testing.TB, id scheduler.Identity) dispatch.
 }
 func (f *dispatchFixture) state(t testing.TB, id scheduler.Identity) domain.AttemptState {
 	t.Helper()
-	a, err := f.s.LoadAttempt(context.Background(), id.WorkspaceID, id.JobID, id.AttemptID)
+	a, _, err := loadAttempt(context.Background(), f.s.db, id.WorkspaceID, id.JobID, id.AttemptID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,6 @@ var (
 	ErrInvalid     = errors.New("invalid state record or options")
 	ErrBusy        = busyError{}
 	ErrDiskFull    = errors.New("state storage is full")
-	ErrBackup      = errors.New("backup is incomplete or invalid")
 )
 
 const (
@@ -38,15 +37,13 @@ const (
 
 type Options struct {
 	OperationTimeout time.Duration
-	BackupTimeout    time.Duration
-	MaxBackupBytes   int64
 }
 
 func DefaultOptions() Options {
-	return Options{OperationTimeout: 5 * time.Second, BackupTimeout: time.Minute, MaxBackupBytes: 256 << 20}
+	return Options{OperationTimeout: 5 * time.Second}
 }
 func (o Options) valid() bool {
-	return o.OperationTimeout > 0 && o.OperationTimeout <= time.Minute && o.BackupTimeout >= o.OperationTimeout && o.BackupTimeout <= time.Hour && o.MaxBackupBytes > 0 && o.MaxBackupBytes <= 1<<40
+	return o.OperationTimeout > 0 && o.OperationTimeout <= time.Minute
 }
 
 // Store has one connection. All operations are bounded; a busy connection queues at
@@ -80,9 +77,6 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 			_ = root.Close()
 		}
 	}()
-	if _, err := os.Lstat(filepath.Join(root.Path, databaseName+".restore")); !errors.Is(err, os.ErrNotExist) {
-		return nil, ErrBackup
-	}
 	if err := initializeRoot(root.Path); err != nil {
 		return nil, err
 	}

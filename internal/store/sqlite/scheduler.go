@@ -16,8 +16,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
-var _ scheduler.Repository = (*Store)(nil)
-
 // schedulerSnapshot reads ALL outstanding attempts plus live worker reservations,
 // not just a prefix of eligible jobs. No provider, credential resolver or file is read.
 func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Settings, now time.Time) ([]scheduler.Candidate, error) {
@@ -140,34 +138,6 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 	return result, nil
 }
 
-func (s *Store) InspectScheduler(ctx context.Context, now time.Time) (scheduler.View, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return scheduler.View{}, err
-	}
-	defer done()
-	var view scheduler.View
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		settings, last, err := schedulerControl(ctx, tx, now)
-		if err != nil {
-			return err
-		}
-		rows, err := schedulerSnapshot(ctx, tx, settings, now)
-		if err != nil {
-			return err
-		}
-		_, view, err = scheduler.Select(rows, domain.WorkspaceID(last), settings, now)
-		return err
-	})
-	if err != nil {
-		return scheduler.View{}, err
-	}
-	return view, nil
-}
-
-// ClaimNext reserves a bounded local worker/account slot and advances fairness in the
-// SAME transaction as the claim and preparing event. It never changes attempt identity
-// or rewrites dispatching/unknown attempts back to queued.
 func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
 	return s.claimNext(ctx, owner, now, false)
 }

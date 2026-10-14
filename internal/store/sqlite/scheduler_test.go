@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
+	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -161,7 +161,7 @@ func TestSchedulerConcurrentClaimsShareAccountAcrossInstances(t *testing.T) {
 		t.Fatal("frozen binding lost", r, err)
 	}
 }
-func TestSchedulerExpiredClaimFencesEveryMutation(t *testing.T) {
+func TestSchedulerExpiredClaimFencesDispatch(t *testing.T) {
 	s, _ := schedulerStore(t)
 	id := schedulerSeed(t, s, "one", "a", "p", "account")
 	old := schedulerClaim(t, s, "old", schedulerNow)
@@ -169,43 +169,26 @@ func TestSchedulerExpiredClaimFencesEveryMutation(t *testing.T) {
 	if fresh.Identity != id || fresh.Generation != old.Generation+1 || fresh.Fence == old.Fence || fresh.AttemptRevision != old.AttemptRevision {
 		t.Fatal("reclaim changed execution identity", old, fresh)
 	}
-	for _, f := range []func() error{
+	for _, check := range []func() error{
 		func() error {
-			_, err := s.RenewClaim(context.Background(), old, schedulerNow.Add(31*time.Second))
+			_, err := s.LoadDispatch(context.Background(), old, schedulerNow.Add(31*time.Second))
 			return err
 		},
-		func() error { return s.ReleaseClaim(context.Background(), old, schedulerNow.Add(31*time.Second)) },
-		func() error { return s.DeferClaim(context.Background(), old, schedulerNow.Add(31*time.Second)) },
+		func() error {
+			return s.YieldDispatch(context.Background(), dispatch.Handle{Claim: old}, schedulerNow.Add(31*time.Second), 0)
+		},
 	} {
-		if err := f(); !errors.Is(err, scheduler.ErrLeaseLost) {
-			t.Fatal("stale fence accepted", err)
+		if err := check(); !errors.Is(err, scheduler.ErrLeaseLost) {
+			t.Fatal("stale dispatch fence accepted", err)
 		}
 	}
 	a, nonce, err := loadAttempt(context.Background(), s.db, id.WorkspaceID, id.JobID, id.AttemptID)
 	if err != nil || a.Number != 1 || nonce != strings.Repeat("a", 64) {
 		t.Fatal("attempt identity lost", err)
 	}
-	next := a.State
-	next.Orchestration = domain.OrchestrationBlocked
-	after, err := a.Transition(next, schedulerNow.Add(32*time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	event := domain.Event{ID: "evt_stale", Sequence: 4, WorkspaceID: id.WorkspaceID, JobID: id.JobID, AttemptID: id.AttemptID, Type: domain.EventSchedulerDeferred, OccurredAt: after.UpdatedAt}
-	if err = s.CommitAttempt(context.Background(), ports.AttemptChange{WorkspaceID: id.WorkspaceID, Before: a, After: after, Event: event}); !errors.Is(err, scheduler.ErrLeaseLost) {
-		t.Fatal("legacy CAS bypasses fence", err)
-	}
-	renewed, err := s.RenewClaim(context.Background(), fresh, schedulerNow.Add(32*time.Second))
-	if err != nil || !renewed.ExpiresAt.After(fresh.ExpiresAt) {
-		t.Fatal("renew", err)
-	}
-	if err = s.ReleaseClaim(context.Background(), renewed, schedulerNow.Add(33*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.ReleaseClaim(context.Background(), renewed, schedulerNow.Add(33*time.Second)); !errors.Is(err, scheduler.ErrLeaseLost) {
-		t.Fatal("released fence reusable", err)
-	}
+
 }
+
 func TestSchedulerClaimAndEventFailureRollBackTogether(t *testing.T) {
 	s, _ := schedulerStore(t)
 	id := schedulerSeed(t, s, "a", "a", "p", "account")
@@ -225,16 +208,7 @@ func TestSchedulerClaimAndEventFailureRollBackTogether(t *testing.T) {
 	if _, err = s.db.Exec("DROP TRIGGER fail_scheduler_event"); err != nil {
 		t.Fatal(err)
 	}
-	c := schedulerClaim(t, s, "w", schedulerNow)
-	if _, err = s.db.Exec(`CREATE TRIGGER fail_defer BEFORE INSERT ON events WHEN NEW.type='scheduler.deferred' BEGIN SELECT RAISE(ABORT,'injected'); END`); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.DeferClaim(context.Background(), c, schedulerNow); err == nil {
-		t.Fatal("defer fault ignored")
-	}
-	if schedulerCount(t, s, "SELECT count(*) FROM scheduler_leases WHERE held=1") != 1 {
-		t.Fatal("failed defer released reservation")
-	}
+	schedulerClaim(t, s, "w", schedulerNow)
 }
 
 // Remote states below are controlled database fixtures for the future orchestrator.
@@ -253,16 +227,13 @@ func TestSchedulerAmbiguousCapacitySurvivesExpiryAndRestart(t *testing.T) {
 	s, path := schedulerStore(t)
 	id := schedulerSeed(t, s, "old", "a", "p", "shared")
 	schedulerSeed(t, s, "next", "b", "q", "shared")
-	c := schedulerClaim(t, s, "w", schedulerNow)
+	schedulerClaim(t, s, "w", schedulerNow)
 	remote := domain.InitialAttemptState()
 	remote.Orchestration = domain.OrchestrationReconciling
 	remote.Execution = domain.ExecutionUnknown
 	remote.RemoteActivity = domain.RemoteActivityPossible
 	remote.DeadlineExceeded = true
 	schedulerSetState(t, s, id, remote)
-	if err := s.ReleaseClaim(context.Background(), c, schedulerNow); !errors.Is(err, scheduler.ErrPhaseGate) {
-		t.Fatal("remote claim released", err)
-	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -293,19 +264,12 @@ func TestSchedulerAmbiguousCapacitySurvivesExpiryAndRestart(t *testing.T) {
 		t.Fatal("old execution reclaimed", next)
 	}
 }
-func TestSchedulerDeferPauseDisableAndBackwardClock(t *testing.T) {
+func TestSchedulerPauseDisableAndBackwardClock(t *testing.T) {
 	s, _ := schedulerStore(t)
 	schedulerSeed(t, s, "a1", "a", "p", "shared")
 	schedulerSeed(t, s, "a2", "a", "p", "shared")
 	schedulerSeed(t, s, "b1", "b", "q", "other")
-	c := schedulerClaim(t, s, "w", schedulerNow)
-	if err := s.DeferClaim(context.Background(), c, schedulerNow); err != nil {
-		t.Fatal(err)
-	}
-	next := schedulerClaim(t, s, "other", schedulerNow)
-	if next.WorkspaceID != "b" {
-		t.Fatal("deferred FIFO head overtaken")
-	}
+	schedulerClaim(t, s, "w", schedulerNow)
 	settings := scheduler.DefaultSettings()
 	settings.Paused = true
 	if err := s.ConfigureScheduler(context.Background(), settings); err != nil {
@@ -315,10 +279,7 @@ func TestSchedulerDeferPauseDisableAndBackwardClock(t *testing.T) {
 	if err != nil || r.Claim != nil || r.View.LiveWorkers != 1 {
 		t.Fatal("pause erased work", r, err)
 	}
-	if _, err = s.RenewClaim(context.Background(), next, schedulerNow.Add(time.Second)); err != nil {
-		t.Fatal("pause prevented cooperative drain", err)
-	}
-	if _, err = s.ClaimNext(context.Background(), "backwards", schedulerNow); !errors.Is(err, scheduler.ErrClock) {
+	if _, err = s.ClaimNext(context.Background(), "backwards", schedulerNow.Add(-time.Second)); !errors.Is(err, scheduler.ErrClock) {
 		t.Fatal("backward clock resurrected ownership", err)
 	}
 	settings.Paused = false
@@ -329,11 +290,11 @@ func TestSchedulerDeferPauseDisableAndBackwardClock(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err = s.ClaimNext(context.Background(), "disabled", schedulerNow.Add(2*time.Second))
-	if err != nil || r.Claim != nil {
+	if err != nil || r.Claim == nil || r.Claim.WorkspaceID != "b" {
 		t.Fatal(r, err)
 	}
-	view, err := s.InspectScheduler(context.Background(), schedulerNow.Add(2*time.Second))
-	if err != nil || len(view.Heads) != 1 || view.Heads[0].Reason != scheduler.AccountDisabled {
+	view := r.View
+	if err != nil || len(view.Heads) != 2 || view.Heads[0].Reason != scheduler.AccountDisabled || view.Heads[1].Reason != scheduler.Eligible {
 		t.Fatal(view, err)
 	}
 }

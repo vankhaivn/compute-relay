@@ -24,16 +24,6 @@ func TestRetentionResultExpirySweepAndRootBinding(t *testing.T) {
 	}
 	before := f.state(t, id)
 	f.clock.advance(8 * 24 * time.Hour)
-	if err := f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "review", true, f.clock.Now()); err != nil {
-		t.Fatal(err)
-	}
-	scanRetention(t, f)
-	if f.state(t, id).Result != domain.ResultAvailable {
-		t.Fatal("held result expired")
-	}
-	if err := f.s.SetRetentionHold(ctx, "a", "attempt", string(id.AttemptID), "review", false, f.clock.Now()); err != nil {
-		t.Fatal(err)
-	}
 	scanRetention(t, f)
 	after := f.state(t, id)
 	if after.Result != domain.ResultExpired || after.Orchestration != before.Orchestration || after.Execution != before.Execution || after.ReleaseEvidence != before.ReleaseEvidence || after.Cancellation != before.Cancellation {
