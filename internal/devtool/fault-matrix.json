@@ -190,8 +190,8 @@
       "scenario": "A URL redirects into a private network destination.",
       "tests": [
         {
-          "file": "internal/httpsinput/client_test.go",
-          "name": "TestEveryRedirectRevalidatesDNSAndPolicy"
+          "file": "internal/api/jobs_test.go",
+          "name": "TestHTTPSInputsFailAdmissionWithoutCreatingJobs"
         }
       ]
     },
