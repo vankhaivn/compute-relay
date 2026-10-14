@@ -1,24 +1,21 @@
-# Using Compute Relay
+# Documentation
 
-User and operator documentation. Architecture, ADRs, provider internals, validation and planning
-are under [development](development/README.md).
+Compute Relay runs finite jobs through a local managed HTTP runtime. Start with the walkthrough,
+then use the topic that owns the operation. API schemas and examples live under [api](../api/README.md).
 
-| I want to... | Read |
+| Topic | Contents |
 |---|---|
-| Know what exists now and its limits | [Current status](status.md) |
-| Set it up from a fresh clone | **[Getting started](getting-started.md)** |
-| Install the native companion without a checkout | [Companion distribution](companion-distribution.md) |
-| Run bounded GPU jobs through Kaggle | **[Kaggle runtime](kaggle-runtime.md)** |
-| Manage connections from a local application | **[Managed connections](managed-connections.md)** |
-| Run CPU jobs in Docker on my own machine over SSH | **[SSH hosts](ssh-hosts.md)** |
-| Stage an SSH attempt before explicitly starting it | [Preparation gates](preparation-gates.md) |
-| Supply temporary secret values to a gated SSH workload | [Workload secrets](workload-secrets.md) |
-| Bound time-sensitive execution across queueing and disconnects | [Execution deadlines](execution-deadlines.md) |
-| Run a finite H.264/AAC stream-copy delivery | [RTMPS example](../examples/finite-rtmps/README.md) |
-| Administer the runtime, workspaces and tokens | [Local runtime](local-runtime.md) |
-| Package code and upload inputs | [Bundles and import](packaging-and-import.md) |
-| Configure profiles, validate/admit jobs and issue controls | [Application CLI](application-cli.md) |
-| Read or download published results | [Artifact delivery](artifact-delivery.md) |
-| Recover safely after an uncertain response or state | [Recovery](recovery.md) |
-| Inspect and explicitly delete an attempt's remote data | [Remote cleanup](remote-cleanup.md) |
-| Check toolchains, hosts and filesystem assumptions | [Compatibility](compatibility.md) |
+| [Getting started](getting-started.md) | Build, private installation, tokens and HTTP job flow. |
+| [Local runtime](local-runtime.md) | Serving, authorization, state and shutdown. |
+| [Managed connections](managed-connections.md) | Credentials, selections, capacity and attempt authorization. |
+| [Kaggle](kaggle-runtime.md) | Native adapter, private resources, GPU and evidence limits. |
+| [SSH hosts](ssh-hosts.md) | Host identity, Docker image, limits and execution. |
+| [Bundles](packaging-and-import.md) | Explicit packaging and immutable uploads. |
+| [Execution gates and deadlines](execution-gates.md) | Separate preparation/start and finite UTC bounds. |
+| [Workload secrets](workload-secrets.md) | Attempt-scoped memory-only supply and delivery. |
+| [Artifact delivery](artifact-delivery.md) | Verified collection, publication and HTTP content. |
+| [Remote cleanup](remote-cleanup.md) | Exact-target preview, authorization and outcomes. |
+| [Recovery](recovery.md) | Ambiguity, backups, retention and upgrades. |
+| [Compatibility](compatibility.md) | Supported host boundaries and qualification. |
+| [Design](design.md) | Invariants, domain model, durable boundaries and fault cases. |
+| [Development](development.md) | Toolchain, checks, CI and commit convention. |

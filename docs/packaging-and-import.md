@@ -1,4 +1,4 @@
-# Safe bundles and local import
+# Bundles and immutable uploads
 
 Package explicitly selected source without running it. The local control plane inspects bundles
 but does not extract or execute uploaded code; the remote runner enforces its own containment.
@@ -56,22 +56,13 @@ changes. Source changes fail. Obvious credential-pattern checks are heuristics, 
 arbitrary data is secret-free; review selections before upload. The trusted operator/mount
 boundary is not a globally atomic directory snapshot or hostile-user sandbox.
 
-## Optional local import
+## Upload objects
 
-`POST /v1/workspaces/{w}/objects/import` is disabled in the normal server. Explicit composition
-uses named absolute `localinput.RootSpec` roots, workspace allowlists/protected paths,
-`objects.NewImporter` and `api.Config.LocalImports`. Applications supply a root name and relative
-file path or explicit bundle includes, never an unrestricted host directory.
+Applications POST raw bytes to `/v1/workspaces/{w}/objects` using write authority and
+`Content-Type: application/octet-stream`. Only complete, validated bounded uploads publish
+metadata; preserve the returned object ID and reference that exact immutable object in a job.
+Workspace ownership is checked again during admission. Later source edits never change an upload.
 
-```json
-{"root":"source","kind":"file","path":"inputs/prompts.jsonl"}
-```
-
-```json
-{"root":"source","kind":"bundle","includes":["main.py","src"]}
-```
-
-An optional `sha256` binds the final raw file/bundle. Authority and transfer admission precede
-source discovery. Rooted no-follow/link/reparse checks and stream completion protect the input
-boundary; verified bytes commit through [object storage](development/auth-and-objects.md). Later edits never
-update an existing object. The optional component is not a shipped TOML/serve enablement path.
+Inputs use `source.kind: "object"`; upload them before admission. HTTPS sources are rejected.
+Local import is unavailable. The control plane never downloads a job-supplied URL or accepts an
+unrestricted host-file selector. See [API contracts](../api/README.md) for upload/admission schemas.

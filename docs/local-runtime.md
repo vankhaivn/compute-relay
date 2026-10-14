@@ -1,48 +1,32 @@
 # Local runtime
 
-Build and operate a private installation. `serve` is admission-only by default; an explicitly
-configured [Kaggle runtime](kaggle-runtime.md) can additionally start bounded provider dispatch and
-collection workers. See [current status](status.md) before depending on a capability.
+Relay is a single Go executable with a loopback HTTP/JSON API, SQLite state and separate private
+input/result stores. `serve` always starts the managed composition. No connection means no
+provider calls. Connection verification and every execution permit remain explicit.
+See [getting started](getting-started.md) for installation commands.
 
-## Build and initialize
-
-From the repository root with the `go.mod` toolchain:
-
-```sh
-go build -trimpath -o compute-relay ./cmd/compute-relay
-./compute-relay help
-./compute-relay init --root /absolute/private/runtime
-./compute-relay workspace create --root /absolute/private/runtime --id app
-./compute-relay token issue --root /absolute/private/runtime --workspace app --scope read --scope write --scope operate --ttl 24h --output /absolute/private/runtime/app-token
-```
-
-Replace paths with operator-owned locations outside the checkout. Their parents must exist;
-the installation and token file must be new. No local GPU or Docker is required.
-
-Token issuance writes the secret once to the private output file and prints a non-secret receipt.
-Keep the receipt's token ID for revocation. This is an application token, not a Kaggle credential.
-Issue only the scopes the application needs; `operate` is required for job controls.
-The separate `manage` and `execute` scopes enable [managed connection](managed-connections.md)
-administration and explicit per-attempt grants. Ordinary job tokens grant neither.
-
-## Configure admission and serve
-
-Apply an immutable profile and grant it to the workspace using [application CLI](application-cli.md)
-before starting the server. Initialization does not create a default profile or fake provider.
+## Serve policy
 
 ```sh
 ./compute-relay serve --root /absolute/private/runtime --listen 127.0.0.1:7331
 ```
 
-Without provider flags the server stays in the foreground and reports `local-admission-only`,
-`dispatch_enabled=false`. The default is literal loopback `127.0.0.1:7331`; port 0 requests an
-assigned port. DNS names, wildcard/remote/private-network listeners and ambiguous aliases are
-rejected. Provider workers require the complete explicit flag set in
-[Kaggle runtime](kaggle-runtime.md); no flag enables remote HTTP exposure or a TLS bypass.
+Optional policy flags are `--managed-machine-shape cpu|NvidiaTeslaT4|NvidiaTeslaP100`,
+`--managed-max-wall-seconds 1..86400`, `--managed-max-workers 1..16`,
+`--managed-allow-internet` and `--managed-credential-store file|keychain`.
+Defaults are CPU, 1800 seconds, two workers, internet disabled and file credentials for a new
+installation. Policy changes affect future selections; they do not rewrite admitted jobs.
+The machine shape applies to Kaggle; SSH stays CPU. No flag grants attempt authorization.
 
-Application HTTP commands can run concurrently with serve. **Stop serve before local
-administration**, including `state` and profile changes, because all acquire the installation's
-exclusive locks. Never delete a lock file to bypass an active process.
+The default listener is literal loopback `127.0.0.1:7331`; port 0 requests an assigned port.
+DNS names, wildcard and remote listeners are rejected. There is no remote-exposure or TLS-bypass
+flag. Install the executable yourself and run it against the existing private root when upgrading;
+there is no companion installer. The embedded Python runner executes remotely.
+
+## Local administration and authority
+
+Application HTTP requests run concurrently with serve. Stop serve before local administrative
+commands because each acquires the installation's exclusive root lock:
 
 ```sh
 ./compute-relay state --root /absolute/private/runtime
@@ -52,58 +36,48 @@ exclusive locks. Never delete a lock file to bypass an active process.
 ./compute-relay token revoke --root /absolute/private/runtime --id tok_ACTUAL_RECEIPT_ID
 ```
 
-Use real receipt IDs. Workspace enable/disable preserves its profile grants. Disabling/revoking
-authority affects subsequent authorized work; it is not remote cancellation.
+Token scopes are `read`, `write`, `operate`, `manage`, `execute`; TTL defaults to 24 hours and is
+bounded from one minute to thirty days. Management and execution are separate from ordinary job
+production. Revocation/disable affects future authority checks; it does not cancel remote work.
 
-## Storage and token safety
+Token delivery requires a new file in a private stable parent outside protected storage.
+Database insertion and file delivery are separate effects. A delivery failure attempts revocation
+and reports `revoked-after-delivery-error` or `revocation-unconfirmed` with the token ID.
+A stdout failure can follow a committed effect; inspect state before retrying.
 
-The installation binds SQLite and separate input/result stores with private identity markers.
-Only `init` creates a new installation. Missing/corrupt/swapped stores or markers are rejected,
-not recreated. Do not edit markers or manually seed SQL. Opening supported state may apply existing migrations; local inspection is not a
-byte-for-byte read-only filesystem operation.
+## State and credentials
 
-Token scopes are explicit `read`, `write`, `operate`, `manage`, `execute`; TTL defaults to 24 hours and is bounded
-from one minute to thirty days. Output requires a new file in a private, stable, same-volume
-parent outside protected state/input/result/credential subdirectories. Database insertion and secret-file
-delivery are not one atomic transaction. A delivery failure attempts revocation and reports
-`revoked-after-delivery-error` or `revocation-unconfirmed` with the token ID. Do not use a partial
-file or assume a nonzero exit rolled back authority. A failure writing stdout can follow a
-successful effect. Preserve receipts and inspect state before retrying.
+Only `init` creates an installation. The host owns one top-level `runtime.lock`; state and blob
+stores share that lock. `.compute-relay-runtime` and the database installation row bind the
+installation, while blob format markers and separate `.retention-id` files bind input/result roots.
+New hosted roots omit `state/.installation` and child locks. An existing legacy `.installation`
+is checked and removed only after complete host validation; existing lock files are preserved.
+Missing, corrupt or swapped stores/identity markers are rejected rather than recreated.
+Do not unlink locks, edit markers or seed SQL manually. Opening supported state applies sequential
+migrations, including through local inspection. A state read is therefore not a byte-for-byte
+read-only filesystem operation.
 
-Buffer clearing does not securely erase all OS/string copies. Protect tokens and backups from
-other users; the local operator and same-user filesystem writers remain trusted.
+Credentials belong in the installation's selected [vault](managed-connections.md#choose-credential-storage).
+New installations use a private unencrypted file; existing Keychain identity is retained through
+the native macOS API. Changed executables may need macOS access permission. Preserve the original
+binary and vault if access is denied; no fallback or token re-entry is needed to retain identity.
 
-Managed credentials use the installation's selected [credential store](managed-connections.md#choose-credential-storage).
-New installations use private, unencrypted `credentials/secrets.env`; Keychain remains optional.
-Keep that directory and `state/credential-store` with a stopped-runtime backup. Replacing a binary
-does not replace the file store or its keys.
+## HTTP and worker lifecycle
 
-## HTTP and shutdown
+Only `/healthz` is public. Readiness, info and application routes enforce authentication, workspace,
+Host/Origin, body/rate/concurrency and idempotency guards. `/readyz` proves local HTTP/storage
+readiness, not account validity, GPU allocation or job success. A 202 is a durable local receipt.
+See the [HTTP reference](../api/README.md).
 
-Only `/healthz` is public. Readiness/info and application routes use authentication, workspace,
-Host/Origin, body/rate/concurrency and idempotency guards. The host's optional local-import and
-HTTPS-ingestion services remain disabled. See [API contracts](../api/README.md).
+Dispatch, collection, cleanup and other background workers share an error policy: transient
+store errors back off and resume while HTTP keeps serving; invariant/corruption errors stop the
+runtime with `ErrState`. Renewed fenced leases prevent a stale worker from committing progress.
+A lease expiring does not prove its callback stopped or release unknown remote capacity.
 
-`/readyz` establishes local HTTP/storage readiness, not proof of GPU allocation or job success,
-and a `202` means local admission/control committed. Which workers start depends on the
-[serve mode](status.md#serve-modes); artifact routes expose only committed publications.
+Interrupt/SIGTERM stops new handlers and allows ten seconds for graceful completion, then closes
+connections on timeout and reports failure. Store closure and lock release still join admitted
+handlers and workers. A callback ignoring cancellation can delay shutdown; closed connections
+alone do not prove side effects stopped. Local shutdown never means remote cancellation.
 
-Interrupt/SIGTERM stops new handlers, allows ten seconds for graceful completion, then closes
-connections on timeout and reports failure. Store closure and lock release still wait for all
-admitted handlers. A callback ignoring cancellation can delay shutdown; closing connections
-alone is not proof that callbacks stopped.
-
-## Validate and verify
-
-```sh
-./compute-relay validate --file ./job.json
-```
-
-This checks a regular bounded job file against schema/semantics only, with `admitted=false` and
-`provider_checked=false`. It does not open state or resolve real objects/profiles/accounts.
-`job validate` in the application guide performs contextual server validation, still without
-admitting work.
-
-Use the [operator checklist](development/validation-checklist.md) for a reproducible host test,
-[storage](development/storage.md) for coordinated recovery and [artifact delivery](artifact-delivery.md)
-for result reads. Local serving does not qualify live compute.
+Use [recovery](recovery.md) for coordinated backups, retention and upgrade behavior;
+[compatibility](compatibility.md) states filesystem/platform limits.

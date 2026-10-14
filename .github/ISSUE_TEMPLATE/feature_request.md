@@ -1,24 +1,18 @@
 ---
 name: Feature request
-about: Propose a focused capability that fits the approved product boundaries.
+about: Propose a focused capability within the product boundaries.
 ---
 
-<!--
-Title: a plain sentence that starts with an imperative verb, without a type prefix.
-Read docs/development/proposal.md first. Retained sessions, dashboards and additional providers
-are future work, not automatic MVP requirements. Do not rely on quota evasion, hidden paid
-fallback or unsupported browser automation.
--->
+<!-- Title: a plain sentence starting with an imperative verb, without a type prefix.
+Read docs/design.md. Finite jobs, operator-owned accounts and explicit one-shot authority are
+product boundaries. Never rely on quota evasion, hidden retries or automatic paid fallback. -->
 
-<!-- What an operator or application cannot do today, with the concrete mechanism or
-measurement. -->
-
-<!-- The proposed change as observable behavior, and how it fits the provider-neutral core,
-batch-first scope, security model and no-mandatory-paid-infrastructure rule. -->
+<!-- State what an application/operator cannot do today, with the concrete mechanism or measurement.
+Describe the proposed observable behavior and its provider-neutral contract. -->
 
 Acceptance:
 
-- <!-- Observable behavior that establishes completion. -->
-- <!-- Required tests, checks or evidence. -->
+- <!-- Observable behavior establishing completion. -->
+- <!-- Required checks or separately authorized live evidence. -->
 
-<!-- Optional: boundaries, primary-source references and what remains unverified. -->
+<!-- Optional: boundaries, primary-source references and remaining unknowns. -->

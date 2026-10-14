@@ -5,7 +5,8 @@ repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
 git config core.hooksPath .githooks
-git config commit.template .gitmessage
+if [ "$(git config --local --get commit.template || true)" = .gitmessage ]; then
+  git config --local --unset-all commit.template
+fi
 
 printf '%s\n' 'Configured core.hooksPath=.githooks'
-printf '%s\n' 'Configured commit.template=.gitmessage'

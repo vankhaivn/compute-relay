@@ -3,27 +3,9 @@
 Deliver results already committed by the collector, with current workspace authority and
 end-to-end byte verification. These commands/routes do not fetch from Kaggle, start collection
 or make a queued job produce results. A job admitted with `result_collection=manual` first needs
-an explicit `job collect` for its original terminal attempt; poll additive `collection` status
+an explicit `POST /jobs/{job_id}/collect` request for its original terminal attempt; poll additive `collection` status
 until verified publication is available. Its progress describes selected provider output work,
-separately from these local content reads. See [collection](development/collection.md) for publication semantics.
-
-## Commands
-
-Use actual job, attempt and artifact IDs plus an application token with `read` scope:
-
-```sh
-./compute-relay job artifacts --workspace app --token-file /absolute/private/runtime/app-token --id job_ID --attempt att_ID --limit 100
-./compute-relay artifact show --workspace app --token-file /absolute/private/runtime/app-token --job job_ID --attempt att_ID --id art_ID
-./compute-relay artifact download --workspace app --token-file /absolute/private/runtime/app-token --job job_ID --attempt att_ID --id art_ID --output /absolute/private/results/chosen-name.bin
-```
-
-Listing returns one explicit page; use its cursor for continuation. There is no implicit latest
-attempt. Metadata records historical verification and workload phase, not a fresh disk check
-or a guarantee of successful execution. Retained stdout/stderr are artifacts, not live streams.
-
-The output parent must already exist, be private and controlled by the operator. The destination
-must be new. Its name comes only from `--output`, never a provider path or Content-Disposition.
-Existing files fail before token/network work.
+separately from these local content reads. Collection and publication semantics are described below.
 
 ## HTTP contract
 
@@ -33,7 +15,7 @@ GET /v1/workspaces/{w}/jobs/{j}/artifacts/{id}?attempt_id={a}
 GET /v1/workspaces/{w}/jobs/{j}/artifacts/{id}/content?attempt_id={a}
 ```
 
-The [OpenAPI](../api/openapi.json) defines parameters and response shapes. All require current
+The [API contracts](../api/README.md) defines parameters and response shapes. All require current
 workspace read authority and explicit target IDs. Wrong/duplicate query fields, bodies, encoded
 path ambiguity, non-GET methods and Range/If-Range are rejected. Host paths, blob IDs and provider
 URLs are not content selectors. A nil result reader disables the routes, not a fallback.
@@ -55,29 +37,43 @@ A late read/Close/panic/timeout/expiry/revocation aborts the stream without JSON
 private bytes and without the success trailer. Already delivered bytes cannot be recalled;
 a final check is not a lock against future authority changes.
 
-The CLI independently validates headers, bytes, digest, clean body EOF/Close and exactly one
-properly declared final true trailer. An initial header is not final acknowledgement. Missing,
-false, duplicate or early trailers, compression and fixed-length replacement fail, including
-empty files. Fresh no-replay transports do not follow redirects or ambient proxies.
+Clients must independently validate target headers, byte count, digest, clean body EOF/Close and
+exactly one properly declared final true trailer. An initial header is not final acknowledgement.
+Missing, false, duplicate or early trailers, compression and fixed-length replacement must fail,
+including empty files. Preserve HTTP/1.1 trailers end to end; generic proxy/browser/HTTP/2
+interoperability is unqualified. Requests should not follow redirects or ambient proxies.
 
-## Create-only local publication
+Publish a downloaded file only after end-to-end verification. Use a private same-directory
+candidate and a new caller-selected destination; do not derive a host path from provider metadata.
+Already delivered bytes cannot be recalled after later revocation or expiry.
 
-Download writes a private same-directory temporary file. After HTTP verification it flushes,
-rehashes local bytes, checks file identity/Close and hard-links to a new final name without
-replacement. Unsupported hard links fail; overwrite-by-rename is not a fallback. A racing
-creator's destination is not replaced.
+## Collection and publication
 
-The success receipt says `delivery=verified-new-file`; stdout contains metadata, not payload.
-Failure after final linking, directory sync or stdout can retain `download_may_be_published=true`.
-Do not assume rollback or delete the destination to retry automatically. Ordinary errors remove
-owned temporary names; a crash can leave them for private investigation.
+`result_collection` is immutable `automatic` or `manual`; omission keeps automatic behavior.
+Manual jobs never create automatic tickets, including diagnostics. Request collection for the
+original terminal attempt through `POST /v1/workspaces/{w}/jobs/{j}/collect` with operate authority,
+`Idempotency-Key` and `{"attempt_id":"att_EXAMPLE"}`. This grants transfer, not compute.
+An interrupted accepted ticket may be reclaimed; a committed failure needs an explicit new request.
 
-HTTP/1.1 trailer preservation and same-filesystem hard-link support are requirements. Byte-range
-resume, transparent proxy/HTTP/2/browser interoperability, secure erasure and hostile-host or
-arbitrary power-loss guarantees are not supplied. Transfer budgets are finite, not throughput
-promises. Admission-only serve reads existing publications only; provider-enabled serve may also
-publish newly collected results through the same verified local result boundary.
+The collector verifies the original provider binding, complete bounded candidate listing and result
+manifest, commits one immutable result pin, transfers selected bytes and reopens/hashes complete
+local blobs. It then commits the entire artifact set, attempt/result state, events and operation
+outcome atomically. No transaction spans provider/blob I/O; stale fenced owners cannot publish.
+Reuse completed blobs only after hashing; a newer listing cannot replace the original result pin.
 
-Use the [operator checklist](development/validation-checklist.md) for host verification and
-[recovery](recovery.md) for uncertainty. File/stream tests are offline evidence until an actual
-operator run is recorded.
+The manifest must match job/attempt/nonce, original bundle/input digests, frozen output declarations,
+GPU requirements and consistent phase/exit/time evidence. Select only declared outputs and fixed
+controls/logs/environment data. Paths are logical relative names, never host deletion selectors.
+Required empty directories cannot be proven without a declared marker file. Candidate hashes alone,
+complete bytes without successful source Close, and a failed final provider receipt are insufficient.
+
+Collection status distinguishes `not_ready`, `awaiting_request`, `pending`, `discovering`,
+`transferring`, `verifying`, `available`, `failed`, `expired` and `unknown`. Progress counts selected
+output bytes, excluding control/protocol overhead. Total is null before discovery. Completed bytes
+include rehashed reused blobs; received bytes count only new stream bytes in the current fenced
+generation and can be null when unsupported. Full counts can precede verification failure.
+Only a committed `available` publication is readable. There is no partial-byte range resume.
+
+A verified failure manifest/log can be available when the payload failed. Provider terminal status,
+result availability and hardware release remain separate. See [recovery](recovery.md) for pin,
+publication and retention uncertainty and [compatibility](compatibility.md) for evidence limits.
