@@ -1,34 +1,10 @@
-name: Go
+name: CI
 
 on:
-  workflow_dispatch:
   pull_request:
-    paths:
-      - "**/*.go"
-      - "internal/store/sqlite/migrations/**"
-      - "internal/**/*.py"
-      - "internal/provider/sshhost/image/**"
-      - "internal/devtool/fault-matrix.json"
-      - "runner/**"
-      - "api/**"
-      - "go.mod"
-      - "go.sum"
-      - "scripts/dev.*"
-      - ".github/workflows/go.yml"
   push:
     branches: [main]
-    paths:
-      - "**/*.go"
-      - "internal/store/sqlite/migrations/**"
-      - "internal/**/*.py"
-      - "internal/provider/sshhost/image/**"
-      - "internal/devtool/fault-matrix.json"
-      - "runner/**"
-      - "api/**"
-      - "go.mod"
-      - "go.sum"
-      - "scripts/dev.*"
-      - ".github/workflows/go.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,8 +17,8 @@ env:
   GO_VERSION: "1.27.1"
 
 jobs:
-  quality:
-    name: Linux checks
+  check:
+    name: Offline checks
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -53,24 +29,28 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: |
-            go.sum
-            .github/workflows/go.yml
-            ${{ github.event_name == 'workflow_dispatch' && 'go.mod' || '' }}
+          cache-dependency-path: go.sum
 
-      - name: Verify toolchain
+      - name: Set up exact uv and Python
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.13"
+          python-version: "3.11.16"
+          enable-cache: false
+
+      - name: Verify Go toolchain
         shell: bash
         run: test "$(go env GOVERSION)" = "go${GO_VERSION}"
 
       - name: Run repository checks
-        run: go run ./cmd/devtool check
+        run: scripts/check.sh
 
       - name: Run race tests
         if: github.event_name == 'workflow_dispatch'
-        run: go run ./cmd/devtool test-race
+        run: go test -race ./... -count=1
 
-  native:
-    name: Native macOS
+  native-macos:
+    name: Native macOS tests and build
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
@@ -85,7 +65,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Run native tests
-        run: go run ./cmd/devtool test
+        run: go test ./... -count=1
 
       - name: Build without CGo
-        run: go run ./cmd/devtool build
+        run: CGO_ENABLED=0 go build ./...
