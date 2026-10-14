@@ -48,7 +48,8 @@ class FakeAPI:
                     raise Failure("api_status_503")
                 return {"attempt_id": "att_original", "availability": "live", "lines": [], "next_cursor": "old-cursor"}
             if "/artifacts?" in route:
-                return {"next_cursor": "", "artifacts": self.artifacts}
+                return {"workspace_id": self.workspace, "job_id": "job_original", "attempt_id": "att_original",
+                        "next_cursor": "", "artifacts": self.artifacts}
             if "/operations/" in route:
                 return {"status": "succeeded", "effect": "remote_deleted"}
             return self.job
@@ -234,11 +235,11 @@ class ControllerTests(unittest.TestCase):
                     "path": "control/stderr.log", "role": "log"}
             api.artifacts = [item]
             args = argparse.Namespace(relay_binary="compute-relay", url="http://127.0.0.1:1", workspace="example", token_file=Path("token"))
-            def download(argv):
-                Path(argv[-1]).write_bytes(b"")
+            def download(_job, _attempt, _item, output):
+                output.write_bytes(b"")
                 return {"delivery": "verified-new-file", "workspace_id": "example", "job_id": "job_original",
                         "attempt_id": "att_original", "artifact": item}
-            with mock.patch.object(c, "local_command", side_effect=download):
+            with mock.patch.object(api, "download", side_effect=download, create=True):
                 result = c.finish(args, api, session)
             self.assertEqual(result["effect"], "remote_deleted")
             self.assertIn("art_empty", session.state["downloads"]["att_original"])
@@ -255,6 +256,16 @@ class ControllerTests(unittest.TestCase):
                 c.finish(argparse.Namespace(), api, session)
             self.assertEqual((target / "art_uncertain").read_bytes(), b"x")
             self.assertFalse(any(call[0] == "POST" for call in api.calls))
+
+    def test_failed_artifact_download_never_requests_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session, api = self.fixture(directory), FakeAPI()
+            api.artifacts = [{"artifact_id": "art_answer", "bytes": 6, "sha256": hashlib.sha256(b"answer").hexdigest()}]
+            with mock.patch.object(api, "download", side_effect=Failure("artifact_delivery_not_verified"), create=True):
+                with self.assertRaises(Failure):
+                    c.finish(argparse.Namespace(), api, session)
+            self.assertFalse(any(call[0] == "POST" for call in api.calls))
+            self.assertEqual(session.state["downloads"]["att_original"], {})
 
     def test_space_and_transport_limits_fail_closed(self):
         args = argparse.Namespace(remote_free_bytes=1024, space_observed_at=c.timestamp(time.time()))
@@ -280,6 +291,119 @@ class ControllerTests(unittest.TestCase):
                     fetch.fetch(output, lock)
             self.assertFalse(output.exists())
             self.assertEqual(output.with_name(output.name + ".partial").read_bytes(), b"data")
+
+
+class ArtifactDownloadTests(unittest.TestCase):
+    def transfer(self, directory, body=b"answer", trailer=b"X-Compute-Relay-Verified: true\r\n", *,
+                 headers=None, ending=None, item=None, publish=None):
+        api = c.API("http://127.0.0.1:7331", "example", "synthetic-token")
+        item = item or {"artifact_id": "art_answer", "path": "outputs/answer.txt", "role": "output",
+                        "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
+        values = {"Content-Type": "application/octet-stream", "X-Artifact-ID": item["artifact_id"],
+                  "X-Workspace-ID": "example", "X-Job-ID": "job_original", "X-Attempt-ID": "att_original",
+                  "X-Content-Bytes": str(item["bytes"]), "X-Content-SHA256": item["sha256"],
+                  "Transfer-Encoding": "chunked", "Trailer": "X-Compute-Relay-Verified"}
+        values.update(headers or {})
+        raw = b"HTTP/1.1 200 OK\r\n" + b"".join(key.encode() + b": " + value.encode() + b"\r\n"
+                                                    for key, value in values.items()) + b"\r\n"
+        if ending is None:
+            raw += (format(len(body), "x").encode() + b"\r\n" + body + b"\r\n") if body else b""
+            raw += b"0\r\n" + trailer + b"\r\n"
+        else:
+            raw += ending
+
+        class Socket:
+            def makefile(self, *_args):
+                return io.BytesIO(raw)
+
+            def shutdown(self, *_args):
+                pass
+
+        class Connection:
+            sock = Socket()
+
+            def connect(self):
+                pass
+
+            def request(self, *args, **kwargs):
+                self.sent = args, kwargs
+
+            def getresponse(self):
+                self.response = self.response_class(self.sock)
+                self.response.begin()
+                return self.response
+
+            def close(self):
+                pass
+
+        connection = Connection()
+        output = Path(directory) / item["artifact_id"]
+        with mock.patch.object(c.http.client, "HTTPConnection", return_value=connection):
+            if publish:
+                with mock.patch.object(c.os, "link", side_effect=publish):
+                    receipt = api.download("job_original", "att_original", item, output)
+            else:
+                receipt = api.download("job_original", "att_original", item, output)
+        self.assertEqual(connection.sent[0], ("GET", "/v1/workspaces/example/jobs/job_original/artifacts/art_answer/content?attempt_id=att_original"))
+        self.assertEqual(connection.sent[1]["headers"]["Accept-Encoding"], "identity")
+        return output, receipt
+
+    def test_verified_download_publishes_exact_new_file_including_empty(self):
+        for body in (b"answer", b""):
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as directory:
+                output, receipt = self.transfer(directory, body)
+                self.assertEqual(output.read_bytes(), body)
+                self.assertEqual(receipt["delivery"], "verified-new-file")
+                self.assertEqual(receipt["attempt_id"], "att_original")
+                self.assertFalse(output.with_name(output.name + ".partial").exists())
+                self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+    def test_missing_bad_duplicate_or_truncated_trailer_never_publishes(self):
+        for trailer in (b"", b"X-Compute-Relay-Verified: false\r\n",
+                        b"X-Compute-Relay-Verified: true\r\nX-Compute-Relay-Verified: true\r\n",
+                        b"X-Compute-Relay-Verified: true", b" " * 32769):
+            with self.subTest(trailer=trailer[:80]), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(Failure):
+                    self.transfer(directory, trailer=trailer)
+                self.assertFalse((Path(directory) / "art_answer").exists())
+                self.assertTrue((Path(directory) / "art_answer.partial").exists())
+
+    def test_truncated_body_missing_terminal_chunk_and_hash_mismatch_never_publish(self):
+        for ending in (b"6\r\nans", b"6\r\nanswer\r\n", b"7\r\nanswer!\r\n0\r\nX-Compute-Relay-Verified: true\r\n\r\n", b"6\r\nwrong!\r\n0\r\nX-Compute-Relay-Verified: true\r\n\r\n"):
+            with self.subTest(ending=ending), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(Failure):
+                    self.transfer(directory, ending=ending)
+                self.assertFalse((Path(directory) / "art_answer").exists())
+
+    def test_mismatched_identity_encoding_or_acknowledgement_header_never_publishes(self):
+        for headers in ({"X-Attempt-ID": "att_other"}, {"Content-Type": "text/plain"},
+                        {"Content-Encoding": "gzip"}, {"Content-Length": "6"},
+                        {"Trailer": "Other"}, {"X-Compute-Relay-Verified": "true"},
+                        {"X-Content-Bytes": "7"}, {"X-Content-SHA256": "0" * 64}):
+            with self.subTest(headers=headers), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(Failure):
+                    self.transfer(directory, headers=headers)
+                self.assertFalse((Path(directory) / "art_answer").exists())
+
+    def test_destination_collision_at_publication_preserves_existing_file(self):
+        link = c.os.link
+        def collide(source, output):
+            output.write_bytes(b"original")
+            link(source, output)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(Failure):
+                self.transfer(directory, publish=collide)
+            self.assertEqual((Path(directory) / "art_answer").read_bytes(), b"original")
+            self.assertEqual((Path(directory) / "art_answer.partial").read_bytes(), b"answer")
+
+    def test_existing_temporary_file_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            partial = Path(directory) / "art_answer.partial"
+            partial.write_bytes(b"original evidence")
+            with self.assertRaises(Failure):
+                self.transfer(directory)
+            self.assertEqual(partial.read_bytes(), b"original evidence")
+            self.assertFalse((Path(directory) / "art_answer").exists())
 
 
 if __name__ == "__main__":
