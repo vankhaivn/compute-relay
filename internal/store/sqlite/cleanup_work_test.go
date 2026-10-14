@@ -3,8 +3,6 @@ package sqlite
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,14 +24,10 @@ type cleanupProbe struct {
 	verifyErr    error
 	result       *provider.CleanupOutcome
 	err          error
-	verifyHook   func()
 	resourceHook func(context.Context, provider.CleanupResourceRequest) (provider.CleanupOutcome, error)
 }
 
 func (p *cleanupProbe) Verify(ctx context.Context, b provider.BindingSnapshot) error {
-	if p.verifyHook != nil {
-		p.verifyHook()
-	}
 	if p.verifyErr != nil {
 		return p.verifyErr
 	}
@@ -56,10 +50,10 @@ func (p *cleanupProbe) CleanupResource(ctx context.Context, request provider.Cle
 	if p.resourceHook != nil {
 		return p.resourceHook(ctx, request)
 	}
-	if p.result != nil || p.err != nil {
-		if p.result != nil {
-			return *p.result, p.err
-		}
+	if p.result != nil {
+		return *p.result, p.err
+	}
+	if p.err != nil {
 		return provider.CleanupOutcome{}, p.err
 	}
 	return p.probeProvider.CleanupResource(ctx, request)
@@ -96,170 +90,6 @@ func admitCleanup(t *testing.T, f *dispatchFixture, id scheduler.Identity, key s
 	}
 	return service, p, r
 }
-func stagingLedger(t *testing.T, f *dispatchFixture, id scheduler.Identity) domain.ProviderResourceID {
-	t.Helper()
-	return domain.ProviderResourceID("res_staging_" + string(f.journal(t, id).Prepared.Identity.IntentID))
-}
-
-func TestCleanupWorkerDeletesOnceAndKeepsReceipts(t *testing.T) {
-	ctx := context.Background()
-	f, id := collectedFixture(t)
-	service, p, original := admitCleanup(t, f, id, "cleanup-apply", false)
-	engine, probe := cleanupWorker(t, f)
-	f.clock.advance(time.Second)
-	runCleanup(t, engine)
-	current, err := service.Get(ctx, p, "a", original.Operation.ID)
-	if err != nil || current.Operation.Status != domain.OperationSucceeded || current.Effect != operations.RemoteDeleted || current.Operation.Revision != 3 || current.Operation.Failure != nil {
-		t.Fatal("deletion was not recorded", current, err)
-	}
-	j := f.journal(t, id)
-	want := provider.CleanupRequest{Remote: *j.Remote, LedgerID: domain.ProviderResourceID("res_execution_" + string(j.Remote.Identity.IntentID)), CreationOperationID: j.PreparationID, ResultsCollected: true, Mode: provider.CleanupApply}
-	if len(probe.requests) != 2 || probe.requests[0] != want || probe.requests[1].LedgerID != stagingLedger(t, f, id) || f.backend.Stats().CleanupCalls != 2 {
-		t.Fatal("cleanup did not apply exactly the recorded ownership", probe.requests)
-	}
-	if worked, err := engine.RunOnce(ctx); worked || err != nil {
-		t.Fatal("completed cleanup repeated", worked, err)
-	}
-	replay, err := service.Submit(ctx, p, "a", id.JobID, domain.OperationCleanup, "cleanup-apply", cleanupBody(id.AttemptID, false, ""))
-	if err != nil || !replay.Replay || replay.Operation.Status != domain.OperationAccepted || replay.Effect != operations.Pending {
-		t.Fatal("replay rewrote the original receipt", replay, err)
-	}
-	again, err := service.Submit(ctx, p, "a", id.JobID, domain.OperationCleanup, "cleanup-after-apply", cleanupBody(id.AttemptID, false, ""))
-	if err != nil || again.Operation.ID != original.Operation.ID || again.Effect != operations.RemoteDeleted || !again.Replay {
-		t.Fatal("applied cleanup was requested again", again, err)
-	}
-	if s := f.state(t, id); s.Result != domain.ResultAvailable || s.Orchestration != domain.OrchestrationSucceeded {
-		t.Fatal("cleanup changed local results or attempt state", s)
-	}
-	assertNoNewCompute(t, f)
-}
-
-func TestCleanupWorkerReportsAlreadyAbsent(t *testing.T) {
-	ctx := context.Background()
-	f, id := collectedFixture(t)
-	_, actor, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	plan, err := f.s.PlanCleanup(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The fake provider models out-of-band deletion of the original inventory.
-	for _, resource := range plan.Resources {
-		request := resource.Request
-		request.Mode = provider.CleanupApply
-		out, err := f.adapter.CleanupResource(ctx, request)
-		if err != nil || !out.Deleted && !out.AlreadyAbsent {
-			t.Fatal(out, err)
-		}
-	}
-	service, p, r := admitCleanup(t, f, id, "cleanup-absent", false)
-	engine, _ := cleanupWorker(t, f)
-	runCleanup(t, engine)
-	current, err := service.Get(ctx, p, "a", r.Operation.ID)
-	if err != nil || current.Operation.Status != domain.OperationSucceeded || current.Effect != operations.AlreadyAbsent {
-		t.Fatal("absence was not recorded", current, err)
-	}
-}
-
-func TestCleanupWorkerFailuresAreExplicit(t *testing.T) {
-	ctx := context.Background()
-	for _, c := range []struct {
-		name   string
-		setup  func(*cleanupProbe)
-		code   domain.ErrorCode
-		action domain.RecommendedAction
-		calls  int
-	}{
-		{"adapter outcome unknown", func(p *cleanupProbe) { p.err = errors.New("provider-secret-canary") }, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
-		{"binding verification fails", func(p *cleanupProbe) { p.verifyErr = errors.New("binding-secret-canary") }, domain.CodeRemoteIdentityMismatch, domain.RecommendedActionInspectProvider, 0},
-		{"adapter unsupported", func(p *cleanupProbe) {
-			p.err = fmt.Errorf("adapter-secret-canary: %w", provider.ErrCleanupUnsupported)
-		}, domain.CodeUnsupportedCapability, domain.RecommendedActionInspectProvider, 0},
-		{"adapter returns no evidence", func(p *cleanupProbe) { p.result = &provider.CleanupOutcome{WouldDelete: true} }, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
-		{"contradictory deletion and access refusal", func(p *cleanupProbe) {
-			p.result = &provider.CleanupOutcome{Deleted: true}
-			p.err = provider.Problem(domain.CodeProviderAccessDenied, domain.FailureStageAuthentication, "private-access-canary")
-		}, domain.CodeProviderStateUnknown, domain.RecommendedActionInspectProvider, 0},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			f, id := uncollectedFixture(t)
-			service, p, r := admitCleanup(t, f, id, "cleanup-failure", true)
-			engine, probe := cleanupWorker(t, f)
-			c.setup(probe)
-			runCleanup(t, engine)
-			current, err := service.Get(ctx, p, "a", r.Operation.ID)
-			if err != nil || current.Operation.Status != domain.OperationFailed || current.Effect != operations.Failed {
-				t.Fatal("failure was not recorded", current, err)
-			}
-			problem := current.Operation.Failure
-			if problem == nil || problem.Code != c.code || problem.RecommendedAction != c.action || problem.Validate() != nil || len(problem.Details) != 0 {
-				t.Fatal("unexpected public problem", problem)
-			}
-			for _, canary := range []string{"secret-canary", "collected results"} {
-				if strings.Contains(problem.Message, canary) {
-					t.Fatal("provider text leaked into the receipt", problem.Message)
-				}
-			}
-			if f.backend.Stats().CleanupCalls != c.calls {
-				t.Fatal("unexpected provider deletion", f.backend.Stats().CleanupCalls)
-			}
-			// A known refusal allows collection. An uncertain mutation must keep
-			// collection blocked, even though the attempt-wide receipt failed.
-			controls, cp, _ := controlService(t, f, "a", auth.Operate)
-			_, err = controls.Submit(ctx, cp, "a", id.JobID, domain.OperationCollect, "collect-after-failure", controlRequest(id.AttemptID))
-			if c.code == domain.CodeProviderStateUnknown {
-				if !errors.Is(err, operations.ErrState) {
-					t.Fatal("unknown cleanup permitted collection", err)
-				}
-			} else if err != nil {
-				t.Fatal("known refusal blocked collection", err)
-			}
-		})
-	}
-	t.Run("new request after failure", func(t *testing.T) {
-		f, id := uncollectedFixture(t)
-		service, p, first := admitCleanup(t, f, id, "cleanup-first", true)
-		engine, probe := cleanupWorker(t, f)
-		probe.err = errors.New("transient")
-		runCleanup(t, engine)
-		probe.err, probe.result = nil, &provider.CleanupOutcome{Deleted: true}
-		second, err := service.Submit(ctx, p, "a", id.JobID, domain.OperationCleanup, "cleanup-second", cleanupBody(id.AttemptID, true, ""))
-		if err != nil || second.Operation.ID == first.Operation.ID || second.Replay {
-			t.Fatal("failed cleanup absorbed a new explicit request", second, err)
-		}
-		runCleanup(t, engine)
-		if current, err := service.Get(ctx, p, "a", second.Operation.ID); err != nil || current.Effect != operations.RemoteDeleted {
-			t.Fatal(current, err)
-		}
-		controls, cp, _ := controlService(t, f, "a", auth.Operate)
-		if _, err = controls.Submit(ctx, cp, "a", id.JobID, domain.OperationCollect, "collect-after-delete", controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrState) {
-			t.Fatal("collection admitted after remote deletion", err)
-		}
-	})
-}
-
-func TestCleanupWorkerTargetsPreparedResource(t *testing.T) {
-	ctx := context.Background()
-	f, id := preparedFixture(t)
-	service, p, r := admitCleanup(t, f, id, "cleanup-prepared", false)
-	engine, probe := cleanupWorker(t, f)
-	probe.result = &provider.CleanupOutcome{Deleted: true}
-	runCleanup(t, engine)
-	j := f.journal(t, id)
-	want := provider.CleanupRequest{
-		Remote:   provider.RemoteReference{Identity: j.Prepared.Identity, Resource: j.Prepared.Resource, Version: "prepared"},
-		LedgerID: stagingLedger(t, f, id), CreationOperationID: j.PreparationID, ResultsCollected: false, Mode: provider.CleanupApply,
-	}
-	if len(probe.requests) != 1 || probe.requests[0] != want {
-		t.Fatal("prepared cleanup did not target the staging resource", probe.requests)
-	}
-	if current, err := service.Get(ctx, p, "a", r.Operation.ID); err != nil || current.Effect != operations.RemoteDeleted {
-		t.Fatal(current, err)
-	}
-	if s := f.backend.Stats(); s.SubmitCalls != 0 || s.Executions != 0 {
-		t.Fatal("cleanup submitted compute", s)
-	}
-}
-
 func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)

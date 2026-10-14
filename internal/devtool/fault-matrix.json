@@ -90,7 +90,7 @@
       "scenario": "Output collection fails halfway through a large file.",
       "tests": [
         {
-          "file": "internal/store/sqlite/fault_matrix_transfer_test.go",
+          "file": "internal/runtimehost/system_collection_crash_test.go",
           "name": "TestFaultMatrixLargeTransferFailureRecoversWithoutCompute"
         }
       ]
@@ -100,18 +100,22 @@
       "scenario": "A required output is missing or has the wrong digest.",
       "tests": [
         {
-          "file": "internal/store/sqlite/collection_test.go",
+          "file": "internal/runtimehost/system_collection_test.go",
           "name": "TestCollectionBadTransfersRequireExplicitRecovery"
         }
       ]
     },
     {
       "number": 11,
-      "scenario": "Output pagination contains more than one page.",
+      "scenario": "Complete artifact listing contains multiple entries; foreign or oversized catalogs are rejected.",
       "tests": [
         {
-          "file": "internal/store/sqlite/collection_test.go",
+          "file": "internal/runtimehost/system_collection_test.go",
           "name": "TestCollectionPublicationReceiptAndScopedReads"
+        },
+        {
+          "file": "internal/runtimehost/system_collection_test.go",
+          "name": "TestCollectionBadTransfersRequireExplicitRecovery"
         }
       ]
     },
@@ -120,7 +124,7 @@
       "scenario": "A cancellation request races with completion.",
       "tests": [
         {
-          "file": "internal/store/sqlite/collection_test.go",
+          "file": "internal/runtimehost/system_collection_test.go",
           "name": "TestCollectionCancellationRaceKeepsTerminalEvidence"
         },
         {
@@ -222,7 +226,7 @@
           "name": "TestDurableAdmissionHTTPContractAndAuthorization"
         },
         {
-          "file": "internal/store/sqlite/collection_test.go",
+          "file": "internal/runtimehost/system_collection_test.go",
           "name": "TestCollectionPublicationReceiptAndScopedReads"
         }
       ]
@@ -284,11 +288,11 @@
       "scenario": "Cleanup is retried after the remote resource is already absent.",
       "tests": [
         {
-          "file": "internal/store/sqlite/cleanup_resources_test.go",
+          "file": "internal/runtimehost/system_cleanup_resources_test.go",
           "name": "TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation"
         },
         {
-          "file": "internal/store/sqlite/cleanup_work_test.go",
+          "file": "internal/runtimehost/system_cleanup_test.go",
           "name": "TestCleanupWorkerReportsAlreadyAbsent"
         }
       ]

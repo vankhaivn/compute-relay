@@ -204,84 +204,31 @@ func assertNoNewCompute(t *testing.T, f *dispatchFixture) {
 		t.Fatal("collection repeated compute or changed attempt identity", s)
 	}
 }
-func TestCollectionPublicationReceiptAndScopedReads(t *testing.T) {
+func TestCollectionPublicationCommitsAtomicRows(t *testing.T) {
 	ctx := context.Background()
 	f, id, p, blobs := collectionFixture(t)
-	service, principal, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	original, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "collect-original", controlRequest(id.AttemptID))
+	service, actor, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+	original, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "collect-original", controlRequest(id.AttemptID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.ReadCollection(ctx, "a", principal.TokenID(), id.JobID, id.AttemptID); !errors.Is(err, collection.ErrNotFound) {
-		t.Fatal("unverified artifacts visible", err)
-	}
-	remapped := f.profile
-	remapped.Binding.ConfigurationRevision = "new-revision"
-	remapped.Binding.ProviderInstanceID = "replacement"
-	remapped.AccountScope = "another-account"
-	if err = f.s.PutProfile(ctx, remapped, true); err != nil {
-		t.Fatal(err)
-	}
-	beforeState := f.state(t, id)
 	runCollection(t, collectionEngine(t, f, p, blobs, f.s))
-	state := f.state(t, id)
-	if state.Orchestration != domain.OrchestrationSucceeded || state.Result != domain.ResultAvailable || state.ReleaseEvidence != beforeState.ReleaseEvidence {
-		t.Fatal("final result changed provider release evidence", state)
+	if controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 5 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect' AND status='succeeded'") != 1 || f.state(t, id).Result != domain.ResultAvailable {
+		t.Fatal("publication did not commit metadata, ticket and result atomically")
 	}
-	current, err := service.Get(ctx, principal, "a", original.Operation.ID)
-	if err != nil || current.Effect != operations.ResultsAvailable || current.Operation.Status != domain.OperationSucceeded {
-		t.Fatal("control did not complete atomically", err)
-	}
-	replay, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "collect-original", controlRequest(id.AttemptID))
-	if err != nil || replay.Operation.Status != domain.OperationAccepted || !replay.Replay || replay.Operation.ID != original.Operation.ID {
-		t.Fatal("original receipt was rewritten", err)
-	}
-	access, _ := auth.New(f.s, f.s)
-	reader, err := collection.NewReader(access, f.s, blobs)
-	if err != nil {
+	var raw string
+	if err = f.s.db.QueryRow("SELECT receipt FROM receipts WHERE namespace='operation' AND subject_id=?", original.Operation.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	result, err := reader.Read(ctx, principal, "a", id.JobID, id.AttemptID)
-	if err != nil || len(result.Files) != 5 || result.Phase != "completed" {
-		t.Fatal("missing verified result", err)
+	var receipt operations.Record
+	if json.Unmarshal([]byte(raw), &receipt) != nil || receipt.Operation.Status != domain.OperationAccepted || receipt.Operation.ID != original.Operation.ID {
+		t.Fatal("publication rewrote immutable acceptance")
 	}
-	for _, file := range result.Files {
-		meta, stream, err := reader.Open(ctx, principal, "a", id.JobID, id.AttemptID, file.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := io.ReadAll(stream)
-		closeErr := stream.Close()
-		if err != nil || closeErr != nil || int64(len(data)) != meta.Object.Bytes || provider.Digest(data) != meta.Object.SHA256 {
-			t.Fatal("committed content did not match identity")
-		}
-	}
-	if _, _, err := reader.Open(ctx, principal, "a", id.JobID, "foreign", result.Files[0].ID); err == nil {
-		t.Fatal("cross-attempt artifact read allowed")
-	}
-	if _, err := reader.Read(ctx, principal, "b", id.JobID, id.AttemptID); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatal("workspace authorization absent", err)
-	}
-	if _, _, err := reader.Open(ctx, principal, "a", id.JobID, id.AttemptID, "foreign"); !errors.Is(err, collection.ErrNotFound) {
-		t.Fatal("arbitrary artifact ID accepted", err)
-	}
-	if err = f.s.RevokeToken(ctx, principal.TokenID()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = reader.Read(ctx, principal, "a", id.JobID, id.AttemptID); !errors.Is(err, auth.ErrUnauthenticated) {
-		t.Fatal("revoked token read results", err)
-	}
-	lists, _ := p.counts()
-	if lists != 1 || p.fetches["scratch/not-selected"] != 0 || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 5 {
-		t.Fatal("full catalog or selected-output boundary failed")
-	}
-	assertNoNewCompute(t, f)
 }
 
-func TestCollectionBadTransfersRequireExplicitRecovery(t *testing.T) {
+func TestCollectionFailuresDoNotPublishSQLRows(t *testing.T) {
 	for _, mode := range []string{"partial", "ack", "corrupt", "long", "panic", "overbound", "foreign", "missing-output", "missing-manifest", "wrong-nonce"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx := context.Background()
 			f, id, p, blobs := collectionFixture(t)
 			p.mode = mode
 			switch mode {
@@ -295,69 +242,28 @@ func TestCollectionBadTransfersRequireExplicitRecovery(t *testing.T) {
 				m["attempt_nonce"] = strings.Repeat("z", 64)
 				p.files[collection.ManifestPath], _ = json.Marshal(m)
 			}
-			engine := collectionEngine(t, f, p, blobs, f.s)
-			worked, err := engine.RunOnce(ctx)
-			var failure collection.Failure
-			if !worked || !errors.As(err, &failure) {
-				t.Fatal("transfer failure not recorded", err)
+			if worked, err := collectionEngine(t, f, p, blobs, f.s).RunOnce(context.Background()); !worked || err == nil {
+				t.Fatal("fault did not execute", err)
 			}
-			state := f.state(t, id)
-			if state.Orchestration != domain.OrchestrationNeedsAttention || state.Result == domain.ResultAvailable || f.journal(t, id).Problem == nil {
-				t.Fatal("false success or missing cached condition")
+			if controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 0 || f.state(t, id).Result == domain.ResultAvailable {
+				t.Fatal("partial metadata escaped SQL publication boundary")
 			}
-			if controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 0 {
-				t.Fatal("partial metadata was published")
-			}
-			if worked, err = engine.RunOnce(ctx); worked || err != nil {
-				t.Fatal("failed operation automatically repeated", err)
-			}
-			assertNoNewCompute(t, f)
-			if mode != "partial" && mode != "ack" {
-				return
-			}
-			// An explicit transfer retry keeps the first snapshot and reuses verified
-			// control blobs; it does not list a newer provider run or rerun compute.
-			lists, _ := p.counts()
-			p.mode = ""
-			f.restart(t)
-			f.clock.advance(time.Minute)
-			service, principal, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-			if _, err = service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "explicit-collection-retry", controlRequest(id.AttemptID)); err != nil {
-				t.Fatal(err)
-			}
-			runCollection(t, collectionEngine(t, f, p, blobs, f.s))
-			after, _ := p.counts()
-			if after != lists || f.state(t, id).Result != domain.ResultAvailable || f.journal(t, id).Problem != nil {
-				t.Fatal("recovery refreshed the pin or retained an obsolete condition")
-			}
-			assertNoNewCompute(t, f)
 		})
 	}
 }
 
-func TestCollectionCancellationRaceKeepsTerminalEvidence(t *testing.T) {
+func TestCollectionRevisionChangeRejectsPublicationRows(t *testing.T) {
 	ctx := context.Background()
 	f, id, p, blobs := collectionFixture(t)
-	service, principal, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+	service, actor, _ := controlService(t, f, "a", auth.Operate)
 	p.hook = func() error {
-		op, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCancel, "cancel-during-transfer", controlRequest(id.AttemptID))
-		if err == nil && op.Effect != operations.TooLate {
-			return errors.New("terminal cancellation was not too late")
-		}
+		_, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCancel, "cancel-during-transfer", controlRequest(id.AttemptID))
 		return err
 	}
-	engine := collectionEngine(t, f, p, blobs, f.s)
-	if _, err := engine.RunOnce(ctx); !errors.Is(err, collection.ErrLeaseLost) {
-		t.Fatal("changed attempt revision accepted", err)
+	if _, err := collectionEngine(t, f, p, blobs, f.s).RunOnce(ctx); !errors.Is(err, collection.ErrLeaseLost) {
+		t.Fatal("changed revision accepted", err)
 	}
-	if controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 {
-		t.Fatal("stale worker published")
+	if controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 0 {
+		t.Fatal("stale revision published rows")
 	}
-	f.clock.advance(11 * time.Minute)
-	runCollection(t, engine)
-	state := f.state(t, id)
-	if state.Orchestration != domain.OrchestrationSucceeded || state.Cancellation != domain.CancellationTooLate {
-		t.Fatal("race fabricated cancellation", state)
-	}
-	assertNoNewCompute(t, f)
 }

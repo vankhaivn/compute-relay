@@ -1,14 +1,10 @@
 package sqlite
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -46,45 +42,37 @@ func (s *collectionFault) CompleteCollection(ctx context.Context, w collection.W
 	}
 	return err
 }
-func TestCollectionRecoveryAcrossCommitBoundaries(t *testing.T) {
+func TestCollectionAcknowledgementsPreserveAtomicSQLHistory(t *testing.T) {
 	for _, stage := range []string{"pin-ack", "before-publication", "publication-ack"} {
 		t.Run(stage, func(t *testing.T) {
-			f, id, p, blobs := collectionFixture(t)
+			f, _, p, blobs := collectionFixture(t)
 			fault := &collectionFault{Store: f.s, stage: stage}
-			worked, err := collectionEngine(t, f, p, blobs, fault).RunOnce(context.Background())
-			if !worked || !errors.Is(err, collection.ErrUnavailable) || !fault.fired {
-				t.Fatal("fault did not interrupt acknowledgement", err)
+			if worked, err := collectionEngine(t, f, p, blobs, fault).RunOnce(context.Background()); !worked || !errors.Is(err, collection.ErrUnavailable) || !fault.fired {
+				t.Fatal("fault did not execute", err)
 			}
-			lists, fetches := p.counts()
-			events := controlCount(t, f.s, "SELECT count(*) FROM events")
-			wantPublications := 0
+			want := 0
 			if stage == "publication-ack" {
-				wantPublications = 1
+				want = 1
 			}
-			if controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != wantPublications || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect' AND status='failed'") != 0 {
-				t.Fatal("lost SQL acknowledgement became a failed or partial result")
+			events := controlCount(t, f.s, "SELECT count(*) FROM events")
+			if controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != want || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect' AND status='failed'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_snapshots") != 1 {
+				t.Fatal("uncertain commit lost pin or invented partial failure")
 			}
 			f.restart(t)
 			f.clock.advance(11 * time.Minute)
-			engine := collectionEngine(t, f, p, blobs, f.s)
-			worked, err = engine.RunOnce(context.Background())
-			if err != nil || worked != (stage != "publication-ack") {
-				t.Fatal("wrong recovery behavior", worked, err)
+			if _, err := collectionEngine(t, f, p, blobs, f.s).RunOnce(context.Background()); err != nil {
+				t.Fatal(err)
 			}
-			newLists, newFetches := p.counts()
-			if newLists != lists || stage != "pin-ack" && newFetches != fetches {
-				t.Fatal("recovery re-listed identity or re-fetched completed blobs")
+			if controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 1 {
+				t.Fatal("recovery duplicated publication or ticket")
 			}
 			if stage == "publication-ack" && controlCount(t, f.s, "SELECT count(*) FROM events") != events {
-				t.Fatal("committed receipt recovery duplicated events")
+				t.Fatal("committed publication recovery appended events")
 			}
-			if f.state(t, id).Result != domain.ResultAvailable || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 1 {
-				t.Fatal("recovery did not preserve one ticket/publication")
-			}
-			assertNoNewCompute(t, f)
 		})
 	}
 }
+
 func TestCollectionPublicationRollbackAndDiskFull(t *testing.T) {
 	for _, full := range []bool{false, true} {
 		t.Run(fmt.Sprint("disk-full=", full), func(t *testing.T) {
@@ -229,97 +217,4 @@ func TestCollectionSchemaSixUpgradePreservesDispatchAndReceipts(t *testing.T) {
 		t.Fatal("upgrade rewrote old receipt")
 	}
 	assertNoNewCompute(t, f)
-}
-
-func TestCollectionProcessKillAfterDurablePin(t *testing.T) {
-	f, id, p, blobs := collectionFixture(t)
-	j := f.journal(t, id)
-	w := collection.Work{Lease: collection.Lease{WorkspaceID: id.WorkspaceID, JobID: id.JobID, AttemptID: id.AttemptID, OperationID: "fixture", Generation: 1, Fence: "01234567890123456789012345678901", Until: f.clock.Now().Add(time.Minute), AttemptRevision: 1}, Plan: *j.Plan, Observation: *j.Observation, Binding: provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}}
-	pin := collectionPin(t, w, p)
-	raw, err := json.Marshal(pin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "pin.json")
-	if err = os.WriteFile(path, raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err = f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCollectionCrashChild$")
-	cmd.Env = append(os.Environ(), "COLLECTION_CRASH_ROOT="+f.root, "COLLECTION_CRASH_PIN="+path, "COLLECTION_CRASH_TIME="+f.clock.Now().Format(time.RFC3339Nano))
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd.Stderr = os.Stderr
-	if err = cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if cmd.ProcessState == nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-		}
-	}()
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	if err != nil || line != "collection-pin-durable\n" {
-		t.Fatal("child did not reach durable pin", line, err)
-	}
-	if err = cmd.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	if err = cmd.Wait(); err == nil {
-		t.Fatal("child was not killed")
-	}
-	s, err := Open(context.Background(), f.root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.attach(t, s)
-	f.clock.advance(time.Minute)
-	runCollection(t, collectionEngine(t, f, p, blobs, f.s))
-	lists, _ := p.counts()
-	if lists != 0 || f.state(t, id).Result != domain.ResultAvailable || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 1 {
-		t.Fatal("process recovery discarded durable pin or operation")
-	}
-	assertNoNewCompute(t, f)
-}
-func TestCollectionCrashChild(t *testing.T) {
-	root := os.Getenv("COLLECTION_CRASH_ROOT")
-	if root == "" {
-		return
-	}
-	ctx := context.Background()
-	at, err := time.Parse(time.RFC3339Nano, os.Getenv("COLLECTION_CRASH_TIME"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	options := DefaultOptions()
-	options.Clock = func() time.Time { return at }
-	s, err := Open(ctx, root, options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	w, err := s.ClaimCollection(ctx, 30*time.Second, 2)
-	if err != nil || w == nil {
-		t.Fatal("claim", err)
-	}
-	raw, err := os.ReadFile(os.Getenv("COLLECTION_CRASH_PIN"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pin collection.Snapshot
-	if err = json.Unmarshal(raw, &pin); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.PinCollection(ctx, *w, pin); err != nil {
-		t.Fatal(err)
-	}
-	fmt.Println("collection-pin-durable")
-	time.Sleep(time.Hour)
 }

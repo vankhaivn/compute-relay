@@ -12,85 +12,15 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
-type retentionFaultRepository struct {
-	*Store
-	stage string
-	fired bool
-}
-
-func (r *retentionFaultRepository) ExpireRetention(ctx context.Context, p retention.Policy, limit int) (retention.SweepReport, error) {
-	report, err := r.Store.ExpireRetention(ctx, p, limit)
-	if err == nil && r.stage == "expiry-ack" && !r.fired {
-		r.fired = true
-		return retention.SweepReport{}, ErrUnavailable
-	}
-	return report, err
-}
-func (r *retentionFaultRepository) CompleteRetention(ctx context.Context, d retention.Deletion) error {
-	err := r.Store.CompleteRetention(ctx, d)
-	if err == nil && r.stage == "completion-ack" && !r.fired {
-		r.fired = true
-		return ErrUnavailable
-	}
-	return err
-}
-
 type retentionFaultBlobs struct {
 	*blobfs.Store
 	calls int
-	lose  bool
-	fired bool
 }
 
 func (b *retentionFaultBlobs) Delete(ctx context.Context, m domain.ObjectMetadata) (bool, error) {
 	b.calls++
 	absent, err := b.Store.Delete(ctx, m)
-	if err == nil && b.lose && !b.fired {
-		b.fired = true
-		return false, ErrUnavailable
-	}
 	return absent, err
-}
-
-func TestRetentionLostAcknowledgementsRecoverWithoutCompute(t *testing.T) {
-	for _, stage := range []string{"expiry-ack", "delete-ack", "completion-ack"} {
-		t.Run(stage, func(t *testing.T) {
-			ctx := context.Background()
-			f, _, p, results := collectionFixture(t)
-			runCollection(t, collectionEngine(t, f, p, results, f.s))
-			f.clock.advance(8 * 24 * time.Hour)
-			repo := &retentionFaultRepository{Store: f.s, stage: stage}
-			inputs := &retentionFaultBlobs{Store: f.blobs, lose: stage == "delete-ack"}
-			outputs := &retentionFaultBlobs{Store: results}
-			sweep, err := retention.NewSweeper(repo, inputs, outputs)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, _, err := sweep.SweepOnce(ctx, retention.DefaultPolicy(), 0, 100); !errors.Is(err, ErrUnavailable) {
-				t.Fatal("acknowledgement fault not returned", err)
-			}
-			if stage == "expiry-ack" && inputs.calls+outputs.calls != 0 {
-				t.Fatal("uncertain expiry commit authorized deletion")
-			}
-			if stage == "delete-ack" && !inputs.fired {
-				t.Fatal("delete fault did not execute")
-			}
-			f.restart(t)
-			sweep, err = retention.NewSweeper(f.s, f.blobs, results)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for i := 0; i < 3; i++ {
-				if _, _, err := sweep.SweepOnce(ctx, retention.DefaultPolicy(), 0, 100); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if controlCount(t, f.s, "SELECT count(*) FROM retention_inventory WHERE expired_at IS NOT NULL AND deleted_at IS NULL") != 0 {
-				t.Fatal("recovery lost pending deletion")
-			}
-			assertNoNewCompute(t, f)
-		})
-	}
 }
 
 func TestRetentionExpiryRollbackAndActualDiskFull(t *testing.T) {

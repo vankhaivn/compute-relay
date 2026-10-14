@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"io"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +14,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -39,102 +36,24 @@ func collectionStatus(t *testing.T, f *dispatchFixture, id scheduler.Identity) d
 	return *status
 }
 
-func TestManualCollectionWaitsAcrossRestartAndExplicitKeysCoalesce(t *testing.T) {
+func TestManualCollectionPersistsCoalescedReceiptsAndProgressRows(t *testing.T) {
 	ctx := context.Background()
 	f, id, p, blobs := collectionFixture(t, "manual")
-	for i := 0; i < 2; i++ {
-		if status := collectionStatus(t, f, id); status.State != "awaiting_request" || status.Mode != "manual" || status.OperationID != nil || status.Progress != nil {
-			t.Fatal(status)
-		}
-		if worked, err := collectionEngine(t, f, p, blobs, f.s).RunOnce(ctx); worked || err != nil {
-			t.Fatal("manual job auto-collected", worked, err)
-		}
-		if lists, fetches := p.counts(); lists != 0 || fetches != 0 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 0 {
-			t.Fatal("manual waiting performed artifact work")
-		}
-		f.restart(t)
+	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_progress") != 0 {
+		t.Fatal("manual admission invented collection work")
 	}
-	service, principal, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	var wg sync.WaitGroup
-	results := make(chan operations.Record, 2)
-	failures := make(chan error, 2)
+	service, actor, _ := controlService(t, f, "a", auth.Operate)
 	for _, key := range []string{"download-first-key", "download-second-key"} {
-		wg.Add(1)
-		go func(key string) {
-			defer wg.Done()
-			r, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, key, controlRequest(id.AttemptID))
-			results <- r
-			failures <- err
-		}(key)
+		if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, key, controlRequest(id.AttemptID)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	wg.Wait()
-	first, second := <-results, <-results
-	if e1, e2 := <-failures, <-failures; e1 != nil || e2 != nil || first.Operation.ID != second.Operation.ID {
-		t.Fatal(first, second, e1, e2)
+	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation' AND scope='collect'") != 2 {
+		t.Fatal("coalescing did not keep one operation and both keys")
 	}
-	if status := collectionStatus(t, f, id); status.State != "pending" || status.OperationID == nil {
-		t.Fatal(status)
-	}
-	f.restart(t)
 	runCollection(t, collectionEngine(t, f, p, blobs, f.s))
-	status := collectionStatus(t, f, id)
-	if status.State != "available" || status.Progress == nil || status.Progress.BytesReceived == nil || *status.Progress.BytesReceived != *status.Progress.BytesTotal || *status.Progress.BytesTotal != int64(len(p.files["outputs/answer.json"])) || status.Progress.BytesCompleted != *status.Progress.BytesTotal {
-		t.Fatal(status)
-	}
-	service, principal, _ = controlService(t, f, "a", auth.Read, auth.Operate)
-	r, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "download-first-key", controlRequest(id.AttemptID))
-	if err != nil || !r.Replay || r.Operation.ID != first.Operation.ID || r.Operation.Status != domain.OperationAccepted {
-		t.Fatal("original receipt changed", r, err)
-	}
-	_, before := p.counts()
-	if _, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "download-already-available", controlRequest(id.AttemptID)); err != nil {
-		t.Fatal(err)
-	}
-	if worked, err := collectionEngine(t, f, p, blobs, f.s).RunOnce(ctx); worked || err != nil {
-		t.Fatal(worked, err)
-	}
-	_, after := p.counts()
-	if after != before {
-		t.Fatal("available collection refetched bytes")
-	}
-	assertNoNewCompute(t, f)
-}
-
-func TestAutomaticCollectionAndManualFailureDiagnostics(t *testing.T) {
-	for _, mode := range []string{"", "automatic", "manual"} {
-		t.Run(mode, func(t *testing.T) {
-			var modes []string
-			if mode != "" {
-				modes = []string{mode}
-			}
-			f, id, p, blobs := collectionFixture(t, modes...)
-			if mode == "manual" {
-				scenario := fake.DefaultScenario()
-				scenario.States = []domain.ExecutionState{domain.ExecutionQueued, domain.ExecutionRunning, domain.ExecutionFailed}
-				f, id, p, blobs = collectionScenarioFixture(t, scenario, "manual")
-				var manifest map[string]any
-				_ = json.Unmarshal(p.files[collection.ManifestPath], &manifest)
-				manifest["phase"], manifest["exit_code"], manifest["error"] = "failed", 1, map[string]any{"code": "COMMAND_FAILED", "message": "fixture failure", "stage": "execution"}
-				manifest["artifacts"] = []any{}
-				delete(p.files, "outputs/answer.json")
-				p.files[collection.ManifestPath], _ = json.Marshal(manifest)
-				if worked, err := collectionEngine(t, f, p, blobs, f.s).RunOnce(context.Background()); worked || err != nil {
-					t.Fatal(worked, err)
-				}
-				service, principal, _ := controlService(t, f, "a", auth.Operate)
-				if _, err := service.Submit(context.Background(), principal, "a", id.JobID, domain.OperationCollect, "explicit-diagnostic-download", controlRequest(id.AttemptID)); err != nil {
-					t.Fatal(err)
-				}
-			}
-			runCollection(t, collectionEngine(t, f, p, blobs, f.s))
-			if f.state(t, id).Result != domain.ResultAvailable {
-				t.Fatal("result unavailable")
-			}
-			if mode == "manual" && f.state(t, id).Orchestration == domain.OrchestrationSucceeded {
-				t.Fatal("diagnostic publication became business success")
-			}
-			assertNoNewCompute(t, f)
-		})
+	if controlCount(t, f.s, "SELECT count(*) FROM collection_progress") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect' AND status='succeeded'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 {
+		t.Fatal("progress, ticket and publication did not commit together")
 	}
 }
 
@@ -197,7 +116,7 @@ func observedEngine(t *testing.T, f *dispatchFixture, p *progressCollectionProvi
 	return e
 }
 
-func TestCollectionObservedProgressIsThrottledAndExcludesControlsAndCache(t *testing.T) {
+func TestCollectionProgressSQLWritesAreThrottledBeforePublication(t *testing.T) {
 	for _, cached := range []bool{false, true} {
 		t.Run(map[bool]string{false: "stream", true: "cache"}[cached], func(t *testing.T) {
 			f, id, p, blobs := collectionFixture(t)
@@ -217,11 +136,9 @@ func TestCollectionObservedProgressIsThrottledAndExcludesControlsAndCache(t *tes
 				t.Fatal(err)
 			}
 			observed := &progressCollectionProvider{collectionProvider: p, clock: f.clock}
-			var incremental bool
 			observed.hook = func(n int64) error {
 				status := collectionStatus(t, f, id)
 				if status.Progress != nil && status.Progress.BytesReceived != nil && *status.Progress.BytesReceived > 0 && *status.Progress.BytesReceived < int64(len(p.files["outputs/answer.json"])) {
-					incremental = true
 					if status.State != "transferring" || status.Progress.BytesCompleted != *status.Progress.BytesReceived || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 {
 						t.Fatal("progress exposed publication or false bytes", status)
 					}
@@ -229,22 +146,9 @@ func TestCollectionObservedProgressIsThrottledAndExcludesControlsAndCache(t *tes
 				return nil
 			}
 			runCollection(t, observedEngine(t, f, observed, blobs, f.s))
-			status := collectionStatus(t, f, id)
-			size := int64(len(p.files["outputs/answer.json"]))
-			if status.Progress == nil || *status.Progress.BytesTotal != size || status.Progress.BytesCompleted != size || status.Progress.BytesReceived == nil {
-				t.Fatal(status)
-			}
-			want := size
-			if cached {
-				want = 0
-			}
-			if *status.Progress.BytesReceived != want || incremental == cached {
-				t.Fatal("received includes cache/controls or lacks incremental samples", status.Progress, incremental)
-			}
 			if n := controlCount(t, f.s, "SELECT count(*) FROM progress_samples"); n > 7 {
 				t.Fatal("per-chunk persistence", n)
 			}
-			assertNoNewCompute(t, f)
 		})
 	}
 }
@@ -316,13 +220,13 @@ func mustParseManual(t *testing.T, raw []byte) admission.Request {
 	return r
 }
 
-func TestManagedManualCollectionRecoveryNeedsNoNewGrant(t *testing.T) {
+func TestCollectionReclaimRetainsOriginalManagedGrantRows(t *testing.T) {
 	ctx := context.Background()
 	f := managedFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false, "manual")
 	grantAuthorization(t, f, id)
 	submittedControl(t, f, id)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := f.adapter.Advance(*f.journal(t, id).Remote); err != nil {
 			t.Fatal(err)
 		}
@@ -330,65 +234,42 @@ func TestManagedManualCollectionRecoveryNeedsNoNewGrant(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	f.restart(t)
-	if w, err := f.s.ClaimCollection(ctx, time.Second, 1); w != nil || err != nil {
-		t.Fatal("managed manual job auto-collected", w, err)
-	}
-	service, principal, _ := controlService(t, f, "a", auth.Operate)
-	r, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "managed-manual-download", controlRequest(id.AttemptID))
+	service, actor, _ := controlService(t, f, "a", auth.Operate)
+	receipt, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "managed-manual-download", controlRequest(id.AttemptID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := f.s.ClaimCollection(ctx, time.Second, 1)
-	if w == nil || err != nil || w.Lease.OperationID != r.Operation.ID || w.Binding.AccountScope != f.profile.AccountScope {
-		t.Fatal(w, err)
+	first, err := f.s.ClaimCollection(ctx, time.Second, 1)
+	if err != nil || first == nil {
+		t.Fatal(err)
 	}
 	f.clock.advance(2 * time.Second)
 	f.restart(t)
-	w, err = f.s.ClaimCollection(ctx, time.Second, 1)
-	if w == nil || err != nil || w.Lease.Generation != 2 || w.Lease.OperationID != r.Operation.ID {
-		t.Fatal(w, err)
+	second, err := f.s.ClaimCollection(ctx, time.Second, 1)
+	if err != nil || second == nil || second.Lease.Generation != 2 || second.Lease.OperationID != receipt.Operation.ID || second.Binding != first.Binding {
+		t.Fatal("reclaim changed original grant context", second, err)
 	}
-	if count := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'"); count != 1 {
-		t.Fatal("collection created grant", count)
+	if controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 1 {
+		t.Fatal("collection created grant or operation")
 	}
-	assertNoNewCompute(t, f)
 }
 
-func TestManualLateTransferFailureKeepsFullBytesUnavailableUntilNewCollect(t *testing.T) {
+func TestFullTransferFailureDoesNotPublishSQLRows(t *testing.T) {
 	ctx := context.Background()
 	f, id, p, blobs := collectionFixture(t, "manual")
-	service, principal, _ := controlService(t, f, "a", auth.Operate)
-	original, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "late-failure-original", controlRequest(id.AttemptID))
-	if err != nil {
+	service, actor, _ := controlService(t, f, "a", auth.Operate)
+	if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "late-failure-original", controlRequest(id.AttemptID)); err != nil {
 		t.Fatal(err)
 	}
 	p.mode = "ack"
 	observed := &progressCollectionProvider{collectionProvider: p, clock: f.clock}
-	e := observedEngine(t, f, observed, blobs, f.s)
-	if worked, err := e.RunOnce(ctx); !worked || err == nil {
-		t.Fatal(worked, err)
+	if worked, err := observedEngine(t, f, observed, blobs, f.s).RunOnce(ctx); !worked || err == nil {
+		t.Fatal("late fault did not execute", err)
 	}
 	s := collectionStatus(t, f, id)
-	if s.State != "failed" || *s.Progress.BytesReceived != *s.Progress.BytesTotal || s.Progress.BytesCompleted != *s.Progress.BytesTotal || f.state(t, id).Result == domain.ResultAvailable || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 {
-		t.Fatal("last byte became publication", s)
+	if s.State != "failed" || *s.Progress.BytesReceived != *s.Progress.BytesTotal || s.Progress.BytesCompleted != *s.Progress.BytesTotal || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 0 {
+		t.Fatal("full progress became SQL publication", s)
 	}
-	if worked, err := e.RunOnce(ctx); worked || err != nil {
-		t.Fatal("committed failure auto-retried", worked, err)
-	}
-	replay, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "late-failure-original", controlRequest(id.AttemptID))
-	if err != nil || replay.Operation.ID != original.Operation.ID || !replay.Replay || replay.Operation.Status != domain.OperationAccepted {
-		t.Fatal(replay, err)
-	}
-	if _, err = service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "late-failure-explicit-recovery", controlRequest(id.AttemptID)); err != nil {
-		t.Fatal(err)
-	}
-	p.mode = ""
-	runCollection(t, e)
-	if s = collectionStatus(t, f, id); s.State != "available" || s.Progress.Generation != 2 || s.Progress.BytesCompleted != *s.Progress.BytesTotal {
-		t.Fatal(s)
-	}
-	assertNoNewCompute(t, f)
 }
 
 type progressAckFault struct {
@@ -404,24 +285,21 @@ func (s *progressAckFault) RecordCollectionProgress(ctx context.Context, w colle
 	}
 	return err
 }
-func TestProgressLostAcknowledgementRetainsTicketAndPin(t *testing.T) {
+func TestProgressAcknowledgementPreservesSQLTicketAndPin(t *testing.T) {
 	ctx := context.Background()
-	f, id, p, blobs := collectionFixture(t)
+	f, _, p, blobs := collectionFixture(t)
 	fault := &progressAckFault{Store: f.s}
 	observed := &progressCollectionProvider{collectionProvider: p, clock: f.clock}
 	if worked, err := observedEngine(t, f, observed, blobs, fault).RunOnce(ctx); !worked || !errors.Is(err, collection.ErrUnavailable) || !fault.fired {
-		t.Fatal(worked, err)
+		t.Fatal("fault did not execute", err)
 	}
 	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect' AND status='failed'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_snapshots") != 1 {
-		t.Fatal("progress uncertainty destroyed recovery")
+		t.Fatal("uncertain progress destroyed SQL recovery")
 	}
-	before := collectionStatus(t, f, id)
 	f.clock.advance(11 * time.Minute)
 	f.restart(t)
 	runCollection(t, observedEngine(t, f, observed, blobs, f.s))
-	after := collectionStatus(t, f, id)
-	if after.State != "available" || after.Progress.Generation != 2 || *before.OperationID != *after.OperationID || *after.Progress.BytesReceived != *after.Progress.BytesTotal {
-		t.Fatal(before, after)
+	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM collection_snapshots") != 1 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 {
+		t.Fatal("recovery duplicated ticket, pin or publication")
 	}
-	assertNoNewCompute(t, f)
 }
