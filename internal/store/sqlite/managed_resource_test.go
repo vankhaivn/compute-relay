@@ -50,9 +50,7 @@ func resourceFixture(t *testing.T) (*managedStateFixture, *resourceStateAdapter)
 	bindResourceFixture(t, f, a)
 	settings := scheduler.DefaultSettings()
 	settings.MaxWorkers, settings.MaxActivePerAccount = 4, 64
-	if err := f.s.ConfigureScheduler(context.Background(), settings); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.ConfigureScheduler(context.Background(), settings))
 	return f, a
 }
 
@@ -60,9 +58,7 @@ func bindResourceFixture(t *testing.T, f *managedStateFixture, a *resourceStateA
 	t.Helper()
 	var err error
 	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{a})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 
 func configureResourceLimit(t *testing.T, f *managedStateFixture, c connections.Connection, limit int) connections.Connection {
@@ -79,9 +75,7 @@ func grantResourceJob(t *testing.T, f *managedStateFixture, c connections.Connec
 	t.Helper()
 	receipt, _ := f.admit(t, c.Workspace, c, key)
 	permits, err := executionauth.New(f.access, f.s, f.clock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err := permits.Authorize(context.Background(), f.principals[c.Workspace], c.Workspace, receipt.JobID, key+"-grant", authorizationRequest(receipt.AttemptID, 10)); err != nil {
 		t.Fatal(err)
 	}
@@ -169,9 +163,7 @@ func TestManagedResourceRecheckPreservesAccountAssociation(t *testing.T) {
 	lan := f.create(t, "a", "bound-lan", "SYNTHETIC_LAN")
 	job := grantResourceJob(t, f, lan, "bound-job")
 	before, err := f.s.ReadJob(ctx, "a", f.principals["a"].TokenID(), job.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	adapter.changed = true
 	op := f.action(t, "a", lan, "changed-native-identity", "check", "")
 	f.run(t)

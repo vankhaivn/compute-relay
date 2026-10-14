@@ -20,9 +20,7 @@ func TestExpiredAdmissionRejectsNewWorkButReplaysOriginal(t *testing.T) {
 	deadline := time.Now().UTC().Add(2 * time.Second).Truncate(time.Second)
 	raw := []byte(strings.Replace(admissionJSON, `"timeouts":{`, `"timeouts":{"execution_deadline":"`+deadline.Format(time.RFC3339)+`",`, 1))
 	first, err := f.service.Submit(ctx, f.p, "a", "absolute-original", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	time.Sleep(time.Until(deadline) + time.Millisecond)
 	replay, err := f.service.Submit(ctx, f.p, "a", "absolute-original", raw)
 	if err != nil || !replay.Replay || replay.JobID != first.JobID || replay.AttemptID != first.AttemptID {

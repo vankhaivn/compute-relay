@@ -87,13 +87,10 @@ func TestStoredCleanupReceiptsRemainReadableWithoutPublicOption(t *testing.T) {
 			service, actor, original := admitCleanup(t, f, id, "historical-cleanup", false)
 			root := copyFixtureAtSchema(t, f.s, 27)
 			old, err := connect(filepath.Join(root, databaseName))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			hash := rewriteSyntheticCleanupRequest(t, old, original.Operation.ID, accepted)
-			if err = old.Close(); err != nil {
-				t.Fatal(err)
-			}
+			err = old.Close()
+			requireNoError(t, err)
 			f.root = root
 			f.restart(t)
 			service, actor = cleanupService(t, f, "a", auth.Read, auth.Operate)
@@ -147,16 +144,13 @@ func rewriteSyntheticCleanupRequest(t *testing.T, db *sql.DB, id domain.Operatio
 		t.Fatal("expected a synthetic released cleanup schema", version, err)
 	}
 	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer tx.Rollback()
 	var job domain.JobID
 	var requestRaw string
 	var attemptID domain.AttemptID
-	if err = tx.QueryRow(`SELECT job_id,attempt_id,request_json FROM cleanup_operations WHERE operation_id=?`, id).Scan(&job, &attemptID, &requestRaw); err != nil {
-		t.Fatal(err)
-	}
+	err = tx.QueryRow(`SELECT job_id,attempt_id,request_json FROM cleanup_operations WHERE operation_id=?`, id).Scan(&job, &attemptID, &requestRaw)
+	requireNoError(t, err)
 	current, err := operations.Parse(domain.OperationCleanup, []byte(requestRaw))
 	if err != nil || current.Reason != "" || current.DiscardUncollected {
 		t.Fatal("unsupported synthetic legacy request", current, err)
@@ -178,9 +172,8 @@ func rewriteSyntheticCleanupRequest(t *testing.T, db *sql.DB, id domain.Operatio
 	var restore []string
 	for _, name := range []string{"cleanup_identity", "cleanup_terminal", "cleanup_revision", immutable} {
 		var raw string
-		if err = tx.QueryRow(`SELECT sql FROM sqlite_schema WHERE name=? AND type='trigger'`, name).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
+		err = tx.QueryRow(`SELECT sql FROM sqlite_schema WHERE name=? AND type='trigger'`, name).Scan(&raw)
+		requireNoError(t, err)
 		restore = append(restore, raw)
 		if _, err = tx.Exec("DROP TRIGGER " + name); err != nil {
 			t.Fatal(err)
@@ -201,8 +194,7 @@ func rewriteSyntheticCleanupRequest(t *testing.T, db *sql.DB, id domain.Operatio
 			t.Fatal(err)
 		}
 	}
-	if err = tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	err = tx.Commit()
+	requireNoError(t, err)
 	return hash
 }

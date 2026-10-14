@@ -32,9 +32,7 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 	legacyCleanup := operations.Request{AttemptID: collected.AttemptID}
 	legacyCleanupRaw, _ := json.Marshal(legacyCleanup)
 	cleanupReceipt, err := cleanupService.Submit(ctx, principal, "a", collected.JobID, domain.OperationCleanup, "migration-cleanup", legacyCleanupRaw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.authorizeSeed = false
 	ids := make([]scheduler.Identity, 5)
 	for i := range ids {
@@ -42,9 +40,7 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 	}
 	root := copyFixtureAtSchema(t, f.s, 26)
 	legacy, err := connect(filepath.Join(root, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer legacy.Close()
 	legacyHash := rewriteSyntheticCleanupRequest(t, legacy, cleanupReceipt.Operation.ID, true)
 	now := f.clock.Now()
@@ -52,9 +48,8 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 	binding, _ := json.Marshal(f.profile)
 	digest := strings.Repeat("c", 64)
 	var connection string
-	if err = legacy.QueryRow("SELECT connection_id FROM managed_connections LIMIT 1").Scan(&connection); err != nil {
-		t.Fatal(err)
-	}
+	err = legacy.QueryRow("SELECT connection_id FROM managed_connections LIMIT 1").Scan(&connection)
+	requireNoError(t, err)
 	connectionReceipt, _ := json.Marshal(connections.Operation{ID: "op_migration_connection", Workspace: "a", ConnectionID: connection, Action: "check", Status: "accepted", ConnectionRevision: 1, CreatedAt: now, UpdatedAt: now})
 	if _, err = legacy.Exec(`INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,created_at,updated_at) VALUES('op_migration_connection','a',?,'check',1,'token_fixture',?,?,'ready','accepted','fixture',?,?,?)`, connection, digest, strings.Repeat("e", 64), " \n"+string(connectionReceipt), stamp, stamp); err != nil {
 		t.Fatal(err)
@@ -157,9 +152,8 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 	for i := range queries {
 		queries[i].rows = upgradeRows(t, legacy, queries[i].before)
 	}
-	if err = legacy.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = legacy.Close()
+	requireNoError(t, err)
 	opts := DefaultOptions()
 	opts.Clock = f.clock.Now
 	upgraded, err := Open(ctx, root, opts)
@@ -175,9 +169,8 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 			t.Fatal("grant evidence changed", q.before)
 		}
 	}
-	if err = integrity(ctx, upgraded.db); err != nil {
-		t.Fatal(err)
-	}
+	err = integrity(ctx, upgraded.db)
+	requireNoError(t, err)
 	for _, kind := range []string{"execution", "prepare", "start", "secret"} {
 		err = upgraded.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 			key := receiptKey{"a", "grant", kind, fmt.Sprintf("%064x", 100), digest, "", operations.ErrConflict}
@@ -196,9 +189,7 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 			}
 			return nil
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 	}
 	cleanupKey, _ := admission.KeyDigest("migration-cleanup")
 	cleanupHash := legacyHash
@@ -210,13 +201,10 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 		t.Fatal("changed historical cleanup request accepted", e)
 	}
 	testSharedGrantConsumption(t, upgraded, ids, now)
-	if err = upgraded.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = upgraded.Close()
+	requireNoError(t, err)
 	reopened, err := Open(ctx, root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer reopened.Close()
 	if n := controlCount(t, reopened, `SELECT count(*) FROM attempt_grants WHERE consumed_at IS NOT NULL AND attempt_id='`+string(ids[0].AttemptID)+`'`); n != 4 {
 		t.Fatal("restart lost consumption", n)
@@ -288,26 +276,18 @@ func TestReceiptGrantMigrationPreservesPreparedStartAndSecretReplay(t *testing.T
 			ctx := context.Background()
 			f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.AcceptLoseResponse)
 			var prepareRaw string
-			if err := f.s.db.QueryRow(`SELECT request FROM attempt_grants WHERE kind='prepare' AND workspace_id='a' AND job_id=?`, id.JobID).Scan(&prepareRaw); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, f.s.db.QueryRow(`SELECT request FROM attempt_grants WHERE kind='prepare' AND workspace_id='a' AND job_id=?`, id.JobID).Scan(&prepareRaw))
 			secretRaw := secretRequest(f, id, ready)
 			secret, err := secrets.Supply(ctx, p, "a", id.JobID, "migration-secret", secretRaw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			startRaw := secretStartRequest(f, id, ready, secret.AuthorizationID)
 			start, err := gate.Start(ctx, p, "a", id.JobID, "migration-start", startRaw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			revokeRaw, _ := json.Marshal(map[string]any{"attempt_id": id.AttemptID})
 			var revoked workloadsecret.Receipt
 			if state == "revoked" {
 				revoked, err = secrets.Revoke(ctx, p, "a", id.JobID, secret.AuthorizationID, "migration-revoke", revokeRaw)
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 			}
 			if state == "consumed" {
 				if _, err = gateStep(t, f); err != nil {

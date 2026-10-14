@@ -32,9 +32,7 @@ func TestManagedReservedIntentIdentityAndGenerationRowsSurviveRestart(t *testing
 				t.Fatal("injected interruption lost", err)
 			}
 			var opID, connectionID, stage, key string
-			if err := f.s.db.QueryRow("SELECT operation_id,connection_id,stage,credential_key FROM managed_connection_operations").Scan(&opID, &connectionID, &stage, &key); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, f.s.db.QueryRow("SELECT operation_id,connection_id,stage,credential_key FROM managed_connection_operations").Scan(&opID, &connectionID, &stage, &key))
 			if stage != "waiting_secret" {
 				t.Fatal("interruption erased reserved credential intent", stage)
 			}
@@ -65,9 +63,7 @@ func TestManagedReservedIntentIdentityAndGenerationRowsSurviveRestart(t *testing
 func TestManagedMissingFingerprintPreservesInitializedStateAndRows(t *testing.T) {
 	f := newManagedStateFixture(t)
 	f.create(t, "a", "fingerprint-original-key", managedStateSecret)
-	if err := f.vault.Delete(context.Background(), "request_fingerprint_v1"); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.vault.Delete(context.Background(), "request_fingerprint_v1"))
 	f.restartManaged(t)
 	for _, key := range []string{"fingerprint-original-key", "fingerprint-new-key"} {
 		if _, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", key, managedCreateBody(managedStateSecret)); !errors.Is(err, connections.ErrVault) {
@@ -148,9 +144,7 @@ func TestManagedReadyCommitKeepsOriginalCredentialGeneration(t *testing.T) {
 	f := newManagedStateFixture(t)
 	repo := &managedReadyLostAck{Store: f.s}
 	service, err := connections.New(f.access, repo, f.vault, []connections.Adapter{f.discovery})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = service.Submit(context.Background(), f.principals["a"], "a", "", "ready-lost-ack-key", managedCreateBody(managedStateSecret)); err == nil {
 		t.Fatal("fault did not lose acknowledgement")
 	}
@@ -195,17 +189,13 @@ func TestManagedReceiptRowsSurviveAdapterPolicyChanges(t *testing.T) {
 				f := newManagedStateFixture(t)
 				raw := managedCreateBody(managedStateSecret)
 				original, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", "adapter-change-key", raw)
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				if stage == "completed" {
 					f.run(t)
 				}
 				changed := managedChangedDescriptor{stateAdapter: f.discovery, removed: change == "removed"}
 				f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{changed})
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				replay, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", "adapter-change-key", raw)
 				original.Replay = true
 				if err != nil || !reflect.DeepEqual(replay, original) {
@@ -246,9 +236,7 @@ func TestManagedWaitingSecretRowsRemainReservedWithoutAdapter(t *testing.T) {
 	f.vault.createHook = nil
 	changed := managedChangedDescriptor{stateAdapter: f.discovery, removed: true}
 	service, err := connections.New(f.access, f.s, f.vault, []connections.Adapter{changed})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = service.Submit(context.Background(), f.principals["a"], "a", "", "adapter-reserved-key", raw); !errors.Is(err, connections.ErrUnsupported) {
 		t.Fatal("unstaged credentials bypassed missing adapter", err)
 	}
@@ -260,9 +248,7 @@ func TestManagedWaitingSecretRowsRemainReservedWithoutAdapter(t *testing.T) {
 func TestManagedRemovedConnectionRejectsLateCredentialReady(t *testing.T) {
 	f := newManagedStateFixture(t)
 	op, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", "late-ready-create", managedCreateBody(managedStateSecret))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.run(t)
 	current := f.get(t, "a", op.ConnectionID)
 	f.action(t, "a", current, "late-ready-remove", "remove", "")
@@ -279,9 +265,7 @@ func TestManagedSecretDeletionCannotRemoveActiveGeneration(t *testing.T) {
 	f := newManagedStateFixture(t)
 	initial := f.create(t, "a", "guard-generation-create", managedStateSecret)
 	oldKey, err := f.s.ResolveConnectionCredential(context.Background(), initial.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.action(t, "a", initial, "guard-generation-replace", "replace_credential", managedStateRotated)
 	f.run(t)
 	activeKey, err := f.s.ResolveConnectionCredential(context.Background(), initial.ID)
@@ -298,9 +282,7 @@ func TestManagedSecretDeletionCannotRemoveActiveGeneration(t *testing.T) {
 	if err != nil || !found || key != oldKey {
 		t.Fatal("deletion selected the active or unrelated generation", key, err)
 	}
-	if err := f.s.CompleteSecretDeletion(context.Background(), oldKey); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.CompleteSecretDeletion(context.Background(), oldKey))
 	if controlCount(t, f.s, "SELECT count(*) FROM managed_credential_generations") != 1 {
 		t.Fatal("old generation deletion did not preserve the current row")
 	}

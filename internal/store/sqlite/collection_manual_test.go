@@ -15,7 +15,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
@@ -30,15 +29,20 @@ func collectionStatus(t *testing.T, f *dispatchFixture, id scheduler.Identity) d
 		status, err = readCollectionStatus(context.Background(), tx, r, f.clock.Now())
 		return err
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return *status
 }
 
 func TestManualCollectionPersistsCoalescedReceiptsAndProgressRows(t *testing.T) {
 	ctx := context.Background()
 	f, id, p, blobs := collectionFixture(t, "manual")
+	f.restart(t)
+	if claim, err := f.s.ClaimCollection(ctx, time.Minute, 1); err != nil || claim != nil {
+		t.Fatal("manual job claimed before an explicit request", claim, err)
+	}
+	if lists, fetches := p.counts(); lists != 0 || fetches != 0 {
+		t.Fatal("manual wait fetched provider artifacts", lists, fetches)
+	}
 	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_progress") != 0 {
 		t.Fatal("manual admission invented collection work")
 	}
@@ -106,13 +110,9 @@ func observedEngine(t *testing.T, f *dispatchFixture, p *progressCollectionProvi
 	t.Helper()
 	registry := provider.NewSnapshotRegistry()
 	p.probeProvider = f.adapter
-	if err := registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, p); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, p))
 	e, err := collection.New(repo, registry, blobs, f.clock, collection.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return e
 }
 
@@ -190,9 +190,7 @@ func TestManualPolicyAdmissionHashReplayAndMigration(t *testing.T) {
 	ctx := context.Background()
 	raw := []byte(strings.Replace(admissionJSON, `"name":"offline-admission"`, `"name":"offline-admission","result_collection":"manual"`, 1))
 	r, err := f.service.Submit(ctx, f.p, "a", "manual-admission-key", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	replay, err := f.service.Submit(ctx, f.p, "a", "manual-admission-key", raw)
 	if err != nil || !replay.Replay || replay.JobID != r.JobID {
 		t.Fatal(replay, err)
@@ -202,9 +200,7 @@ func TestManualPolicyAdmissionHashReplayAndMigration(t *testing.T) {
 	}
 	old := copyFixtureAtSchema(t, f.s, 11)
 	upgraded, err := Open(ctx, old, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer upgraded.Close()
 	record, err := upgraded.ReadJob(ctx, "a", f.p.TokenID(), r.JobID)
 	if err != nil || record.Request.Spec().CollectionMode() != "manual" || !bytes.Equal(record.Request.Canonical(), mustParseManual(t, raw).Canonical()) {
@@ -214,62 +210,8 @@ func TestManualPolicyAdmissionHashReplayAndMigration(t *testing.T) {
 func mustParseManual(t *testing.T, raw []byte) admission.Request {
 	t.Helper()
 	r, err := admission.Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return r
-}
-
-func TestCollectionReclaimRetainsOriginalManagedGrantRows(t *testing.T) {
-	ctx := context.Background()
-	f := managedFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false, "manual")
-	grantAuthorization(t, f, id)
-	submittedControl(t, f, id)
-	for range 2 {
-		if err := f.adapter.Advance(*f.journal(t, id).Remote); err != nil {
-			t.Fatal(err)
-		}
-		if err := f.step(t); err != nil {
-			t.Fatal(err)
-		}
-	}
-	service, actor, _ := controlService(t, f, "a", auth.Operate)
-	receipt, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "managed-manual-download", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, err := f.s.ClaimCollection(ctx, time.Second, 1)
-	if err != nil || first == nil {
-		t.Fatal(err)
-	}
-	f.clock.advance(2 * time.Second)
-	f.restart(t)
-	second, err := f.s.ClaimCollection(ctx, time.Second, 1)
-	if err != nil || second == nil || second.Lease.Generation != 2 || second.Lease.OperationID != receipt.Operation.ID || second.Binding != first.Binding {
-		t.Fatal("reclaim changed original grant context", second, err)
-	}
-	if controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'") != 1 {
-		t.Fatal("collection created grant or operation")
-	}
-}
-
-func TestFullTransferFailureDoesNotPublishSQLRows(t *testing.T) {
-	ctx := context.Background()
-	f, id, p, blobs := collectionFixture(t, "manual")
-	service, actor, _ := controlService(t, f, "a", auth.Operate)
-	if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "late-failure-original", controlRequest(id.AttemptID)); err != nil {
-		t.Fatal(err)
-	}
-	p.mode = "ack"
-	observed := &progressCollectionProvider{collectionProvider: p, clock: f.clock}
-	if worked, err := observedEngine(t, f, observed, blobs, f.s).RunOnce(ctx); !worked || err == nil {
-		t.Fatal("late fault did not execute", err)
-	}
-	s := collectionStatus(t, f, id)
-	if s.State != "failed" || *s.Progress.BytesReceived != *s.Progress.BytesTotal || s.Progress.BytesCompleted != *s.Progress.BytesTotal || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 0 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 0 {
-		t.Fatal("full progress became SQL publication", s)
-	}
 }
 
 type progressAckFault struct {

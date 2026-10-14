@@ -29,13 +29,10 @@ func schedulerStore(t *testing.T) (*Store, string) {
 	opts := DefaultOptions()
 	opts.Clock = func() time.Time { return schedulerNow }
 	s, err := Open(context.Background(), path, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
-	if err = s.ConfigureScheduler(context.Background(), scheduler.DefaultSettings()); err != nil {
-		t.Fatal(err)
-	}
+	err = s.ConfigureScheduler(context.Background(), scheduler.DefaultSettings())
+	requireNoError(t, err)
 	return s, path
 }
 
@@ -50,9 +47,7 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, acce
 	identity := scheduler.Identity{WorkspaceID: domain.WorkspaceID(w), JobID: domain.JobID("job_" + id), AttemptID: domain.AttemptID("att_" + id)}
 	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "profile-" + instance, ProviderInstanceID: domain.ProviderInstanceID(instance), ConfigurationRevision: "r1"}, account)
 	var version int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow("PRAGMA user_version").Scan(&version))
 	resource := "cpu"
 	if len(accelerator) == 1 {
 		resource = accelerator[0]
@@ -67,9 +62,7 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, acce
 		raw = strings.Replace(raw, `"accelerator":"gpu"`, `"accelerator":"gpu","minimum_gpu_count":1`, 1)
 	}
 	req, err := admission.Parse([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	raw = string(req.Canonical())
 	state, _ := json.Marshal(domain.InitialAttemptState())
 	at := schedulerNow.Add(-time.Hour).Format(time.RFC3339Nano)
@@ -91,15 +84,11 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, acce
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if version >= 11 {
 		connection := strings.TrimPrefix(profile.CredentialRef, "vault:")
 		_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,updated_at) VALUES(?,?,'fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?) ON CONFLICT(connection_id) DO NOTHING`, connection, w, account, at)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		m := domain.ObjectMetadata{WorkspaceID: identity.WorkspaceID, ID: "bundle", Bytes: 1, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}
 		if version < 25 {
 			// Historical migration fixtures use their original automatic inventory
@@ -115,16 +104,13 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, acce
 			}
 		}
 		_, err = s.db.Exec(`INSERT INTO job_objects VALUES(?,?,'bundle','bundle',1,?)`, w, string(identity.JobID), string(m.SHA256))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f := &dispatchFixture{s: s, clock: &dispatchClock{at: schedulerNow.Add(-time.Millisecond)}}
 		permits, actor := authorizationService(t, f, identity.WorkspaceID, auth.Execute)
 		if resource == "gpu" {
 			q := schedulerQuota(10, schedulerNow.Add(-time.Millisecond))
-			if err = s.RecordQuota(ctx, account, "gpu", q); err != nil {
-				t.Fatal(err)
-			}
+			err = s.RecordQuota(ctx, account, "gpu", q)
+			requireNoError(t, err)
 		}
 		request, _ := json.Marshal(executionauth.Request{AttemptID: identity.AttemptID, MaxRemoteWallSeconds: 120, AuthorizePrivateStaging: true, AuthorizeCompute: true})
 		if _, err = permits.Authorize(ctx, actor, identity.WorkspaceID, identity.JobID, "scheduler-grant-"+id, request); err != nil {
@@ -153,18 +139,14 @@ func schedulerTime(s *Store, at time.Time) { s.options.Clock = func() time.Time 
 func schedulerCount(t *testing.T, s *Store, query string) int {
 	t.Helper()
 	var n int
-	if err := s.db.QueryRow(query).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow(query).Scan(&n))
 	return n
 }
 func TestSchedulerFIFOAndCursorSurviveRestart(t *testing.T) {
 	s, path := schedulerStore(t)
 	settings := scheduler.DefaultSettings()
 	settings.MaxActivePerAccount = 4
-	if err := s.ConfigureScheduler(context.Background(), settings); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.ConfigureScheduler(context.Background(), settings))
 	a1 := schedulerSeed(t, s, "a1", "a", "first", "shared")
 	a2 := schedulerSeed(t, s, "a2", "a", "first", "shared")
 	b1 := schedulerSeed(t, s, "b1", "b", "second", "shared")
@@ -173,14 +155,10 @@ func TestSchedulerFIFOAndCursorSurviveRestart(t *testing.T) {
 	if first.Identity != a1 {
 		t.Fatal("FIFO first", first)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Close())
 	var err error
 	s, err = Open(context.Background(), path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	for i, want := range []scheduler.Identity{b1, a2, b2} {
 		c := schedulerClaim(t, s, fmt.Sprintf("worker%d", i+2), schedulerNow)
@@ -220,9 +198,7 @@ func TestSchedulerConcurrentClaimsShareAccountAcrossInstances(t *testing.T) {
 	}
 	// Alias remapping cannot move an accepted attempt into another account.
 	p := admission.DefaultProfile(domain.ProviderBinding{Profile: "profile-second", ProviderInstanceID: "third", ConfigurationRevision: "r2"}, "different-account")
-	if err := s.PutProfile(context.Background(), p, true); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.PutProfile(context.Background(), p, true))
 	r, err := s.ClaimNext(context.Background(), "remap")
 	if err != nil || r.Claim != nil || r.View.AccountReservations["same-account"] != 1 {
 		t.Fatal("frozen binding lost", r, err)
@@ -282,9 +258,7 @@ func TestSchedulerClaimAndEventFailureRollBackTogether(t *testing.T) {
 // They do not call a provider and cannot be produced by the M3-03 local lease API.
 func schedulerSetState(t *testing.T, s *Store, id scheduler.Identity, state domain.AttemptState) {
 	t.Helper()
-	if err := state.Validate(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, state.Validate())
 	raw, _ := json.Marshal(state)
 	if _, err := s.db.Exec("UPDATE attempts SET state=?,orchestration=? WHERE workspace_id=? AND job_id=? AND attempt_id=?", string(raw), string(state.Orchestration), string(id.WorkspaceID), string(id.JobID), string(id.AttemptID)); err != nil {
 		t.Fatal(err)
@@ -301,14 +275,10 @@ func TestSchedulerAmbiguousCapacitySurvivesExpiryAndRestart(t *testing.T) {
 	remote.RemoteActivity = domain.RemoteActivityPossible
 	remote.DeadlineExceeded = true
 	schedulerSetState(t, s, id, remote)
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Close())
 	var err error
 	s, err = Open(context.Background(), path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	schedulerTime(s, schedulerNow.Add(time.Hour))
 	r, err := s.ClaimNext(context.Background(), "new")
@@ -340,9 +310,7 @@ func TestSchedulerPauseDisableAndBackwardClock(t *testing.T) {
 	schedulerClaim(t, s, "w", schedulerNow)
 	settings := scheduler.DefaultSettings()
 	settings.Paused = true
-	if err := s.ConfigureScheduler(context.Background(), settings); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.ConfigureScheduler(context.Background(), settings))
 	schedulerTime(s, schedulerNow.Add(time.Second))
 	r, err := s.ClaimNext(context.Background(), "paused")
 	if err != nil || r.Claim != nil || r.View.LiveWorkers != 1 {
@@ -358,12 +326,10 @@ func TestSchedulerPauseDisableAndBackwardClock(t *testing.T) {
 		t.Fatal("wall rollback regressed committed clock", floor, err)
 	}
 	settings.Paused = false
-	if err = s.ConfigureScheduler(context.Background(), settings); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.ConfigureAccount(context.Background(), "shared", scheduler.AccountPolicy{Disabled: true, MaxActive: 1}); err != nil {
-		t.Fatal(err)
-	}
+	err = s.ConfigureScheduler(context.Background(), settings)
+	requireNoError(t, err)
+	err = s.ConfigureAccount(context.Background(), "shared", scheduler.AccountPolicy{Disabled: true, MaxActive: 1})
+	requireNoError(t, err)
 	schedulerTime(s, schedulerNow.Add(2*time.Second))
 	r, err = s.ClaimNext(context.Background(), "disabled")
 	if err != nil || r.Claim == nil || r.Claim.WorkspaceID != "b" {
@@ -383,14 +349,10 @@ func TestSchedulerQuotaLatchAndStrictPolicy(t *testing.T) {
 	s, _ := schedulerStore(t)
 	schedulerSeed(t, s, "a", "a", "p", "account", "gpu")
 	ctx := context.Background()
-	if err := s.RecordQuota(ctx, "account", "gpu", schedulerQuota(0, schedulerNow)); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.RecordQuota(ctx, "account", "gpu", schedulerQuota(0, schedulerNow)))
 	schedulerTime(s, schedulerNow.Add(time.Second))
 	unavailable := provider.QuotaObservation{Status: provider.QuotaUnavailable, Resource: "gpu", ObservedAt: schedulerNow.Add(time.Second)}
-	if err := s.RecordQuota(ctx, "account", "gpu", unavailable); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.RecordQuota(ctx, "account", "gpu", unavailable))
 	schedulerTime(s, schedulerNow.Add(time.Hour))
 	r, err := s.ClaimNext(ctx, "w")
 	if err != nil || r.Claim != nil || r.View.Heads[0].Reason != scheduler.QuotaExhausted {
@@ -400,24 +362,21 @@ func TestSchedulerQuotaLatchAndStrictPolicy(t *testing.T) {
 		t.Fatal("out-of-order observation accepted", err)
 	}
 	at := schedulerNow.Add(time.Hour)
-	if err = s.ConfigureAccount(ctx, "account", scheduler.AccountPolicy{MaxActive: 1, StrictQuota: true}); err != nil {
-		t.Fatal(err)
-	}
+	err = s.ConfigureAccount(ctx, "account", scheduler.AccountPolicy{MaxActive: 1, StrictQuota: true})
+	requireNoError(t, err)
 	q := schedulerQuota(1, at)
 	q.Precision = "rounded hours"
 	schedulerTime(s, q.ObservedAt)
-	if err = s.RecordQuota(ctx, "account", "gpu", q); err != nil {
-		t.Fatal(err)
-	}
+	err = s.RecordQuota(ctx, "account", "gpu", q)
+	requireNoError(t, err)
 	r, err = s.ClaimNext(ctx, "rounded")
 	if err != nil || r.Claim != nil || r.View.Heads[0].Reason != scheduler.QuotaUncertain {
 		t.Fatal("rounded quota proved strict sufficiency", r, err)
 	}
 	q = schedulerQuota(1, at.Add(time.Second))
 	schedulerTime(s, q.ObservedAt)
-	if err = s.RecordQuota(ctx, "account", "gpu", q); err != nil {
-		t.Fatal(err)
-	}
+	err = s.RecordQuota(ctx, "account", "gpu", q)
+	requireNoError(t, err)
 	if schedulerClaim(t, s, "fresh", q.ObservedAt).QuotaWarning != "" {
 		t.Fatal("fresh exact quota warning")
 	}
@@ -425,9 +384,7 @@ func TestSchedulerQuotaLatchAndStrictPolicy(t *testing.T) {
 func TestSchedulerStartsPausedAndEnqueueRollsBack(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state")
 	s, err := Open(context.Background(), path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	schedulerSeed(t, s, "a", "a", "p", "account")
 	r, err := s.ClaimNext(context.Background(), "w")

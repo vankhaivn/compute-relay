@@ -25,9 +25,7 @@ func workLeaseFixture(t *testing.T, kind workKind) (*dispatchFixture, workLease,
 		f.seed(t, "a", 1, false)
 		settings := scheduler.DefaultSettings()
 		settings.LeaseDuration = time.Second
-		if err := f.s.ConfigureScheduler(ctx, settings); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, f.s.ConfigureScheduler(ctx, settings))
 		w := f.claim(t)
 		return f, dispatchLease(w.Handle.Claim), func() (time.Time, error) {
 			h, err := f.s.RenewDispatch(ctx, w.Handle)
@@ -134,16 +132,12 @@ func TestWorkLeaseGenerationOverflowFailsWithoutReset(t *testing.T) {
 	f.clock.advance(2 * time.Second)
 	root := copyFixtureAtSchema(t, f.s, 25)
 	old, err := connect(filepath.Join(root, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	// The released scheduler schema permits any strictly greater generation.
 	if _, err := old.Exec(`UPDATE scheduler_leases SET generation=?`, int64(math.MaxInt64)); err != nil {
 		t.Fatal(err)
 	}
-	if err := old.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, old.Close())
 	f.root = root
 	f.restart(t)
 	if err := f.s.write(context.Background(), func(ctx context.Context, tx *sql.Tx, now time.Time) error {
@@ -191,9 +185,7 @@ func TestWorkLeaseMigrationPreservesEveryGeneration(t *testing.T) {
 				}
 				root := copyFixtureAtSchema(t, f.s, 25)
 				old, err := connect(filepath.Join(root, databaseName))
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				var query string
 				switch kind {
 				case dispatchWork:
@@ -207,18 +199,14 @@ func TestWorkLeaseMigrationPreservesEveryGeneration(t *testing.T) {
 				if len(before) == 0 {
 					t.Fatal("empty migration fixture")
 				}
-				if err := old.Close(); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, old.Close())
 				f.root = root
 				f.restart(t)
 				after := upgradeRows(t, f.s.db, `SELECT kind,key,generation,owner,fence,until_ms,held,operation_id,attempt_revision FROM work_leases WHERE kind='`+string(kind)+`'`)
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("lease history changed: before=%v after=%v", before, after)
 				}
-				if err := integrity(ctx, f.s.db); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, integrity(ctx, f.s.db))
 				if state != "live" && !(kind == cleanupWork && state == "released") {
 					var next workLease
 					if err := f.s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {

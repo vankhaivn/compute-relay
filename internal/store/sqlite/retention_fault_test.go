@@ -36,9 +36,7 @@ func TestRetentionExpiryRollbackAndActualDiskFull(t *testing.T) {
 					t.Fatal(err)
 				}
 				var pages int
-				if err := f.s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, f.s.db.QueryRow("PRAGMA page_count").Scan(&pages))
 				if _, err := f.s.db.Exec(fmt.Sprintf("PRAGMA max_page_count=%d", pages+16)); err != nil {
 					t.Fatal(err)
 				}
@@ -53,9 +51,7 @@ func TestRetentionExpiryRollbackAndActualDiskFull(t *testing.T) {
 			inputs := &retentionFaultBlobs{Store: f.blobs}
 			outputs := &retentionFaultBlobs{Store: blobs}
 			sweep, err := retention.NewSweeper(f.s, inputs, outputs)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if _, _, err = sweep.SweepOnce(ctx, retention.DefaultPolicy(), 0, 100); err == nil || full && !errors.Is(err, ErrDiskFull) {
 				t.Fatal("did not exercise intended SQL fault", err)
 			}

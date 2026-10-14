@@ -14,12 +14,8 @@ func TestDispatchCachedProblemReadDoesNotWrite(t *testing.T) {
 	f := newDispatchFixture(t, scenario)
 	id := f.seed(t, "a", 1, false)
 	_, p := authorizationService(t, f, "a", auth.Read)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.step(t))
+	requireNoError(t, f.step(t))
 	before, state, events := f.journal(t, id), f.state(t, id), controlCount(t, f.s, "SELECT count(*) FROM events")
 	for range 3 {
 		if _, err := f.s.ReadJob(t.Context(), "a", p.TokenID(), id.JobID); err != nil {

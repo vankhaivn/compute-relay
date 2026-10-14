@@ -19,9 +19,7 @@ func TestRetentionExpiryPreservesSQLVerificationHistory(t *testing.T) {
 		t.Fatal("expiry erased SQL verification history")
 	}
 	sweep, err := retention.NewSweeper(f.s, f.blobs, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for range 3 {
 		if _, _, err = sweep.SweepOnce(context.Background(), retention.DefaultPolicy(), 0, 100); err != nil {
 			t.Fatal(err)
@@ -38,9 +36,7 @@ func TestRetentionSchemaSevenUpgradePreservesPublishedHistory(t *testing.T) {
 	runCollection(t, collectionEngine(t, f, p, blobs, f.s))
 	_, actor, _ := controlService(t, f, "a", auth.Read)
 	original, err := f.s.ReadCollection(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.root = copyFixtureAtSchema(t, f.s, 7)
 	f.restart(t)
 	upgraded, err := f.s.ReadCollection(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID)

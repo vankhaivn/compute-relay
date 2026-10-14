@@ -59,14 +59,10 @@ func TestExplicitRetirementPreservesEvidenceAndNeverClaimsProviderWork(t *testin
 			f = newDispatchFixture(t, scenario)
 			id = f.seed(t, "a", 1, false)
 			if phase != "queued" {
-				if err := f.step(t); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, f.step(t))
 			}
 			if phase == "submission_unknown" {
-				if err := f.step(t); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, f.step(t))
 			}
 			if phase == "submission_unknown" {
 				controls, actor, _ := controlService(t, f, "a", auth.Read, auth.Operate)
@@ -84,15 +80,12 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	ctx := context.Background()
 	root := copyFixtureAtSchema(t, f.s, 23)
 	legacy, err := connect(filepath.Join(root, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	// Reconstruct a pre-retirement explicit revision without altering a released
 	// fixture or migration. Explicit mode had no durable per-attempt grant.
 	var trigger string
-	if err = legacy.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='immutable_profile_revision'`).Scan(&trigger); err != nil {
-		t.Fatal(err)
-	}
+	err = legacy.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='immutable_profile_revision'`).Scan(&trigger)
+	requireNoError(t, err)
 	if _, err = legacy.Exec(`DROP TRIGGER immutable_profile_revision`); err != nil {
 		t.Fatal(err)
 	}
@@ -109,13 +102,10 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 		t.Fatal(err)
 	}
 	var priorBarrier bool
-	if err = legacy.QueryRow(`SELECT dispatch_barrier FROM scheduler_queue WHERE workspace_id=? AND job_id=? AND attempt_id=?`, id.WorkspaceID, id.JobID, id.AttemptID).Scan(&priorBarrier); err != nil {
-		t.Fatal(err)
-	}
+	err = legacy.QueryRow(`SELECT dispatch_barrier FROM scheduler_queue WHERE workspace_id=? AND job_id=? AND attempt_id=?`, id.WorkspaceID, id.JobID, id.AttemptID).Scan(&priorBarrier)
+	requireNoError(t, err)
 	prior, nonce, err := loadAttempt(ctx, legacy, id.WorkspaceID, id.JobID, id.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	queries := []string{
 		"SELECT * FROM jobs ORDER BY job_id",
 		"SELECT * FROM profile_revisions ORDER BY profile,revision",
@@ -138,18 +128,15 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	for i, query := range queries {
 		before[i] = upgradeRows(t, legacy, query)
 	}
-	if err = legacy.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = legacy.Close()
+	requireNoError(t, err)
 	upgraded, err := Open(ctx, root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("open retired fixture: %v", err)
 	}
 	defer upgraded.Close()
 	after, afterNonce, err := loadAttempt(ctx, upgraded.db, id.WorkspaceID, id.JobID, id.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	expected := prior
 	if !prior.State.Orchestration.Terminal() {
 		expected.State.Orchestration = domain.OrchestrationNeedsAttention
@@ -181,9 +168,8 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	}
 	for _, row := range resourceStates {
 		var state, reason string
-		if err = upgraded.db.QueryRow(`SELECT state,reason FROM cleanup_resources WHERE workspace_id=? AND operation_id=? AND resource_id=?`, row[0], row[1], row[2]).Scan(&state, &reason); err != nil {
-			t.Fatal(err)
-		}
+		err = upgraded.db.QueryRow(`SELECT state,reason FROM cleanup_resources WHERE workspace_id=? AND operation_id=? AND resource_id=?`, row[0], row[1], row[2]).Scan(&state, &reason)
+		requireNoError(t, err)
 		expected := row[3].(string)
 		if expected == "pending" {
 			expected = "retained"
@@ -199,9 +185,8 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 		}
 	}
 	f.clock.advance(time.Hour)
-	if err = upgraded.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
-		t.Fatal(err)
-	}
+	err = upgraded.ConfigureScheduler(ctx, scheduler.DefaultSettings())
+	requireNoError(t, err)
 	if claim, err := upgraded.ClaimNext(ctx, "upgrade-worker"); err != nil || claim.Claim != nil {
 		t.Fatal("retired dispatch claimed", claim, err)
 	}
@@ -220,14 +205,11 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 			t.Fatal("retired operations remain pending", table, pending, err)
 		}
 		rows, err := upgraded.db.Query("SELECT record FROM " + table + " WHERE status='failed'")
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		for rows.Next() {
 			var raw string
-			if err = rows.Scan(&raw); err != nil {
-				t.Fatal(err)
-			}
+			err = rows.Scan(&raw)
+			requireNoError(t, err)
 			var record struct{ Operation domain.Operation }
 			if json.Unmarshal([]byte(raw), &record) != nil || record.Operation.Validate() != nil || record.Operation.Failure == nil || record.Operation.Failure.Details[domain.ReasonDetail] != "explicit_mode_retired" {
 				t.Fatal("invalid retired operation outcome")
@@ -240,30 +222,20 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 		t.Fatal("explicit alias remains eligible", enabled, err)
 	}
 	access, err := auth.New(upgraded, upgraded)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	token, _, err := access.Issue(ctx, id.WorkspaceID, []auth.Scope{auth.Read, auth.Operate}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	actor, err := access.Authenticate(ctx, token.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	controls, err := operations.New(access, upgraded, f.blobs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, kind := range []domain.OperationKind{domain.OperationCancel, domain.OperationReconcile, domain.OperationCollect} {
 		if _, err = controls.Submit(ctx, actor, id.WorkspaceID, id.JobID, kind, "retired-new-"+string(kind), controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrState) {
 			t.Fatal("retired control admitted", kind, err)
 		}
 	}
 	cleanups, err := operations.New(access, upgraded, nil, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = cleanups.Submit(ctx, actor, id.WorkspaceID, id.JobID, domain.OperationCleanup, "retired-new-cleanup", cleanupBody(id.AttemptID, false, "")); !errors.Is(err, operations.ErrState) {
 		t.Fatal("retired cleanup admitted", err)
 	}

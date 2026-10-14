@@ -28,24 +28,18 @@ func TestDispatchProcessKillAtMutationIntentBoundaries(t *testing.T) {
 			submission := strings.HasPrefix(mode, "submit")
 			committed := strings.HasSuffix(mode, "after")
 			if submission {
-				if err := f.step(t); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, f.step(t))
 			}
 			f.clock.advance(10 * time.Minute)
 			now := f.clock.Now()
-			if err := f.s.Close(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, f.s.Close())
 			marker := filepath.Join(t.TempDir(), "intent-boundary")
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestDispatchCrashHelper$", "-test.timeout=18s")
 			child.Env = append(os.Environ(), "CR_DISPATCH_CRASH_ROOT="+f.root, "CR_DISPATCH_CRASH_MODE="+mode, "CR_DISPATCH_CRASH_NOW="+now.Format(time.RFC3339Nano), "CR_DISPATCH_CRASH_MARKER="+marker)
 			child.Stdout, child.Stderr = os.Stderr, os.Stderr
-			if err := child.Start(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, child.Start())
 			defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
 			until := time.Now().Add(12 * time.Second)
 			for {
@@ -57,14 +51,10 @@ func TestDispatchProcessKillAtMutationIntentBoundaries(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			if err := child.Process.Kill(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, child.Process.Kill())
 			_ = child.Wait()
 			s, err := Open(context.Background(), f.root, DefaultOptions())
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			f.attach(t, s)
 			phase := dispatch.Local
 			if submission {
@@ -80,9 +70,8 @@ func TestDispatchProcessKillAtMutationIntentBoundaries(t *testing.T) {
 				t.Fatalf("phase=%s want=%s", got, phase)
 			}
 			var intents int
-			if err = s.db.QueryRow("SELECT count(*) FROM submission_intents").Scan(&intents); err != nil {
-				t.Fatal(err)
-			}
+			err = s.db.QueryRow("SELECT count(*) FROM submission_intents").Scan(&intents)
+			requireNoError(t, err)
 			if intents != 0 && !(submission && committed && intents == 1) {
 				t.Fatal("partial intent survived rollback", intents)
 			}
@@ -117,20 +106,14 @@ func TestDispatchCrashHelper(t *testing.T) {
 	}
 	mode := os.Getenv("CR_DISPATCH_CRASH_MODE")
 	now, err := time.Parse(time.RFC3339Nano, os.Getenv("CR_DISPATCH_CRASH_NOW"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	opts := DefaultOptions()
 	opts.Clock = func() time.Time { return now }
 	s, err := Open(context.Background(), root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	c, err := s.ClaimRecovery(context.Background(), "crash_child")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if c == nil {
 		r, err := s.ClaimNext(context.Background(), "crash_child")
 		if err != nil || r.Claim == nil {
@@ -139,15 +122,11 @@ func TestDispatchCrashHelper(t *testing.T) {
 		c = r.Claim
 	}
 	work, err := s.LoadDispatch(context.Background(), *c)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	action := dispatch.Action{Kind: dispatch.BeginSubmission}
 	if strings.HasPrefix(mode, "prepare") {
 		work, err = s.ConsumeAuthorization(context.Background(), work.Handle)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		plan, op := storePlan(t, work)
 		action = dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}
 	}
@@ -159,17 +138,13 @@ func TestDispatchCrashHelper(t *testing.T) {
 		// Deliberately write the transaction's full prefix without its commit. This is a
 		// controlled fault fixture, never a production transaction callback API.
 		tx, err := s.db.BeginTx(context.Background(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		defer tx.Rollback()
-		if err = uncommittedDispatchPrefix(tx, work, action, now); err != nil {
-			t.Fatal(err)
-		}
+		err = uncommittedDispatchPrefix(tx, work, action, now)
+		requireNoError(t, err)
 	}
-	if err = os.WriteFile(os.Getenv("CR_DISPATCH_CRASH_MARKER"), []byte("boundary"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	err = os.WriteFile(os.Getenv("CR_DISPATCH_CRASH_MARKER"), []byte("boundary"), 0600)
+	requireNoError(t, err)
 	time.Sleep(time.Minute)
 	t.Fatal("parent did not terminate crash fixture")
 }

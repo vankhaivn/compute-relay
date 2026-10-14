@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -143,14 +144,10 @@ func newManagedStateFixture(t testing.TB) *managedStateFixture {
 	f.bind(t)
 	for _, w := range []domain.WorkspaceID{"a", "b"} {
 		secret, _, err := f.access.Issue(context.Background(), w, []auth.Scope{auth.Read, auth.Write, auth.Operate, auth.Manage, auth.Execute}, time.Time{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f.tokens[w] = secret.Reveal()
 		p, err := f.access.Authenticate(context.Background(), secret.Reveal())
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f.principals[w] = p
 	}
 	return f
@@ -160,30 +157,20 @@ func (f *managedStateFixture) bind(t testing.TB) {
 	var err error
 	f.s.options.Clock = f.clock.Now
 	f.access, err = auth.New(f.s, f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{f.discovery})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 func (f *managedStateFixture) restartManaged(t testing.TB) {
 	t.Helper()
-	if err := f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.Close())
 	s, err := Open(context.Background(), f.root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.s = s
 	f.bind(t)
 	for w, token := range f.tokens {
 		p, err := f.access.Authenticate(context.Background(), token)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f.principals[w] = p
 	}
 }
@@ -209,17 +196,13 @@ func (f *managedStateFixture) run(t testing.TB) {
 func (f *managedStateFixture) get(t testing.TB, w domain.WorkspaceID, id string) connections.Connection {
 	t.Helper()
 	r, err := f.service.Get(context.Background(), f.principals[w], w, id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return r
 }
 func (f *managedStateFixture) create(t testing.TB, w domain.WorkspaceID, key, secret string) connections.Connection {
 	t.Helper()
 	op, err := f.service.Submit(context.Background(), f.principals[w], w, "", key, managedCreateBody(secret))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.run(t)
 	r := f.get(t, w, op.ConnectionID)
 	if r.Authentication != "verified" || r.Selection == nil {
@@ -230,84 +213,27 @@ func (f *managedStateFixture) create(t testing.TB, w domain.WorkspaceID, key, se
 func (f *managedStateFixture) action(t testing.TB, w domain.WorkspaceID, c connections.Connection, key, action, secret string) connections.Operation {
 	t.Helper()
 	op, err := f.service.Submit(context.Background(), f.principals[w], w, c.ID, key, managedActionBody(action, c.Revision, secret))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return op
 }
 func (f *managedStateFixture) admit(t testing.TB, w domain.WorkspaceID, c connections.Connection, key string) (admission.Receipt, admission.Record) {
 	t.Helper()
 	service, err := admission.New(f.access, f.s, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	raw := strings.Replace(dispatchJSON, `"profile":"fixture"`, `"profile":"`+c.Selection.Profile+`"`, 1)
 	raw = strings.Replace(raw, `"accelerator":"cpu"`, `"accelerator":"gpu","minimum_gpu_count":1`, 1)
 	r, err := service.Submit(context.Background(), f.principals[w], w, key, []byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	job, err := service.Get(context.Background(), f.principals[w], w, r.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return r, job
 }
 func (f *managedStateFixture) resolvedSecret(t testing.TB, ref string) string {
 	t.Helper()
 	var result string
 	err := f.service.WithCredential(context.Background(), ports.CredentialRef(ref), func(value []byte) error { result = string(value); return nil })
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return result
-}
-
-func TestManagedConcurrentAcceptanceStoresOneConnection(t *testing.T) {
-	f := newManagedStateFixture(t)
-	const count = 12
-	receipts := make(chan connections.Operation, count)
-	errs := make(chan error, count)
-	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			r, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", "concurrent-create-key", managedCreateBody(managedStateSecret))
-			receipts <- r
-			errs <- err
-		}()
-	}
-	wg.Wait()
-	close(receipts)
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	fresh := 0
-	var first connections.Operation
-	for r := range receipts {
-		if first.ID == "" {
-			first = r
-		}
-		if r.ID != first.ID {
-			t.Fatal("concurrent replay changed operation")
-		}
-		if !r.Replay {
-			fresh++
-		}
-	}
-	if fresh != 1 || controlCount(t, f.s, "SELECT count(*) FROM managed_connections") != 1 {
-		t.Fatal("concurrent create duplicated", fresh)
-	}
-	if _, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", "concurrent-create-key", managedCreateBody(managedStateOther)); !errors.Is(err, connections.ErrConflict) {
-		t.Fatal("changed secret reused key", err)
-	}
-	if controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='connection'") != 1 {
-		t.Fatal("connection acceptance stored duplicate receipts")
-	}
 }
 
 func TestManagedAliasesDoNotExpandStaticWorkspaceAllowlist(t *testing.T) {
@@ -315,9 +241,7 @@ func TestManagedAliasesDoNotExpandStaticWorkspaceAllowlist(t *testing.T) {
 	a := f.create(t, "a", "connection-a-key", managedStateSecret)
 	f.create(t, "b", "connection-b-key", managedStateRotated)
 	var allowed string
-	if err := f.s.db.QueryRow("SELECT allowed_profiles FROM workspaces WHERE workspace_id='a'").Scan(&allowed); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.db.QueryRow("SELECT allowed_profiles FROM workspaces WHERE workspace_id='a'").Scan(&allowed))
 	if strings.Contains(allowed, a.Selection.Profile) {
 		t.Fatal("managed aliases expanded static workspace allowlist")
 	}
@@ -353,9 +277,7 @@ func TestManagedCredentialMaterialAbsentFromDurableFiles(t *testing.T) {
 func TestManagedConcurrentPayloadStoresOneFingerprint(t *testing.T) {
 	f := newManagedStateFixture(t)
 	second, err := connections.New(f.access, f.s, f.vault, []connections.Adapter{f.discovery})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	const count = 12
 	type result struct {
 		operation connections.Operation
@@ -404,5 +326,39 @@ func TestManagedConcurrentPayloadStoresOneFingerprint(t *testing.T) {
 	}
 	if controlCount(t, f.s, "SELECT count(DISTINCT request_sha256) FROM receipts WHERE namespace='connection'") != 1 {
 		t.Fatal("mixed payload stored multiple fingerprints")
+	}
+}
+
+func TestManagedQuotaProjectionPreservesUnitsFreshnessAndReset(t *testing.T) {
+	f := newManagedStateFixture(t)
+	connection := f.create(t, "a", "quota-details-key", managedStateSecret)
+	calls := f.discovery.count()
+	knownAt := f.clock.Now().Add(time.Second)
+	unknownAt := knownAt.Add(6*time.Minute + time.Second)
+	reset := knownAt.Add(24 * time.Hour)
+	limit, used, remaining := 2.0001, 0.2501, 1.5
+	known := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Unit: "hours", Limit: &limit, Used: &used, Remaining: &remaining, ResetAt: &reset, ObservedAt: knownAt, Source: "synthetic", Precision: "lower_bound"}
+	unknown := provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "gpu", Unit: "seconds", ObservedAt: unknownAt, Source: "synthetic", Precision: "unknown"}
+	int64Ptr := func(value int64) *int64 { return &value }
+	for _, step := range []struct {
+		name    string
+		advance time.Duration
+		observe *provider.QuotaObservation
+		want    connections.Quota
+	}{
+		{"known", time.Second, &known, connections.Quota{Status: "known", Resource: "gpu", Unit: "seconds", Limit: int64Ptr(7200), Used: int64Ptr(901), Remaining: int64Ptr(5400), LocalReserved: int64Ptr(0), ResetAt: &reset, ObservedAt: &knownAt, Precision: "lower_bound"}},
+		{"stale", 6 * time.Minute, nil, connections.Quota{Status: "stale", Resource: "gpu", Unit: "seconds", Limit: int64Ptr(7200), Used: int64Ptr(901), LocalReserved: int64Ptr(0), ResetAt: &reset, ObservedAt: &knownAt, Precision: "unknown"}},
+		{"unknown", time.Second, &unknown, connections.Quota{Status: "unknown", Resource: "gpu", Unit: "seconds", ObservedAt: &unknownAt, Precision: "unknown"}},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			f.clock.advance(step.advance)
+			if step.observe != nil {
+				requireNoError(t, f.s.RecordQuota(t.Context(), *connection.AccountID, "gpu", *step.observe))
+			}
+			got := f.get(t, "a", connection.ID).Quotas[0]
+			if !reflect.DeepEqual(got, step.want) || f.discovery.count() != calls {
+				t.Fatal("quota projection changed observed evidence or refreshed provider", got, step.want)
+			}
+		})
 	}
 }

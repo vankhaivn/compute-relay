@@ -1,9 +1,7 @@
 package sqlite
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -21,10 +19,10 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/testsupport"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -89,34 +87,9 @@ func (p *probeProvider) Start(ctx context.Context, prepared provider.Prepared, a
 }
 func fixtureBundle(t testing.TB) []byte {
 	t.Helper()
-	payload := []byte("raise SystemExit('fixture must never run on the control host')\n")
-	m := packaging.Manifest{Version: packaging.Version, Files: []packaging.File{{Path: "never-executed.py", Bytes: int64(len(payload)), SHA256: string(provider.Digest(payload))}}}
-	manifest, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var b bytes.Buffer
-	gz := gzip.NewWriter(&b)
-	gz.Header.OS = 255
-	tw := tar.NewWriter(gz)
-	for _, entry := range []struct {
-		name string
-		data []byte
-	}{{packaging.ManifestPath, manifest}, {"code/never-executed.py", payload}} {
-		if err = tw.WriteHeader(&tar.Header{Name: entry.name, Size: int64(len(entry.data)), Typeflag: tar.TypeReg, Mode: 0644, ModTime: time.Unix(0, 0).UTC(), Format: tar.FormatUSTAR}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = tw.Write(entry.data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err = gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return b.Bytes()
+	return testsupport.Bundle(t, map[string][]byte{
+		"never-executed.py": []byte("raise SystemExit('fixture must never run on the control host')\n"),
+	})
 }
 func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 	t.Helper()
@@ -126,42 +99,30 @@ func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 	opts := DefaultOptions()
 	opts.Clock = testClock.Now
 	s, err := Open(ctx, root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	blobs, err := blobfs.New(filepath.Join(t.TempDir(), "blobs"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f := &dispatchFixture{authorizeSeed: true, extraProfiles: map[domain.WorkspaceID]admission.Profile{}, s: s, root: root, blobs: blobs, clock: testClock}
 	t.Cleanup(func() { _ = f.s.Close(); _ = blobs.Close() })
 	for _, w := range []domain.WorkspaceID{"a", "b"} {
-		if err = s.PutWorkspace(ctx, auth.Workspace{ID: w, Enabled: true, AllowedProfiles: []string{"fixture"}}); err != nil {
-			t.Fatal(err)
-		}
+		err = s.PutWorkspace(ctx, auth.Workspace{ID: w, Enabled: true, AllowedProfiles: []string{"fixture"}})
+		requireNoError(t, err)
 		for id, data := range map[domain.ObjectID][]byte{"code": fixtureBundle(t), "data": []byte("frozen-input")} {
 			m, err := blobs.Put(ctx, domain.ObjectMetadata{ID: id, WorkspaceID: w, Bytes: -1}, bytes.NewReader(data))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = s.CommitObject(ctx, m); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
+			err = s.CommitObject(ctx, m)
+			requireNoError(t, err)
 		}
 	}
 	f.profile = admission.DefaultProfile(domain.ProviderBinding{Profile: "fixture", ProviderInstanceID: "fake_1", ConfigurationRevision: "one"}, "shared_account")
 	f.profile.CredentialRef = "vault:con_fixture"
 	f.profile.MaxActiveAttempts = 64
-	if err = s.PutProfile(ctx, f.profile, true); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
-		t.Fatal(err)
-	}
+	err = s.PutProfile(ctx, f.profile, true)
+	requireNoError(t, err)
+	err = s.ConfigureScheduler(ctx, scheduler.DefaultSettings())
+	requireNoError(t, err)
 	f.backend, err = fake.NewBackend(scenario)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.attach(t, s)
 	return f
 }
@@ -171,14 +132,11 @@ func (f *dispatchFixture) attach(t testing.TB, s *Store) {
 	s.options.Clock = f.clock.Now
 	binding := provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}
 	p, err := fake.NewBound(f.backend, f.clock, binding)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.adapter = &probeProvider{Bound: p, store: s}
 	f.registry = provider.NewSnapshotRegistry()
-	if err = f.registry.Register(binding, f.adapter); err != nil {
-		t.Fatal(err)
-	}
+	err = f.registry.Register(binding, f.adapter)
+	requireNoError(t, err)
 	for _, profile := range f.extraProfiles {
 		binding := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 		adapter, bindErr := fake.NewBound(f.backend, f.clock, binding)
@@ -190,9 +148,7 @@ func (f *dispatchFixture) attach(t testing.TB, s *Store) {
 		}
 	}
 	f.engine, err = dispatch.New(s, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 
 // These admitted records support private transaction and ledger invariants.
@@ -218,29 +174,20 @@ func (f *dispatchFixture) seedRaw(t testing.TB, w domain.WorkspaceID, number int
 			profile.Binding.Profile += "_" + string(w)
 			profile.CredentialRef += "_" + string(w)
 			raw = strings.Replace(raw, `"profile":"`+f.profile.Binding.Profile+`"`, `"profile":"`+profile.Binding.Profile+`"`, 1)
-			if err := f.s.PutProfile(ctx, profile, true); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, f.s.PutProfile(ctx, profile, true))
 			f.extraProfiles[w] = profile
 			binding := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 			adapter, err := fake.NewBound(f.backend, f.clock, binding)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = f.registry.Register(binding, &probeProvider{Bound: adapter, store: f.s}); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
+			err = f.registry.Register(binding, &probeProvider{Bound: adapter, store: f.s})
+			requireNoError(t, err)
 		}
 		connection := strings.TrimPrefix(profile.CredentialRef, "vault:")
 		_, err := f.s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES(?,?,'fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?) ON CONFLICT(connection_id) DO NOTHING`, connection, w, profile.AccountScope, profile.Binding.Profile, f.clock.Now().Format(time.RFC3339Nano))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 	}
 	req, err := admission.Parse([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	id := scheduler.Identity{WorkspaceID: w, JobID: domain.JobID(fmt.Sprintf("job_%d", number)), AttemptID: domain.AttemptID(fmt.Sprintf("attempt_%d", number))}
 	at := f.clock.Now().Add(-time.Millisecond).Format(time.RFC3339Nano)
 	state, _ := json.Marshal(domain.InitialAttemptState())
@@ -265,15 +212,11 @@ func (f *dispatchFixture) seedRaw(t testing.TB, w domain.WorkspaceID, number int
 		_, err = tx.ExecContext(ctx, "INSERT INTO events(workspace_id,job_id,event_id,sequence,attempt_id,type,occurred_at) VALUES(?,?,?,1,?,'job.accepted',?)", string(w), string(id.JobID), "accepted_"+string(id.AttemptID), string(id.AttemptID), at)
 		return err
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if f.authorizeSeed && !req.Spec().SeparateStart() {
 		service, actor := authorizationService(t, f, w, auth.Execute)
 		_, err := service.Authorize(ctx, actor, w, id.JobID, "seed-grant-"+string(id.AttemptID), authorizationRequest(id.AttemptID, req.Spec().Timeouts.RemoteWallSeconds))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 	}
 	return id
 }
@@ -290,32 +233,22 @@ func (f *dispatchFixture) journal(t testing.TB, id scheduler.Identity) dispatch.
 	t.Helper()
 	var seq int64
 	var j dispatch.Journal
-	if err := f.s.db.QueryRow("SELECT queue_seq FROM scheduler_queue WHERE workspace_id=? AND job_id=? AND attempt_id=?", string(id.WorkspaceID), string(id.JobID), string(id.AttemptID)).Scan(&seq); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.db.QueryRow("SELECT queue_seq FROM scheduler_queue WHERE workspace_id=? AND job_id=? AND attempt_id=?", string(id.WorkspaceID), string(id.JobID), string(id.AttemptID)).Scan(&seq))
 	err := withTx(context.Background(), f.s.db, func(tx *sql.Tx) error { var err error; j, err = loadJournal(context.Background(), tx, seq); return err })
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return j
 }
 func (f *dispatchFixture) state(t testing.TB, id scheduler.Identity) domain.AttemptState {
 	t.Helper()
 	a, _, err := loadAttempt(context.Background(), f.s.db, id.WorkspaceID, id.JobID, id.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return a.State
 }
 func (f *dispatchFixture) restart(t testing.TB) {
 	t.Helper()
-	if err := f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.Close())
 	s, err := Open(context.Background(), f.root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.attach(t, s)
 }
 func (f *dispatchFixture) claim(t testing.TB) dispatch.Work {
@@ -325,13 +258,9 @@ func (f *dispatchFixture) claim(t testing.TB) dispatch.Work {
 		t.Fatalf("claim: %v", err)
 	}
 	w, err := f.s.LoadDispatch(context.Background(), *r.Claim)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	w, err = f.s.ConsumeAuthorization(context.Background(), w.Handle)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return w
 }
 func storePlan(t testing.TB, w dispatch.Work) (provider.Plan, domain.OperationID) {
@@ -341,13 +270,9 @@ func storePlan(t testing.TB, w dispatch.Work) (provider.Plan, domain.OperationID
 		refs[r.Role] = r.Object
 	}
 	snapshot, err := dispatch.Snapshot(w.Job, refs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	job, op, err := dispatch.ResolveJob(w, snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return provider.Plan{Job: job}, op
 }
 
@@ -360,9 +285,7 @@ func TestDispatchRollbackAtLedgerJournalAndEvent(t *testing.T) {
 			plan, op := storePlan(t, work)
 			// Trigger names/tables come only from this static corpus, not external input.
 			_, err := f.s.db.Exec("CREATE TRIGGER inject_dispatch_failure BEFORE INSERT ON " + table + " BEGIN SELECT RAISE(ABORT,'injected'); END;")
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if _, err = f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}); err == nil {
 				t.Fatal("injected commit succeeded")
 			}
@@ -385,18 +308,14 @@ func TestDispatchRollbackAtLedgerJournalAndEvent(t *testing.T) {
 func TestDispatchSubmissionRollbackAndFencedConcurrentGate(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.step(t))
 	f.clock.advance(time.Minute)
 	claim, err := f.s.ClaimRecovery(context.Background(), "gate")
 	if err != nil || claim == nil {
 		t.Fatal(err)
 	}
 	work, err := f.s.LoadDispatch(context.Background(), *claim)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = f.s.db.Exec("CREATE TRIGGER fail_submit BEFORE INSERT ON submission_intents BEGIN SELECT RAISE(ABORT,'no'); END;"); err != nil {
 		t.Fatal(err)
 	}
@@ -452,12 +371,8 @@ func TestDispatchDiskFullRollsBackIntentAndBarrier(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pages, maximum int64
-	if err := f.s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.s.db.QueryRow(fmt.Sprintf("PRAGMA max_page_count=%d", pages+1)).Scan(&maximum); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.db.QueryRow("PRAGMA page_count").Scan(&pages))
+	requireNoError(t, f.s.db.QueryRow(fmt.Sprintf("PRAGMA max_page_count=%d", pages+1)).Scan(&maximum))
 	if _, err := f.s.db.Exec("CREATE TRIGGER dispatch_full BEFORE INSERT ON provider_resources BEGIN INSERT INTO dispatch_fill VALUES(zeroblob(1048576)); END"); err != nil {
 		t.Fatal(err)
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -133,12 +134,8 @@ func collectionScenarioFixture(t *testing.T, scenario fake.Scenario, collectionM
 	id := f.seed(t, "a", 1, false, collectionMode...)
 	submittedControl(t, f, id)
 	for i := 0; i < 2; i++ {
-		if err := f.adapter.Advance(*f.journal(t, id).Remote); err != nil {
-			t.Fatal(err)
-		}
-		if err := f.step(t); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, f.adapter.Advance(*f.journal(t, id).Remote))
+		requireNoError(t, f.step(t))
 	}
 	j := f.journal(t, id)
 	if !j.Observation.Execution.Terminal() {
@@ -146,9 +143,7 @@ func collectionScenarioFixture(t *testing.T, scenario fake.Scenario, collectionM
 	}
 	p := &collectionProvider{probeProvider: f.adapter, fetches: map[string]int{}, files: completedOutputs(t, f, j.Remote.Identity)}
 	blobs, err := blobfs.New(filepath.Join(t.TempDir(), "results"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = blobs.Close() })
 	return f, id, p, blobs
 }
@@ -167,9 +162,7 @@ func completedOutputs(t testing.TB, f *dispatchFixture, identity provider.Identi
 		"artifacts":      []any{map[string]any{"path": "answer.json", "bytes": len(data), "sha256": provider.Digest(data)}},
 	}
 	raw, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return map[string][]byte{
 		collection.ManifestPath: raw, "outputs/answer.json": data, "control/stdout.log": []byte("fixture output\n"),
 		"control/stderr.log": {}, "control/environment.json": []byte(`{"fixture":true}`),
@@ -181,13 +174,9 @@ func collectionEngine(t *testing.T, f *dispatchFixture, p *collectionProvider, b
 	p.probeProvider = f.adapter
 	registry := provider.NewSnapshotRegistry()
 	binding := provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}
-	if err := registry.Register(binding, p); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, registry.Register(binding, p))
 	engine, err := collection.New(repo, registry, blobs, f.clock, collection.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return engine
 }
 func runCollection(t *testing.T, engine *collection.Engine) {
@@ -209,21 +198,42 @@ func TestCollectionPublicationCommitsAtomicRows(t *testing.T) {
 	f, id, p, blobs := collectionFixture(t)
 	service, actor, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	original, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "collect-original", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	runCollection(t, collectionEngine(t, f, p, blobs, f.s))
 	if controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 5 || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect' AND status='succeeded'") != 1 || f.state(t, id).Result != domain.ResultAvailable {
 		t.Fatal("publication did not commit metadata, ticket and result atomically")
 	}
 	var raw string
-	if err = f.s.db.QueryRow("SELECT receipt FROM receipts WHERE namespace='operation' AND subject_id=?", original.Operation.ID).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.db.QueryRow("SELECT receipt FROM receipts WHERE namespace='operation' AND subject_id=?", original.Operation.ID).Scan(&raw)
+	requireNoError(t, err)
 	var receipt operations.Record
 	if json.Unmarshal([]byte(raw), &receipt) != nil || receipt.Operation.Status != domain.OperationAccepted || receipt.Operation.ID != original.Operation.ID {
 		t.Fatal("publication rewrote immutable acceptance")
 	}
+	state := f.state(t, id)
+	counts := snapshotTableCounts(t, f.s, "events", "artifacts", "collection_publications", "operations", "receipts")
+	access, err := auth.New(f.s, f.s)
+	requireNoError(t, err)
+	reader, err := collection.NewReader(access, f.s, blobs)
+	requireNoError(t, err)
+	result, err := reader.Read(ctx, actor, "a", id.JobID, id.AttemptID)
+	if err != nil || len(result.Files) != 5 {
+		t.Fatal("published result unreadable", err)
+	}
+	for _, file := range result.Files {
+		_, stream, err := reader.Open(ctx, actor, "a", id.JobID, id.AttemptID, file.ID)
+		requireNoError(t, err)
+		_, readErr := io.Copy(io.Discard, stream)
+		closeErr := stream.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatal("published artifact unreadable", file.ID, readErr, closeErr)
+		}
+	}
+	replay, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "collect-original", controlRequest(id.AttemptID))
+	if err != nil || !replay.Replay || !reflect.DeepEqual(replay.Operation, original.Operation) || replay.Effect != original.Effect || f.state(t, id) != state {
+		t.Fatal("read changed original receipt or attempt state", err)
+	}
+	requireUnchangedTableCounts(t, f.s, counts)
 }
 
 func TestCollectionFailuresDoNotPublishSQLRows(t *testing.T) {

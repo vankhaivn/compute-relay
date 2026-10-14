@@ -14,9 +14,7 @@ func TestSchedulerMigrationBackfillsStableAcceptanceOrder(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "legacy")
 	root, err := statefs.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if err = initializeRoot(root.Path); err != nil {
 		root.Close()
 		t.Fatal(err)
@@ -32,27 +30,20 @@ func TestSchedulerMigrationBackfillsStableAcceptanceOrder(t *testing.T) {
 	}
 	legacy := &Store{db: db, root: root, options: DefaultOptions()}
 	defer legacy.Close()
-	if err = migrate(ctx, db, migrations[:3]); err != nil {
-		t.Fatal(err)
-	}
+	err = migrate(ctx, db, migrations[:3])
+	requireNoError(t, err)
 	schedulerSeed(t, legacy, "z-first", "a", "p", "account")
 	schedulerSeed(t, legacy, "a-second", "a", "p", "account")
 	var installation string
-	if err = db.QueryRow("SELECT installation_id FROM runtime_installation WHERE singleton=1").Scan(&installation); err != nil {
-		t.Fatal(err)
-	}
-	if err = legacy.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = db.QueryRow("SELECT installation_id FROM runtime_installation WHERE singleton=1").Scan(&installation)
+	requireNoError(t, err)
+	err = legacy.Close()
+	requireNoError(t, err)
 	upgraded, err := Open(ctx, path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer upgraded.Close()
 	rows, err := upgraded.db.Query("SELECT job_id FROM scheduler_queue ORDER BY queue_seq")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var order []string
 	for rows.Next() {
 		var id string
@@ -64,9 +55,7 @@ func TestSchedulerMigrationBackfillsStableAcceptanceOrder(t *testing.T) {
 	}
 	err = rows.Err()
 	rows.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if !reflect.DeepEqual(order, []string{"job_z-first", "job_a-second"}) {
 		t.Fatal("migration reordered equal-time admissions", order)
 	}
@@ -78,9 +67,8 @@ func TestSchedulerMigrationBackfillsStableAcceptanceOrder(t *testing.T) {
 	if err != nil || r.Claim != nil {
 		t.Fatal("upgrade started work without opt-in", r, err)
 	}
-	if err = upgraded.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
-		t.Fatal(err)
-	}
+	err = upgraded.ConfigureScheduler(ctx, scheduler.DefaultSettings())
+	requireNoError(t, err)
 	r, err = upgraded.ClaimNext(ctx, "migration")
 	if err != nil || r.Claim != nil {
 		t.Fatal("retired explicit work was rearmed", r, err)

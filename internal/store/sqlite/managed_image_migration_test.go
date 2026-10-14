@@ -34,32 +34,22 @@ func TestImageMigrationRetiresLegacyAdmissionButPreservesFrozenJobs(t *testing.T
 	ctx := context.Background()
 	var err error
 	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{legacySSHStateAdapter{f.discovery}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	body := strings.Replace(string(managedCreateBody(managedStateSecret)), `"fixture"`, `"ssh"`, 1)
 	op, err := f.service.Submit(ctx, f.principals["a"], "a", "", "legacy-ssh-connection", []byte(body))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.run(t)
 	connection := f.get(t, "a", op.ConnectionID)
 	if connection.Selection == nil {
 		t.Fatal("legacy selection not created")
 	}
 	jobs, err := admission.New(f.access, f.s, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	spec := strings.Replace(dispatchJSON, `"profile":"fixture"`, `"profile":"`+connection.Selection.Profile+`"`, 1)
 	receipt, err := jobs.Submit(ctx, f.principals["a"], "a", "legacy-frozen-job", []byte(spec))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	original, err := jobs.Get(ctx, f.principals["a"], "a", receipt.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	oldPath := copyFixtureAtSchema(t, f.s, 17)
 	upgraded, err := Open(ctx, oldPath, DefaultOptions())
 	if err != nil {

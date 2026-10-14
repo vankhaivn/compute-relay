@@ -27,17 +27,14 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			service, actor := cleanupService(t, f, "a", auth.Read, auth.Operate)
 			body := cleanupBody(id.AttemptID, false, "")
 			receipt, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCleanup, "legacy-cleanup", body)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if state == "running" || strings.HasPrefix(state, "legacy_") {
 				w, err := f.s.ClaimCleanup(ctx, time.Second)
 				if err != nil || w == nil {
 					t.Fatal(w, err)
 				}
-				if err = f.s.BeginCleanupResource(ctx, *w, w.Resources[0]); err != nil {
-					t.Fatal(err)
-				}
+				err = f.s.BeginCleanupResource(ctx, *w, w.Resources[0])
+				requireNoError(t, err)
 			}
 			if state == "succeeded" || state == "failed" {
 				worker, probe := cleanupWorker(t, f)
@@ -48,25 +45,18 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			}
 			root := copyFixtureAtSchema(t, f.s, 27)
 			legacy, err := connect(filepath.Join(root, databaseName))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			legacyHash := rewriteSyntheticCleanupRequest(t, legacy, receipt.Operation.ID, true)
 			// Preserve the exact original legacy JSON layout and insignificant whitespace.
 			var recordRaw string
-			if err = legacy.QueryRow(`SELECT record FROM cleanup_operations WHERE operation_id=?`, receipt.Operation.ID).Scan(&recordRaw); err != nil {
-				t.Fatal(err)
-			}
+			err = legacy.QueryRow(`SELECT record FROM cleanup_operations WHERE operation_id=?`, receipt.Operation.ID).Scan(&recordRaw)
+			requireNoError(t, err)
 			current, err := decodeOperation(recordRaw, 8192)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if state == "legacy_unknown" {
 				p, _ := domain.NewProblem(domain.CodeProviderStateUnknown, "The earlier deletion outcome is unknown.", domain.FailureStageObservation)
 				current.Operation, err = current.Operation.Transition(domain.OperationFailed, &p, current.Operation.UpdatedAt)
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				current.Effect = operations.Failed
 			}
 			oldRecord := func(r operations.Record) string {
@@ -75,9 +65,7 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 					Effect    operations.Effect
 					Replay    bool
 				}{r.Operation, r.Effect, false})
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				return " \n" + string(raw) + "\t"
 			}
 			triggers := []string{"cleanup_identity", "cleanup_revision", "cleanup_terminal", "immutable_receipt"}
@@ -87,9 +75,8 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			var restore []string
 			for _, name := range triggers {
 				var raw string
-				if err = legacy.QueryRow(`SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?`, name).Scan(&raw); err != nil {
-					t.Fatal(err)
-				}
+				err = legacy.QueryRow(`SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?`, name).Scan(&raw)
+				requireNoError(t, err)
 				restore = append(restore, raw)
 				if _, err = legacy.Exec("DROP TRIGGER " + name); err != nil {
 					t.Fatal(err)
@@ -128,9 +115,8 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			for i, q := range queries {
 				before[i] = upgradeRows(t, legacy, q)
 			}
-			if err = legacy.Close(); err != nil {
-				t.Fatal(err)
-			}
+			err = legacy.Close()
+			requireNoError(t, err)
 			calls := f.backend.Stats()
 			f.root = root
 			f.restart(t)
@@ -165,9 +151,8 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			if _, err = f.s.ReplayOperation(ctx, "a", actor.TokenID(), domain.OperationCleanup, key, falseHash); !errors.Is(err, operations.ErrConflict) {
 				t.Fatal("legacy true acceptance was normalized", err)
 			}
-			if err = integrity(ctx, f.s.db); err != nil {
-				t.Fatal(err)
-			}
+			err = integrity(ctx, f.s.db)
+			requireNoError(t, err)
 		})
 	}
 }
@@ -178,16 +163,12 @@ func TestCleanupOperationMigrationKeepsFIFOAndSequenceHighWater(t *testing.T) {
 	_, _, receipt := admitCleanup(t, f, id, "fifo-cleanup", false)
 	root := copyFixtureAtSchema(t, f.s, 27)
 	old, err := connect(filepath.Join(root, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var revisionGuard, terminalGuard string
-	if err = old.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='operation_revision'`).Scan(&revisionGuard); err != nil {
-		t.Fatal(err)
-	}
-	if err = old.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='operation_terminal'`).Scan(&terminalGuard); err != nil {
-		t.Fatal(err)
-	}
+	err = old.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='operation_revision'`).Scan(&revisionGuard)
+	requireNoError(t, err)
+	err = old.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='operation_terminal'`).Scan(&terminalGuard)
+	requireNoError(t, err)
 	if _, err = old.Exec(`DROP TRIGGER operation_revision; DROP TRIGGER operation_terminal; UPDATE operations SET operation_seq=17;` + revisionGuard + `;` + terminalGuard + `; UPDATE sqlite_sequence SET seq=40 WHERE name='operations'`); err != nil {
 		t.Fatal(err)
 	}
@@ -195,9 +176,7 @@ func TestCleanupOperationMigrationKeepsFIFOAndSequenceHighWater(t *testing.T) {
 	legacy.Operation.ID = "op_legacy_failed"
 	p, _ := domain.NewProblem(domain.CodeProviderStateUnknown, "The original deletion outcome is unknown.", domain.FailureStageObservation)
 	legacy.Operation, err = legacy.Operation.Transition(domain.OperationFailed, &p, legacy.Operation.UpdatedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	legacy.Effect = operations.Failed
 	raw, _ := json.Marshal(legacy)
 	if _, err = old.Exec(`INSERT INTO cleanup_operations(cleanup_seq,workspace_id,operation_id,job_id,attempt_id,resource_id,status,revision,created_at,request_sha256,request_json,record)
@@ -205,9 +184,8 @@ func TestCleanupOperationMigrationKeepsFIFOAndSequenceHighWater(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := upgradeRows(t, old, `SELECT operation_seq,operation_id FROM operations ORDER BY operation_seq`)
-	if err = old.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = old.Close()
+	requireNoError(t, err)
 	f.root = root
 	f.restart(t)
 	if got := upgradeRows(t, f.s.db, `SELECT operation_seq,operation_id FROM operations WHERE kind!='cleanup' ORDER BY operation_seq`); !reflect.DeepEqual(got, expected) {
@@ -221,9 +199,8 @@ func TestCleanupOperationMigrationKeepsFIFOAndSequenceHighWater(t *testing.T) {
 	if err = f.s.db.QueryRow(`SELECT seq FROM sqlite_sequence WHERE name='operations'`).Scan(&seq); err != nil || seq != 42 {
 		t.Fatal(seq, err)
 	}
-	if err = integrity(ctx, f.s.db); err != nil {
-		t.Fatal(err)
-	}
+	err = integrity(ctx, f.s.db)
+	requireNoError(t, err)
 }
 
 func TestCleanupOperationMigrationEmptyHighWaterAndOverflowRollback(t *testing.T) {
@@ -240,9 +217,7 @@ func TestCleanupOperationMigrationEmptyHighWaterAndOverflowRollback(t *testing.T
 			}
 			root := copyFixtureAtSchema(t, source, 27)
 			old, err := connect(filepath.Join(root, databaseName))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			high := int64(9000)
 			if overflow {
 				high = math.MaxInt64
@@ -254,14 +229,11 @@ func TestCleanupOperationMigrationEmptyHighWaterAndOverflowRollback(t *testing.T
 				t.Fatal(err)
 			}
 			original := upgradeRows(t, old, `SELECT * FROM cleanup_operations ORDER BY cleanup_seq`)
-			if err = old.Close(); err != nil {
-				t.Fatal(err)
-			}
+			err = old.Close()
+			requireNoError(t, err)
 			upgraded, err := Open(ctx, root, DefaultOptions())
 			if !overflow {
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				defer upgraded.Close()
 				var got int64
 				if err = upgraded.db.QueryRow(`SELECT seq FROM sqlite_sequence WHERE name='operations'`).Scan(&got); err != nil || got != high {
@@ -274,9 +246,7 @@ func TestCleanupOperationMigrationEmptyHighWaterAndOverflowRollback(t *testing.T
 				t.Fatal("overflow silently reassigned operation order")
 			}
 			old, err = connect(filepath.Join(root, databaseName))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer old.Close()
 			var version int
 			if err = old.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 27 {

@@ -36,63 +36,41 @@ func newAdmission(t *testing.T) admissionFixture {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "state")
 	s, err := Open(ctx, path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	for _, w := range []string{"a", "b"} {
-		if err = s.PutWorkspace(ctx, auth.Workspace{ID: domain.WorkspaceID(w), Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
-			t.Fatal(err)
-		}
+		err = s.PutWorkspace(ctx, auth.Workspace{ID: domain.WorkspaceID(w), Enabled: true, AllowedProfiles: []string{"default-gpu"}})
+		requireNoError(t, err)
 		for _, id := range []string{"code", "data"} {
-			if err = s.CommitObject(ctx, domain.ObjectMetadata{WorkspaceID: domain.WorkspaceID(w), ID: domain.ObjectID(id), Bytes: 7, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}); err != nil {
-				t.Fatal(err)
-			}
+			err = s.CommitObject(ctx, domain.ObjectMetadata{WorkspaceID: domain.WorkspaceID(w), ID: domain.ObjectID(id), Bytes: 7, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))})
+			requireNoError(t, err)
 		}
 	}
 	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "default-gpu", ProviderInstanceID: "fake_1", ConfigurationRevision: "rev_1"}, "account_1")
 	profile.CredentialRef = "vault:con_admission_a"
-	if err = s.PutProfile(ctx, profile, true); err != nil {
-		t.Fatal(err)
-	}
+	err = s.PutProfile(ctx, profile, true)
+	requireNoError(t, err)
 	_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES('con_admission_a','a','fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?)`, profile.AccountScope, profile.Binding.Profile, time.Now().UTC().Format(time.RFC3339Nano))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	second := profile
 	second.Binding.Profile += "_b"
 	second.CredentialRef = "vault:con_admission_b"
-	if err = s.PutProfile(ctx, second, true); err != nil {
-		t.Fatal(err)
-	}
+	err = s.PutProfile(ctx, second, true)
+	requireNoError(t, err)
 	_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES('con_admission_b','b','fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?)`, second.AccountScope, second.Binding.Profile, time.Now().UTC().Format(time.RFC3339Nano))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	access, err := auth.New(s, s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	token, _, err := access.Issue(ctx, "a", []auth.Scope{auth.Read, auth.Write}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p, err := access.Authenticate(ctx, token.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	other, _, err := access.Issue(ctx, "b", []auth.Scope{auth.Read, auth.Write}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p2, err := access.Authenticate(ctx, other.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	svc, err := admission.New(access, s, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return admissionFixture{s, path, svc, access, p, p2, token.Reveal(), profile}
 }
 func tableCount(t *testing.T, s *Store, table string) int {
@@ -103,17 +81,13 @@ func tableCount(t *testing.T, s *Store, table string) int {
 		t.Fatal("unsafe test table")
 	}
 	var n int
-	if err := s.db.QueryRow("SELECT count(*) FROM " + table).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow("SELECT count(*) FROM "+table).Scan(&n))
 	return n
 }
 func submit(t *testing.T, f admissionFixture, key string) admission.Receipt {
 	t.Helper()
 	r, err := f.service.Submit(context.Background(), f.p, "a", key, []byte(admissionJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return r
 }
 func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
@@ -121,9 +95,7 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 	ctx := context.Background()
 	first := submit(t, f, "lost-response-key")
 	before, err := f.service.Get(ctx, f.p, "a", first.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if first.Replay || first.Status != "queued" || before.Attempt.Number != 1 || before.Attempt.State != domain.InitialAttemptState() || len(before.AttemptNonce) != 64 || len(before.Objects) != 2 {
 		t.Fatal("bad initial admission")
 	}
@@ -131,16 +103,12 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 	revised.Binding.ProviderInstanceID = "fake_2"
 	revised.Binding.ConfigurationRevision = "rev_2"
 	revised.AccountScope = "account_2"
-	if err = f.s.PutProfile(ctx, revised, true); err != nil {
-		t.Fatal(err)
-	}
-	if err = f.s.PutProfile(ctx, revised, false); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.PutProfile(ctx, revised, true)
+	requireNoError(t, err)
+	err = f.s.PutProfile(ctx, revised, false)
+	requireNoError(t, err)
 	replay, err := f.service.Submit(ctx, f.p, "a", "lost-response-key", []byte(strings.Replace(admissionJSON, ":10", ":1e1", 1)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	expected := first
 	expected.Replay = true
 	if replay != expected {
@@ -153,19 +121,14 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 	if _, err = f.service.Submit(ctx, f.p, "a", "new-request-key", []byte(admissionJSON)); !errors.Is(err, auth.ErrForbidden) {
 		t.Fatal("disabled profile used", err)
 	}
-	if err = f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.Close()
+	requireNoError(t, err)
 	s, err := Open(ctx, f.root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	access, _ := auth.New(s, s)
 	p, err := access.Authenticate(ctx, f.secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	svc, _ := admission.New(access, s, admission.DefaultLimits())
 	replay, err = svc.Submit(ctx, p, "a", "lost-response-key", []byte(admissionJSON))
 	if err != nil || replay != expected {
@@ -282,9 +245,7 @@ func TestAdmissionLimitsAndNoComputeValidation(t *testing.T) {
 		t.Fatal("validation mutated admission", err)
 	}
 	r, err := svc.Submit(ctx, f.p, "a", "limit-first", []byte(admissionJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = svc.Submit(ctx, f.p, "a", "limit-second", []byte(admissionJSON)); !errors.Is(err, admission.ErrLimit) {
 		t.Fatal("limit bypassed", err)
 	}
@@ -297,9 +258,7 @@ func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 	f := newAdmission(t)
 	ctx := context.Background()
 	foreign := domain.ObjectMetadata{ID: "foreign_only", WorkspaceID: "b", Bytes: 7, SHA256: domain.SHA256Digest(strings.Repeat("b", 64))}
-	if err := f.s.CommitObject(ctx, foreign); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.CommitObject(ctx, foreign))
 	for _, id := range []string{"foreign_only", "missing"} {
 		raw := strings.Replace(admissionJSON, `"object_id":"data"`, `"object_id":"`+id+`"`, 1)
 		if _, err := f.service.Submit(ctx, f.p, "a", "missing-key-"+id, []byte(raw)); !errors.Is(err, admission.ErrInputs) {
@@ -307,13 +266,10 @@ func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 		}
 	}
 	req, err := admission.Parse([]byte(admissionJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	key, _ := admission.KeyDigest("revoked-transaction")
-	if err = f.s.RevokeToken(ctx, f.p.TokenID()); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.RevokeToken(ctx, f.p.TokenID())
+	requireNoError(t, err)
 	if _, err = f.s.AdmitJob(ctx, "a", f.p.TokenID(), key, req, admission.DefaultLimits()); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("transaction trusted stale authority", err)
 	}
@@ -324,16 +280,12 @@ func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 func TestDiskFullAdmissionLeavesNoPartialRows(t *testing.T) {
 	f := newAdmission(t)
 	var pages int
-	if err := f.s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.db.QueryRow("PRAGMA page_count").Scan(&pages))
 	if _, err := f.s.db.Exec("PRAGMA max_page_count=" + strconv.Itoa(pages)); err != nil {
 		t.Fatal(err)
 	}
 	var request map[string]any
-	if err := json.Unmarshal([]byte(admissionJSON), &request); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, json.Unmarshal([]byte(admissionJSON), &request))
 	environment := map[string]string{}
 	for i := 0; i < 64; i++ {
 		environment["FIELD_"+strconv.Itoa(i)] = strings.Repeat("x", 4096)

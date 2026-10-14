@@ -19,21 +19,13 @@ import (
 func cleanupService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scopes ...auth.Scope) (*operations.Service, auth.Principal) {
 	t.Helper()
 	access, err := auth.New(f.s, f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	secret, _, err := access.Issue(context.Background(), w, scopes, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p, err := access.Authenticate(context.Background(), secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, err := operations.New(access, f.s, nil, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return service, p
 }
 func cleanupBody(id domain.AttemptID, discard bool, reason string) []byte {
@@ -75,9 +67,7 @@ func preparedFixture(t *testing.T) (*dispatchFixture, scheduler.Identity) {
 		if i == 6 {
 			t.Fatal("fixture never staged")
 		}
-		if err := f.step(t); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, f.step(t))
 	}
 	service, p, _ := controlService(t, f, "a", auth.Operate)
 	if r := cancelControl(t, f, service, p, id); r.Effect != operations.DispatchPrevented {
@@ -95,9 +85,7 @@ func TestCleanupAdmissionPersistsOneOperationAndPerKeyReceipts(t *testing.T) {
 	f, id := collectedFixture(t)
 	service, actor := cleanupService(t, f, "a", auth.Read, auth.Operate)
 	first, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCleanup, "cleanup-original", cleanupBody(id.AttemptID, false, ""))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = service.Submit(ctx, actor, "a", id.JobID, domain.OperationCleanup, "cleanup-second-key", cleanupBody(id.AttemptID, false, "")); err != nil {
 		t.Fatal(err)
 	}
@@ -158,9 +146,7 @@ func TestCleanupStorageRejectsForgedRows(t *testing.T) {
 	f, id := collectedFixture(t)
 	service, p := cleanupService(t, f, "a", auth.Operate)
 	r, err := service.Submit(ctx, p, "a", id.JobID, domain.OperationCleanup, "cleanup-forgery", cleanupBody(id.AttemptID, false, ""))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, statement := range []string{
 		"DELETE FROM operations WHERE kind='cleanup'",
 		"DELETE FROM receipts WHERE namespace='operation' AND scope='cleanup'",
@@ -174,9 +160,8 @@ func TestCleanupStorageRejectsForgedRows(t *testing.T) {
 		}
 	}
 	var execution string
-	if err = f.s.db.QueryRow("SELECT resource_id FROM provider_resources WHERE purpose='execution'").Scan(&execution); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.db.QueryRow("SELECT resource_id FROM provider_resources WHERE purpose='execution'").Scan(&execution)
+	requireNoError(t, err)
 	if _, err = f.s.db.Exec(`INSERT INTO operations(workspace_id,operation_id,job_id,attempt_id,resource_id,status,revision,created_at,request_sha256,request_json,record,kind)
  SELECT workspace_id,'op_forged',job_id,attempt_id,?,status,revision,created_at,request_sha256,request_json,replace(record,operation_id,'op_forged'),kind FROM operations WHERE kind='cleanup'`, execution); err == nil {
 		t.Fatal("cleanup accepted a non-staging target")
@@ -186,13 +171,9 @@ func TestCleanupStorageRejectsForgedRows(t *testing.T) {
 func cleanupPreviewService(t testing.TB, f *dispatchFixture) *cleanup.Service {
 	t.Helper()
 	access, err := auth.New(f.s, f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, err := cleanup.NewService(access, f.s, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return service
 }
 

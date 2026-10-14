@@ -32,33 +32,23 @@ func TestRetentionRejectsExpiredInputsBeforeReadAndCommit(t *testing.T) {
 	service, actor, _ := controlService(t, f, "a", auth.Read, auth.Write, auth.Operate)
 	cancelled := cancelControl(t, f, service, actor, id)
 	proof, err := f.s.RetryInputs(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.clock.advance(8 * 24 * time.Hour)
 	scanRetention(t, f)
 	// Physical bytes still exist until sweep, but expiry already forbids their reuse.
 	stream, err := f.blobs.Open(ctx, "a", "code")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	stream.Close()
 	probe := &retentionReadProbe{inner: f.blobs}
 	access, err := auth.New(f.s, f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, err = operations.New(access, f.s, probe, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationRetryCompute, "expired-retry-key", controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrInputs) || probe.reads != 0 {
 		t.Fatal("expired snapshot read bytes or returned an unclassified SQL failure", err, probe.reads)
 	}
 	req, err := operations.Parse(domain.OperationRetryCompute, controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	key, _ := admission.KeyDigest("stale-proof-key")
 	hash, _ := req.Digest(id.JobID, domain.OperationRetryCompute)
 	command := operations.Command{WorkspaceID: "a", TokenID: actor.TokenID(), JobID: id.JobID, Kind: domain.OperationRetryCompute, Request: req, KeyDigest: key, RequestHash: hash, Inputs: &proof, Limits: admission.DefaultLimits()}
@@ -66,9 +56,7 @@ func TestRetentionRejectsExpiredInputsBeforeReadAndCommit(t *testing.T) {
 		t.Fatal("commit trusted a pre-expiry input proof", err)
 	}
 	job, err := admission.Parse([]byte(dispatchJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err := f.s.ValidateJob(ctx, "a", actor.TokenID(), job); !errors.Is(err, admission.ErrInputs) {
 		t.Fatal("validation accepted expired input metadata", err)
 	}
@@ -97,14 +85,10 @@ func TestRetentionAdmissionReplayOutlivesInputExpiry(t *testing.T) {
 	}
 	service, actor, _ := controlService(t, f, "a", auth.Read, auth.Write, auth.Operate)
 	job, err := admission.Parse([]byte(dispatchJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	key, _ := admission.KeyDigest("retained-receipt-key")
 	original, err := f.s.AdmitJob(ctx, "a", actor.TokenID(), key, job, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cancelControl(t, f, service, actor, scheduler.Identity{WorkspaceID: "a", JobID: original.JobID, AttemptID: original.AttemptID})
 	f.clock.advance(8 * 24 * time.Hour)
 	scanRetention(t, f)

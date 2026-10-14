@@ -35,9 +35,7 @@ func attachGate(t testing.TB, f *dispatchFixture) {
 	cfg.PollDelay = time.Millisecond
 	var err error
 	f.engine, err = dispatch.New(f.s, f.registry, f.blobs, f.clock, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 func gateFixture(t testing.TB, mode fake.SubmitMode, maxActive ...int) *dispatchFixture {
 	t.Helper()
@@ -62,9 +60,7 @@ func prepareGrant(t testing.TB, f *dispatchFixture, id scheduler.Identity) (*exe
 	service, p := authorizationService(t, f, "a", auth.Execute, auth.Read)
 	raw, _ := json.Marshal(executionauth.PrepareRequest{AttemptID: id.AttemptID, MaxPreparationSeconds: 60, ReadyUntil: f.clock.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339), MaxStagedBytes: 1 << 20, AuthorizePrivateStaging: true})
 	receipt, err := service.Prepare(context.Background(), p, "a", id.JobID, "prepare-key-"+string(id.JobID), raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return service, p, receipt, raw
 }
 func readyGate(t testing.TB, f *dispatchFixture, id scheduler.Identity) (*executionauth.Service, auth.Principal, executionauth.Readiness) {
@@ -89,18 +85,15 @@ func TestExecutionGateStartGrantConsumptionAndIntentAreAtomic(t *testing.T) {
 	id := gateSeed(t, f, 1)
 	service, p, ready := readyGate(t, f, id)
 	start, err := service.Start(t.Context(), p, "a", id.JobID, "atomic-start", startGrantRaw(f, id, ready))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	// probeProvider.startControlled checks consumed authority and the committed
 	// submission intent inside the provider callback, before its remote effect.
 	if worked, err := gateStep(t, f); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
 	var consumed, intents int
-	if err = f.s.db.QueryRow("SELECT count(*) FROM attempt_grants WHERE kind='start' AND authorization_id=? AND consumed_at IS NOT NULL", start.AuthorizationID).Scan(&consumed); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.db.QueryRow("SELECT count(*) FROM attempt_grants WHERE kind='start' AND authorization_id=? AND consumed_at IS NOT NULL", start.AuthorizationID).Scan(&consumed)
+	requireNoError(t, err)
 	if err = f.s.db.QueryRow("SELECT count(*) FROM submission_intents WHERE status='accepted'").Scan(&intents); err != nil || consumed != 1 || intents != 1 || f.backend.Stats().SubmitCalls != 1 {
 		t.Fatal("start grant and intent did not commit together", consumed, intents, err)
 	}
@@ -109,9 +102,7 @@ func TestExecutionGateReadyReleasesWorkerLeaseAndRetainsAccountHolds(t *testing.
 	f := gateFixture(t, fake.Accept, 2)
 	settings := scheduler.DefaultSettings()
 	settings.MaxWorkers, settings.MaxActivePerAccount = 3, 2
-	if err := f.s.ConfigureScheduler(t.Context(), settings); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.ConfigureScheduler(t.Context(), settings))
 	for n := 1; n <= 2; n++ {
 		id := gateSeed(t, f, n)
 		readyGate(t, f, id)
@@ -148,9 +139,8 @@ func TestExecutionGateStorageReleasedOnlyAfterConfirmedCleanup(t *testing.T) {
 		t.Fatal("admission released unconfirmed storage")
 	}
 	finishCleanupResourceFixtures(t, f, *w)
-	if err = f.s.CompleteCleanup(t.Context(), *w, cleanup.Outcome{Effect: operations.RemoteDeleted}); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.CompleteCleanup(t.Context(), *w, cleanup.Outcome{Effect: operations.RemoteDeleted})
+	requireNoError(t, err)
 	if controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0") != 0 {
 		t.Fatal("confirmed cleanup retained storage hold")
 	}

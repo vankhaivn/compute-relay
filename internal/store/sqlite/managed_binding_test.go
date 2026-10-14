@@ -19,9 +19,7 @@ func managedBindingFixture(t *testing.T) (*dispatchFixture, provider.BindingSnap
 	f.profile.AccountScope = connections.AccountScope("fixture", "fixture_account")
 	f.profile.CredentialRef = "vault:con_fixture"
 	seedAuthorizationConnection(t, f, "a", "con_fixture")
-	if err := f.s.PutProfile(context.Background(), f.profile, false); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.PutProfile(context.Background(), f.profile, false))
 	return f, provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}
 }
 
@@ -31,9 +29,7 @@ func TestManagedBindingReadPreservesDisabledAndObsoleteFrozenProfiles(t *testing
 	newProfile := f.profile
 	newProfile.Binding = connections.ProfileBinding("con_fixture", 2)
 	newProfile.MaxRemoteWallSeconds = 10
-	if err := f.s.PutProfile(ctx, newProfile, true); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.PutProfile(ctx, newProfile, true))
 	if _, err := f.s.db.Exec(`UPDATE managed_connections SET new_work='disabled',current_profile=?,authentication='pending' WHERE connection_id='con_fixture'`, newProfile.Binding.Profile); err != nil {
 		t.Fatal(err)
 	}

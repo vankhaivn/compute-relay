@@ -46,9 +46,7 @@ func TestCleanupSharedReferencesAcrossBindingAliasesAreRetained(t *testing.T) {
 			_, err := f.s.db.Exec(`INSERT INTO provider_resources
  SELECT 'res_shared','b',?,?,'other_alias',account_scope,purpose,'op_shared',resource_key,identity,plan_sha256,resource_ref,readiness,cleanup_state,created_at
  FROM provider_resources WHERE workspace_id='a' AND purpose=?`, string(other.JobID), string(other.AttemptID), purpose)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			service, principal := cleanupService(t, f, "a", auth.Operate)
 			preview, err := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{f.adapter}).Preview(ctx, principal, "a", id.JobID, id.AttemptID, false)
 			if err != nil || preview.Eligible || preview.Reason != "shared_resource" || len(preview.Resources) != 2 {
@@ -88,9 +86,7 @@ func TestCleanupResourceFencesAndAggregateEvidence(t *testing.T) {
 	if err := f.s.CompleteCleanupResource(ctx, *first, result); !errors.Is(err, operations.ErrChanged) {
 		t.Fatal("deletion confirmed without resource intent", err)
 	}
-	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0]); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.BeginCleanupResource(ctx, *first, first.Resources[0]))
 	f.clock.advance(2 * time.Second)
 	second, err := f.s.ClaimCleanup(ctx, time.Minute)
 	if err != nil || second == nil {
@@ -106,9 +102,7 @@ func TestCleanupResourceFencesAndAggregateEvidence(t *testing.T) {
 	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.AlreadyAbsent}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("aggregate disagreed with resource evidence", err)
 	}
-	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.RemoteDeleted}); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.RemoteDeleted}))
 }
 
 func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
@@ -149,9 +143,7 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 					}
 				}
 				plan, err := f.s.PlanCleanup(ctx, "a", principal.TokenID(), id.JobID, id.AttemptID, false)
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				for _, resource := range plan.Resources {
 					request := resource.Request
 					request.Mode = provider.CleanupDryRun
@@ -221,20 +213,16 @@ func TestCleanupTargetEncodingPreservesReleasedFingerprint(t *testing.T) {
 	// The retired runtime flag was false/omitted in immutable snapshots. Its
 	// removal must preserve the pre-removal request encoding and fingerprint.
 	rows, err := f.s.db.Query(`SELECT target,target_sha256 FROM cleanup_resources WHERE operation_id=? ORDER BY ordinal`, receipt.Operation.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer rows.Close()
 	count := 0
 	for rows.Next() {
 		var target, hash string
-		if err = rows.Scan(&target, &hash); err != nil {
-			t.Fatal(err)
-		}
+		err = rows.Scan(&target, &hash)
+		requireNoError(t, err)
 		var resource cleanup.Resource
-		if err = json.Unmarshal([]byte(target), &resource); err != nil {
-			t.Fatal(err)
-		}
+		err = json.Unmarshal([]byte(target), &resource)
+		requireNoError(t, err)
 		q := resource.Request
 		legacy := struct {
 			provider.CleanupRequest
@@ -251,9 +239,8 @@ func TestCleanupTargetEncodingPreservesReleasedFingerprint(t *testing.T) {
 		}
 		count++
 	}
-	if err = rows.Err(); err != nil {
-		t.Fatal(err)
-	}
+	err = rows.Err()
+	requireNoError(t, err)
 	rows.Close()
 	if count != 2 {
 		t.Fatal("missing original snapshots", count)
@@ -266,9 +253,7 @@ func TestCleanupResourceIntentRejectsChangedPlan(t *testing.T) {
 	service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
 	body, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID})
 	_, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "name-recovery", body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	first, err := f.s.ClaimCleanup(ctx, time.Second)
 	if err != nil || first == nil {
 		t.Fatal(first, err)
@@ -285,12 +270,19 @@ func TestCleanupPreviewDoesNotCreateOperationRows(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)
 	_, actor := cleanupService(t, f, "a", auth.Read, auth.Operate)
+	counts := snapshotTableCounts(t, f.s, "events", "operations", "receipts", "work_leases", "provider_resources")
+	plan, err := f.s.PlanCleanup(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID, false)
+	if err != nil || !plan.Eligible || len(plan.Resources) != 2 {
+		t.Fatal("cleanup plan lost the original inventory", plan, err)
+	}
+	requireUnchangedTableCounts(t, f.s, counts)
 	probe := &cleanupProbe{probeProvider: f.adapter}
 	service := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
 	preview, err := service.Preview(ctx, actor, "a", id.JobID, id.AttemptID, false)
 	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
 		t.Fatal("successful preview lost the original targets", preview, err)
 	}
+	requireUnchangedTableCounts(t, f.s, counts)
 	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='cleanup'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM cleanup_resources") != 0 {
 		t.Fatal("successful preview created cleanup rows")
 	}

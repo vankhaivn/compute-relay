@@ -82,9 +82,7 @@ func TestCollectionPublicationRollbackAndDiskFull(t *testing.T) {
 					t.Fatal(err)
 				}
 				var pages int
-				if err := f.s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, f.s.db.QueryRow("PRAGMA page_count").Scan(&pages))
 				if _, err := f.s.db.Exec(fmt.Sprintf("PRAGMA max_page_count=%d", pages+16)); err != nil {
 					t.Fatal(err)
 				}
@@ -151,9 +149,8 @@ func TestCollectionLeaseContentionStaleFenceAndForgedProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	pin := collectionPin(t, *first, p)
-	if err = f.s.PinCollection(ctx, *first, pin); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.PinCollection(ctx, *first, pin)
+	requireNoError(t, err)
 	f.clock.advance(2 * time.Second)
 	second, err := f.s.ClaimCollection(ctx, time.Minute, 2)
 	if err != nil || second == nil || second.Lease.Generation != first.Lease.Generation+1 || second.Lease.Fence == first.Lease.Fence {
@@ -183,9 +180,7 @@ func collectionPin(t *testing.T, w collection.Work, p *collectionProvider) colle
 		catalog = append(catalog, provider.Artifact{Remote: w.Observation.Remote, Path: path, Bytes: int64(len(data)), SHA256: provider.Digest(data)})
 	}
 	pin, err := collection.BuildSnapshot(w, p.files[collection.ManifestPath], catalog, collection.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return pin
 }
 func TestCollectionSchemaSixUpgradePreservesDispatchAndReceipts(t *testing.T) {
@@ -193,9 +188,7 @@ func TestCollectionSchemaSixUpgradePreservesDispatchAndReceipts(t *testing.T) {
 	f, id, p, blobs := collectionFixture(t)
 	service, principal, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	op, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCollect, "before-upgrade-key", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	before := f.journal(t, id)
 	// Build actual released schema 6 rather than assuming which later tables exist.
 	f.root = copyFixtureAtSchema(t, f.s, 6)
@@ -209,9 +202,8 @@ func TestCollectionSchemaSixUpgradePreservesDispatchAndReceipts(t *testing.T) {
 		t.Fatal("upgrade lost accepted collection", err)
 	}
 	var receipt string
-	if err = f.s.db.QueryRow("SELECT receipt FROM receipts WHERE namespace='operation' AND subject_id=?", string(op.Operation.ID)).Scan(&receipt); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.db.QueryRow("SELECT receipt FROM receipts WHERE namespace='operation' AND subject_id=?", string(op.Operation.ID)).Scan(&receipt)
+	requireNoError(t, err)
 	var stored operations.Record
 	if json.Unmarshal([]byte(receipt), &stored) != nil || stored.Operation.Status != domain.OperationAccepted {
 		t.Fatal("upgrade rewrote old receipt")

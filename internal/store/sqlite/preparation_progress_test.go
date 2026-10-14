@@ -14,18 +14,14 @@ import (
 func TestPreparationProgressRejectsWrongPhaseAndForgedGeneration(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	f.seed(t, "a", 1, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.step(t))
 	f.clock.advance(time.Minute)
 	claim, err := f.s.ClaimRecovery(t.Context(), "progress-storage")
 	if err != nil || claim == nil {
 		t.Fatal(err)
 	}
 	work, err := f.s.LoadDispatch(t.Context(), *claim)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	sample := domain.PreparationProgress{Scope: "staged_input_bytes", Generation: work.Handle.Claim.Generation, BytesTotal: 100, ObservedAt: f.clock.Now()}
 	if err = f.s.RecordPreparationProgress(t.Context(), work.Handle, sample); !errors.Is(err, dispatch.ErrConflict) {
 		t.Fatal("progress outside staging", err)

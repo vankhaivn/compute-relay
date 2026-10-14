@@ -65,9 +65,7 @@ func cleanupWorker(t *testing.T, f *dispatchFixture) (*cleanup.Engine, *cleanupP
 	t.Helper()
 	probe := &cleanupProbe{probeProvider: f.adapter}
 	engine, err := cleanup.New(f.s, cleanupResolver{probe}, cleanup.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return engine, probe
 }
 func runCleanup(t *testing.T, engine *cleanup.Engine) {
@@ -81,9 +79,7 @@ func admitCleanup(t *testing.T, f *dispatchFixture, id scheduler.Identity, key s
 	t.Helper()
 	service, p := cleanupService(t, f, "a", auth.Read, auth.Operate)
 	r, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCleanup, key, cleanupBody(id.AttemptID, discard, ""))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return service, p, r
 }
 func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
@@ -111,9 +107,8 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 		t.Fatal("failure without a problem accepted", err)
 	}
 	finishCleanupResourceFixtures(t, f, *second)
-	if err = f.s.CompleteCleanup(ctx, *second, deleted); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.CompleteCleanup(ctx, *second, deleted)
+	requireNoError(t, err)
 	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.AlreadyAbsent}); !errors.Is(err, cleanup.ErrLeaseLost) {
 		t.Fatal("terminal cleanup was rewritten", err)
 	}
@@ -130,13 +125,9 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 func finishCleanupResourceFixtures(t *testing.T, f *dispatchFixture, w cleanup.Work) {
 	t.Helper()
 	for _, item := range w.Resources {
-		if err := f.s.BeginCleanupResource(context.Background(), w, item); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, f.s.BeginCleanupResource(context.Background(), w, item))
 		result := item.Result
 		result.State, result.Reason = operations.ResourceDeleted, "fixture_deletion_confirmed"
-		if err := f.s.CompleteCleanupResource(context.Background(), w, result); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, f.s.CompleteCleanupResource(context.Background(), w, result))
 	}
 }

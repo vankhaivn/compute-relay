@@ -27,9 +27,7 @@ func TestSchedulerProcessKillBeforeAndAfterClaimCommit(t *testing.T) {
 			cmd.Env = append(os.Environ(), "CR_SCHEDULER_ROOT="+state, "CR_SCHEDULER_MARKER="+marker, "CR_SCHEDULER_PHASE="+phase)
 			cmd.Stdout = os.Stderr
 			cmd.Stderr = os.Stderr
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, cmd.Start())
 			waited := false
 			t.Cleanup(func() {
 				if !waited {
@@ -47,15 +45,11 @@ func TestSchedulerProcessKillBeforeAndAfterClaimCommit(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			if err := cmd.Process.Kill(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, cmd.Process.Kill())
 			_ = cmd.Wait()
 			waited = true
 			s, err := Open(context.Background(), state, DefaultOptions())
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer s.Close()
 			c := schedulerClaim(t, s, "recovered", schedulerNow.Add(time.Minute))
 			wantGeneration := int64(1)
@@ -84,17 +78,12 @@ func TestSchedulerCrashHelper(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Clock = func() time.Time { return schedulerNow }
 	s, err := Open(ctx, path, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = s.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
+	err = s.ConfigureScheduler(ctx, scheduler.DefaultSettings())
+	requireNoError(t, err)
 	id := schedulerSeed(t, s, "crash", "a", "p", "account")
 	ready := func() {
-		if err := os.WriteFile(os.Getenv("CR_SCHEDULER_MARKER"), []byte("at-claim-boundary"), 0600); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, os.WriteFile(os.Getenv("CR_SCHEDULER_MARKER"), []byte("at-claim-boundary"), 0600))
 		for {
 			time.Sleep(time.Second)
 		}
@@ -125,9 +114,7 @@ func TestSchedulerCrashHelper(t *testing.T) {
 		ready()
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 func TestSchedulerDiskFullDoesNotAcknowledgeOrPartiallyClaim(t *testing.T) {
 	s, _ := schedulerStore(t)
@@ -138,9 +125,7 @@ func TestSchedulerDiskFullDoesNotAcknowledgeOrPartiallyClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pages int64
-	if err := s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow("PRAGMA page_count").Scan(&pages))
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA max_page_count=%d", pages+1)); err != nil {
 		t.Fatal(err)
 	}
@@ -152,9 +137,8 @@ func TestSchedulerDiskFullDoesNotAcknowledgeOrPartiallyClaim(t *testing.T) {
 		t.Fatal("disk-full left partial claim")
 	}
 	var raw string
-	if err = s.db.QueryRow("SELECT state FROM attempts WHERE attempt_id=?", string(id.AttemptID)).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	err = s.db.QueryRow("SELECT state FROM attempts WHERE attempt_id=?", string(id.AttemptID)).Scan(&raw)
+	requireNoError(t, err)
 	var state domain.AttemptState
 	if err = json.Unmarshal([]byte(raw), &state); err != nil || state.Orchestration != domain.OrchestrationQueued {
 		t.Fatal("disk-full advanced state", err)

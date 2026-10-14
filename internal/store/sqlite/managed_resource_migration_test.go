@@ -48,21 +48,15 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	legacy := preResourceSSHAdapter{legacySSHStateAdapter{f.discovery}}
 	var err error
 	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{legacy})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	settings := scheduler.DefaultSettings()
 	settings.MaxWorkers, settings.MaxActivePerAccount = 4, 64
-	if err := f.s.ConfigureScheduler(ctx, settings); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.ConfigureScheduler(ctx, settings))
 	create := func(w domain.WorkspaceID, key, secret string) connections.Connection {
 		t.Helper()
 		body := strings.Replace(string(managedCreateBody(secret)), `"fixture"`, `"ssh"`, 1)
 		op, err := f.service.Submit(ctx, f.principals[w], w, "", key, []byte(body))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f.run(t)
 		return f.get(t, w, op.ConnectionID)
 	}
@@ -71,25 +65,17 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	admit := func(c connections.Connection, key string) (scheduler.Identity, admission.Record) {
 		t.Helper()
 		jobs, err := admission.New(f.access, f.s, admission.DefaultLimits())
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		raw := strings.Replace(dispatchJSON, `"profile":"fixture"`, `"profile":"`+c.Selection.Profile+`"`, 1)
 		r, err := jobs.Submit(ctx, f.principals[c.Workspace], c.Workspace, key, []byte(raw))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		permits, err := executionauth.New(f.access, f.s, f.clock)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		if _, err := permits.Authorize(ctx, f.principals[c.Workspace], c.Workspace, r.JobID, key+"-grant", authorizationRequest(r.AttemptID, 10)); err != nil {
 			t.Fatal(err)
 		}
 		record, err := jobs.Get(ctx, f.principals[c.Workspace], c.Workspace, r.JobID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		return scheduler.Identity{WorkspaceID: c.Workspace, JobID: r.JobID, AttemptID: r.AttemptID}, record
 	}
 	first, original := admit(lan, "legacy-first-job")
@@ -105,9 +91,7 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	}
 	queued, queuedOriginal := admit(lan, "legacy-queued-job")
 	oldPath := copyFixtureAtSchema(t, f.s, version)
-	if err := f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.Close())
 	f.s, err = Open(ctx, oldPath, DefaultOptions())
 	if err != nil {
 		t.Fatal("upgrade", err)
@@ -116,9 +100,7 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	f.bind(t)
 	upgraded := upgradedResourceSSHAdapter{legacy}
 	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{upgraded})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, c := range []connections.Connection{lan, vpn} {
 		current := f.get(t, c.Workspace, c.ID)
 		if current.Selection != nil || !current.CredentialPresent || current.Concurrency == nil || current.Concurrency.EffectiveLimit != nil || current.Concurrency.WaitReason == nil || *current.Concurrency.WaitReason != string(scheduler.ResourceUnverified) {

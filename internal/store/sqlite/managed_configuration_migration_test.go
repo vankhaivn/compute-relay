@@ -17,24 +17,17 @@ func TestManagedConfigurationMigrationPreservesOperationsAndConstraints(t *testi
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "legacy-managed")
 	root, err := statefs.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer root.Close()
-	if err = initializeRoot(path); err != nil {
-		t.Fatal(err)
-	}
-	if err = statefs.WriteNew(filepath.Join(path, databaseName), nil); err != nil {
-		t.Fatal(err)
-	}
+	err = initializeRoot(path)
+	requireNoError(t, err)
+	err = statefs.WriteNew(filepath.Join(path, databaseName), nil)
+	requireNoError(t, err)
 	db, err := connect(filepath.Join(path, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer db.Close()
-	if err = migrate(ctx, db, migrations[:12]); err != nil {
-		t.Fatal(err)
-	}
+	err = migrate(ctx, db, migrations[:12])
+	requireNoError(t, err)
 	legacy := &Store{db: db, root: root, options: DefaultOptions()}
 	workspace(t, legacy, "a")
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -47,12 +40,10 @@ func TestManagedConfigurationMigrationPreservesOperationsAndConstraints(t *testi
 		t.Fatal(err)
 	}
 	var installation string
-	if err = db.QueryRow("SELECT installation_id FROM runtime_installation").Scan(&installation); err != nil {
-		t.Fatal(err)
-	}
-	if err = migrate(ctx, db, migrations); err != nil {
-		t.Fatal(err)
-	}
+	err = db.QueryRow("SELECT installation_id FROM runtime_installation").Scan(&installation)
+	requireNoError(t, err)
+	err = migrate(ctx, db, migrations)
+	requireNoError(t, err)
 	var afterID, afterReceipt, pending, stage, key, fingerprint string
 	var wall sql.NullInt64
 	if err = db.QueryRow("SELECT installation_id FROM runtime_installation").Scan(&afterID); err != nil || afterID != installation {
@@ -81,7 +72,6 @@ func TestManagedConfigurationMigrationPreservesOperationsAndConstraints(t *testi
 	if _, err = db.Exec(`UPDATE managed_connection_operations SET installation=X'01' WHERE operation_id='op_old'`); err == nil {
 		t.Fatal("image installation plan is mutable")
 	}
-	if err = integrity(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	err = integrity(ctx, db)
+	requireNoError(t, err)
 }

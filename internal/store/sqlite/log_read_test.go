@@ -41,9 +41,7 @@ func TestLogReadAuthorizesExactAttemptWithoutDispatchEffects(t *testing.T) {
 			t.Fatal(tc, err)
 		}
 	}
-	if err := f.s.RevokeToken(context.Background(), p.TokenID()); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.RevokeToken(context.Background(), p.TokenID()))
 	if _, err := f.s.ReadLogAttempt(context.Background(), "a", p.TokenID(), id.JobID, id.AttemptID); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("revoked read accepted", err)
 	}
@@ -59,9 +57,7 @@ func TestHistoricalProviderReadsKeepDurableRowsUnchanged(t *testing.T) {
 	}
 	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	retry, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "logs-history-retry", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if retry.NewAttemptID == id.AttemptID || !retry.NewAttemptID.Valid() {
 		t.Fatal("retry did not select a new attempt")
 	}

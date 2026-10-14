@@ -23,9 +23,7 @@ func configureHoldWorkers(t *testing.T, f *dispatchFixture, workers int) {
 	t.Helper()
 	settings := scheduler.DefaultSettings()
 	settings.MaxWorkers = workers
-	if err := f.s.ConfigureScheduler(context.Background(), settings); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.ConfigureScheduler(context.Background(), settings))
 }
 
 // These jobs use distinct frozen account bindings in the same operator workspace.
@@ -39,9 +37,7 @@ func holdSeed(t *testing.T, f *dispatchFixture, n, account int) scheduler.Identi
 	f.profile.Binding.Profile = scope
 	f.profile.Binding.ProviderInstanceID = domain.ProviderInstanceID(connection)
 	f.profile.CredentialRef = "vault:" + connection
-	if err := f.s.PutProfile(context.Background(), f.profile, true); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.PutProfile(context.Background(), f.profile, true))
 	if _, err := f.s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,updated_at) VALUES(?,'a','fixture','fixture',1,'verified','enabled',?,?,'fixture_key',?) ON CONFLICT(connection_id) DO NOTHING`, connection, scope, scope, f.clock.Now().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -70,9 +66,7 @@ func TestPreparationHoldsUsePersistedConcurrencyAcrossAccounts(t *testing.T) {
 			}
 			var count, accounts int
 			var total int64
-			if err := f.s.db.QueryRow(`SELECT count(*),count(DISTINCT account_scope),sum(reserved_bytes) FROM attempt_grants WHERE kind='prepare' AND storage_released=0`).Scan(&count, &accounts, &total); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, f.s.db.QueryRow(`SELECT count(*),count(DISTINCT account_scope),sum(reserved_bytes) FROM attempt_grants WHERE kind='prepare' AND storage_released=0`).Scan(&count, &accounts, &total))
 			if count != workers || accounts != min(workers, 2) || total < 1 || total > int64(workers)*executionauth.MaxStagedBytes {
 				t.Fatal("wrong global/account reservation or byte budget", count, accounts, total)
 			}
@@ -89,9 +83,7 @@ func TestLowerPreparationConcurrencyPreservesExistingHoldsAndReceipts(t *testing
 	for i, id := range ids[:2] {
 		var err error
 		receipts[i], err = service.Prepare(context.Background(), actor, "a", id.JobID, "hold-"+string(id.JobID), holdRequest(f, id))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 	}
 	holdsQuery := `SELECT authorization_id,status,reserved_bytes,storage_released FROM attempt_grants WHERE kind='prepare' AND job_id IN ('job_1','job_2') ORDER BY job_id`
 	receiptsQuery := `SELECT key_sha256,request_sha256,receipt FROM receipts WHERE namespace='grant' AND scope='prepare' AND job_id IN ('job_1','job_2') ORDER BY job_id`

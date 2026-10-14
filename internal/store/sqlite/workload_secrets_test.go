@@ -51,18 +51,12 @@ func secretFixture(t testing.TB, mode fake.SubmitMode) (*dispatchFixture, schedu
 func attachSecrets(t testing.TB, f *dispatchFixture, gate *executionauth.Service) (*workloadsecret.Service, *workloadsecret.Pool) {
 	t.Helper()
 	pool, err := workloadsecret.NewPool(bytes.Repeat([]byte{17}, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(pool.Close)
 	a, err := auth.New(f.s, f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, err := workloadsecret.New(a, f.s, pool, f.clock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	gate.WithSecrets(pool)
 	f.engine.WithSecrets(pool)
 	return service, pool
@@ -81,23 +75,18 @@ func secretStartRequest(f *dispatchFixture, id scheduler.Identity, ready executi
 func assertNoWorkloadValues(t testing.TB, s *Store) {
 	t.Helper()
 	rows, err := s.db.Query(`SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var tables []string
 	for rows.Next() {
 		var table string
-		if err = rows.Scan(&table); err != nil {
-			t.Fatal(err)
-		}
+		err = rows.Scan(&table)
+		requireNoError(t, err)
 		tables = append(tables, table)
 	}
 	rows.Close()
 	for _, table := range tables {
 		rows, err := s.db.Query(`SELECT * FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		cols, _ := rows.Columns()
 		for rows.Next() {
 			values := make([]any, len(cols))
@@ -105,9 +94,8 @@ func assertNoWorkloadValues(t testing.TB, s *Store) {
 			for i := range values {
 				targets[i] = &values[i]
 			}
-			if err = rows.Scan(targets...); err != nil {
-				t.Fatal(err)
-			}
+			err = rows.Scan(targets...)
+			requireNoError(t, err)
 			for _, value := range values {
 				raw := fmt.Sprint(value)
 				if strings.Contains(raw, workloadCanary) || strings.Contains(raw, base64.StdEncoding.EncodeToString([]byte(workloadCanary))) {
@@ -115,9 +103,8 @@ func assertNoWorkloadValues(t testing.TB, s *Store) {
 				}
 			}
 		}
-		if err = rows.Err(); err != nil {
-			t.Fatal(err)
-		}
+		err = rows.Err()
+		requireNoError(t, err)
 		rows.Close()
 	}
 }
@@ -126,14 +113,10 @@ func TestWorkloadSecretDurableAbsenceAndAtomicConsumption(t *testing.T) {
 	f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.Accept)
 	raw := secretRequest(f, id, ready)
 	receipt, err := secrets.Supply(t.Context(), p, "a", id.JobID, "secret-storage", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	assertNoWorkloadValues(t, f.s)
 	start, err := gate.Start(t.Context(), p, "a", id.JobID, "secret-start-storage", secretStartRequest(f, id, ready, receipt.AuthorizationID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	assertNoWorkloadValues(t, f.s)
 	// startWithSecrets asserts equal durable consumption timestamps and a started
 	// intent inside the callback before delivering the synthetic material.
@@ -156,9 +139,7 @@ func TestWorkloadSecretRejectedRevokedAndCancelledRequestsPersistNoValues(t *tes
 			f, id, _, p, ready, secrets, _ := secretFixture(t, fake.Accept)
 			raw := secretRequest(f, id, ready)
 			r, err := secrets.Supply(t.Context(), p, "a", id.JobID, "storage-absence", raw)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			switch mode {
 			case "conflict":
 				changed := bytes.Replace(raw, []byte(base64.StdEncoding.EncodeToString([]byte(workloadCanary))), []byte(base64.StdEncoding.EncodeToString([]byte("changed-value"))), 1)

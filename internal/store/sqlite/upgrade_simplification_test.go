@@ -29,22 +29,14 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			ctx := context.Background()
 			script, err := os.ReadFile(filepath.Join(fixture.directory, "runtime.sql"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			raw, err := os.ReadFile(filepath.Join(fixture.directory, "requests.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			var requests baselineFixture
-			if err := json.Unmarshal(raw, &requests); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, json.Unmarshal(raw, &requests))
 			root := loadStateScript(t, string(script))
 			original, err := connect(filepath.Join(root, databaseName))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			var version int
 			if err := original.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != fixture.version {
 				t.Fatalf("fixture schema=%d want %d: %v", version, fixture.version, err)
@@ -64,33 +56,23 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 				}
 			}
 			blobs, err := blobfs.New(filepath.Join(root, "results"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			rows, err := original.Query("SELECT workspace_id,object_id,bytes,sha256 FROM artifacts ORDER BY path")
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			var metadata []domain.ObjectMetadata
 			for rows.Next() {
 				var object domain.ObjectMetadata
-				if err := rows.Scan(&object.WorkspaceID, &object.ID, &object.Bytes, &object.SHA256); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, rows.Scan(&object.WorkspaceID, &object.ID, &object.Bytes, &object.SHA256))
 				metadata = append(metadata, object)
 			}
-			if err := rows.Err(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, rows.Err())
 			rows.Close()
 			if len(metadata) != 5 {
 				t.Fatalf("published artifacts=%d want 5", len(metadata))
 			}
 			for _, object := range metadata {
 				data, err := os.ReadFile(filepath.Join(fixture.artifacts, string(object.ID)))
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				if int64(len(data)) != object.Bytes || provider.Digest(data) != object.SHA256 {
 					t.Fatal("fixture bytes differ from original publication", object.ID)
 				}
@@ -99,12 +81,8 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 				}
 			}
 			// Close the restored historical blob store before migrating the installation.
-			if err := blobs.Close(); err != nil {
-				t.Fatal(err)
-			}
-			if err := original.Close(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, blobs.Close())
+			requireNoError(t, original.Close())
 			s, err := Open(ctx, root, DefaultOptions())
 			if err != nil {
 				t.Fatal("upgrade", err)
@@ -129,14 +107,10 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 				reason := map[string]string{"granted status": "account_capacity", "queued status": "workspace_fifo"}[want.Name]
 				if reason != "" {
 					var response map[string]any
-					if err := json.Unmarshal(want.Response, &response); err != nil {
-						t.Fatal(err)
-					}
+					requireNoError(t, json.Unmarshal(want.Response, &response))
 					response["scheduling"] = map[string]string{"reason": reason}
 					want.Response, err = json.Marshal(response)
-					if err != nil {
-						t.Fatal(err)
-					}
+					requireNoError(t, err)
 				}
 				status, got := baselineCall(t, handler, requests.Token, want)
 				if status != want.Status || !sameJSON(t, got, want.Response) {
@@ -144,30 +118,20 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 				}
 			}
 			access, err := auth.New(s, s)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			principal, err := access.Authenticate(ctx, requests.Token)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			var clockMillis int64
-			if err := s.db.QueryRow("SELECT clock_ms FROM scheduler_control WHERE singleton=1").Scan(&clockMillis); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, s.db.QueryRow("SELECT clock_ms FROM scheduler_control WHERE singleton=1").Scan(&clockMillis))
 			connections, err := s.ListConnections(ctx, "a", principal.TokenID())
 			if err != nil || len(connections) != len(before[2]) {
 				t.Fatalf("connections unreadable: %v %v", connections, err)
 			}
 			blobs, err = blobfs.New(filepath.Join(root, "results"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer blobs.Close()
 			reader, err := collection.NewReader(access, s, blobs)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			publications := upgradeRows(t, s.db, "SELECT workspace_id,job_id,attempt_id FROM collection_publications")
 			if len(publications) != 1 {
 				t.Fatalf("publications=%d want 1", len(publications))
@@ -180,9 +144,7 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 			}
 			for _, file := range result.Files {
 				meta, stream, err := reader.Open(ctx, principal, w, job, attempt, file.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				data, err := io.ReadAll(stream)
 				closeErr := stream.Close()
 				if err != nil || closeErr != nil || int64(len(data)) != meta.Object.Bytes || provider.Digest(data) != meta.Object.SHA256 {
@@ -196,14 +158,10 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 func upgradeRows(t *testing.T, db *sql.DB, query string) [][]any {
 	t.Helper()
 	rows, err := db.Query(query)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer rows.Close()
 	columns, err := rows.Columns()
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var result [][]any
 	for rows.Next() {
 		values := make([]any, len(columns))
@@ -211,13 +169,9 @@ func upgradeRows(t *testing.T, db *sql.DB, query string) [][]any {
 		for i := range values {
 			targets[i] = &values[i]
 		}
-		if err := rows.Scan(targets...); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, rows.Scan(targets...))
 		result = append(result, values)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, rows.Err())
 	return result
 }

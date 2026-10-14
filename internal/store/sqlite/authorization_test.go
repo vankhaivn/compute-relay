@@ -33,46 +33,32 @@ func managedFixture(t testing.TB, scenario fake.Scenario, maxActive ...int) *dis
 		f.profile.MaxActiveAttempts = maxActive[0]
 	}
 	seedAuthorizationConnection(t, f, "a", "con_fixture")
-	if err := f.s.PutProfile(context.Background(), f.profile, true); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.PutProfile(context.Background(), f.profile, true))
 	attachManaged(t, f)
 	return f
 }
 func seedAuthorizationConnection(t testing.TB, f *dispatchFixture, workspace domain.WorkspaceID, id string) {
 	t.Helper()
 	_, err := f.s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,updated_at) VALUES(?,?,'fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?)`, id, string(workspace), f.profile.AccountScope, f.clock.Now().Format(time.RFC3339Nano))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 func attachManaged(t testing.TB, f *dispatchFixture) {
 	t.Helper()
 	f.attach(t, f.s)
 	var err error
 	f.engine, err = dispatch.New(f.s, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 func authorizationService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scopes ...auth.Scope) (*executionauth.Service, auth.Principal) {
 	t.Helper()
 	a, err := auth.New(f.s, f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	secret, _, err := a.Issue(context.Background(), w, scopes, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p, err := a.Authenticate(context.Background(), secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, err := executionauth.New(a, f.s, f.clock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return service, p
 }
 func authorizationRequest(attempt domain.AttemptID, wall int64) []byte {
@@ -83,9 +69,7 @@ func grantAuthorization(t testing.TB, f *dispatchFixture, id scheduler.Identity)
 	t.Helper()
 	service, p := authorizationService(t, f, id.WorkspaceID, auth.Execute)
 	r, err := service.Authorize(context.Background(), p, id.WorkspaceID, id.JobID, "grant-original-key", authorizationRequest(id.AttemptID, 10))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return r, service, p
 }
 func managedClaim(t testing.TB, f *dispatchFixture) dispatch.Work {
@@ -95,53 +79,70 @@ func managedClaim(t testing.TB, f *dispatchFixture) dispatch.Work {
 		t.Fatalf("managed claim=%+v error=%v", r, err)
 	}
 	w, err := f.s.LoadDispatch(context.Background(), *r.Claim)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return w
 }
-func TestAuthorizationConcurrentReplayStoresOneGrant(t *testing.T) {
-	f := managedFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	service, p := authorizationService(t, f, "a", auth.Execute)
-	const requests = 12
-	results := make(chan executionauth.Receipt, requests)
-	errs := make(chan error, requests)
-	var wg sync.WaitGroup
-	for i := 0; i < requests; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			r, e := service.Authorize(context.Background(), p, "a", id.JobID, "same-grant-key", authorizationRequest(id.AttemptID, 10))
-			results <- r
-			errs <- e
-		}()
-	}
-	wg.Wait()
-	close(results)
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	var grant domain.OperationID
-	fresh := 0
-	for r := range results {
-		if grant == "" {
-			grant = r.AuthorizationID
-		}
-		if r.AuthorizationID != grant {
-			t.Fatal("duplicate receipt identity")
-		}
-		if !r.Replay {
-			fresh++
-		}
-	}
-	if fresh != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 {
-		t.Fatal("concurrent permit multiplication", fresh)
+func TestAuthorizationConcurrentGrantsHaveOneWinner(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		key       func(int) string
+		replays   int
+		conflicts int
+	}{
+		{"same key", func(int) string { return "same-grant-key" }, 11, 0},
+		{"distinct keys", func(i int) string { return fmt.Sprintf("distinct-permit-key-%d", i) }, 0, 11},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := managedFixture(t, fake.DefaultScenario())
+			id := f.seed(t, "a", 1, false)
+			service, actor := authorizationService(t, f, "a", auth.Execute)
+			const requests = 12
+			type result struct {
+				receipt executionauth.Receipt
+				err     error
+			}
+			results := make(chan result, requests)
+			var wg sync.WaitGroup
+			for i := range requests {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					r, err := service.Authorize(context.Background(), actor, "a", id.JobID, tc.key(i), authorizationRequest(id.AttemptID, 10))
+					results <- result{r, err}
+				}(i)
+			}
+			wg.Wait()
+			close(results)
+			var grant domain.OperationID
+			fresh, replays, conflicts := 0, 0, 0
+			for result := range results {
+				if errors.Is(result.err, executionauth.ErrConflict) {
+					conflicts++
+					continue
+				}
+				if result.err != nil {
+					t.Fatal(result.err)
+				}
+				if grant == "" {
+					grant = result.receipt.AuthorizationID
+				}
+				if result.receipt.AuthorizationID != grant {
+					t.Fatal("concurrent grant changed receipt identity")
+				}
+				if result.receipt.Replay {
+					replays++
+				} else {
+					fresh++
+				}
+			}
+			if fresh != 1 || replays != tc.replays || conflicts != tc.conflicts ||
+				controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 {
+				t.Fatal("concurrent permit multiplication", fresh, replays, conflicts)
+			}
+		})
 	}
 }
+
 func TestAuthorizationTransactionRejectsRevokedReplay(t *testing.T) {
 	f := managedFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
@@ -197,9 +198,8 @@ func TestEveryClaimRequiresDurableAuthorization(t *testing.T) {
 		t.Fatal("ungranted attempt claimed", r, err)
 	}
 	grantAuthorization(t, f, id)
-	if err = f.step(t); err != nil {
-		t.Fatal(err)
-	}
+	err = f.step(t)
+	requireNoError(t, err)
 	if f.backend.Stats().PrepareCalls != 1 {
 		t.Fatal("authorized attempt did not prepare exactly once")
 	}
@@ -216,9 +216,7 @@ func TestAuthorizationRetryCreatesDistinctGrantRows(t *testing.T) {
 	control, p, _ := controlService(t, f, "a", auth.Operate)
 	cancelControl(t, f, control, p, id)
 	retry, err := control.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-grant-key", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, execute := authorizationService(t, f, "a", auth.Execute)
 	if _, err = service.Authorize(context.Background(), execute, "a", id.JobID, "retry-new-permit", authorizationRequest(retry.NewAttemptID, 10)); err != nil {
 		t.Fatal(err)
@@ -241,16 +239,12 @@ func seedAuthorizationGPU(t testing.TB, f *dispatchFixture, w domain.WorkspaceID
 		profile.Binding.ConfigurationRevision = "managed_" + string(w)
 		profile.Binding.ProviderInstanceID = domain.ProviderInstanceID(connection)
 		profile.CredentialRef = "vault:" + connection
-		if err := f.s.PutProfile(ctx, profile, true); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, f.s.PutProfile(ctx, profile, true))
 	}
 	raw := strings.Replace(dispatchJSON, `"accelerator":"cpu"`, `"accelerator":"gpu","minimum_gpu_count":1`, 1)
 	raw = strings.Replace(raw, `"profile":"fixture"`, `"profile":"`+profile.Binding.Profile+`"`, 1)
 	req, err := admission.Parse([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	id := scheduler.Identity{WorkspaceID: w, JobID: domain.JobID(fmt.Sprintf("gpu_job_%d", n)), AttemptID: domain.AttemptID(fmt.Sprintf("gpu_attempt_%d", n))}
 	at := f.clock.Now().Add(-time.Millisecond).Format(time.RFC3339Nano)
 	state, _ := json.Marshal(domain.InitialAttemptState())
@@ -269,9 +263,7 @@ func seedAuthorizationGPU(t testing.TB, f *dispatchFixture, w domain.WorkspaceID
 		_, err := tx.ExecContext(ctx, "INSERT INTO events(workspace_id,job_id,event_id,sequence,attempt_id,type,occurred_at) VALUES(?,?,?,1,?,'job.accepted',?)", string(w), string(id.JobID), "accepted_"+string(id.AttemptID), string(id.AttemptID), at)
 		return err
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return id
 }
 func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
@@ -288,9 +280,7 @@ func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
 	}
 	remaining, limit, used := 15.0, 15.0, 0.0
 	q := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Limit: &limit, Used: &used, Remaining: &remaining, Unit: "seconds", ObservedAt: f.clock.Now(), Source: "fixture", Precision: "lower_bound"}
-	if err := f.s.RecordQuota(context.Background(), f.profile.AccountScope, "gpu", q); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.RecordQuota(context.Background(), f.profile.AccountScope, "gpu", q))
 	if _, err := grant(sa, pa, a); err != nil {
 		t.Fatal(err)
 	}
@@ -304,9 +294,7 @@ func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
 		}
 		return err
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	// Its own reservation must not prevent the already-authorized attempt from starting.
 	r, err := f.s.ClaimNext(context.Background(), "quota_worker")
 	if err != nil || r.Claim == nil || r.Claim.Identity != a {
@@ -332,6 +320,7 @@ func TestCollectionRecoveryReusesOriginalPermitAndOperation(t *testing.T) {
 		t.Fatal("collection claim missing", work, err)
 	}
 	original := work.Lease
+	binding := work.Binding
 	if count := controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'"); count != 1 {
 		t.Fatal("collection created duplicate tickets", count)
 	}
@@ -341,43 +330,13 @@ func TestCollectionRecoveryReusesOriginalPermitAndOperation(t *testing.T) {
 	f.clock.advance(2 * time.Minute)
 	f.restart(t)
 	work, err = f.s.ClaimCollection(ctx, time.Minute, 1)
-	if err != nil || work == nil || work.Lease.OperationID != original.OperationID || work.Lease.AttemptID != original.AttemptID || work.Lease.Generation != original.Generation+1 || work.Lease.Fence == original.Fence {
+	if err != nil || work == nil || work.Lease.OperationID != original.OperationID || work.Lease.AttemptID != original.AttemptID || work.Lease.Generation != original.Generation+1 || work.Lease.Fence == original.Fence || work.Binding != binding {
 		t.Fatal("collection recovery changed identity or lost fencing", work, err)
 	}
 	if count := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'"); count != 1 {
 		t.Fatal("collection created authorization", count)
 	}
 	assertNoNewCompute(t, f)
-}
-
-func TestAuthorizationDistinctKeysStoreOneGrant(t *testing.T) {
-	f := managedFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	service, p := authorizationService(t, f, "a", auth.Execute)
-	const count = 12
-	results := make(chan error, count)
-	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_, err := service.Authorize(context.Background(), p, "a", id.JobID, fmt.Sprintf("distinct-permit-key-%d", i), authorizationRequest(id.AttemptID, 10))
-			results <- err
-		}(i)
-	}
-	wg.Wait()
-	close(results)
-	won := 0
-	for err := range results {
-		if err == nil {
-			won++
-		} else if !errors.Is(err, executionauth.ErrConflict) {
-			t.Fatal(err)
-		}
-	}
-	if won != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 {
-		t.Fatal("distinct keys multiplied grant", won)
-	}
 }
 
 func TestAuthorizationConnectionOwnershipAndDisabledContinuation(t *testing.T) {

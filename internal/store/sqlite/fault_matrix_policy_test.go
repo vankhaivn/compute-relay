@@ -14,17 +14,11 @@ func TestQuotaRejectionStoresUnknownAllowanceWithoutInventedValues(t *testing.T)
 	f := newDispatchFixture(t, scenario)
 	f.adapter.rejectQuota = true
 	f.seed(t, "a", 1, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.step(t))
+	requireNoError(t, f.step(t))
 	var raw string
 	var exhausted bool
-	if err := f.s.db.QueryRow("SELECT observation,exhausted FROM scheduler_quotas WHERE account_scope=? AND resource='cpu'", f.profile.AccountScope).Scan(&raw, &exhausted); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.db.QueryRow("SELECT observation,exhausted FROM scheduler_quotas WHERE account_scope=? AND resource='cpu'", f.profile.AccountScope).Scan(&raw, &exhausted))
 	var q provider.QuotaObservation
 	if json.Unmarshal([]byte(raw), &q) != nil || !exhausted || q.Limit != nil || q.Remaining != nil || q.Used != nil || q.Status != provider.QuotaUnknown {
 		t.Fatal("invented provider allowance", raw)

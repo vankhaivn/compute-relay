@@ -20,13 +20,9 @@ func TestQuotaEvidenceKeepsObservedTimeAndRejectsFutureEvidence(t *testing.T) {
 	s, _ := clockStore(t, opts, len(migrations))
 	observed := schedulerNow.Add(-time.Second).Add(123 * time.Nanosecond)
 	q := schedulerQuota(10, observed)
-	if err := s.RecordQuota(testctx, "account", "gpu", q); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.RecordQuota(testctx, "account", "gpu", q))
 	var raw string
-	if err := s.db.QueryRow(`SELECT observation FROM scheduler_quotas WHERE account_scope='account' AND resource='gpu'`).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow(`SELECT observation FROM scheduler_quotas WHERE account_scope='account' AND resource='gpu'`).Scan(&raw))
 	var stored provider.QuotaObservation
 	if json.Unmarshal([]byte(raw), &stored) != nil || !stored.ObservedAt.Equal(observed) {
 		t.Fatal("quota observation was replaced by repository time", raw)
@@ -46,28 +42,20 @@ func TestProgressEvidenceKeepsObservedTimeAndRejectsFutureEvidence(t *testing.T)
 			t.Fatal(claim, err)
 		}
 		work, err := f.s.LoadDispatch(testctx, *claim.Claim)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		work, err = f.s.ConsumeAuthorization(testctx, work.Handle)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		plan, operation := storePlan(t, work)
 		work, err = f.s.CommitDispatch(testctx, work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: operation})
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		observed := f.clock.Now().Add(123 * time.Nanosecond)
 		f.clock.advance(time.Second)
 		sample := domain.PreparationProgress{Scope: "staged_input_bytes", Generation: work.Handle.Claim.Generation, BytesCompleted: 1, BytesTotal: 2, ObservedAt: observed}
-		if err = f.s.RecordPreparationProgress(testctx, work.Handle, sample); err != nil {
-			t.Fatal(err)
-		}
+		err = f.s.RecordPreparationProgress(testctx, work.Handle, sample)
+		requireNoError(t, err)
 		var raw string
-		if err = f.s.db.QueryRow(`SELECT progress FROM preparation_progress WHERE workspace_id='a'`).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
+		err = f.s.db.QueryRow(`SELECT progress FROM preparation_progress WHERE workspace_id='a'`).Scan(&raw)
+		requireNoError(t, err)
 		var stored domain.PreparationProgress
 		if json.Unmarshal([]byte(raw), &stored) != nil || !stored.ObservedAt.Equal(observed) {
 			t.Fatal("preparation observation was replaced by repository time", raw)
@@ -86,13 +74,11 @@ func TestProgressEvidenceKeepsObservedTimeAndRejectsFutureEvidence(t *testing.T)
 		observed := f.clock.Now().Add(123 * time.Nanosecond)
 		f.clock.advance(time.Second)
 		sample := initialProgress(*work, observed)
-		if err = f.s.RecordCollectionProgress(testctx, *work, "discovering", sample); err != nil {
-			t.Fatal(err)
-		}
+		err = f.s.RecordCollectionProgress(testctx, *work, "discovering", sample)
+		requireNoError(t, err)
 		var raw string
-		if err = f.s.db.QueryRow(`SELECT progress FROM collection_progress WHERE workspace_id='a'`).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
+		err = f.s.db.QueryRow(`SELECT progress FROM collection_progress WHERE workspace_id='a'`).Scan(&raw)
+		requireNoError(t, err)
 		var stored domain.CollectionProgress
 		if json.Unmarshal([]byte(raw), &stored) != nil || !stored.ObservedAt.Equal(observed) {
 			t.Fatal("collection observation was replaced by repository time", raw)

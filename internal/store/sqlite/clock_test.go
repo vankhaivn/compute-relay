@@ -23,24 +23,17 @@ func clockStore(t *testing.T, options Options, version int) (*Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state")
 	root, err := statefs.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = initializeRoot(root.Path); err != nil {
-		t.Fatal(err)
-	}
-	if err = statefs.WriteNew(filepath.Join(root.Path, databaseName), nil); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
+	err = initializeRoot(root.Path)
+	requireNoError(t, err)
+	err = statefs.WriteNew(filepath.Join(root.Path, databaseName), nil)
+	requireNoError(t, err)
 	db, err := connect(filepath.Join(root.Path, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	s := &Store{db: db, root: root, options: options}
 	t.Cleanup(func() { _ = s.Close() })
-	if err = migrate(context.Background(), db, migrations[:version]); err != nil {
-		t.Fatal(err)
-	}
+	err = migrate(context.Background(), db, migrations[:version])
+	requireNoError(t, err)
 	return s, path
 }
 
@@ -48,15 +41,11 @@ func TestClockLegacySubmillisecondWriteSurvivesRollback(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Clock = func() time.Time { return schedulerNow }
 	s, _ := clockStore(t, opts, len(migrations))
-	if err := s.ConfigureScheduler(testctx, scheduler.DefaultSettings()); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.ConfigureScheduler(testctx, scheduler.DefaultSettings()))
 	id := schedulerSeed(t, s, "fraction", "a", "p", "account")
 	root := copyFixtureAtSchema(t, s, 24)
 	legacy, err := connect(filepath.Join(root, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer legacy.Close()
 	historical := time.Now().UTC().Truncate(time.Millisecond).Add(time.Hour).Add(123 * time.Nanosecond)
 	stamp := historical.Format(time.RFC3339Nano)
@@ -67,14 +56,10 @@ func TestClockLegacySubmillisecondWriteSurvivesRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := upgradeRows(t, legacy, `SELECT state,revision,created_at,updated_at FROM attempts`)
-	if err := legacy.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, legacy.Close())
 	opts.Clock = func() time.Time { return historical.Add(-time.Second) }
 	upgraded, err := Open(testctx, root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer upgraded.Close()
 	after := upgradeRows(t, upgraded.db, `SELECT state,revision,created_at,updated_at FROM attempts`)
 	if len(after) != 1 || after[0][3] != stamp || !reflect.DeepEqual(before, after) {
@@ -100,9 +85,7 @@ func TestClockSamplesAfterTransactionSlotIsAcquired(t *testing.T) {
 	opts.Clock = wall.Now
 	s, _ := clockStore(t, opts, len(migrations))
 	holding, err := s.db.BeginTx(testctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer holding.Rollback()
 	result := make(chan time.Time, 1)
 	failures := make(chan error, 1)
@@ -118,12 +101,8 @@ func TestClockSamplesAfterTransactionSlotIsAcquired(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	wall.advance(time.Minute)
-	if err := holding.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-failures; err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, holding.Commit())
+	requireNoError(t, <-failures)
 	if got := <-result; !got.Equal(wall.Now()) {
 		t.Fatal("clock sampled before acquiring transaction", got, wall.Now())
 	}
@@ -183,14 +162,10 @@ func TestClockConcurrentRollbackAndRestartKeepCommittedFloor(t *testing.T) {
 	if _, err := s.LookupWorkspace(testctx, "rolled-back-clock"); !errors.Is(err, auth.ErrNotFound) {
 		t.Fatal("failed transaction persisted prefix", err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Close())
 	opts.Clock = func() time.Time { return schedulerNow.Add(-time.Hour) }
 	reopened, err := Open(testctx, root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer reopened.Close()
 	if err := reopened.write(testctx, func(_ context.Context, _ *sql.Tx, now time.Time) error {
 		if !now.Equal(floor) {
@@ -207,9 +182,7 @@ func TestClockExpiredTokenCannotReturnAfterRollbackOrRestart(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Clock = wall.Now
 	s, root := clockStore(t, opts, len(migrations))
-	if err := s.PutWorkspace(testctx, auth.Workspace{ID: "a", Enabled: true}); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.PutWorkspace(testctx, auth.Workspace{ID: "a", Enabled: true}))
 	wall.advance(123 * time.Nanosecond)
 	access, _ := auth.New(s, s)
 	expiry := schedulerNow.Add(time.Second)
@@ -225,13 +198,10 @@ func TestClockExpiredTokenCannotReturnAfterRollbackOrRestart(t *testing.T) {
 	if _, err = access.Authenticate(testctx, secret.Reveal()); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("wall rollback resurrected token", err)
 	}
-	if err = s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = s.Close()
+	requireNoError(t, err)
 	reopened, err := Open(testctx, root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer reopened.Close()
 	access, _ = auth.New(reopened, reopened)
 	if _, err = access.Authenticate(testctx, secret.Reveal()); !errors.Is(err, auth.ErrUnauthenticated) {
@@ -244,15 +214,11 @@ func TestClockObjectInventoryUsesSameSampleAndRollsBackWithMetadata(t *testing.T
 	opts := DefaultOptions()
 	opts.Clock = func() time.Time { return now }
 	s, _ := clockStore(t, opts, len(migrations))
-	if err := s.PutWorkspace(testctx, auth.Workspace{ID: "a", Enabled: true}); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.PutWorkspace(testctx, auth.Workspace{ID: "a", Enabled: true}))
 	now = now.Add(123 * time.Nanosecond)
 	m := object("clock-object")
 	m.WorkspaceID = "a"
-	if err := s.CommitObject(testctx, m); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.CommitObject(testctx, m))
 	var stamp string
 	if err := s.db.QueryRow(`SELECT recorded_at FROM retention_inventory WHERE kind='input' AND object_id=?`, m.ID).Scan(&stamp); err != nil || stamp != now.Format(time.RFC3339Nano) {
 		t.Fatal("retention stamp did not use transaction sample", stamp, err)
@@ -293,15 +259,12 @@ func TestClockNewClaimSurvivesWallRollbackAndRestart(t *testing.T) {
 	if err != nil || before.Handle.Claim != claim || !before.Job.Attempt.UpdatedAt.Equal(claimedAt) {
 		t.Fatal("rollback lost current claim or regressed attempt", before.Handle, err)
 	}
-	if err = f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.Close()
+	requireNoError(t, err)
 	opts := DefaultOptions()
 	opts.Clock = f.clock.Now
 	reopened, err := Open(testctx, f.root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.attach(t, reopened)
 	after, err := f.s.LoadDispatch(testctx, claim)
 	if err != nil || after.Handle != before.Handle || after.Job.Attempt != before.Job.Attempt || after.Job.Profile != before.Job.Profile || after.Job.AttemptNonce != before.Job.AttemptNonce {
@@ -321,13 +284,9 @@ func TestClockLegacyQuotaOnlyFloorPreservesEvidencePrecision(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE scheduler_control SET clock_ms=? WHERE singleton=1`, schedulerNow.UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Close())
 	upgraded, err := Open(testctx, root, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer upgraded.Close()
 	if err = upgraded.RecordQuota(testctx, "account", "gpu", observation); err != nil {
 		t.Fatal("legacy fractional observation became future evidence", err)
@@ -342,13 +301,9 @@ func TestClockLegacyQuotaOnlyFloorPreservesEvidencePrecision(t *testing.T) {
 func TestClockLegacyEmptyFloorStaysZero(t *testing.T) {
 	options := DefaultOptions()
 	legacy, root := clockStore(t, options, 24)
-	if err := legacy.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, legacy.Close())
 	upgraded, err := Open(testctx, root, options)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer upgraded.Close()
 	var floor int64
 	if err = upgraded.db.QueryRow(`SELECT clock_ms FROM scheduler_control WHERE singleton=1`).Scan(&floor); err != nil || floor != 0 {

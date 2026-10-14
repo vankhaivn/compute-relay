@@ -22,21 +22,13 @@ import (
 func controlService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scopes ...auth.Scope) (*operations.Service, auth.Principal, string) {
 	t.Helper()
 	access, err := auth.New(f.s, f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	secret, _, err := access.Issue(context.Background(), w, scopes, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p, err := access.Authenticate(context.Background(), secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, err := operations.New(access, f.s, f.blobs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return service, p, secret.Reveal()
 }
 func controlRequest(id domain.AttemptID) []byte {
@@ -46,9 +38,7 @@ func controlRequest(id domain.AttemptID) []byte {
 func cancelControl(t testing.TB, f *dispatchFixture, service *operations.Service, p auth.Principal, id scheduler.Identity) operations.Record {
 	t.Helper()
 	r, err := service.Submit(context.Background(), p, id.WorkspaceID, id.JobID, domain.OperationCancel, "cancel-original-key", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return r
 }
 func submittedControl(t testing.TB, f *dispatchFixture, id scheduler.Identity) {
@@ -69,9 +59,7 @@ func submittedControl(t testing.TB, f *dispatchFixture, id scheduler.Identity) {
 func controlCount(t testing.TB, s *Store, query string) int {
 	t.Helper()
 	var n int
-	if err := s.db.QueryRow(query).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow(query).Scan(&n))
 	return n
 }
 
@@ -113,14 +101,10 @@ func installCancelProbe(t testing.TB, f *dispatchFixture, supported bool, outcom
 	p := &cancelProbe{probeProvider: f.adapter, clock: f.clock, calls: &atomic.Int32{}, supported: supported, outcome: outcome, execution: domain.ExecutionSucceeded}
 	registry := provider.NewSnapshotRegistry()
 	binding := provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}
-	if err := registry.Register(binding, p); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, registry.Register(binding, p))
 	var err error
 	f.engine, err = dispatch.New(f.s, registry, f.blobs, f.clock, dispatch.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return p
 }
 
@@ -146,14 +130,20 @@ func TestControlsRetryPreservesHistoricalRowsAndOneReceipt(t *testing.T) {
 	id := f.seed(t, "a", 1, false)
 	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	cancelControl(t, f, service, p, id)
+	probe := &retentionReadProbe{inner: f.blobs}
+	access, err := auth.New(f.s, f.s)
+	requireNoError(t, err)
+	service, err = operations.New(access, f.s, probe, admission.DefaultLimits())
+	requireNoError(t, err)
 	old, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
-	if err != nil {
-		t.Fatal(err)
+	requireNoError(t, err)
+	first, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID))
+	if err != nil || first.Replay || probe.reads != 2 {
+		t.Fatal("first retry did not read both frozen objects", err, probe.reads)
 	}
-	for range 2 {
-		if _, err = service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID)); err != nil {
-			t.Fatal(err)
-		}
+	replay, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID))
+	if err != nil || !replay.Replay || replay.Operation.ID != first.Operation.ID || probe.reads != 2 {
+		t.Fatal("retry replay reread inputs or changed receipt", err, probe.reads)
 	}
 	historical, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
 	if err != nil || historical != old {
@@ -191,13 +181,10 @@ func TestControlsRawCommandRechecksAuthorization(t *testing.T) {
 	_, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	req := operations.Request{AttemptID: id.AttemptID}
 	hash, err := req.Digest(id.JobID, domain.OperationCancel)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	key, _ := admission.KeyDigest("revoked-raw-command")
-	if err = f.s.RevokeToken(t.Context(), p.TokenID()); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.RevokeToken(t.Context(), p.TokenID())
+	requireNoError(t, err)
 	_, err = f.s.AdmitOperation(t.Context(), operations.Command{WorkspaceID: "a", TokenID: p.TokenID(), JobID: id.JobID, Kind: domain.OperationCancel, Request: req, KeyDigest: key, RequestHash: hash, Limits: admission.DefaultLimits()})
 	if !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("raw command skipped authority", err)
@@ -214,9 +201,7 @@ func TestControlsCancellationIntentIsDurableBeforeCallback(t *testing.T) {
 	probe := installCancelProbe(t, f, true, provider.CancellationOutcome{Status: domain.CancellationAccepted})
 	cancelControl(t, f, service, p, id)
 	// cancelProbe checks the private cancel_started row before any callback effect.
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.step(t))
 	if probe.calls.Load() != 1 {
 		t.Fatal("missing committed cancellation callback")
 	}

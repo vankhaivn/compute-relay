@@ -27,17 +27,13 @@ func newStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "state # 'quoted'")
 	s, err := Open(testctx, root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	return s, root
 }
 func workspace(t *testing.T, s *Store, id string) {
 	t.Helper()
-	if err := s.PutWorkspace(testctx, auth.Workspace{ID: domain.WorkspaceID(id), Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.PutWorkspace(testctx, auth.Workspace{ID: domain.WorkspaceID(id), Enabled: true, AllowedProfiles: []string{"default-gpu"}}))
 }
 func object(id string) domain.ObjectMetadata {
 	return domain.ObjectMetadata{ID: domain.ObjectID(id), WorkspaceID: "a", Bytes: 7, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}
@@ -51,30 +47,20 @@ func TestIdentityPragmasAndDurableRepositories(t *testing.T) {
 	if err != nil || !validID(info.InstallationID) || info.SchemaVersion != len(migrations) || info.JournalMode != "wal" || info.Synchronous != 2 || !info.ForeignKeys {
 		t.Fatalf("bad info: %+v %v", info, err)
 	}
-	if err := s.Ready(testctx); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Ready(testctx))
 	access, _ := auth.New(s, s)
 	secret, record, err := access.Issue(testctx, "a", []auth.Scope{auth.Read, auth.Write}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CommitObject(testctx, object("input")); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
+	requireNoError(t, s.CommitObject(testctx, object("input")))
 	if err := s.CommitObject(testctx, object("input")); !errors.Is(err, ErrConflict) {
 		t.Fatal("immutable object overwritten", err)
 	}
 	if _, err := s.GetObject(testctx, "b", "input"); !errors.Is(err, objects.ErrNotFound) {
 		t.Fatal("wrong workspace visible", err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Close())
 	s, err = Open(testctx, root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	after, _ := s.Info(testctx)
 	if after.InstallationID != info.InstallationID {
@@ -87,16 +73,10 @@ func TestIdentityPragmasAndDurableRepositories(t *testing.T) {
 	if m, err := s.GetObject(testctx, "a", "input"); err != nil || m != object("input") {
 		t.Fatal("metadata lost", err)
 	}
-	if err := access.Revoke(testctx, record.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, access.Revoke(testctx, record.ID))
+	requireNoError(t, s.Close())
 	s, err = Open(testctx, root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	access, _ = auth.New(s, s)
 	if _, err := access.Authenticate(testctx, secret.Reveal()); !errors.Is(err, auth.ErrUnauthenticated) {
@@ -178,9 +158,7 @@ func TestTransactionsRollbackAndPoolWaitIsBounded(t *testing.T) {
 		t.Fatal("partial transaction survived", err)
 	}
 	conn, err := s.db.Conn(testctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(testctx, 20*time.Millisecond)
 	defer cancel()
@@ -210,9 +188,7 @@ func TestConcurrentWritesAndClosedStore(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Close())
 	if err := s.Ready(testctx); !errors.Is(err, ErrClosed) {
 		t.Fatal("closed store answered", err)
 	}
@@ -220,9 +196,7 @@ func TestConcurrentWritesAndClosedStore(t *testing.T) {
 		t.Fatal("closed store accepted write", err)
 	}
 	next, err := Open(testctx, root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer next.Close()
 	for i := 0; i < 24; i++ {
 		if _, err := next.LookupWorkspace(testctx, domain.WorkspaceID(fmt.Sprintf("w%d", i))); err != nil {
@@ -234,9 +208,7 @@ func TestConcurrentWritesAndClosedStore(t *testing.T) {
 func TestSQLiteDiskFullRollsBackWithoutReplay(t *testing.T) {
 	s, _ := newStore(t)
 	var count int64
-	if err := s.db.QueryRow("PRAGMA page_count").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow("PRAGMA page_count").Scan(&count))
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA max_page_count=%d", count+1)); err != nil {
 		t.Fatal(err)
 	}
@@ -264,9 +236,7 @@ func TestProcessKillPreservesCommittedWALAndRollsBackIncompleteTransaction(t *te
 	cmd.Env = append(os.Environ(), "CR_STATE_CRASH_ROOT="+root, "CR_STATE_CRASH_MARKER="+marker)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, cmd.Start())
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -284,14 +254,10 @@ func TestProcessKillPreservesCommittedWALAndRollsBackIncompleteTransaction(t *te
 		}
 		t.Fatal("second process not locked", err)
 	}
-	if err := cmd.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, cmd.Process.Kill())
 	_ = cmd.Wait()
 	s, err := Open(testctx, root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	if _, err := s.LookupWorkspace(testctx, "committed"); err != nil {
 		t.Fatal("committed WAL lost", err)
@@ -306,20 +272,14 @@ func TestStateCrashHelper(t *testing.T) {
 		return
 	}
 	s, err := Open(testctx, root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	workspace(t, s, "committed")
 	tx, err := s.db.BeginTx(testctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err := tx.Exec("INSERT INTO workspaces VALUES('uncommitted',1,'[]')"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(os.Getenv("CR_STATE_CRASH_MARKER"), []byte("ready"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.WriteFile(os.Getenv("CR_STATE_CRASH_MARKER"), []byte("ready"), 0o600))
 	for {
 		time.Sleep(time.Second)
 	}

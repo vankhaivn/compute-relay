@@ -21,50 +21,32 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old-state")
 	root, err := statefs.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer root.Close()
-	if err := initializeRoot(path); err != nil {
-		t.Fatal(err)
-	}
-	if err := statefs.WriteNew(filepath.Join(path, databaseName), nil); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, initializeRoot(path))
+	requireNoError(t, statefs.WriteNew(filepath.Join(path, databaseName), nil))
 	db, err := connect(filepath.Join(path, databaseName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer db.Close()
-	if err := migrate(ctx, db, migrations[:version]); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, migrate(ctx, db, migrations[:version]))
 	type trigger struct{ name, sql string }
 	triggers := []trigger{}
 	tables := []string{}
 	rows, err := db.Query("SELECT type,name,sql FROM sqlite_schema WHERE type IN ('table','trigger') AND name NOT LIKE 'sqlite_%' ORDER BY name")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for rows.Next() {
 		var kind, name, definition string
-		if err := rows.Scan(&kind, &name, &definition); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, rows.Scan(&kind, &name, &definition))
 		if kind == "trigger" {
 			triggers = append(triggers, trigger{name, definition})
 		} else if name != "schema_migrations" {
 			tables = append(tables, name)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, rows.Err())
 	rows.Close()
 	conn, err := db.Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE ? AS fixture_source", filepath.Join(source.root.Path, databaseName)); err != nil {
 		t.Fatal(err)
@@ -73,9 +55,7 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		t.Fatal(err)
 	}
 	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer tx.Rollback()
 	quote := func(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
 	for _, tr := range triggers {
@@ -92,24 +72,18 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 			t.Fatal("clear fixture table", name, err)
 		}
 		columnRows, err := tx.Query("PRAGMA table_xinfo(" + quote(name) + ")")
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		var writable []string
 		for columnRows.Next() {
 			var ordinal, notNull, primaryKey, hidden int
 			var column, kind string
 			var defaultValue any
-			if err := columnRows.Scan(&ordinal, &column, &kind, &notNull, &defaultValue, &primaryKey, &hidden); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, columnRows.Scan(&ordinal, &column, &kind, &notNull, &defaultValue, &primaryKey, &hidden))
 			if hidden == 0 {
 				writable = append(writable, column)
 			}
 		}
-		if err := columnRows.Err(); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, columnRows.Err())
 		columnRows.Close()
 		targetColumns := strings.Join(writable, ",")
 		columns := targetColumns
@@ -223,12 +197,8 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 	if _, err := conn.ExecContext(ctx, "DETACH DATABASE fixture_source"); err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := recordInstallation(ctx, db, path); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, conn.Close())
+	requireNoError(t, recordInstallation(ctx, db, path))
 	if err := integrity(ctx, db); err != nil {
 		t.Fatal("released fixture integrity/foreign keys", err)
 	}

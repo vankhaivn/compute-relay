@@ -12,9 +12,7 @@ func TestDispatchMigrationPreservesExistingQueueAndDoesNotInventIntents(t *testi
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "schema-four")
 	root, err := statefs.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if err = initializeRoot(root.Path); err != nil {
 		root.Close()
 		t.Fatal(err)
@@ -30,28 +28,22 @@ func TestDispatchMigrationPreservesExistingQueueAndDoesNotInventIntents(t *testi
 	}
 	legacy := &Store{db: db, root: root, options: DefaultOptions()}
 	defer legacy.Close()
-	if err = migrate(ctx, db, migrations[:4]); err != nil {
-		t.Fatal(err)
-	}
+	err = migrate(ctx, db, migrations[:4])
+	requireNoError(t, err)
 	schedulerSeed(t, legacy, "one", "a", "p", "account")
 	var installation string
-	if err = db.QueryRow("SELECT installation_id FROM runtime_installation WHERE singleton=1").Scan(&installation); err != nil {
-		t.Fatal(err)
-	}
+	err = db.QueryRow("SELECT installation_id FROM runtime_installation WHERE singleton=1").Scan(&installation)
+	requireNoError(t, err)
 	var sequence int64
-	if err = db.QueryRow("SELECT queue_seq FROM scheduler_queue WHERE job_id='job_one'").Scan(&sequence); err != nil {
-		t.Fatal(err)
-	}
+	err = db.QueryRow("SELECT queue_seq FROM scheduler_queue WHERE job_id='job_one'").Scan(&sequence)
+	requireNoError(t, err)
 	if _, err = db.Exec("UPDATE scheduler_queue SET dispatch_barrier=1 WHERE queue_seq=?", sequence); err != nil {
 		t.Fatal(err)
 	}
-	if err = legacy.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = legacy.Close()
+	requireNoError(t, err)
 	upgraded, err := Open(ctx, path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer upgraded.Close()
 	info, err := upgraded.Info(ctx)
 	if err != nil || info.InstallationID != installation || info.SchemaVersion != len(migrations) {
