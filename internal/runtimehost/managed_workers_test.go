@@ -13,9 +13,12 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
+	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/fake"
+	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
 type managedTestVault struct {
@@ -59,6 +62,7 @@ type managedTestAdapter struct {
 	*managedKaggleAdapter
 	checks         int
 	quotaRemaining *float64
+	clock          ports.Clock
 }
 
 func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connections.Verification, error) {
@@ -76,33 +80,57 @@ func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connection
 		remaining = *a.quotaRemaining
 		used = limit - remaining
 	}
+	now := time.Now().UTC()
+	if a.clock != nil {
+		now = a.clock.Now()
+	}
 	return connections.Verification{CanonicalAccount: account, Quota: provider.QuotaObservation{
 		Status: provider.QuotaKnown, Resource: "gpu", Unit: "seconds", Limit: &limit, Used: &used, Remaining: &remaining,
-		ObservedAt: time.Now().UTC(), Source: "offline-fixture", Precision: "lower_bound",
+		ObservedAt: now, Source: "offline-fixture", Precision: "lower_bound",
 	}}, nil
 }
 
 type managedTestFixture struct {
-	host     *Host
-	services *managedServices
-	adapter  *managedTestAdapter
-	vault    *managedTestVault
-	actor    auth.Principal
-	config   ManagedServeConfig
+	host         *Host
+	services     *managedServices
+	adapter      *managedTestAdapter
+	vault        *managedTestVault
+	actor        auth.Principal
+	config       ManagedServeConfig
+	token        string
+	clock        ports.Clock
+	extra        []connections.Adapter
+	backend      *fake.Backend
+	wrapDispatch func(*sqlite.Store) dispatch.Repository
+	http         *systemHTTP
 }
 
 func newManagedTestFixture(t *testing.T, withVault bool, extra ...connections.Adapter) *managedTestFixture {
+	t.Helper()
+	return newManagedTestFixtureAt(t, withVault, nil, extra...)
+}
+
+func newManagedTestFixtureAt(t *testing.T, withVault bool, testClock ports.Clock, extra ...connections.Adapter) *managedTestFixture {
 	t.Helper()
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = h.Close() })
+	f := &managedTestFixture{host: h, clock: testClock, extra: extra}
+	t.Cleanup(func() {
+		f.stopHTTP(t)
+		if err := f.host.Close(); err != nil {
+			t.Error("close fixture host", err)
+		}
+	})
+	if testClock != nil {
+		injectHostClock(t, h, testClock.Now)
+	}
 	if _, err := h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)
 	}
-	secret, _, err := h.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Write, auth.Manage, auth.Execute}, time.Time{})
+	secret, _, err := h.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Write, auth.Manage, auth.Execute, auth.Operate}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,17 +139,12 @@ func newManagedTestFixture(t *testing.T, withVault bool, extra ...connections.Ad
 		t.Fatal(err)
 	}
 	config := ManagedServeConfig{MachineShape: "NvidiaTeslaT4", MaxRemoteWallSeconds: 300, MaxWorkers: 2}
-	adapter := &managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: config}}
-	f := &managedTestFixture{host: h, adapter: adapter, actor: actor, config: config}
-	var vault credentials.Vault
+	adapter := &managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: config}, clock: testClock}
+	f.adapter, f.actor, f.config, f.token = adapter, actor, config, secret.Reveal()
 	if withVault {
 		f.vault = &managedTestVault{entries: map[string][]byte{}}
-		vault = f.vault
 	}
-	f.services, err = h.composeManaged(ctx, config, vault, append([]connections.Adapter{adapter}, extra...)...)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.compose(t)
 	return f
 }
 
