@@ -17,26 +17,21 @@ import (
 
 // Mutation routes only admit durable local records. Cleanup GET may perform a
 // bounded provider dry run, never apply. All existing middleware runs first.
-func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
+func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Operations == nil {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "durable controls are not configured")
 		return
 	}
-	if segments[3] == "operations" && len(segments) == 5 {
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", "GET")
-			respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "operation records are read-only")
-			return
-		}
-		record, err := h.config.Operations.Get(r.Context(), p, workspace, domain.OperationID(segments[4]))
+	if r.PathValue("operation") != "" {
+		record, err := h.config.Operations.Get(r.Context(), p, workspace, domain.OperationID(r.PathValue("operation")))
 		if errors.Is(err, operations.ErrNotFound) && h.config.Cleanup != nil {
 			// Cleanup receipts share the operation identifier namespace.
-			cleaned, cleanupErr := h.config.Cleanup.Get(r.Context(), p, workspace, domain.OperationID(segments[4]))
+			cleaned, cleanupErr := h.config.Cleanup.Get(r.Context(), p, workspace, domain.OperationID(r.PathValue("operation")))
 			if cleanupErr != nil {
 				controlError(w, r, cleanupErr)
 				return
 			}
-			if cleaned.Validate() != nil || cleaned.Operation.WorkspaceID != workspace || string(cleaned.Operation.ID) != segments[4] {
+			if cleaned.Validate() != nil || cleaned.Operation.WorkspaceID != workspace || string(cleaned.Operation.ID) != r.PathValue("operation") {
 				controlError(w, r, errors.New("invalid operation record"))
 				return
 			}
@@ -47,7 +42,7 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 			controlError(w, r, err)
 			return
 		}
-		if record.Validate() != nil || record.Operation.WorkspaceID != workspace || string(record.Operation.ID) != segments[4] {
+		if record.Validate() != nil || record.Operation.WorkspaceID != workspace || string(record.Operation.ID) != r.PathValue("operation") {
 			controlError(w, r, errors.New("invalid operation record"))
 			return
 		}
@@ -55,43 +50,31 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 		return
 	}
 	kind := domain.OperationKind("")
-	if segments[3] == "jobs" && len(segments) == 6 {
-		switch segments[5] {
-		case "cancel":
-			kind = domain.OperationCancel
-		case "retry":
-			kind = domain.OperationRetryCompute
-		case "reconcile":
-			kind = domain.OperationReconcile
-		case "collect":
-			kind = domain.OperationCollect
-		case "cleanup":
-			if h.config.Cleanup != nil {
-				kind = domain.OperationCleanup
-			}
+	switch {
+	case strings.HasSuffix(r.Pattern, "/cancel"):
+		kind = domain.OperationCancel
+	case strings.HasSuffix(r.Pattern, "/retry"):
+		kind = domain.OperationRetryCompute
+	case strings.HasSuffix(r.Pattern, "/reconcile"):
+		kind = domain.OperationReconcile
+	case strings.HasSuffix(r.Pattern, "/collect"):
+		kind = domain.OperationCollect
+	case strings.HasSuffix(r.Pattern, "/cleanup"):
+		if h.config.Cleanup == nil {
+			managedNotFound(w, r)
+			return
 		}
-	}
-	if kind != domain.OperationCleanup && !operations.Supported(kind) {
-		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "control route not implemented")
-		return
+		kind = domain.OperationCleanup
 	}
 	if kind == domain.OperationCleanup && r.Method == http.MethodGet {
-		h.cleanupPreview(w, r, p, workspace, domain.JobID(segments[4]))
-		return
-	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		if kind == domain.OperationCleanup && h.config.Cleanup.PreviewAvailable() {
-			w.Header().Set("Allow", "GET, POST")
-		}
-		respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "controls require an explicit POST")
+		h.cleanupPreview(w, r, p, workspace, domain.JobID(r.PathValue("job")))
 		return
 	}
 	if err := auth.Require(p, workspace, auth.Operate); err != nil {
 		controlError(w, r, err)
 		return
 	}
-	job := domain.JobID(segments[4])
+	job := domain.JobID(r.PathValue("job"))
 	if !job.Valid() {
 		controlError(w, r, operations.ErrRequest)
 		return
@@ -114,7 +97,7 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 		controlError(w, r, operations.ErrRequest)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, operations.MaxRequestBytes))
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		mapError(w, r, err) // No operation was admitted before the body was read.
 		return

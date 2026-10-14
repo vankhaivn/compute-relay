@@ -10,34 +10,26 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
-func (h *handler) workloadSecrets(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
+func (h *handler) workloadSecrets(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Secrets == nil {
 		managedNotFound(w, r)
 		return
 	}
-	job := domain.JobID(segments[4])
+	job := domain.JobID(r.PathValue("job"))
 	if !job.Valid() {
 		workloadSecretError(w, r, workloadsecret.ErrRequest)
 		return
 	}
-	supply := len(segments) == 6
-	read := len(segments) == 7
-	revoke := len(segments) == 8 && segments[7] == "revoke"
-	if !supply && !read && !revoke {
-		managedNotFound(w, r)
-		return
-	}
-	method := http.MethodPost
-	if read {
-		method = http.MethodGet
-	}
-	if !managedMethod(w, r, method) || !managedScope(w, r, p, workspace, auth.Execute) {
+	supply := r.PathValue("authorization") == ""
+	read := r.Method == http.MethodGet
+	revoke := !supply && !read
+	if !managedScope(w, r, p, workspace, auth.Execute) {
 		return
 	}
 	var receipt workloadsecret.Receipt
 	var err error
 	if read {
-		receipt, err = h.config.Secrets.Get(r.Context(), p, workspace, job, domain.OperationID(segments[6]))
+		receipt, err = h.config.Secrets.Get(r.Context(), p, workspace, job, domain.OperationID(r.PathValue("authorization")))
 	} else {
 		limit := workloadsecret.MaxRequestBytes
 		if revoke {
@@ -51,14 +43,14 @@ func (h *handler) workloadSecrets(w http.ResponseWriter, r *http.Request, p auth
 		if supply {
 			receipt, err = h.config.Secrets.Supply(r.Context(), p, workspace, job, key, body)
 		} else {
-			receipt, err = h.config.Secrets.Revoke(r.Context(), p, workspace, job, domain.OperationID(segments[6]), key, body)
+			receipt, err = h.config.Secrets.Revoke(r.Context(), p, workspace, job, domain.OperationID(r.PathValue("authorization")), key, body)
 		}
 	}
 	if err != nil {
 		workloadSecretError(w, r, err)
 		return
 	}
-	if receipt.Validate() != nil || receipt.WorkspaceID != workspace || receipt.JobID != job || !supply && string(receipt.AuthorizationID) != segments[6] {
+	if receipt.Validate() != nil || receipt.WorkspaceID != workspace || receipt.JobID != job || !supply && string(receipt.AuthorizationID) != r.PathValue("authorization") {
 		workloadSecretError(w, r, workloadsecret.ErrState)
 		return
 	}

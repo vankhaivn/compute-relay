@@ -3,17 +3,11 @@ package api
 import (
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
-
-func cleanupPreviewPath(path string) bool {
-	segments := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	return len(segments) == 6 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "jobs" && segments[5] == "cleanup"
-}
 
 func (h *handler) cleanupPreview(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, job domain.JobID) {
 	if h.config.Cleanup == nil || !h.config.Cleanup.PreviewAvailable() {

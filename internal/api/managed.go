@@ -18,18 +18,13 @@ import (
 
 // connections admits durable local administration only. Account verification and
 // all provider calls belong to the connection worker, never this HTTP boundary.
-func (h *handler) connections(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
+func (h *handler) connections(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Connections == nil {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "connection administration is not configured")
 		return
 	}
-	if len(segments) < 4 {
-		managedNotFound(w, r)
-		return
-	}
-	resource := segments[3]
-	if resource == "providers" && len(segments) == 4 {
-		if !managedMethod(w, r, http.MethodGet) || !managedScope(w, r, p, workspace, auth.Read) {
+	if strings.HasSuffix(r.Pattern, "/providers") {
+		if !managedScope(w, r, p, workspace, auth.Read) {
 			return
 		}
 		providers, err := h.config.Connections.Descriptors(r.Context(), p, workspace)
@@ -45,31 +40,27 @@ func (h *handler) connections(w http.ResponseWriter, r *http.Request, p auth.Pri
 		}{providers})
 		return
 	}
-	if resource == "connection-operations" && len(segments) == 5 {
-		if !managedMethod(w, r, http.MethodGet) || !managedScope(w, r, p, workspace, auth.Manage) {
+	if r.PathValue("connectionOperation") != "" {
+		if !managedScope(w, r, p, workspace, auth.Manage) {
 			return
 		}
-		operation, err := h.config.Connections.Operation(r.Context(), p, workspace, domain.OperationID(segments[4]))
+		operation, err := h.config.Connections.Operation(r.Context(), p, workspace, domain.OperationID(r.PathValue("connectionOperation")))
 		if err != nil {
 			connectionError(w, r, err)
 			return
 		}
-		if !validConnectionOperation(operation, workspace) || string(operation.ID) != segments[4] {
+		if !validConnectionOperation(operation, workspace) || string(operation.ID) != r.PathValue("connectionOperation") {
 			connectionError(w, r, connections.ErrUnavailable)
 			return
 		}
 		respond(w, http.StatusOK, operation)
 		return
 	}
-	if resource != "connections" {
-		managedNotFound(w, r)
-		return
-	}
-	if len(segments) > 4 && !domain.ObjectID(segments[4]).Valid() {
+	if id := r.PathValue("connection"); id != "" && !domain.ObjectID(id).Valid() {
 		connectionError(w, r, connections.ErrRequest)
 		return
 	}
-	if len(segments) == 4 && r.Method == http.MethodGet {
+	if r.PathValue("connection") == "" && r.Method == http.MethodGet {
 		if !managedScope(w, r, p, workspace, auth.Read) {
 			return
 		}
@@ -92,34 +83,24 @@ func (h *handler) connections(w http.ResponseWriter, r *http.Request, p auth.Pri
 		}{items})
 		return
 	}
-	if len(segments) == 5 {
-		if !managedMethod(w, r, http.MethodGet) || !managedScope(w, r, p, workspace, auth.Read) {
+	if r.Method == http.MethodGet {
+		if !managedScope(w, r, p, workspace, auth.Read) {
 			return
 		}
-		item, err := h.config.Connections.Get(r.Context(), p, workspace, segments[4])
+		item, err := h.config.Connections.Get(r.Context(), p, workspace, r.PathValue("connection"))
 		if err != nil {
 			connectionError(w, r, err)
 			return
 		}
-		if item.Workspace != workspace || item.ID != segments[4] {
+		if item.Workspace != workspace || item.ID != r.PathValue("connection") {
 			connectionError(w, r, connections.ErrUnavailable)
 			return
 		}
 		respond(w, http.StatusOK, item)
 		return
 	}
-	connection := ""
-	if len(segments) == 6 && segments[5] == "actions" {
-		connection = segments[4]
-	} else if len(segments) != 4 {
-		managedNotFound(w, r)
-		return
-	}
-	methods := http.MethodPost
-	if len(segments) == 4 {
-		methods = "GET, POST"
-	}
-	if !managedMethod(w, r, methods) || !managedScope(w, r, p, workspace, auth.Manage) {
+	connection := r.PathValue("connection")
+	if !managedScope(w, r, p, workspace, auth.Manage) {
 		return
 	}
 	body, key, ok := readManagedRequest(w, r, connections.MaxRequestBytes)
@@ -141,25 +122,17 @@ func (h *handler) connections(w http.ResponseWriter, r *http.Request, p auth.Pri
 	respond(w, http.StatusAccepted, operation)
 }
 
-func (h *handler) authorizations(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
+func (h *handler) authorizations(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Authorizations == nil {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "execution authorization is not configured")
 		return
 	}
-	isPost := len(segments) == 6 && segments[3] == "jobs" && segments[5] == "authorize"
-	isGet := len(segments) == 7 && segments[3] == "jobs" && segments[5] == "authorizations"
-	if !isPost && !isGet {
-		managedNotFound(w, r)
+	isPost := r.Method == http.MethodPost
+	isGet := !isPost
+	if !managedScope(w, r, p, workspace, auth.Execute) {
 		return
 	}
-	method := http.MethodGet
-	if isPost {
-		method = http.MethodPost
-	}
-	if !managedMethod(w, r, method) || !managedScope(w, r, p, workspace, auth.Execute) {
-		return
-	}
-	job := domain.JobID(segments[4])
+	job := domain.JobID(r.PathValue("job"))
 	if !job.Valid() {
 		authorizationError(w, r, executionauth.ErrRequest)
 		return
@@ -167,7 +140,7 @@ func (h *handler) authorizations(w http.ResponseWriter, r *http.Request, p auth.
 	var receipt executionauth.Receipt
 	var err error
 	if isGet {
-		receipt, err = h.config.Authorizations.Get(r.Context(), p, workspace, job, domain.OperationID(segments[6]))
+		receipt, err = h.config.Authorizations.Get(r.Context(), p, workspace, job, domain.OperationID(r.PathValue("authorization")))
 	} else {
 		body, key, ok := readManagedRequest(w, r, executionauth.MaxRequestBytes)
 		if !ok {
@@ -181,7 +154,7 @@ func (h *handler) authorizations(w http.ResponseWriter, r *http.Request, p auth.
 		authorizationError(w, r, err)
 		return
 	}
-	if receipt.Validate() != nil || receipt.WorkspaceID != workspace || receipt.JobID != job || isGet && string(receipt.AuthorizationID) != segments[6] {
+	if receipt.Validate() != nil || receipt.WorkspaceID != workspace || receipt.JobID != job || isGet && string(receipt.AuthorizationID) != r.PathValue("authorization") {
 		authorizationError(w, r, errors.New("invalid authorization receipt"))
 		return
 	}
@@ -195,17 +168,6 @@ func (h *handler) authorizations(w http.ResponseWriter, r *http.Request, p auth.
 
 func managedNotFound(w http.ResponseWriter, r *http.Request) {
 	respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "managed route not implemented")
-}
-
-func managedMethod(w http.ResponseWriter, r *http.Request, methods string) bool {
-	for _, method := range strings.Split(methods, ", ") {
-		if r.Method == method {
-			return true
-		}
-	}
-	w.Header().Set("Allow", methods)
-	respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "method is not permitted for this managed route")
-	return false
 }
 
 func managedScope(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, scope auth.Scope) bool {

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
@@ -14,10 +13,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-func logPath(path string) bool {
-	s := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	return len(s) == 6 && s[0] == "v1" && s[1] == "workspaces" && s[3] == "jobs" && s[5] == "logs"
-}
 func parseLogQuery(r *http.Request) (domain.AttemptID, provider.PageRequest, error) {
 	page := provider.PageRequest{Limit: 100}
 	v, err := url.ParseQuery(r.URL.RawQuery)
@@ -49,14 +44,9 @@ func parseLogQuery(r *http.Request) (domain.AttemptID, provider.PageRequest, err
 	}
 	return attempt, page, nil
 }
-func (h *handler) logs(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "method not implemented for this route")
-		return
-	}
+func (h *handler) logs(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	attempt, request, err := parseLogQuery(r)
-	job := domain.JobID(segments[4])
+	job := domain.JobID(r.PathValue("job"))
 	if err != nil || !job.Valid() {
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "invalid log request")
 		return

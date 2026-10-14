@@ -15,11 +15,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
-func artifactPath(path string) bool {
-	s := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	return len(s) >= 6 && len(s) <= 8 && s[0] == "v1" && s[1] == "workspaces" && s[3] == "jobs" && s[5] == "artifacts" && (len(s) != 8 || s[7] == "content")
-}
-
 type artifactQuery struct {
 	attempt domain.AttemptID
 	cursor  string
@@ -72,19 +67,14 @@ func publishedView(result collection.Result, target artifactTarget) (artifactPag
 	return p, nil
 }
 
-func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal auth.Principal, workspace domain.WorkspaceID, segments []string) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "artifact routes are read-only")
-		return
-	}
+func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Results == nil {
 		artifactError(w, r, collection.ErrNotFound)
 		return
 	}
-	query, err := parseArtifactQuery(r, len(segments) == 6)
-	job := domain.JobID(segments[4])
-	if err != nil || !job.Valid() || len(segments) > 6 && !domain.ArtifactID(segments[6]).Valid() {
+	query, err := parseArtifactQuery(r, r.PathValue("artifact") == "")
+	job := domain.JobID(r.PathValue("job"))
+	if err != nil || !job.Valid() || r.PathValue("artifact") != "" && !domain.ArtifactID(r.PathValue("artifact")).Valid() {
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "explicit attempt and bounded artifact parameters required")
 		return
 	}
@@ -99,7 +89,7 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 		artifactError(w, r, err)
 		return
 	}
-	if len(segments) == 6 {
+	if r.PathValue("artifact") == "" {
 		offset, err := artifactOffset(query.cursor, page.SnapshotSHA256, page.Total)
 		if err != nil {
 			respondError(w, r, 409, domain.CodeInvalidRequest, domain.FailureStageValidation, "artifact cursor does not match this publication")
@@ -115,7 +105,7 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 	}
 	var selected *artifactFile
 	for i := range page.Artifacts {
-		if page.Artifacts[i].ID == segments[6] {
+		if page.Artifacts[i].ID == r.PathValue("artifact") {
 			selected = &page.Artifacts[i]
 			break
 		}
@@ -124,7 +114,7 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 		artifactError(w, r, collection.ErrNotFound)
 		return
 	}
-	if len(segments) == 7 {
+	if !strings.HasSuffix(r.Pattern, "/content") {
 		respond(w, 200, artifactMetadata{artifactTarget: target, ResultPhase: page.ResultPhase, VerifiedAt: page.VerifiedAt, Artifact: *selected})
 		return
 	}
