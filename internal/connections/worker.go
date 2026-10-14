@@ -95,18 +95,15 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		defer s.secretMu.Unlock()
 		err = s.vault.WithSecret(ctx, record.CredentialKey, func([]byte) error { return nil })
 		if err == nil {
-			err = s.repo.ReadyConnection(ctx, op.Workspace, record.ActorTokenID, op.ID)
+			return true, s.repo.ReadyConnection(ctx, op.Workspace, record.ActorTokenID, op.ID)
 		}
-		if err != nil {
-			if ctx.Err() != nil {
-				return true, ctx.Err()
-			}
-			// Absence after a crash is not a failed user request. Keep the original
-			// reservation writable by exact replay, and defer its next inspection so it
-			// cannot starve ready operations or pending exact secret cleanup.
-			return true, s.repo.DeferConnectionSecret(ctx, op.ID)
+		if ctx.Err() != nil {
+			return true, ctx.Err()
 		}
-		return true, nil
+		// Absence after a crash is not a failed user request. Keep the original
+		// reservation writable by exact replay, and defer its next inspection so it
+		// cannot starve ready operations or pending exact secret cleanup.
+		return true, s.repo.DeferConnectionSecret(ctx, op.ID)
 	}
 	if op.Action == "remove" {
 		s.secretMu.Lock()
@@ -139,6 +136,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	}
 	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	var installErr error
 	err = s.vault.WithSecret(verifyCtx, record.CredentialKey, func(secret []byte) error {
 		var err error
 		if op.Action == "install_image" {
@@ -150,6 +148,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 			if !recoverOnly {
 				started, beginErr := s.repo.BeginConnectionInstall(verifyCtx, op.ID)
 				if beginErr != nil {
+					installErr = beginErr
 					return beginErr
 				}
 				recoverOnly = !started
@@ -162,6 +161,9 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		}
 		return err
 	})
+	if installErr != nil {
+		return true, installErr
+	}
 	if ctx.Err() != nil {
 		return true, ctx.Err()
 	}
