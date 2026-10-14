@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,29 +32,12 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 			fake := newFakeHost(t)
 			var mu sync.Mutex
 			var remote bytes.Buffer
-			server := newTestServer(t)
-			server.Password, server.ClientKey = password, public
-			server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
-				input, _ := io.ReadAll(stdin)
+			server := fakeHostOverSSH(t, fake, password, public, func(command string, input []byte) {
 				mu.Lock()
 				remote.WriteString(command)
 				remote.Write(input)
 				mu.Unlock()
-				if strings.HasSuffix(command, "'version' '--format' '{{.Server.Os}}/{{.Server.Arch}}'") {
-					_, _ = io.WriteString(stdout, "linux/amd64\n")
-					return 0
-				}
-				var in io.Reader
-				if len(input) > 0 {
-					in = bytes.NewReader(input)
-				}
-				result, err := fake.Run(ctx, nil, commandArgs(t, command), in, stdout)
-				if err != nil {
-					return 255
-				}
-				_, _ = stderr.Write(result.Stderr)
-				return result.ExitCode
-			}
+			})
 			target := server.target()
 			fields := map[string]string{FieldHost: target.Host, FieldPort: strconv.Itoa(target.Port), FieldUsername: target.User}
 			for k, v := range login {

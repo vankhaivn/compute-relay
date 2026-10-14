@@ -16,22 +16,23 @@ import (
 func imageHost(t *testing.T) (*fakeHost, []byte) {
 	t.Helper()
 	fake := newFakeHost(t)
-	server := newTestServer(t)
-	server.Password = "synthetic-image-password"
-	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
-		result, err := fake.Run(context.Background(), nil, commandArgs(t, command), stdin, stdout)
-		if err != nil {
-			return 255
-		}
-		_, _ = stderr.Write(result.Stderr)
-		return result.ExitCode
-	}
+	server := fakeHostOverSSH(t, fake, "synthetic-image-password", nil, nil)
 	target := server.target()
 	raw, err := EncodeFields(map[string]string{FieldHost: target.Host, FieldPort: strconv.Itoa(target.Port), FieldUsername: target.User, FieldPassword: server.Password})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return fake, raw
+}
+
+func verifiedImageHost(t *testing.T) (*fakeHost, []byte, HostVerification) {
+	t.Helper()
+	fake, raw := imageHost(t)
+	before, err := VerifyManagedHost(context.Background(), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fake, raw, before
 }
 
 func TestImageInstallationBuildsOnlyThePinnedRepositoryRecipe(t *testing.T) {
@@ -86,12 +87,8 @@ func TestImageInstallationBuildsOnlyThePinnedRepositoryRecipe(t *testing.T) {
 }
 
 func TestImageInstallationUnknownRecoversWithoutAnotherBuild(t *testing.T) {
-	fake, raw := imageHost(t)
+	fake, raw, before := verifiedImageHost(t)
 	ctx := context.Background()
-	before, err := VerifyManagedHost(ctx, raw)
-	if err != nil {
-		t.Fatal(err)
-	}
 	fake.fail = func(args []string) (Result, bool) {
 		if fake.builds == 1 && args[0] == "image" {
 			return Result{ExitCode: 255}, true
@@ -99,7 +96,7 @@ func TestImageInstallationUnknownRecoversWithoutAnotherBuild(t *testing.T) {
 		return Result{}, false
 	}
 	op := domain.OperationID("op_lost_image_response")
-	if _, err = InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, false); !errors.Is(err, ErrImageInstallationUnknown) {
+	if _, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, false); !errors.Is(err, ErrImageInstallationUnknown) {
 		t.Fatal("lost inspection became success", err)
 	}
 	fake.mu.Lock()
@@ -123,16 +120,12 @@ func TestImageInstallationUnknownRecoversWithoutAnotherBuild(t *testing.T) {
 }
 
 func TestImageInstallationRejectsChangedPlatformBeforeBuilding(t *testing.T) {
-	fake, raw := imageHost(t)
+	fake, raw, before := verifiedImageHost(t)
 	ctx := context.Background()
-	before, err := VerifyManagedHost(ctx, raw)
-	if err != nil {
-		t.Fatal(err)
-	}
 	fake.mu.Lock()
 	fake.platform = "linux/arm64"
 	fake.mu.Unlock()
-	if _, err = InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_changed_platform", false); !errors.Is(err, ErrIdentity) || fake.builds != 0 {
+	if _, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_changed_platform", false); !errors.Is(err, ErrIdentity) || fake.builds != 0 {
 		t.Fatal("changed architecture built an image", err)
 	}
 }
@@ -173,12 +166,8 @@ func TestInstalledImagePreparationFreezesLimitsAndNeverPulls(t *testing.T) {
 }
 
 func TestImageInstallationNonzeroExitUsesImageEvidence(t *testing.T) {
-	fake, raw := imageHost(t)
+	fake, raw, before := verifiedImageHost(t)
 	ctx := context.Background()
-	before, err := VerifyManagedHost(ctx, raw)
-	if err != nil {
-		t.Fatal(err)
-	}
 	fake.mu.Lock()
 	fake.buildExit = 137
 	fake.mu.Unlock()
@@ -233,12 +222,8 @@ func TestManagedHostRecheckPinsPreviouslyVerifiedKey(t *testing.T) {
 }
 
 func TestImageInstallationPinsMachineAndLegacyRecoveryNeverBuilds(t *testing.T) {
-	fake, raw := imageHost(t)
+	fake, raw, before := verifiedImageHost(t)
 	ctx := context.Background()
-	before, err := VerifyManagedHost(ctx, raw)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := InstallImage(ctx, raw, before.Account, "", before.Architecture, "op_legacy_install", false); !errors.Is(err, ErrRequest) || fake.builds != 0 {
 		t.Fatal("missing machine identity allowed a new build", err)
 	}

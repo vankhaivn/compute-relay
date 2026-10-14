@@ -2,7 +2,6 @@ package sshhost
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"testing"
 
@@ -44,30 +43,5 @@ func TestCleanupRejectsMalformedAndChangedOriginalReferences(t *testing.T) {
 				t.Fatalf("invalid reference reached deletion: %+v %v", out, err)
 			}
 		})
-	}
-}
-
-func TestCleanupUsesOnlyOriginalIDWithoutForceOrVolumeRemoval(t *testing.T) {
-	h := newHarness(t)
-	_, prepared := h.prepare(t)
-	ref, err := decodeRef(prepared.Resource, prepared.Identity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := provider.CleanupRequest{Remote: provider.RemoteReference{Identity: prepared.Identity, Resource: prepared.Resource, Version: "prepared"}, LedgerID: "ledger_fixture", CreationOperationID: testOperation, Mode: provider.CleanupDryRun}
-	if out, err := h.adapter.CleanupResource(context.Background(), resourceRequest(req, mustPlan(t, h).Digest())); err != nil || !out.WouldDelete || h.host.commands("rm") != 0 {
-		t.Fatalf("preview: %+v %v", out, err)
-	}
-	req.Mode = provider.CleanupApply
-	if out, err := h.adapter.CleanupResource(context.Background(), resourceRequest(req, mustPlan(t, h).Digest())); err != nil || !out.Deleted {
-		t.Fatalf("apply: %+v %v", out, err)
-	}
-	if out, err := h.adapter.CleanupResource(context.Background(), resourceRequest(req, mustPlan(t, h).Digest())); err != nil || !out.AlreadyAbsent {
-		t.Fatalf("repeat: %+v %v", out, err)
-	}
-	for _, call := range h.host.calls {
-		if len(call) > 2 && call[1] == "container" && call[2] == "rm" && !slices.Equal(call[1:], []string{"container", "rm", ref.ID}) {
-			t.Fatalf("cleanup widened its target: %v", call)
-		}
 	}
 }

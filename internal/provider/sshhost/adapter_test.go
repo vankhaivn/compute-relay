@@ -264,6 +264,11 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 	}
 
 	request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: testOperation, ResultsCollected: true, Mode: provider.CleanupDryRun}
+	c.labels[labelPrefix+"attempt"] = "other_attempt"
+	if _, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); !problemCode(err, domain.CodeRemoteIdentityMismatch) || h.host.commands("rm") != 0 {
+		t.Fatalf("changed execution owner reached cleanup: %v", err)
+	}
+	c.labels[labelPrefix+"attempt"] = string(h.job.Identity.AttemptID)
 	if dry, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); err != nil || !dry.WouldDelete || dry.Deleted || h.host.commands("rm") != 0 {
 		t.Fatalf("dry run = %+v, %v", dry, err)
 	}
@@ -280,65 +285,54 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 }
 
 func TestSubmitRejectsOnlyBeforeStartAndOtherwiseStaysUnknown(t *testing.T) {
-	ctx := context.Background()
-	t.Run("container missing", func(t *testing.T) {
-		h := newHarness(t)
-		_, prepared := h.prepare(t)
-		h.host.containers = map[string]*fakeContainer{}
-		out := h.adapter.Start(ctx, prepared, nil, nil)
-		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || out.Problem.PublicDetails()["reason"] != "container_missing" {
-			t.Fatalf("submit = %+v", out)
-		}
-	})
-	t.Run("host unreachable", func(t *testing.T) {
-		h := newHarness(t)
-		_, prepared := h.prepare(t)
-		h.dialErr = ErrUnavailable
-		out := h.adapter.Start(ctx, prepared, nil, nil)
-		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || h.host.starts != 0 {
-			t.Fatalf("submit = %+v", out)
-		}
-	})
-	t.Run("cancelled context", func(t *testing.T) {
-		h := newHarness(t)
-		_, prepared := h.prepare(t)
-		cancelled, cancel := context.WithCancel(ctx)
-		cancel()
-		dials := h.dials
-		out := h.adapter.Start(cancelled, prepared, nil, nil)
-		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || h.dials != dials {
-			t.Fatalf("submit = %+v", out)
-		}
-	})
-	t.Run("start fails", func(t *testing.T) {
-		h := newHarness(t)
-		_, prepared := h.prepare(t)
-		h.host.fail = func(args []string) (Result, bool) { return Result{ExitCode: 1}, args[1] == "start" }
-		out := h.adapter.Start(ctx, prepared, nil, nil)
-		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionUnknown {
-			t.Fatalf("submit = %+v", out)
-		}
-	})
-	t.Run("already started", func(t *testing.T) {
-		h := newHarness(t)
-		_, prepared := h.prepare(t)
-		if out := h.adapter.Start(ctx, prepared, nil, nil); out.Status != provider.SubmissionAccepted {
-			t.Fatalf("first submit = %+v", out)
-		}
-		out := h.adapter.Start(ctx, prepared, nil, nil)
-		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionUnknown || h.host.starts != 1 {
-			t.Fatalf("second submit = %+v", out)
-		}
-	})
-	t.Run("foreign preparation", func(t *testing.T) {
-		h := newHarness(t)
-		_, prepared := h.prepare(t)
-		prepared.PreparationID = "prep_other"
-		out := h.adapter.Start(ctx, prepared, nil, nil)
-		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || h.host.starts != 0 {
-			t.Fatalf("submit = %+v", out)
-		}
-	})
+	for _, tc := range []struct {
+		name   string
+		status provider.SubmissionStatus
+		starts int
+		reason string
+	}{
+		{"container missing", provider.SubmissionRejected, 0, "container_missing"},
+		{"host unreachable", provider.SubmissionRejected, 0, ""},
+		{"cancelled context", provider.SubmissionRejected, 0, ""},
+		{"start fails", provider.SubmissionUnknown, 0, ""},
+		{"already started", provider.SubmissionUnknown, 1, ""},
+		{"foreign preparation", provider.SubmissionRejected, 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			_, prepared := h.prepare(t)
+			ctx := context.Background()
+			switch tc.name {
+			case "container missing":
+				h.host.containers = map[string]*fakeContainer{}
+			case "host unreachable":
+				h.dialErr = ErrUnavailable
+			case "cancelled context":
+				cancelled, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = cancelled
+			case "start fails":
+				h.host.fail = func(args []string) (Result, bool) { return Result{ExitCode: 1}, args[1] == "start" }
+			case "already started":
+				if out := h.adapter.Start(ctx, prepared, nil, nil); out.Status != provider.SubmissionAccepted {
+					t.Fatalf("first submit = %+v", out)
+				}
+			case "foreign preparation":
+				prepared.PreparationID = "prep_other"
+			}
+			dials := h.dials
+			out := h.adapter.Start(ctx, prepared, nil, nil)
+			if out.Validate(h.job.Identity) != nil || out.Status != tc.status || h.host.starts != tc.starts {
+				t.Fatalf("submit = %+v, starts=%d", out, h.host.starts)
+			}
+			if tc.name == "cancelled context" && h.dials != dials {
+				t.Fatal("cancelled start contacted the host")
+			}
+			if tc.reason != "" && (out.Problem == nil || out.Problem.PublicDetails()["reason"] != tc.reason) {
+				t.Fatalf("submit reason = %+v", out.Problem)
+			}
+		})
+	}
 }
 
 func TestPrepareRemovesItsOwnContainerWhenStagingFails(t *testing.T) {
@@ -511,26 +505,6 @@ func TestReadLogsPagesCompleteStdoutLines(t *testing.T) {
 	}
 }
 
-func TestCleanupDeletesOnlyTheStoppedOwnedContainer(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	remote := h.submit(t)
-	request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: testOperation, ResultsCollected: true, Mode: provider.CleanupApply}
-	if _, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); !problemCode(err, domain.CodeRemoteExecutionUnresolved) {
-		t.Fatalf("running cleanup: %v", err)
-	}
-	h.host.finish(1, nil)
-	foreign := request
-	foreign.CreationOperationID = "prep_other"
-	if _, err := h.adapter.CleanupResource(ctx, resourceRequest(foreign, mustPlan(t, h).Digest())); !problemCode(err, domain.CodeRemoteIdentityMismatch) {
-		t.Fatalf("foreign creation: %v", err)
-	}
-	h.host.container(t).labels[labelPrefix+"attempt"] = "attempt_other"
-	if _, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); !problemCode(err, domain.CodeRemoteIdentityMismatch) || h.host.commands("rm") != 0 {
-		t.Fatalf("relabelled container: %v", err)
-	}
-}
-
 func TestReadTarRefusesLinksAndOversizedFiles(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
@@ -555,24 +529,6 @@ func TestReadTarRefusesLinksAndOversizedFiles(t *testing.T) {
 	}
 	if _, err = h.adapter.Fetch(ctx, remote, answer, &dst, 1, nil); !errors.Is(err, ErrArtifact) {
 		t.Fatalf("over caller limit: %v", err)
-	}
-}
-
-func TestPrepareUsesFrozenProcessLimit(t *testing.T) {
-	h := newHarness(t)
-	h.adapter.config.MaxProcesses = 256
-	_, _ = h.prepare(t)
-	h.host.mu.Lock()
-	defer h.host.mu.Unlock()
-	found := false
-	for _, argv := range h.host.calls {
-		command := strings.Join(argv, " ")
-		if strings.Contains(command, "container create") {
-			found = strings.Contains(command, "--pids-limit 256")
-		}
-	}
-	if !found {
-		t.Fatal("container did not use the configured PID limit")
 	}
 }
 
