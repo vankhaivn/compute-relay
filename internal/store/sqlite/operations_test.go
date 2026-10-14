@@ -5,10 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"reflect"
-	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -79,125 +75,6 @@ func controlCount(t testing.TB, s *Store, query string) int {
 	return n
 }
 
-func TestControlsPreventDispatchFenceOldWorkerAndReplayAfterRestart(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	service, p, secret := controlService(t, f, "a", auth.Read, auth.Operate)
-	work := f.claim(t)
-	accepted := cancelControl(t, f, service, p, id)
-	if accepted.Effect != operations.DispatchPrevented || accepted.TerminationConfirmed || accepted.Operation.Status != domain.OperationSucceeded {
-		t.Fatal("prevention is not remote termination", accepted)
-	}
-	plan, prep := storePlan(t, work)
-	if _, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: prep}); !errors.Is(err, scheduler.ErrLeaseLost) {
-		t.Fatal("stale worker escaped cancellation", err)
-	}
-	if f.state(t, id).Orchestration != domain.OrchestrationCancelled || f.journal(t, id).Phase != dispatch.Prevented {
-		t.Fatal("dispatch was not durably prevented")
-	}
-	if controlCount(t, f.s, "SELECT count(*) FROM provider_resources") != 0 {
-		t.Fatal("cancel created remote resources")
-	}
-	// The running callback's lease is not falsely released by the HTTP request.
-	if controlCount(t, f.s, "SELECT count(*) FROM work_leases WHERE kind='dispatch' AND held=1") != 1 {
-		t.Fatal("local ownership released prematurely")
-	}
-	before := controlCount(t, f.s, "SELECT count(*) FROM events")
-	f.restart(t)
-	access, _ := auth.New(f.s, f.s)
-	p, err := access.Authenticate(context.Background(), secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service, err = operations.New(access, f.s, f.blobs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	replay, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCancel, "cancel-original-key", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := accepted
-	expected.Replay = true
-	if !reflect.DeepEqual(replay, expected) || controlCount(t, f.s, "SELECT count(*) FROM events") != before {
-		t.Fatal("restart/replay changed the receipt or emitted duplicate events")
-	}
-	if _, err = service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCancel, "cancel-original-key", []byte(`{"attempt_id":"different"}`)); !errors.Is(err, operations.ErrConflict) {
-		t.Fatal("conflicting key accepted", err)
-	}
-}
-
-func TestControlsConcurrentRetryKeepsFrozenHistoryAndNewIdentity(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	cancelControl(t, f, service, p, id)
-	old, err := f.s.ReadJob(context.Background(), "a", p.TokenID(), id.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := f.profile
-	changed.Binding.ConfigurationRevision = "two"
-	changed.Binding.ProviderInstanceID = "another_provider"
-	changed.AccountScope = "another_account"
-	if err = f.s.PutProfile(context.Background(), changed, true); err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	results := make(chan operations.Record, 20)
-	failures := make(chan error, 20)
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			r, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-concurrent-key", controlRequest(id.AttemptID))
-			if err != nil {
-				failures <- err
-			} else {
-				results <- r
-			}
-		}()
-	}
-	wg.Wait()
-	close(results)
-	close(failures)
-	for err := range failures {
-		t.Fatal(err)
-	}
-	var first operations.Record
-	for r := range results {
-		if first.NewAttemptID == "" {
-			first = r
-		}
-		if r.Operation.ID != first.Operation.ID || r.NewAttemptID != first.NewAttemptID || r.Operation.AttemptID != id.AttemptID {
-			t.Fatal("duplicate retry identity")
-		}
-	}
-	if first.Effect != operations.NewAttemptCreated || first.NewAttemptID == id.AttemptID || first.NewAttemptID == "" {
-		t.Fatal("retry did not create a distinct attempt")
-	}
-	current, err := f.s.ReadJob(context.Background(), "a", p.TokenID(), id.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Attempt.Number != 2 || current.Attempt.ID != first.NewAttemptID || current.AttemptNonce == old.AttemptNonce || current.Profile != old.Profile || !reflect.DeepEqual(current.Objects, old.Objects) || string(current.Request.Canonical()) != string(old.Request.Canonical()) {
-		t.Fatal("retry changed immutable inputs/binding or reused the nonce")
-	}
-	historical, _, err := loadAttempt(context.Background(), f.s.db, "a", id.JobID, id.AttemptID)
-	if err != nil || historical != old.Attempt {
-		t.Fatal("retry rewrote historical attempt", err)
-	}
-	if controlCount(t, f.s, "SELECT count(*) FROM attempts") != 2 || controlCount(t, f.s, "SELECT count(*) FROM scheduler_queue") != 2 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='retry_compute'") != 1 {
-		t.Fatal("retry duplicated rows")
-	}
-	if _, err = service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-different-key", controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrChanged) {
-		t.Fatal("new key targeted superseded attempt", err)
-	}
-	if _, err = service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-running-key", controlRequest(first.NewAttemptID)); !errors.Is(err, operations.ErrUnresolved) {
-		t.Fatal("queued attempt retried", err)
-	}
-}
-
 type cancelProbe struct {
 	*probeProvider
 	clock     *dispatchClock
@@ -247,144 +124,55 @@ func installCancelProbe(t testing.TB, f *dispatchFixture, supported bool, outcom
 	return p
 }
 
-func TestControlsUnsupportedAcceptedAndConfirmedCancellation(t *testing.T) {
-	for _, mode := range []string{"unsupported", "accepted", "confirmed", "lost_response"} {
-		t.Run(mode, func(t *testing.T) {
-			f := newDispatchFixture(t, fake.DefaultScenario())
-			id := f.seed(t, "a", 1, false)
-			submittedControl(t, f, id)
-			service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-			outcome := provider.CancellationOutcome{Status: domain.CancellationAccepted}
-			if mode == "confirmed" {
-				outcome = provider.CancellationOutcome{Status: domain.CancellationConfirmed, TerminationConfirmed: true}
-			}
-			probe := installCancelProbe(t, f, mode != "unsupported", outcome)
-			probe.lost = mode == "lost_response"
-			accepted := cancelControl(t, f, service, p, id)
-			if accepted.Operation.Status != domain.OperationAccepted || accepted.TerminationConfirmed {
-				t.Fatal("HTTP response claimed termination")
-			}
-			if err := f.step(t); err != nil {
-				t.Fatal(err)
-			}
-			current, err := service.Get(context.Background(), p, "a", accepted.Operation.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			switch mode {
-			case "unsupported", "lost_response":
-				if current.Operation.Status != domain.OperationManualRequired || current.TerminationConfirmed || f.state(t, id).RemoteActivity == domain.RemoteActivityInactive {
-					t.Fatal("manual request invented termination")
-				}
-				raw, _ := json.Marshal(current)
-				if strings.Contains(string(raw), "canary") {
-					t.Fatal("upstream diagnostic leaked")
-				}
-			case "accepted":
-				if current.Operation.Status != domain.OperationRunning || current.TerminationConfirmed || f.state(t, id).Cancellation != domain.CancellationAccepted {
-					t.Fatal("acceptance reported completion")
-				}
-			case "confirmed":
-				if current.Operation.Status != domain.OperationSucceeded || !current.TerminationConfirmed || f.state(t, id).Execution != domain.ExecutionCancelled {
-					t.Fatal("terminal cancellation evidence was lost")
-				}
-			}
-			if mode != "confirmed" {
-				if err = f.step(t); err != nil {
-					t.Fatal(err)
-				}
-				if f.state(t, id).Execution != domain.ExecutionSucceeded || f.state(t, id).Cancellation != domain.CancellationTooLate {
-					t.Fatal("completion did not win")
-				}
-				latest, err := service.Get(context.Background(), p, "a", accepted.Operation.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if mode == "accepted" && (latest.Effect != operations.TooLate || latest.TerminationConfirmed) {
-					t.Fatal("completion was reported as cancellation")
-				}
-				if mode != "accepted" && !reflect.DeepEqual(latest, current) {
-					t.Fatal("terminal manual operation history was rewritten")
-				}
-			}
-			want := int32(1)
-			if mode == "unsupported" {
-				want = 0
-			}
-			if probe.calls.Load() != want {
-				t.Fatal("cancel call count", probe.calls.Load())
-			}
-			replay, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCancel, "cancel-original-key", controlRequest(id.AttemptID))
-			if err != nil || replay.Operation.Status != domain.OperationAccepted || !replay.Replay {
-				t.Fatal("original receipt was not stable", err)
-			}
-		})
-	}
-}
-
-func TestControlsCancelIntentRestartDoesNotRepeatMutation(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	submittedControl(t, f, id)
-	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	accepted := cancelControl(t, f, service, p, id)
-	f.clock.advance(time.Minute)
-	claim, err := f.s.ClaimRecovery(context.Background(), "intent-crash")
-	if err != nil || claim == nil {
-		t.Fatal("claim", err)
-	}
-	work, err := f.s.LoadDispatch(context.Background(), *claim)
-	if err != nil {
-		t.Fatal(err)
-	}
-	committed, err := f.s.CommitCancellation(context.Background(), work.Handle, accepted.Operation.ID, dispatch.CancellationAction{Begin: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Lose the successful acknowledgement and restart before sending Cancel.
-	if _, err = f.s.CommitCancellation(context.Background(), work.Handle, accepted.Operation.ID, dispatch.CancellationAction{Begin: true}); err == nil {
-		t.Fatal("lost acknowledgement rearmed cancel")
-	}
-	if committed.Cancellation == nil || !committed.Cancellation.Started {
-		t.Fatal("gate not persisted")
-	}
-	f.restart(t)
-	probe := installCancelProbe(t, f, true, provider.CancellationOutcome{Status: domain.CancellationAccepted})
-	if err = f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if probe.calls.Load() != 0 || f.state(t, id).Cancellation != domain.CancellationTooLate {
-		t.Fatal("restart repeated cancel instead of observing")
-	}
-}
-
-func TestControlsCancellationDuringStagingAndTransactionalRollback(t *testing.T) {
+func TestControlsCancellationFencesWorkerWithoutReleasingItsLease(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
 	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	f.adapter.prepareEntered = make(chan struct{})
-	f.adapter.prepareRelease = make(chan struct{})
-	returned := make(chan error, 1)
-	go func() { _, err := f.engine.RunOnce(context.Background(), "staging-race"); returned <- err }()
-	select {
-	case <-f.adapter.prepareEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("staging was not entered")
-	}
+	work := f.claim(t)
 	cancelControl(t, f, service, p, id)
-	close(f.adapter.prepareRelease)
-	if err := <-returned; !errors.Is(err, scheduler.ErrLeaseLost) {
-		t.Fatal("stale preparation committed", err)
+	plan, prep := storePlan(t, work)
+	if _, err := f.s.CommitDispatch(t.Context(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: prep}); !errors.Is(err, scheduler.ErrLeaseLost) {
+		t.Fatal("stale worker escaped cancellation", err)
 	}
-	if f.journal(t, id).Phase != dispatch.Prevented || controlCount(t, f.s, "SELECT count(*) FROM submission_intents") != 0 {
-		t.Fatal("cancel permitted submit")
+	if controlCount(t, f.s, "SELECT count(*) FROM provider_resources") != 0 || controlCount(t, f.s, "SELECT count(*) FROM submission_intents") != 0 {
+		t.Fatal("cancellation created remote intent")
 	}
-	// Roll back every part of a retry if its sequenced event cannot commit.
+	if controlCount(t, f.s, "SELECT count(*) FROM work_leases WHERE kind='dispatch' AND held=1") != 1 {
+		t.Fatal("callback ownership prematurely released")
+	}
+}
+func TestControlsRetryPreservesHistoricalRowsAndOneReceipt(t *testing.T) {
+	f := newDispatchFixture(t, fake.DefaultScenario())
+	id := f.seed(t, "a", 1, false)
+	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+	cancelControl(t, f, service, p, id)
+	old, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err = service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	historical, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
+	if err != nil || historical != old {
+		t.Fatal("retry rewrote historical attempt", err)
+	}
+	if controlCount(t, f.s, "SELECT count(*) FROM attempts") != 2 || controlCount(t, f.s, "SELECT count(*) FROM scheduler_queue") != 2 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='retry_compute'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation' AND scope='retry_compute'") != 1 {
+		t.Fatal("retry duplicated durable rows")
+	}
+}
+func TestControlsRetryEventFailureRollsBackAndLeavesKeyReusable(t *testing.T) {
+	f := newDispatchFixture(t, fake.DefaultScenario())
+	id := f.seed(t, "a", 1, false)
+	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+	cancelControl(t, f, service, p, id)
 	before := controlCount(t, f.s, "SELECT count(*) FROM operations")
 	if _, err := f.s.db.Exec(`CREATE TRIGGER fail_control_event BEFORE INSERT ON events WHEN NEW.type='attempt.retried' BEGIN SELECT RAISE(ABORT,'injected failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "rollback-retry-key", controlRequest(id.AttemptID)); err == nil {
+	if _, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "rollback-retry-key", controlRequest(id.AttemptID)); err == nil {
 		t.Fatal("event failure acknowledged")
 	}
 	if controlCount(t, f.s, "SELECT count(*) FROM operations") != before || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 || controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation' AND scope='retry_compute'") != 0 {
@@ -393,101 +181,60 @@ func TestControlsCancellationDuringStagingAndTransactionalRollback(t *testing.T)
 	if _, err := f.s.db.Exec("DROP TRIGGER fail_control_event"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "rollback-retry-key", controlRequest(id.AttemptID)); err != nil {
+	if _, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "rollback-retry-key", controlRequest(id.AttemptID)); err != nil {
 		t.Fatal("rollback consumed idempotency key", err)
 	}
 }
-
-func TestControlsCollectIsTransferOnlyAndReconcileNeverSubmits(t *testing.T) {
+func TestControlsRawCommandRechecksAuthorization(t *testing.T) {
+	f := newDispatchFixture(t, fake.DefaultScenario())
+	id := f.seed(t, "a", 1, false)
+	_, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+	req := operations.Request{AttemptID: id.AttemptID}
+	hash, err := req.Digest(id.JobID, domain.OperationCancel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := admission.KeyDigest("revoked-raw-command")
+	if err = f.s.RevokeToken(t.Context(), p.TokenID()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.s.AdmitOperation(t.Context(), operations.Command{WorkspaceID: "a", TokenID: p.TokenID(), JobID: id.JobID, Kind: domain.OperationCancel, Request: req, KeyDigest: key, RequestHash: hash, Limits: admission.DefaultLimits()})
+	if !errors.Is(err, auth.ErrUnauthenticated) {
+		t.Fatal("raw command skipped authority", err)
+	}
+	if controlCount(t, f.s, "SELECT count(*) FROM operations") != 0 || controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation'") != 0 {
+		t.Fatal("revoked command committed rows")
+	}
+}
+func TestControlsCancellationIntentIsDurableBeforeCallback(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
 	submittedControl(t, f, id)
 	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	if _, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "unresolved-retry", controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrUnresolved) {
-		t.Fatal("unresolved compute retried", err)
-	}
-	reconciliation, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationReconcile, "reconcile-original", controlRequest(id.AttemptID))
-	if err != nil {
+	probe := installCancelProbe(t, f, true, provider.CancellationOutcome{Status: domain.CancellationAccepted})
+	cancelControl(t, f, service, p, id)
+	// cancelProbe checks the private cancel_started row before any callback effect.
+	if err := f.step(t); err != nil {
 		t.Fatal(err)
 	}
-	probe := installCancelProbe(t, f, false, provider.CancellationOutcome{})
-	if err = f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	r, err := service.Get(context.Background(), p, "a", reconciliation.Operation.ID)
-	if err != nil || r.Effect != operations.ObservationRefreshed {
-		t.Fatal("reconciliation not acknowledged", err)
-	}
-	if _, err = service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "successful-retry", controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrCollect) {
-		t.Fatal("successful compute rerun for missing artifacts", err)
-	}
-	collect, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCollect, "collect-original-key", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCollect, "collect-another-key", controlRequest(id.AttemptID))
-	if err != nil || again.Operation.ID != collect.Operation.ID {
-		t.Fatal("parallel collection ticket duplicated", err)
-	}
-	if f.state(t, id).Result != domain.ResultNotAvailable || probe.calls.Load() != 0 || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 || controlCount(t, f.s, "SELECT count(*) FROM submission_intents") != 1 {
-		t.Fatal("control replay started compute or invented artifacts")
+	if probe.calls.Load() != 1 {
+		t.Fatal("missing committed cancellation callback")
 	}
 }
 
-type blockedInputs struct {
-	operations.BlobReader
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (b *blockedInputs) Open(ctx context.Context, w domain.WorkspaceID, id domain.ObjectID) (io.ReadCloser, error) {
-	b.once.Do(func() {
-		close(b.entered)
-		select {
-		case <-b.release:
-		case <-ctx.Done():
-		}
-	})
-	return b.BlobReader.Open(ctx, w, id)
-}
-func TestControlsAuthorizationRecheckedAfterRetryIO(t *testing.T) {
+func TestControlsReplayLeavesEventAndReceiptRowsUnchanged(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
-	service, p, secret := controlService(t, f, "a", auth.Read, auth.Operate)
+	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	cancelControl(t, f, service, p, id)
-	access, _ := auth.New(f.s, f.s)
-	blocked := &blockedInputs{BlobReader: f.blobs, entered: make(chan struct{}), release: make(chan struct{})}
-	service, err := operations.New(access, f.s, blocked, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
+	events := controlCount(t, f.s, "SELECT count(*) FROM events")
+	receipts := controlCount(t, f.s, "SELECT count(*) FROM receipts")
+	for range 3 {
+		if _, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationCancel, "cancel-original-key", controlRequest(id.AttemptID)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	result := make(chan error, 1)
-	go func() {
-		_, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "revoked-during-read", controlRequest(id.AttemptID))
-		result <- err
-	}()
-	select {
-	case <-blocked.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("retry did not verify blobs")
-	}
-	// Test-only concurrent revocation, using the same persisted authority consulted at commit.
-	if _, err = f.s.db.Exec("UPDATE api_token_hashes SET revoked=1 WHERE token_id=?", p.TokenID()); err != nil {
-		t.Fatal(err)
-	}
-	close(blocked.release)
-	if err = <-result; err == nil {
-		t.Fatal("revoked authority committed retry")
-	}
-	if controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 {
-		t.Fatal("revocation lost the commit race")
-	}
-	if _, err = access.Authenticate(context.Background(), secret); err == nil {
-		t.Fatal("token was not revoked")
-	}
-	readOnly, reader, _ := controlService(t, f, "a", auth.Read)
-	if _, err = readOnly.Submit(context.Background(), reader, "a", id.JobID, domain.OperationCancel, "read-only-operation", controlRequest(id.AttemptID)); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatal("read scope operated", err)
+	if controlCount(t, f.s, "SELECT count(*) FROM events") != events || controlCount(t, f.s, "SELECT count(*) FROM receipts") != receipts {
+		t.Fatal("replay wrote events or receipts")
 	}
 }

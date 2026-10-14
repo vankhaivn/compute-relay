@@ -22,7 +22,6 @@ type cleanupProbe struct {
 	mu           sync.Mutex
 	requests     []provider.CleanupRequest
 	verifyErr    error
-	result       *provider.CleanupOutcome
 	err          error
 	resourceHook func(context.Context, provider.CleanupResourceRequest) (provider.CleanupOutcome, error)
 }
@@ -49,9 +48,6 @@ func (p *cleanupProbe) CleanupResource(ctx context.Context, request provider.Cle
 	p.mu.Unlock()
 	if p.resourceHook != nil {
 		return p.resourceHook(ctx, request)
-	}
-	if p.result != nil {
-		return *p.result, p.err
 	}
 	if p.err != nil {
 		return provider.CleanupOutcome{}, p.err

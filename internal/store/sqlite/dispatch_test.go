@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -55,15 +53,9 @@ type dispatchFixture struct {
 }
 type probeProvider struct {
 	*fake.Bound
-	store                *Store
-	losePrepare          bool
-	panicSubmit          bool
-	validateError        bool
-	public               bool
-	rejectQuota          bool
-	prepareEntered       chan struct{}
-	prepareRelease       chan struct{}
-	afterPreparationRead func()
+	store       *Store
+	losePrepare bool
+	rejectQuota bool
 }
 
 func (p *probeProvider) Prepare(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.Prepared, error) {
@@ -71,28 +63,11 @@ func (p *probeProvider) Prepare(ctx context.Context, plan provider.Plan, op doma
 	if err := p.store.db.QueryRowContext(ctx, "SELECT count(*) FROM provider_resources WHERE operation_id=? AND purpose='staging'", string(op)).Scan(&n); err != nil || n != 1 {
 		return provider.Prepared{}, errors.New("prepare called without committed ownership intent")
 	}
-	if p.prepareEntered != nil {
-		close(p.prepareEntered)
-		select {
-		case <-p.prepareRelease:
-		case <-ctx.Done():
-			return provider.Prepared{}, ctx.Err()
-		}
-	}
 	prepared, err := p.Bound.Prepare(ctx, plan, op)
-	if p.public {
-		prepared.Private = false
-	}
 	if p.losePrepare {
 		return provider.Prepared{}, errors.New("private-response-canary")
 	}
 	return prepared, err
-}
-func (p *probeProvider) Validate(ctx context.Context, j provider.ResolvedJob) (provider.Plan, error) {
-	if p.validateError {
-		return provider.Plan{}, provider.Problem(domain.CodeConfigurationInvalid, domain.FailureStageLocalRuntime, "temporary configuration fixture")
-	}
-	return p.Bound.Validate(ctx, j)
 }
 func (p *probeProvider) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
 	var n int
@@ -109,9 +84,6 @@ func (p *probeProvider) Start(ctx context.Context, prepared provider.Prepared, a
 	if p.rejectQuota && outcome.Status == provider.SubmissionRejected {
 		problem := provider.Problem(domain.CodeQuotaExhausted, domain.FailureStageSubmission, "fixture exhausted")
 		outcome.Problem = &problem
-	}
-	if p.panicSubmit {
-		panic("provider-secret-canary")
 	}
 	return outcome
 }
@@ -223,8 +195,8 @@ func (f *dispatchFixture) attach(t testing.TB, s *Store) {
 	}
 }
 
-// These are controlled admitted-record fixtures, not a replacement admission path.
-// The separate executable smoke goes through the actual auth/admission services.
+// These admitted records support private transaction and ledger invariants.
+// System scenarios use runtimehost's shared managed fixture and public services.
 func (f *dispatchFixture) seed(t testing.TB, w domain.WorkspaceID, number int, url bool, collectionMode ...string) scheduler.Identity {
 	t.Helper()
 	raw := dispatchJSON
@@ -379,206 +351,6 @@ func storePlan(t testing.TB, w dispatch.Work) (provider.Plan, domain.OperationID
 	return provider.Plan{Job: job}, op
 }
 
-func TestDispatchLostSubmitResponseRestartAndTerminalCollectionGate(t *testing.T) {
-	scenario := fake.DefaultScenario()
-	scenario.Mode = fake.AcceptLoseResponse
-	f := newDispatchFixture(t, scenario)
-	id := f.seed(t, "a", 1, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if f.journal(t, id).Phase != dispatch.Ready || f.backend.Stats().Executions != 0 {
-		t.Fatal("prepare allocated execution")
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	j := f.journal(t, id)
-	if j.Phase != dispatch.Submitting || !j.SubmitStarted || !j.Problem.ComputeMayHaveStarted {
-		t.Fatal("lost response not recorded")
-	}
-	f.restart(t)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	j = f.journal(t, id)
-	if j.Phase != dispatch.Submitted || j.Remote == nil {
-		t.Fatal("reference not rediscovered")
-	}
-	if err := f.adapter.Advance(*j.Remote); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if f.state(t, id).Orchestration != domain.OrchestrationRunning {
-		t.Fatal("running evidence lost")
-	}
-	if err := f.adapter.Advance(*j.Remote); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	state := f.state(t, id)
-	stats := f.backend.Stats()
-	if state.Orchestration != domain.OrchestrationCollecting || state.Result != domain.ResultNotAvailable || state.RemoteActivity != domain.RemoteActivityInactive || stats.PrepareCalls != 1 || stats.SubmitCalls != 1 || stats.Executions != 1 {
-		t.Fatalf("unsafe terminal result: %+v %+v", state, stats)
-	}
-	if f.journal(t, id).Phase != dispatch.Collectible {
-		t.Fatal("collection gate absent")
-	}
-}
-func TestDispatchStagingLossAndDelayedReadinessNeverRepeatPrepare(t *testing.T) {
-	scenario := fake.DefaultScenario()
-	scenario.PreparationReady = false
-	f := newDispatchFixture(t, scenario)
-	id := f.seed(t, "a", 1, false)
-	f.adapter.losePrepare = true
-	if err := f.step(t); err == nil {
-		t.Fatal("lost staging response was hidden")
-	}
-	f.restart(t)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	j := f.journal(t, id)
-	if j.Phase != dispatch.Staging || j.Prepared == nil || j.Prepared.Ready || f.backend.Stats().SubmitCalls != 0 {
-		t.Fatal("unready staging submitted")
-	}
-	if err := f.adapter.MarkReady(j.Plan.Job.Identity); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if stats := f.backend.Stats(); stats.PrepareCalls != 1 || stats.SubmitCalls != 1 || stats.Executions != 1 {
-		t.Fatalf("duplicate staging/submit: %+v", stats)
-	}
-}
-func TestDispatchUnknownNotFoundStopsAndKeepsAccountCapacity(t *testing.T) {
-	scenario := fake.DefaultScenario()
-	scenario.Mode = fake.Unresolved
-	f := newDispatchFixture(t, scenario)
-	id := f.seed(t, "a", 1, false)
-	f.seed(t, "b", 2, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < dispatch.MaxFailures; i++ {
-		if err := f.step(t); err == nil {
-			t.Fatal("unresolved poll did not report a problem")
-		}
-	}
-	j := f.journal(t, id)
-	if j.Phase != dispatch.Attention || !j.Problem.ComputeMayHaveStarted {
-		t.Fatal("not-found was treated as non-acceptance")
-	}
-	f.clock.advance(time.Hour)
-	worked, err := f.engine.RunOnce(context.Background(), "new-worker")
-	if err != nil || worked || f.backend.Stats().SubmitCalls != 1 {
-		t.Fatalf("ambiguous account slot was released: %v %v", worked, err)
-	}
-}
-func TestDispatchPublicStagingAndProvenRejection(t *testing.T) {
-	for _, public := range []bool{false, true} {
-		t.Run(fmt.Sprint(public), func(t *testing.T) {
-			scenario := fake.DefaultScenario()
-			scenario.Mode = fake.Reject
-			f := newDispatchFixture(t, scenario)
-			id := f.seed(t, "a", 1, false)
-			f.adapter.public = public
-			if err := f.step(t); err != nil {
-				t.Fatal(err)
-			}
-			if !public {
-				if err := f.step(t); err != nil {
-					t.Fatal(err)
-				}
-			}
-			j := f.journal(t, id)
-			if public {
-				if j.Phase != dispatch.Attention || j.Prepared == nil || j.Prepared.Private || j.Problem.Code != domain.CodePrivateStagingUnavailable {
-					t.Fatal("public resource not preserved/stopped")
-				}
-			} else if j.Phase != dispatch.Rejected || j.Problem.ComputeMayHaveStarted || f.state(t, id).Execution != domain.ExecutionNotSubmitted {
-				t.Fatal("proven rejection confused with remote failure")
-			}
-			before := f.backend.Stats()
-			f.clock.advance(time.Hour)
-			_, err := f.engine.RunOnce(context.Background(), "again")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if f.backend.Stats() != before {
-				t.Fatal("rejected/public work retried")
-			}
-		})
-	}
-}
-
-type lostDispatchAck struct {
-	*Store
-	kind dispatch.Kind
-	once atomic.Bool
-}
-
-func (r *lostDispatchAck) CommitDispatch(ctx context.Context, h dispatch.Handle, a dispatch.Action) (dispatch.Work, error) {
-	w, err := r.Store.CommitDispatch(ctx, h, a)
-	if err == nil && a.Kind == r.kind && r.once.CompareAndSwap(false, true) {
-		return dispatch.Work{}, ErrUnavailable
-	}
-	return w, err
-}
-func TestDispatchCommitAcknowledgementLossDoesNotRepeatMutation(t *testing.T) {
-	for _, kind := range []dispatch.Kind{dispatch.BeginPreparation, dispatch.BeginSubmission, dispatch.SubmissionSeen} {
-		t.Run(string(kind), func(t *testing.T) {
-			f := newDispatchFixture(t, fake.DefaultScenario())
-			id := f.seed(t, "a", 1, false)
-			wrapped := &lostDispatchAck{Store: f.s, kind: kind}
-			var err error
-			f.engine, err = dispatch.New(wrapped, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if kind != dispatch.BeginPreparation {
-				if err = f.step(t); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err = f.step(t); err == nil {
-				t.Fatal("lost ack returned success")
-			}
-			f.restart(t)
-			if kind == dispatch.SubmissionSeen {
-				if err = f.step(t); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				_ = f.step(t)
-			}
-			stats := f.backend.Stats()
-			if kind == dispatch.BeginPreparation && (stats.PrepareCalls != 0 || stats.SubmitCalls != 0) {
-				t.Fatal("recovery created unacknowledged preparation")
-			}
-			if kind == dispatch.BeginSubmission && stats.SubmitCalls != 0 {
-				t.Fatal("recovery submitted unacknowledged intent")
-			}
-			if kind == dispatch.SubmissionSeen && (stats.SubmitCalls != 1 || stats.Executions != 1) {
-				t.Fatal("accepted execution repeated")
-			}
-			if kind != dispatch.SubmissionSeen && f.journal(t, id).Phase == dispatch.Rejected {
-				t.Fatal("missing resource became proven rejection")
-			}
-		})
-	}
-}
 func TestDispatchRollbackAtLedgerJournalAndEvent(t *testing.T) {
 	for _, table := range []string{"provider_resources", "dispatch_journals", "events"} {
 		t.Run(table, func(t *testing.T) {
@@ -668,153 +440,6 @@ func TestDispatchSubmissionRollbackAndFencedConcurrentGate(t *testing.T) {
 	}
 	if _, err = f.s.LoadDispatch(context.Background(), *claim); !errors.Is(err, scheduler.ErrLeaseLost) {
 		t.Fatalf("old worker still owned: %v", err)
-	}
-}
-func TestDispatchPauseAndAccountPolicyBlockNewCallsButAllowObservation(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	settings := scheduler.DefaultSettings()
-	settings.Paused = true
-	if err := f.s.ConfigureScheduler(context.Background(), settings); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); !errors.Is(err, dispatch.ErrPolicy) {
-		t.Fatalf("paused submit: %v", err)
-	}
-	if f.backend.Stats().SubmitCalls != 0 {
-		t.Fatal("paused configuration called submit")
-	}
-	settings.Paused = false
-	_ = f.s.ConfigureScheduler(context.Background(), settings)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	_ = f.s.ConfigureAccount(context.Background(), "shared_account", scheduler.AccountPolicy{Disabled: true, MaxActive: 1})
-	if err := f.step(t); err != nil {
-		t.Fatal("disabling new dispatch blocked observation", err)
-	}
-	if f.journal(t, id).Observation == nil {
-		t.Fatal("observation recovery disappeared")
-	}
-}
-
-func TestDispatchMalformedBundleNeverStages(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	// Replace only disposable fixture bytes; never a source or operator directory.
-	// The controlled BlobStore lies about bundle bytes to exercise orchestration revalidation.
-	bad := &corruptBundle{BlobStore: f.blobs}
-	var err error
-	f.engine, err = dispatch.New(f.s, f.registry, bad, f.clock, dispatch.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = f.step(t); err == nil {
-		t.Fatal("corrupt bundle accepted")
-	}
-	if f.journal(t, id).Phase != dispatch.Failed || f.backend.Stats().PrepareCalls != 0 {
-		t.Fatal("invalid bytes reached staging")
-	}
-}
-
-type corruptBundle struct{ dispatch.BlobStore }
-
-func (b *corruptBundle) Open(ctx context.Context, w domain.WorkspaceID, id domain.ObjectID) (io.ReadCloser, error) {
-	if id == "code" {
-		return io.NopCloser(strings.NewReader("not-a-bundle")), nil
-	}
-	return b.BlobStore.Open(ctx, w, id)
-}
-func TestDispatchProviderPanicAfterAcceptanceIsReconciled(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	f.adapter.panicSubmit = true
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	j := f.journal(t, id)
-	raw, _ := json.Marshal(j)
-	if j.Phase != dispatch.Submitting || bytes.Contains(raw, []byte("secret-canary")) {
-		t.Fatal("panic escaped ambiguity/redaction")
-	}
-	f.restart(t)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if f.backend.Stats().SubmitCalls != 1 || f.journal(t, id).Remote == nil {
-		t.Fatal("panic retried compute")
-	}
-}
-func TestDispatchFrozenProfileDoesNotFollowRemap(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	changed := f.profile
-	changed.Binding.ConfigurationRevision = "two"
-	changed.Binding.ProviderInstanceID = "other"
-	changed.AccountScope = "other_account"
-	if err := f.s.PutProfile(context.Background(), changed, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if f.journal(t, id).Plan.Job.Identity.InstanceID != f.profile.Binding.ProviderInstanceID {
-		t.Fatal("profile silently remapped")
-	}
-}
-func TestDispatchDoesNotExecutePayloadOnHost(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	f.seed(t, "a", 1, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(f.root, "answer.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("unexpected local workload output")
-	}
-	if f.backend.Stats().Executions != 0 {
-		t.Fatal("preparation triggered execution")
-	}
-}
-
-func TestDispatchRejectedQuotaLatchesWithoutInventedAllowance(t *testing.T) {
-	scenario := fake.DefaultScenario()
-	scenario.Mode = fake.Reject
-	f := newDispatchFixture(t, scenario)
-	f.adapter.rejectQuota = true
-	id := f.seed(t, "a", 1, false)
-	f.seed(t, "b", 2, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	j := f.journal(t, id)
-	if j.Problem == nil || j.Problem.Code != domain.CodeQuotaExhausted {
-		t.Fatal("quota rejection was hidden")
-	}
-	var raw string
-	var exhausted bool
-	if err := f.s.db.QueryRow("SELECT observation,exhausted FROM scheduler_quotas WHERE account_scope=? AND resource='cpu'", f.profile.AccountScope).Scan(&raw, &exhausted); err != nil {
-		t.Fatal(err)
-	}
-	var q provider.QuotaObservation
-	if json.Unmarshal([]byte(raw), &q) != nil || !exhausted || q.Limit != nil || q.Remaining != nil || q.Used != nil || q.Status != provider.QuotaUnknown {
-		t.Fatal("invented provider values", raw)
-	}
-	f.clock.advance(time.Hour)
-	worked, err := f.engine.RunOnce(context.Background(), "quota_blocked")
-	if err != nil || worked {
-		t.Fatal("exhausted account automatically submitted another job", worked, err)
-	}
-	if stats := f.backend.Stats(); stats.SubmitCalls != 1 || stats.Executions != 0 {
-		t.Fatal(stats)
 	}
 }
 

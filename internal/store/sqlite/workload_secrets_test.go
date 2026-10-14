@@ -8,12 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
-	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -34,9 +32,6 @@ func (p *probeProvider) startWithSecrets(ctx context.Context, prepared provider.
 		panic("wrong synthetic material")
 	}
 	outcome := p.Bound.Start(ctx, prepared, &start, &material)
-	if p.panicSubmit {
-		panic("uncertain secret start")
-	}
 	return outcome
 }
 func secretFixture(t testing.TB, mode fake.SubmitMode) (*dispatchFixture, scheduler.Identity, *executionauth.Service, auth.Principal, executionauth.Readiness, *workloadsecret.Service, *workloadsecret.Pool) {
@@ -126,261 +121,64 @@ func assertNoWorkloadValues(t testing.TB, s *Store) {
 		rows.Close()
 	}
 }
-func TestWorkloadSecretRestartRequiresExplicitResupplyAndConsumesOnce(t *testing.T) {
-	ctx := context.Background()
-	f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.AcceptLoseResponse)
-	if ready.Secrets == nil || ready.Secrets.Status != "missing" {
-		t.Fatal("missing slots not exposed")
-	}
-	if _, err := gate.Start(ctx, p, "a", id.JobID, "no-material-start", startGrantRaw(f, id, ready)); !errors.Is(err, workloadsecret.ErrUnavailable) {
-		t.Fatal("start without slots", err)
-	}
+
+func TestWorkloadSecretDurableAbsenceAndAtomicConsumption(t *testing.T) {
+	f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.Accept)
 	raw := secretRequest(f, id, ready)
-	receipt, err := secrets.Supply(ctx, p, "a", id.JobID, "secret-original", raw)
+	receipt, err := secrets.Supply(t.Context(), p, "a", id.JobID, "secret-storage", raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	startRaw := secretStartRequest(f, id, ready, receipt.AuthorizationID)
-	if _, err = gate.Start(ctx, p, "a", id.JobID, "start-original", startRaw); err != nil {
+	assertNoWorkloadValues(t, f.s)
+	start, err := gate.Start(t.Context(), p, "a", id.JobID, "secret-start-storage", secretStartRequest(f, id, ready, receipt.AuthorizationID))
+	if err != nil {
 		t.Fatal(err)
+	}
+	assertNoWorkloadValues(t, f.s)
+	// startWithSecrets asserts equal durable consumption timestamps and a started
+	// intent inside the callback before delivering the synthetic material.
+	if worked, err := gateStep(t, f); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	var n int
+	if err = f.s.db.QueryRow(`SELECT count(*) FROM attempt_grants m JOIN attempt_grants a ON a.kind='start' AND m.workspace_id=a.workspace_id AND m.job_id=a.job_id AND m.attempt_id=a.attempt_id JOIN scheduler_queue q ON q.workspace_id=m.workspace_id AND q.job_id=m.job_id AND q.attempt_id=m.attempt_id JOIN submission_intents i ON i.queue_seq=q.queue_seq WHERE m.kind='secret' AND m.authorization_id=? AND a.authorization_id=? AND m.consumed_at=a.consumed_at AND i.status='accepted'`, receipt.AuthorizationID, start.AuthorizationID).Scan(&n); err != nil || n != 1 {
+		t.Fatal("secret/start/intent atomicity", n, err)
 	}
 	assertNoWorkloadValues(t, f.s)
 	pool.Close()
 	f.restart(t)
-	attachGate(t, f)
-	gate, p = authorizationService(t, f, "a", auth.Read, auth.Execute)
-	secrets, pool = attachSecrets(t, f, gate)
-	if _, err = gateStep(t, f); err != nil || f.backend.Stats().SubmitCalls != 0 {
-		t.Fatal("memory loss started payload", err)
-	}
-	state, err := gate.Readiness(ctx, p, "a", id.JobID)
-	if err != nil || state.Secrets.Status != "material_lost" {
-		t.Fatal("material loss invisible", err)
-	}
-	replay, err := secrets.Supply(ctx, p, "a", id.JobID, "secret-original", raw)
-	if err != nil || !replay.Replay || replay.AuthorizationID != receipt.AuthorizationID {
-		t.Fatal("explicit resupply failed", err)
-	}
-	if _, err = gateStep(t, f); err != nil {
-		t.Fatal(err)
-	}
-	if f.journal(t, id).Phase != dispatch.Submitting || f.backend.Stats().Executions != 1 {
-		t.Fatal("lost ack was not retained")
-	}
-	if pool.Available(workloadsecret.Key{WorkspaceID: "a", JobID: id.JobID, AttemptID: id.AttemptID}, receipt.AuthorizationID, f.clock.Now()) {
-		t.Fatal("used material retained")
-	}
-	current, err := secrets.Get(ctx, p, "a", id.JobID, receipt.AuthorizationID)
-	if err != nil || current.Status != "consumed" {
-		t.Fatal("missing consumption", err)
-	}
-	if _, err = secrets.Supply(ctx, p, "a", id.JobID, "secret-original", raw); err != nil {
-		t.Fatal(err)
-	}
-	if pool.Available(current.Key(), receipt.AuthorizationID, f.clock.Now()) {
-		t.Fatal("used replay restored material")
-	}
-	pool.Close()
-	f.restart(t)
-	attachGate(t, f)
-	if _, err = gateStep(t, f); err != nil || f.backend.Stats().SubmitCalls != 1 || f.journal(t, id).Phase != dispatch.Submitted {
-		t.Fatal("recovery repeated delivery/start", err)
-	}
-	assertNoWorkloadValues(t, f.s)
-}
-func TestWorkloadSecretRevokeDuringRemoteVerificationPreventsStart(t *testing.T) {
-	ctx := context.Background()
-	f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.Accept)
-	raw := secretRequest(f, id, ready)
-	receipt, err := secrets.Supply(ctx, p, "a", id.JobID, "secret-original", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = gate.Start(ctx, p, "a", id.JobID, "start-original", secretStartRequest(f, id, ready, receipt.AuthorizationID)); err != nil {
-		t.Fatal(err)
-	}
-	revokeRaw, _ := json.Marshal(map[string]any{"attempt_id": id.AttemptID})
-	f.adapter.afterPreparationRead = func() {
-		f.adapter.afterPreparationRead = nil
-		if _, err := secrets.Revoke(ctx, p, "a", id.JobID, receipt.AuthorizationID, "revoke-original", revokeRaw); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err = gateStep(t, f); err != nil || f.backend.Stats().SubmitCalls != 0 || f.journal(t, id).SubmitStarted {
-		t.Fatal("revocation lost start race", err)
-	}
-	if pool.Available(receipt.Key(), receipt.AuthorizationID, f.clock.Now()) {
-		t.Fatal("revoked bytes retained")
-	}
-	replay, err := secrets.Revoke(ctx, p, "a", id.JobID, receipt.AuthorizationID, "revoke-original", revokeRaw)
-	if err != nil || !replay.Replay || replay.Status != "revoked" {
-		t.Fatal("revocation replay", err)
-	}
-	if _, err = secrets.Supply(ctx, p, "a", id.JobID, "secret-original", raw); err != nil || pool.Available(receipt.Key(), receipt.AuthorizationID, f.clock.Now()) {
-		t.Fatal("revoked replay rearmed", err)
-	}
-	assertNoWorkloadValues(t, f.s)
-}
-func TestWorkloadSecretSupplyConflictScopesAndExpiry(t *testing.T) {
-	ctx := context.Background()
-	f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.Accept)
-	raw := secretRequest(f, id, ready)
-	receipt, err := secrets.Supply(ctx, p, "a", id.JobID, "secret-original", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := bytes.Replace(raw, []byte(base64.StdEncoding.EncodeToString([]byte(workloadCanary))), []byte(base64.StdEncoding.EncodeToString([]byte("changed-value"))), 1)
-	if _, err = secrets.Supply(ctx, p, "a", id.JobID, "secret-original", changed); !errors.Is(err, workloadsecret.ErrConflict) {
-		t.Fatal("changed replay", err)
-	}
-	if _, err = secrets.Supply(ctx, p, "a", id.JobID, "secret-new-key", raw); !errors.Is(err, workloadsecret.ErrConflict) {
-		t.Fatal("new supply rearmed", err)
-	}
-	_, read := authorizationService(t, f, "a", auth.Read)
-	if _, err = secrets.Supply(ctx, read, "a", id.JobID, "secret-original", raw); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatal("read scope supplied values", err)
-	}
-	if _, err = secrets.Get(ctx, read, "a", id.JobID, receipt.AuthorizationID); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatal("read scope read write-only receipt", err)
-	}
-	if _, err = secrets.Supply(ctx, p, "b", id.JobID, "secret-original", raw); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatal("foreign workspace", err)
-	}
-	f.clock.advance(time.Minute)
-	if _, err = gate.Start(ctx, p, "a", id.JobID, "expired-material", secretStartRequest(f, id, ready, receipt.AuthorizationID)); !errors.Is(err, workloadsecret.ErrUnavailable) {
-		t.Fatal("expired supply usable", err)
-	}
-	if _, err = secrets.Supply(ctx, p, "a", id.JobID, "secret-original", raw); err != nil || pool.Available(receipt.Key(), receipt.AuthorizationID, f.clock.Now()) {
-		t.Fatal("expired replay refreshed material", err)
-	}
 	assertNoWorkloadValues(t, f.s)
 }
 
-func TestWorkloadSecretCrashAfterConsumptionNeverRestoresOrSends(t *testing.T) {
-	ctx := context.Background()
-	f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.Accept)
-	raw := secretRequest(f, id, ready)
-	receipt, err := secrets.Supply(ctx, p, "a", id.JobID, "crash-secret-original", raw)
-	if err != nil {
-		t.Fatal(err)
+func TestWorkloadSecretRejectedRevokedAndCancelledRequestsPersistNoValues(t *testing.T) {
+	for _, mode := range []string{"conflict", "revoked", "cancelled", "expired"} {
+		t.Run(mode, func(t *testing.T) {
+			f, id, _, p, ready, secrets, _ := secretFixture(t, fake.Accept)
+			raw := secretRequest(f, id, ready)
+			r, err := secrets.Supply(t.Context(), p, "a", id.JobID, "storage-absence", raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "conflict":
+				changed := bytes.Replace(raw, []byte(base64.StdEncoding.EncodeToString([]byte(workloadCanary))), []byte(base64.StdEncoding.EncodeToString([]byte("changed-value"))), 1)
+				if _, err = secrets.Supply(t.Context(), p, "a", id.JobID, "storage-absence", changed); !errors.Is(err, workloadsecret.ErrConflict) {
+					t.Fatal(err)
+				}
+			case "revoked":
+				if _, err = secrets.Revoke(t.Context(), p, "a", id.JobID, r.AuthorizationID, "storage-revoke", []byte(`{"attempt_id":"`+string(id.AttemptID)+`"}`)); err != nil {
+					t.Fatal(err)
+				}
+			case "cancelled":
+				service, actor, _ := controlService(t, f, "a", auth.Operate)
+				cancelControl(t, f, service, actor, id)
+			case "expired":
+				f.clock.advance(time.Minute)
+			}
+			if _, err = secrets.Supply(t.Context(), p, "a", id.JobID, "storage-absence", raw); err != nil {
+				t.Fatal(err)
+			}
+			assertNoWorkloadValues(t, f.s)
+		})
 	}
-	if _, err = gate.Start(ctx, p, "a", id.JobID, "crash-start-original", secretStartRequest(f, id, ready, receipt.AuthorizationID)); err != nil {
-		t.Fatal(err)
-	}
-	f.clock.advance(10 * time.Millisecond)
-	claim, err := f.s.ClaimRecovery(ctx, "secret_crash_worker")
-	if err != nil || claim == nil {
-		t.Fatal("missing claim", err)
-	}
-	work, err := f.s.LoadDispatch(ctx, *claim)
-	if err != nil {
-		t.Fatal(err)
-	}
-	material, err := pool.Claim(receipt.Key(), receipt.AuthorizationID, f.clock.Now(), func() error {
-		_, err := f.s.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission, SecretsAvailable: true})
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	material.Clear()
-	// Crash before the unique provider invocation leaves intent uncertain, not reusable.
-	pool.Close()
-	f.restart(t)
-	attachGate(t, f)
-	gate, p = authorizationService(t, f, "a", auth.Read, auth.Execute)
-	secrets, pool = attachSecrets(t, f, gate)
-	f.clock.advance(time.Minute)
-	if _, err = gateStep(t, f); err == nil || !strings.HasPrefix(err.Error(), "PROVIDER_SUBMISSION_UNKNOWN:") {
-		t.Fatal("crash lost uncertainty", err)
-	}
-	current, err := secrets.Get(ctx, p, "a", id.JobID, receipt.AuthorizationID)
-	if err != nil || current.Status != "consumed" {
-		t.Fatal("consumption lost", err)
-	}
-	if replay, err := secrets.Supply(ctx, p, "a", id.JobID, "crash-secret-original", raw); err != nil || !replay.Replay {
-		t.Fatal("original replay lost", err)
-	}
-	if pool.Available(receipt.Key(), receipt.AuthorizationID, f.clock.Now()) || f.backend.Stats().SubmitCalls != 0 || !f.journal(t, id).SubmitStarted || f.state(t, id).RemoteActivity != domain.RemoteActivityPossible {
-		t.Fatal("crash rearmed material or execution")
-	}
-	assertNoWorkloadValues(t, f.s)
-}
-
-func TestWorkloadSecretCancellationClearsMaterialAndBlocksExactResupply(t *testing.T) {
-	ctx := context.Background()
-	f, id, _, p, ready, secrets, pool := secretFixture(t, fake.Accept)
-	raw := secretRequest(f, id, ready)
-	receipt, err := secrets.Supply(ctx, p, "a", id.JobID, "cancel-secret-original", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	control, op, _ := controlService(t, f, "a", auth.Operate)
-	cancelControl(t, f, control, op, id)
-	pool.Sweep(f.clock.Now(), func(key workloadsecret.Key, authID domain.OperationID) bool {
-		usable, err := f.s.WorkloadSecretsUsable(ctx, key, authID)
-		return err == nil && usable
-	})
-	if pool.Available(receipt.Key(), receipt.AuthorizationID, f.clock.Now()) {
-		t.Fatal("cancelled bytes retained")
-	}
-	if _, err = secrets.Supply(ctx, p, "a", id.JobID, "cancel-secret-original", raw); err != nil {
-		t.Fatal("cancelled original receipt lost", err)
-	}
-	if pool.Available(receipt.Key(), receipt.AuthorizationID, f.clock.Now()) || f.backend.Stats().SubmitCalls != 0 {
-		t.Fatal("cancelled replay restored bytes")
-	}
-	assertNoWorkloadValues(t, f.s)
-}
-
-func TestWorkloadSecretConcurrentSupplyCoalescesBeforeOneStart(t *testing.T) {
-	ctx := context.Background()
-	f, id, gate, p, ready, secrets, pool := secretFixture(t, fake.Accept)
-	raw := secretRequest(f, id, ready)
-	var wg sync.WaitGroup
-	receipts := make(chan workloadsecret.Receipt, 8)
-	failures := make(chan error, 8)
-	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			r, err := secrets.Supply(ctx, p, "a", id.JobID, "concurrent-secret-original", raw)
-			receipts <- r
-			failures <- err
-		}()
-	}
-	wg.Wait()
-	close(receipts)
-	close(failures)
-	for err := range failures {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	var first workloadsecret.Receipt
-	originals := 0
-	for receipt := range receipts {
-		if first.AuthorizationID == "" {
-			first = receipt
-		}
-		if receipt.AuthorizationID != first.AuthorizationID {
-			t.Fatal("multiple secret authorities")
-		}
-		if !receipt.Replay {
-			originals++
-		}
-	}
-	if originals != 1 {
-		t.Fatal("multiple original receipts")
-	}
-	if _, err := gate.Start(ctx, p, "a", id.JobID, "concurrent-secret-start", secretStartRequest(f, id, ready, first.AuthorizationID)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gateStep(t, f); err != nil {
-		t.Fatal(err)
-	}
-	if f.backend.Stats().SubmitCalls != 1 || pool.Available(first.Key(), first.AuthorizationID, f.clock.Now()) {
-		t.Fatal("concurrent supply repeated start or retained bytes")
-	}
-	assertNoWorkloadValues(t, f.s)
 }
