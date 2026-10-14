@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -58,9 +57,6 @@ func TestInvalidListenerDoesNotOpenOrCreateState(t *testing.T) {
 
 func TestInvalidManagedCommandDoesNotOpenOrCreateState(t *testing.T) {
 	python := filepath.Join(t.TempDir(), "synthetic-python3")
-	if runtime.GOOS == "windows" {
-		python += ".exe"
-	}
 	if err := os.WriteFile(python, []byte("synthetic executable fixture; must never run"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -110,9 +106,6 @@ func TestManagedCommandComposesPolicyWithoutReadingCredentials(t *testing.T) {
 	// This file is intentionally not an interpreter. Empty managed startup must
 	// never execute it to discover an account, read a credential or grant compute.
 	python := filepath.Join(t.TempDir(), "synthetic-python3")
-	if runtime.GOOS == "windows" {
-		python += ".exe"
-	}
 	if err := os.WriteFile(python, []byte("synthetic executable fixture; must never run"), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,6 @@ environment:
 ./scripts/kaggle-client.sh check
 ```
 
-PowerShell and CMD wrappers are documented in [tools/kaggle-client](../tools/kaggle-client/README.md).
 The provider config below must use the absolute Python executable from this environment.
 
 ## 2. Configure the credential outside Git

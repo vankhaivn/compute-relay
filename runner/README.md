@@ -152,7 +152,7 @@ or allocate GPU. Go tests check the embedded source inventory/lock. For an inten
 reviewed asset change only, update hashes with `python runner/check.py --lock` and rerun checks.
 Never refresh the lock to conceal an unexpected source difference.
 
-The locked client/CI Python is 3.11.16. Native control-plane checks on macOS/Windows do not
+The locked client/CI Python is 3.11.16. Native control-plane checks on macOS do not
 mean the remote runner supports those hosts. Keep full operator/provider run records outside this
 guide; put only support-changing sanitized evidence in a focused issue/PR. Design constraints are
 in [ADR-0007](../docs/development/decisions/0007-finite-remote-runner.md).

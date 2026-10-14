@@ -24,10 +24,9 @@ Do not assume a successful local import proves GPU availability or compatible re
 
 ## Host and filesystem requirements
 
-Routine Go and client CI run on Linux. Manually starting either workflow adds its macOS checks;
-the Go workflow also adds full race tests. Windows CI is disabled, and a green routine PR does
-not provide current macOS or Windows validation. Platform implementations and local commands
-remain available. See the [CI policy](development/go-toolchain.md#dependency-changes-and-ci).
+The local control plane supports Linux and macOS. Routine Go and client CI run on Linux. Manually
+starting either workflow adds its macOS checks; the Go workflow also adds full race tests. See the
+[CI policy](development/go-toolchain.md#dependency-changes-and-ci).
 Check the actual job log for runner architecture. Cross-compilation or one OS job does not
 qualify every amd64/arm64 combination.
 Record the exact OS/architecture, filesystem and tool versions in the private operator record;
@@ -39,15 +38,15 @@ share only the minimal sanitized values needed by a focused issue/PR.
 | Application transport | Explicit loopback address, application token file, no redirect or ambient proxy. Not a public multi-tenant endpoint. |
 | Artifact HTTP | HTTP/1.1 chunked transfer with the final verification trailer preserved. Generic proxy/browser/HTTP/2 compatibility is not established. |
 | Artifact destination | Private same-filesystem temporary file and create-only hard link; unsupported hard links fail rather than overwrite. |
-| Permissions | Native private Unix permissions or protected Windows ACLs. The same-user operator remains trusted. |
-| Managed credentials | New installations use an unencrypted private `credentials/secrets.env` file on Linux, macOS and Windows. Existing Keychain installations retain their backend; Keychain is optional on macOS. See [storage selection](managed-connections.md#choose-credential-storage). |
-| Remote runner | Linux process-group and signal semantics. Windows/macOS support refers to the local host, not remote workload execution. |
+| Permissions | Native private Unix permissions. The same-user operator remains trusted. |
+| Managed credentials | New installations use an unencrypted private `credentials/secrets.env` file on Linux and macOS. Existing Keychain installations retain their backend; Keychain is optional on macOS. See [storage selection](managed-connections.md#choose-credential-storage). |
+| Remote runner | Linux process-group and signal semantics. |
 | SSH host | SSH server with password, keyboard-interactive or key login; a Docker engine reporting `linux/amd64` or `linux/arm64` that the login can use; ED25519 host key preferred for pinning. See [SSH hosts](ssh-hosts.md). |
 | SSH-only managed mode | `--managed` needs no Python or CGo and uses the selected credential backend. Optional Keychain uses the native macOS API; existing item access lists can require explicit per-binary trust when switching from the Python bridge or updating the binary. |
 | Storage durability | Database-only backup excludes blobs. Shared/network filesystems and arbitrary power-loss guarantees are unverified. |
 
-Credential-file updates flush a private temporary file before replacing the original. Unix also
-syncs the directory; Windows does not claim a portable directory-sync or power-loss guarantee.
+Credential-file updates flush a private temporary file before replacing the original and sync the
+directory.
 The file backend is bounded to 8 MiB and 4096 entries and refuses corruption, unsafe permissions
 and links. It does not provide encryption or protection from same-user processes.
 

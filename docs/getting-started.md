@@ -15,8 +15,6 @@ go build -trimpath -o compute-relay ./cmd/compute-relay
 ./compute-relay help
 ```
 
-On Windows build/use `compute-relay.exe` and use absolute Windows paths below.
-
 ## 2. Choose private runtime paths
 
 Runtime state and token files must live outside the source checkout in directories you control.

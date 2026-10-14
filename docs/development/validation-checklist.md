@@ -26,8 +26,7 @@ sanitized commit, configuration, command and observation needed to reproduce it.
 ## 2. Values
 
 Choose a new private work directory once. If it already exists, inspect it; never delete or
-reinitialize it to bypass an uncertain submission. On Windows use equivalent PowerShell variables,
-`.exe` names and private ACLs.
+reinitialize it to bypass an uncertain submission.
 
 ```sh
 umask 077

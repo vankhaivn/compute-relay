@@ -7,10 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -29,7 +26,7 @@ func runExecutionSource(parent context.Context, c Config, mode string, secret []
 		return result, ErrMode
 	}
 	info, err := os.Stat(c.PythonExecutable)
-	if err != nil || !info.Mode().IsRegular() || runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(c.PythonExecutable), ".exe") {
+	if err != nil || !info.Mode().IsRegular() {
 		return result, ErrProcess
 	}
 	header, err := json.Marshal(request)
@@ -58,13 +55,6 @@ func runExecutionSource(parent context.Context, c Config, mode string, secret []
 	cmd := exec.CommandContext(ctx, c.PythonExecutable, "-I", "-X", "utf8", "-c", source, mode, strconv.Itoa(seconds))
 	cmd.Dir = work
 	cmd.Env = []string{"HOME=" + work, "USERPROFILE=" + work, "TMPDIR=" + work, "TMP=" + work, "TEMP=" + work, "LANG=C.UTF-8"}
-	if runtime.GOOS == "windows" {
-		for _, name := range []string{"SystemRoot", "WINDIR"} {
-			if value, ok := os.LookupEnv(name); ok {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
-		}
-	}
 	cmd.Stdin = bytes.NewReader(input)
 	out := &boundedOutput{cancel: cancel}
 	diagnostic := &boundedOutput{cancel: cancel, discard: true}

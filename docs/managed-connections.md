@@ -54,7 +54,7 @@ An explicit different backend is rejected: this flag is not a credential migrati
 
 The file backend stores provider credentials and the request-fingerprint key in
 `credentials/secrets.env` under the runtime root. Relay creates the directory with private Unix
-permissions (`0700`), files with `0600`, or private inherited Windows ACLs. Values are base64 encoded
+permissions (`0700`) and files with `0600`. Values are base64 encoded
 to preserve private keys and arbitrary bytes; **they are not encrypted**. Only filesystem access
 protects this store. The local operator and processes running as that user remain trusted.
 

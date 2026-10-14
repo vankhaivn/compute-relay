@@ -14,14 +14,12 @@ go build -trimpath -o compute-relay ./cmd/compute-relay
 ./compute-relay --help
 ```
 
-Use `compute-relay.exe` on Windows. Do not change `go.mod` to make a validation run pass.
 GNU Make and Docker are not prerequisites.
 
 ## Checks
 
 Run from the repository root. The shell-independent form is `go run ./cmd/devtool TASK`.
-The wrappers `./scripts/dev.sh TASK`, `./scripts/dev.ps1 TASK` and `scripts\dev.cmd TASK`
-forward the same tasks on POSIX, PowerShell and CMD.
+The wrapper `./scripts/dev.sh TASK` forwards the same tasks on supported hosts.
 
 | Task | Behavior |
 |---|---|
@@ -62,8 +60,7 @@ The named fault matrix and actual runner-result contract checks still run uncach
 commits cancel superseded workflow runs. Separate workflows check the locked
 [Kaggle client](../../tools/kaggle-client/README.md) on Linux, adding macOS only when that workflow
 is started manually, and the
-[runner](../../runner/README.md) on Linux. Windows CI is disabled; Windows compatibility changes
-require explicit native validation. CI uses no live account credential or GPU.
+[runner](../../runner/README.md) on Linux. CI uses no live account credential or GPU.
 
 ## Build metadata
 

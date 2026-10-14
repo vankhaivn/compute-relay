@@ -23,7 +23,7 @@ or a guarantee of successful execution. Retained stdout/stderr are artifacts, no
 
 The output parent must already exist, be private and controlled by the operator. The destination
 must be new. Its name comes only from `--output`, never a provider path or Content-Disposition.
-Existing files fail before token/network work. On Windows use corresponding `.exe` and paths.
+Existing files fail before token/network work.
 
 ## HTTP contract
 

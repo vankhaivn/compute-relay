@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -126,22 +125,11 @@ func TestExecutableLocalLifecycleAndSignalReopen(t *testing.T) {
 		t.Fatal("real CLI HTTP boundary failed")
 	}
 	runChild(t, 1, "state", "--root", root) // OS ownership survives across command entry points.
-	if runtime.GOOS == "windows" {
-		// Windows os.Process.Signal does not provide POSIX interrupt delivery.
-		// This is abrupt-death/reopen evidence, not a Windows graceful-signal claim.
-		if err := server.Process.Kill(); err != nil {
-			t.Fatal(err)
-		}
-		if err := server.Wait(); err == nil {
-			t.Fatal("killed server exited successfully")
-		}
-	} else {
-		if err := server.Process.Signal(os.Interrupt); err != nil {
-			t.Fatal(err)
-		}
-		if err := server.Wait(); err != nil {
-			t.Fatal("signal shutdown failed", err, diagnostic.String())
-		}
+	if err := server.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Wait(); err != nil {
+		t.Fatal("signal shutdown failed", err, diagnostic.String())
 	}
 	if bytes.Contains(diagnostic.Bytes(), []byte(token)) {
 		t.Fatal("server diagnostic exposed token")
@@ -178,9 +166,6 @@ func TestExecutableManagedHelpAndInvalidModeFlags(t *testing.T) {
 // Pins the managed companion surface that installed application clients drive: exact receipts,
 // readiness body and feature names, a minimal process environment and owned-state refusal.
 func TestExecutableManagedCompanionClientSurface(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("this executable fixture requires Unix interrupt delivery; native file-vault and managed startup tests cover Windows")
-	}
 	root := filepath.Join(t.TempDir(), "runtime")
 	var initialized, reopened struct {
 		InstallationID string `json:"installation_id"`

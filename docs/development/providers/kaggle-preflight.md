@@ -25,10 +25,9 @@ All five fields are required. Adapt paths/account; keep this regular JSON file o
 }
 ```
 
-Windows uses an absolute JSON-escaped path to `.venv\\Scripts\\python.exe`. Configuration is
-bounded to 8 KiB, closed against unknown/duplicate/case-alias/null fields and immutable after
-construction. The account parser is a conservative lowercase ASCII subset, not every possible
-upstream username.
+Configuration is bounded to 8 KiB, closed against unknown/duplicate/case-alias/null fields and
+immutable after construction. The account parser is a conservative lowercase ASCII subset, not
+every possible upstream username.
 
 Provision the selected environment variable securely. Only explicit allowlisted `env:NAME`
 references and opaque API tokens are resolved by this component. Values are 1–8192 printable

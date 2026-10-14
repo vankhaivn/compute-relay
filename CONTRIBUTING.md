@@ -23,7 +23,7 @@ Enable the local hook from the clone root:
 ./scripts/setup-git-hooks.sh
 ```
 
-PowerShell/CMD equivalents are in `scripts/`. The hook supplements CI; it does not replace checks.
+The hook supplements CI; it does not replace checks.
 
 ## Checks and evidence
 

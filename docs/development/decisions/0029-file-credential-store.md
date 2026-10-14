@@ -38,7 +38,7 @@ falling back from Keychain would hide an access failure and split an installatio
   root after stopping the previous process.
 - Preserve the credential directory and backend marker with coordinated installation backups.
   Atomic replacement does not make the file and SQLite one transaction; existing recovery applies.
-- Unix directory sync supplements file sync. Windows retains its documented filesystem-durability
-  limits; network filesystems and arbitrary power-loss recovery are not qualified.
+- Unix directory sync supplements file sync; network filesystems and arbitrary power-loss recovery
+  are not qualified.
 - No implicit export, migration or fallback between file and Keychain is introduced. The
   [operator guide](../../managed-connections.md#choose-credential-storage) owns setup and recovery.

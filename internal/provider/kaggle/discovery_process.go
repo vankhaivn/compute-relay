@@ -6,10 +6,7 @@ import (
 	_ "embed"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -30,7 +27,7 @@ func runDiscovery(ctx context.Context, python string, token []byte) (discoveryRe
 func runDiscoverySource(parent context.Context, python string, token []byte, source string) (discoveryResponse, error) {
 	var none discoveryResponse
 	info, err := os.Stat(python)
-	if err != nil || !info.Mode().IsRegular() || runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(python), ".exe") {
+	if err != nil || !info.Mode().IsRegular() {
 		return none, ErrProcess
 	}
 	work, err := os.MkdirTemp("", "compute-relay-discovery-")
@@ -43,13 +40,6 @@ func runDiscoverySource(parent context.Context, python string, token []byte, sou
 	cmd := exec.CommandContext(ctx, python, "-I", "-X", "utf8", "-c", source)
 	cmd.Dir = work
 	cmd.Env = []string{"HOME=" + work, "USERPROFILE=" + work, "TMPDIR=" + work, "TMP=" + work, "TEMP=" + work, "LANG=C.UTF-8"}
-	if runtime.GOOS == "windows" {
-		for _, name := range []string{"SystemRoot", "WINDIR"} {
-			if value, ok := os.LookupEnv(name); ok {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
-		}
-	}
 	cmd.Stdin = bytes.NewReader(token)
 	out := &boundedOutput{cancel: cancel}
 	diagnostic := &boundedOutput{cancel: cancel, discard: true}

@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -53,8 +50,7 @@ func (c ManagedServeConfig) validate() error {
 		return ErrRequest
 	}
 	info, err := os.Stat(c.PythonExecutable)
-	if err != nil || !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 ||
-		runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(c.PythonExecutable), ".exe") {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
 		return ErrRequest
 	}
 	return nil

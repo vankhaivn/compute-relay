@@ -7,9 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"time"
 )
 
@@ -27,9 +24,6 @@ func runHelper(ctx context.Context, c Config, mode Mode, secret []byte, source s
 	if err != nil || !info.Mode().IsRegular() {
 		return Report{}, ErrProcess
 	}
-	if runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(c.PythonExecutable), ".exe") {
-		return Report{}, ErrProcess
-	}
 	work, err := os.MkdirTemp("", "compute-relay-preflight-")
 	if err != nil {
 		return Report{}, ErrProcess
@@ -40,13 +34,6 @@ func runHelper(ctx context.Context, c Config, mode Mode, secret []byte, source s
 	cmd := exec.CommandContext(ctx, c.PythonExecutable, "-I", "-X", "utf8", "-c", source, string(mode), c.AccountName)
 	cmd.Dir = work
 	cmd.Env = []string{"HOME=" + work, "USERPROFILE=" + work, "TMPDIR=" + work, "TMP=" + work, "TEMP=" + work, "LANG=C.UTF-8"}
-	if runtime.GOOS == "windows" {
-		for _, name := range []string{"SystemRoot", "WINDIR"} {
-			if value, ok := os.LookupEnv(name); ok {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
-		}
-	}
 	cmd.Stdin = bytes.NewReader(secret)
 	out := &boundedOutput{cancel: cancel}
 	diagnostic := &boundedOutput{cancel: cancel, discard: true}

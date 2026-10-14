@@ -8,10 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -25,8 +22,7 @@ func monitorProgram() string {
 	return "import types\ncore=types.ModuleType('_compute_relay_read_core')\nexec(compile(" + strconv.Quote(executionSource) + ", 'compute-relay/execution-core.py', 'exec'), core.__dict__)\n" + monitorSource
 }
 
-// The composed helper exceeds Windows' command-line ceiling after argument
-// escaping. Keep only this fixed bootstrap in argv; source and credentials use
+// Keep only this fixed bootstrap in argv; source and credentials use
 // separate, exact stdin frames and are never written to the host filesystem.
 const monitorBootstrap = `import sys
 _relay_size = int(sys.argv.pop(1))
@@ -46,7 +42,7 @@ func runMonitorSource(parent context.Context, c Config, mode string, token []byt
 		return none, ErrMode
 	}
 	info, err := os.Stat(c.PythonExecutable)
-	if err != nil || !info.Mode().IsRegular() || runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(c.PythonExecutable), ".exe") {
+	if err != nil || !info.Mode().IsRegular() {
 		return none, ErrProcess
 	}
 	header, err := json.Marshal(r)
@@ -75,13 +71,6 @@ func runMonitorSource(parent context.Context, c Config, mode string, token []byt
 	cmd := exec.CommandContext(ctx, c.PythonExecutable, "-I", "-X", "utf8", "-c", monitorBootstrap, strconv.Itoa(len(source)), mode)
 	cmd.Dir = work
 	cmd.Env = []string{"HOME=" + work, "USERPROFILE=" + work, "TMPDIR=" + work, "TMP=" + work, "TEMP=" + work, "LANG=C.UTF-8"}
-	if runtime.GOOS == "windows" {
-		for _, name := range []string{"SystemRoot", "WINDIR"} {
-			if value, ok := os.LookupEnv(name); ok {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
-		}
-	}
 	cmd.Stdin = bytes.NewReader(input)
 	out := &monitorOutput{limit: 128 << 10, cancel: cancel}
 	diagnostic := &monitorOutput{limit: 16 << 10, discard: true, cancel: cancel}

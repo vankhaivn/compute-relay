@@ -105,8 +105,7 @@ func (s *Store) Delete(ctx context.Context, expected domain.ObjectMetadata) (boo
 	}
 	// Both paths are beneath the same exclusively locked blob root. Never unlink
 	// individual final files: a crash must leave a complete object or quarantine.
-	// On Windows, an outstanding reader may prevent this rename; leave the durable
-	// tombstone pending and retry later. POSIX readers retain their open descriptor.
+	// If the rename fails, leave the durable tombstone pending and retry later.
 	if err := s.rename(final, retired); err != nil {
 		return false, ErrUnavailable
 	}

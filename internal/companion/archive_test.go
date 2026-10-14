@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 func testBuild() Build {
@@ -41,54 +40,6 @@ func fixture(t *testing.T) (string, string, string) {
 		}
 	}
 	archive := filepath.Join(base, "bundle.tar.gz")
-	if runtime.GOOS == "windows" {
-		// Windows does not preserve POSIX executable bits. Parsing and extraction
-		// still consume the exact native archive format without pretending that a
-		// Windows filesystem can produce a qualified macOS executable package.
-		m := Manifest{Schema: Schema, Build: testBuild()}
-		var body bytes.Buffer
-		for _, name := range []string{"bin/companionpack", "bin/compute-relay", "client/python/bin/python3.11", "share/LICENSE", "share/go-dependencies.json", "share/python-dependencies.json", "share/uv.lock"} {
-			mode := int64(0644)
-			if strings.Contains(name, "bin/") {
-				mode = 0755
-			}
-			hash := sha256.Sum256([]byte(name))
-			m.Files = append(m.Files, File{name, int64(len(name)), mode, hex.EncodeToString(hash[:])})
-		}
-		if err := m.Validate(); err != nil {
-			t.Fatal(err)
-		}
-		raw, err := manifestBytes(m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		gz := gzip.NewWriter(&body)
-		writer := tar.NewWriter(gz)
-		write := func(name string, data []byte, mode int64) {
-			t.Helper()
-			if err := writer.WriteHeader(&tar.Header{Name: name, Size: int64(len(data)), Mode: mode, Typeflag: tar.TypeReg, ModTime: time.Unix(0, 0), Format: tar.FormatPAX}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := writer.Write(data); err != nil {
-				t.Fatal(err)
-			}
-		}
-		write(ManifestName, raw, 0644)
-		for _, f := range m.Files {
-			write(f.Path, []byte(f.Path), f.Mode)
-		}
-		if err := writer.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if err := gz.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(archive, body.Bytes(), 0600); err != nil {
-			t.Fatal(err)
-		}
-		hash := sha256.Sum256(body.Bytes())
-		return stage, archive, hex.EncodeToString(hash[:])
-	}
 	sha, err := Pack(stage, archive, testBuild())
 	if err != nil {
 		t.Fatal(err)
@@ -97,9 +48,6 @@ func fixture(t *testing.T) (string, string, string) {
 }
 
 func TestDeterministicArchiveInstallAndRelocation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("native packing requires POSIX executable mode bits")
-	}
 	stage, archive, sha := fixture(t)
 	second := filepath.Join(t.TempDir(), "second.tar.gz")
 	other, err := Pack(stage, second, testBuild())
@@ -285,9 +233,6 @@ func TestInstallerRejectsUntrustedArchiveMembers(t *testing.T) {
 func TestPackRejectsSymlinksAndCaseCollisions(t *testing.T) {
 	stage, _, _ := fixture(t)
 	t.Run("native-source-symlink", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("native packing and source symlinks require POSIX host")
-		}
 		if err := os.Symlink("compute-relay", filepath.Join(stage, "bin/linked")); err != nil {
 			t.Fatal(err)
 		}

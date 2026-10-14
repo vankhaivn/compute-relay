@@ -8,10 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -30,7 +27,7 @@ func runStagingSource(parent context.Context, c Config, mode string, secret []by
 		return result, ErrMode
 	}
 	info, err := os.Stat(c.PythonExecutable)
-	if err != nil || !info.Mode().IsRegular() || runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(c.PythonExecutable), ".exe") {
+	if err != nil || !info.Mode().IsRegular() {
 		return result, ErrProcess
 	}
 	work, err := os.MkdirTemp("", "compute-relay-staging-")
@@ -51,13 +48,6 @@ func runStagingSource(parent context.Context, c Config, mode string, secret []by
 	cmd := exec.CommandContext(ctx, c.PythonExecutable, "-I", "-X", "utf8", "-c", source, mode, strconv.Itoa(seconds))
 	cmd.Dir = work
 	cmd.Env = []string{"HOME=" + work, "USERPROFILE=" + work, "TMPDIR=" + work, "TMP=" + work, "TEMP=" + work, "LANG=C.UTF-8"}
-	if runtime.GOOS == "windows" {
-		for _, name := range []string{"SystemRoot", "WINDIR"} {
-			if value, ok := os.LookupEnv(name); ok {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
-		}
-	}
 	header, err := json.Marshal(p.request)
 	if err != nil || len(header) > 65536 {
 		return result, ErrProtocol

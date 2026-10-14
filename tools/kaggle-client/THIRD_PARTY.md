@@ -39,6 +39,6 @@ Changing Python, uv, Kaggle CLI, Kaggle SDK, or any resolved dependency requires
 
 1. source/changelog and license review;
 2. regenerated `uv.lock` and `dependency-inventory.json`;
-3. passing process-safety and client-inventory tests on Linux, macOS, and Windows;
+3. passing process-safety and client-inventory tests on Linux and macOS;
 4. updated M-0 compatibility/evidence documents when a capability assumption changes; and
 5. separate authorized live re-verification for affected provider claims.

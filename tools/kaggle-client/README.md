@@ -13,16 +13,6 @@ From the repository root, install uv **0.12.13**, then use the wrapper for your 
 ./scripts/kaggle-client.sh check
 ```
 
-```powershell
-./scripts/kaggle-client.ps1 sync
-./scripts/kaggle-client.ps1 check
-```
-
-```cmd
-scripts\kaggle-client.cmd sync
-scripts\kaggle-client.cmd check
-```
-
 The wrappers do not install uv globally or alter another Python environment. Sync downloads
 locked packages/Python as needed; the checks do not authenticate Kaggle or allocate compute.
 
@@ -57,8 +47,8 @@ metadata without importing/authenticating the provider client.
 
 ## Authenticated use is separate
 
-Use the absolute `.venv/bin/python` path on POSIX or `.venv/Scripts/python.exe` on Windows
-in the [client configuration](../../docs/development/providers/kaggle-preflight.md). Local checks
+Use the absolute `.venv/bin/python` path in the
+[client configuration](../../docs/development/providers/kaggle-preflight.md). Local checks
 read pins without reading tokens. Authenticated account reads, private staging and GPU execution
 each require their own authorization. Never pass a token as a flag, commit credential values, or
 use a CI credential for operator validation.

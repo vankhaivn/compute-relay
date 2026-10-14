@@ -17,8 +17,7 @@ go build -trimpath -o compute-relay ./cmd/compute-relay
 ```
 
 Replace paths with operator-owned locations outside the checkout. Their parents must exist;
-the installation and token file must be new. On Windows use `compute-relay.exe` and absolute
-Windows paths. No local GPU or Docker is required.
+the installation and token file must be new. No local GPU or Docker is required.
 
 Token issuance writes the secret once to the private output file and prints a non-secret receipt.
 Keep the receipt's token ID for revocation. This is an application token, not a Kaggle credential.

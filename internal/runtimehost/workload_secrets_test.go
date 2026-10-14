@@ -5,9 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -89,11 +87,6 @@ func TestWorkloadSecretKeyRejectsUnsafeOrCorruptState(t *testing.T) {
 				err = os.WriteFile(path, []byte("short"), 0600)
 			case "permissions":
 				err = os.WriteFile(path, bytes.Repeat([]byte{3}, 32), 0644)
-				if err == nil && runtime.GOOS == "windows" {
-					// Windows inherits the protected parent DACL; mode bits do not
-					// grant public access. Add an actual Everyone read grant.
-					err = exec.Command("icacls", path, "/grant", "*S-1-1-0:(R)").Run()
-				}
 			case "symlink":
 				target := filepath.Join(t.TempDir(), "key")
 				if err = os.WriteFile(target, bytes.Repeat([]byte{4}, 32), 0600); err == nil {

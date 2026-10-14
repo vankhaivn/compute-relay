@@ -10,10 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -24,7 +21,7 @@ var artifactContractSource string
 var artifactSource string
 
 // Pack only fixed reviewed helper code, never workload source or credentials.
-// Compression keeps the command below Windows' command-line limit. Modules use
+// Compression bounds the fixed helper passed to the interpreter. Modules use
 // non-main names, so the execution core's mutation entry point is never invoked.
 func artifactProgram() (string, error) {
 	source := "import types\ncore=types.ModuleType('_relay_artifact_core')\nexec(" + strconv.Quote(executionSource) + ",core.__dict__)\ncontract=types.ModuleType('_relay_artifact_contract')\nexec(" + strconv.Quote(artifactContractSource) + ",contract.__dict__)\n" + artifactSource
@@ -61,7 +58,7 @@ func runArtifactSource(parent context.Context, c Config, mode string, token []by
 		return nil, ErrMode
 	}
 	info, err := os.Stat(c.PythonExecutable)
-	if err != nil || !info.Mode().IsRegular() || runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(c.PythonExecutable), ".exe") {
+	if err != nil || !info.Mode().IsRegular() {
 		return nil, ErrProcess
 	}
 	header, err := json.Marshal(request)
@@ -90,13 +87,6 @@ func runArtifactSource(parent context.Context, c Config, mode string, token []by
 	cmd := exec.CommandContext(ctx, c.PythonExecutable, "-I", "-X", "utf8", "-c", source, mode, strconv.Itoa(seconds))
 	cmd.Dir = work
 	cmd.Env = []string{"HOME=" + work, "USERPROFILE=" + work, "TMPDIR=" + work, "TMP=" + work, "TEMP=" + work, "LANG=C.UTF-8"}
-	if runtime.GOOS == "windows" {
-		for _, name := range []string{"SystemRoot", "WINDIR"} {
-			if value, ok := os.LookupEnv(name); ok {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
-		}
-	}
 	cmd.Stdin = bytes.NewReader(input)
 	out := &monitorOutput{limit: artifactCatalogBytes, cancel: cancel}
 	diagnostic := &monitorOutput{limit: 16 << 10, discard: true, cancel: cancel}
