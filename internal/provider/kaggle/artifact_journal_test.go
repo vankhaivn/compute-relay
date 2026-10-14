@@ -123,7 +123,7 @@ func (f *artifactJournalFixture) attach(t *testing.T) {
 		// Independently visible committed ownership, not a return-value assertion.
 		f.x.f.inspect(t, func(db *sql.DB) {
 			var n int
-			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM collection_leases WHERE held=1").Scan(&n); err != nil || n != 1 {
+			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM work_leases WHERE kind='collection' AND held=1").Scan(&n); err != nil || n != 1 {
 				t.Fatal("helper entered without committed collection lease", n, err)
 			}
 			if request.Target != nil && strings.HasPrefix(request.Target.Path, "outputs/") {
