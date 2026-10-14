@@ -45,12 +45,18 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 				result, failed = inspectCleanupResource(call, p, w, item)
 				if result.State == operations.ResourceRunning {
 					if err := repo.BeginCleanupResource(call, w, item); err != nil {
-						// No provider mutation follows a changed target or an expired fence.
-						if errors.Is(err, ErrLeaseLost) || ctx.Err() != nil {
+						if ctx.Err() != nil {
 							return Outcome{}, err
 						}
-						result.State, result.Reason = operations.ResourceRetained, "eligibility_changed"
-						failed = failure(domain.CodeIllegalStateTransition, "cleanup eligibility changed before deletion; the resource was retained", domain.RecommendedActionRetryRead)
+						switch err {
+						case operations.ErrChanged, operations.ErrBusy, operations.ErrState, operations.ErrUnresolved, operations.ErrUncollected:
+							result.State, result.Reason = operations.ResourceRetained, "eligibility_changed"
+							failed = failure(domain.CodeIllegalStateTransition, "cleanup eligibility changed before deletion; the resource was retained", domain.RecommendedActionRetryRead)
+						default:
+							// Storage failures are not evidence that eligibility changed.
+							// Preserve the claim for retry/recovery or fatal worker shutdown.
+							return Outcome{}, err
+						}
 					} else {
 						result, failed = callCleanupResource(call, p, item)
 					}

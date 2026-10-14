@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
 type stubRepo struct {
@@ -222,5 +223,78 @@ func TestEngineEmptyInventorySettlesWithoutProviderCall(t *testing.T) {
 	worked, err := engine.RunOnce(context.Background())
 	if !worked || err != nil || target.applied != 0 || len(repo.outcomes) != 1 || repo.outcomes[0].Effect != operations.AlreadyAbsent {
 		t.Fatalf("empty inventory did not settle locally: %v %v %+v", worked, err, repo.outcomes)
+	}
+}
+
+type intentFailureRepo struct {
+	*stubRepo
+	failure error
+	results []operations.ResourceResult
+}
+
+func (r *intentFailureRepo) BeginCleanupResource(context.Context, Work, ResourceWork) error {
+	return r.failure
+}
+func (r *intentFailureRepo) CompleteCleanupResource(_ context.Context, _ Work, result operations.ResourceResult) error {
+	r.results = append(r.results, result)
+	return nil
+}
+
+type temporaryStoreFailure struct{}
+
+func (temporaryStoreFailure) Error() string   { return "synthetic store contention" }
+func (temporaryStoreFailure) Temporary() bool { return true }
+
+func TestCleanupIntentStoreFailuresPreserveRecoveryAndWorkerPolicy(t *testing.T) {
+	fatal := errors.New("synthetic integrity failure")
+	for _, state := range []operations.ResourceState{operations.ResourcePending, operations.ResourceRunning} {
+		for _, tc := range []struct {
+			name    string
+			failure error
+			policy  worker.Decision
+		}{
+			{"busy", temporaryStoreFailure{}, worker.Retry},
+			{"timeout", context.DeadlineExceeded, worker.Retry},
+			{"integrity", fatal, worker.Stop},
+			{"joined eligibility and integrity", errors.Join(operations.ErrChanged, fatal), worker.Stop},
+		} {
+			t.Run(string(state)+"/"+tc.name, func(t *testing.T) {
+				work := stubWork(t)
+				work.Lease.Until = time.Now().Add(time.Minute)
+				work.Resources[0].Result.State = state
+				repo := &intentFailureRepo{stubRepo: &stubRepo{work: work}, failure: tc.failure}
+				target := &stubTarget{result: provider.CleanupOutcome{Deleted: true}}
+				engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
+				if err != nil {
+					t.Fatal(err)
+				}
+				worked, err := engine.RunOnce(t.Context())
+				if !worked || !errors.Is(err, tc.failure) || worker.Classify(err) != tc.policy {
+					t.Fatal("intent error did not reach worker policy", worked, err)
+				}
+				if target.applied != 0 || len(repo.results) != 0 || len(repo.outcomes) != 0 || work.Resources[0].Result.State != state {
+					t.Fatal("store failure mutated the provider or settled uncertain evidence")
+				}
+			})
+		}
+	}
+}
+
+func TestCleanupIntentEligibilityRefusalsStillRetainResources(t *testing.T) {
+	for _, refusal := range []error{operations.ErrChanged, operations.ErrBusy, operations.ErrState, operations.ErrUnresolved, operations.ErrUncollected} {
+		t.Run(refusal.Error(), func(t *testing.T) {
+			repo := &intentFailureRepo{stubRepo: &stubRepo{work: stubWork(t)}, failure: refusal}
+			target := &stubTarget{}
+			engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			worked, err := engine.RunOnce(t.Context())
+			if !worked || err != nil || target.applied != 0 || len(repo.results) != 1 || len(repo.outcomes) != 1 ||
+				repo.results[0].State != operations.ResourceRetained || repo.results[0].Reason != "eligibility_changed" ||
+				repo.outcomes[0].Problem == nil || repo.outcomes[0].Problem.Code != domain.CodeIllegalStateTransition {
+				t.Fatal("eligibility refusal lost its safe terminal outcome", worked, err)
+			}
+		})
 	}
 }
