@@ -22,6 +22,9 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 		}()
 		return e.resolver.Resolve(w.Binding)
 	}()
+	if provider.IsLocalStateError(resolveErr) {
+		return Outcome{}, resolveErr
+	}
 	allAbsent, priorUnresolved := true, false
 	var firstFailure *Outcome
 	for _, item := range w.Resources {
@@ -42,7 +45,11 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 				result.State, result.Reason = operations.ResourceRetained, "provider_not_configured"
 				failed = failure(domain.CodeConfigurationInvalid, "the attempt's frozen provider binding is not configured; resources were retained", domain.RecommendedActionConfigure)
 			default:
-				result, failed = inspectCleanupResource(call, p, w, item)
+				var err error
+				result, failed, err = inspectCleanupResource(call, p, w, item)
+				if err != nil {
+					return Outcome{}, err
+				}
 				if result.State == operations.ResourceRunning {
 					if err := repo.BeginCleanupResource(call, w, item); err != nil {
 						if ctx.Err() != nil {
@@ -58,7 +65,10 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 							return Outcome{}, err
 						}
 					} else {
-						result, failed = callCleanupResource(call, p, item)
+						result, failed, err = callCleanupResource(call, p, item)
+						if err != nil {
+							return Outcome{}, err
+						}
 					}
 				}
 			}
@@ -96,7 +106,7 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 	return Outcome{Effect: operations.RemoteDeleted}, nil
 }
 
-func inspectCleanupResource(ctx context.Context, adapter provider.Provider, w Work, item ResourceWork) (result operations.ResourceResult, failed Outcome) {
+func inspectCleanupResource(ctx context.Context, adapter provider.Provider, w Work, item ResourceWork) (result operations.ResourceResult, failed Outcome, localErr error) {
 	result = item.Result
 	defer func() {
 		if recover() != nil {
@@ -105,23 +115,29 @@ func inspectCleanupResource(ctx context.Context, adapter provider.Provider, w Wo
 		}
 	}()
 	description, err := adapter.DescribeCleanup(item.Resource.Request)
+	if provider.IsLocalStateError(err) {
+		return result, Outcome{}, err
+	}
 	if err != nil || !description.Valid() {
 		result.State, result.Reason = operations.ResourceRetained, "identity_unverified"
-		return result, failure(domain.CodeRemoteIdentityMismatch, "the recorded cleanup target could not be verified; this resource was retained", domain.RecommendedActionInspectProvider)
+		return result, failure(domain.CodeRemoteIdentityMismatch, "the recorded cleanup target could not be verified; this resource was retained", domain.RecommendedActionInspectProvider), nil
 	}
 	if description.Support != domain.CapabilitySupportSupported {
 		result.State, result.Reason = operations.ResourceRetained, description.Reason
-		return result, failure(domain.CodeUnsupportedCapability, "exact-target cleanup is unavailable for this resource; inspect its retained reason", domain.RecommendedActionInspectProvider)
+		return result, failure(domain.CodeUnsupportedCapability, "exact-target cleanup is unavailable for this resource; inspect its retained reason", domain.RecommendedActionInspectProvider), nil
 	}
-	if adapter.Verify(ctx, w.Binding) != nil {
+	if err := adapter.Verify(ctx, w.Binding); err != nil {
+		if provider.IsLocalStateError(err) {
+			return result, Outcome{}, err
+		}
 		result.State, result.Reason = operations.ResourceRetained, "binding_unverified"
-		return result, failure(domain.CodeRemoteIdentityMismatch, "the frozen provider binding could not be verified; this resource was retained", domain.RecommendedActionInspectProvider)
+		return result, failure(domain.CodeRemoteIdentityMismatch, "the frozen provider binding could not be verified; this resource was retained", domain.RecommendedActionInspectProvider), nil
 	}
 	result.State, result.Reason = operations.ResourceRunning, "delete_intent_recorded"
-	return result, Outcome{}
+	return result, Outcome{}, nil
 }
 
-func callCleanupResource(ctx context.Context, adapter provider.Provider, item ResourceWork) (result operations.ResourceResult, failed Outcome) {
+func callCleanupResource(ctx context.Context, adapter provider.Provider, item ResourceWork) (result operations.ResourceResult, failed Outcome, localErr error) {
 	result = item.Result
 	result.State, result.Reason = operations.ResourceUnknown, "provider_outcome_unknown"
 	failed = failure(domain.CodeProviderStateUnknown, "remote cleanup returned no confirmed outcome; preserve the original targets for recovery", domain.RecommendedActionInspectProvider)
@@ -134,20 +150,23 @@ func callCleanupResource(ctx context.Context, adapter provider.Provider, item Re
 	request.Mode = provider.CleanupApply
 	request.RecoverOnly = item.Result.State == operations.ResourceRunning
 	outcome, err := adapter.CleanupResource(ctx, request)
+	if provider.IsLocalStateError(err) {
+		return result, Outcome{}, err
+	}
 	if err == nil && outcome.Deleted && !outcome.AlreadyAbsent && !outcome.WouldDelete {
 		result.State, result.Reason = operations.ResourceDeleted, "deletion_confirmed"
-		return result, Outcome{}
+		return result, Outcome{}, nil
 	}
 	if err == nil && outcome.AlreadyAbsent && !outcome.Deleted && !outcome.WouldDelete {
 		result.State, result.Reason = operations.ResourceAbsent, "absence_confirmed"
-		return result, Outcome{}
+		return result, Outcome{}, nil
 	}
 	if err != nil && (outcome.Deleted || outcome.AlreadyAbsent || outcome.WouldDelete) {
-		return result, failed // Contradictory evidence cannot establish a safe refusal.
+		return result, failed, nil // Contradictory evidence cannot establish a safe refusal.
 	}
 	if errors.Is(err, provider.ErrCleanupUnsupported) {
 		result.State, result.Reason = operations.ResourceRetained, "resource_cleanup_unsupported"
-		return result, failure(domain.CodeUnsupportedCapability, "the adapter retained an unsupported cleanup target", domain.RecommendedActionInspectProvider)
+		return result, failure(domain.CodeUnsupportedCapability, "the adapter retained an unsupported cleanup target", domain.RecommendedActionInspectProvider), nil
 	}
 	var value domain.Problem
 	var pointer *domain.Problem
@@ -168,5 +187,5 @@ func callCleanupResource(ctx context.Context, adapter provider.Provider, item Re
 		result.State, result.Reason = operations.ResourceFailed, "provider_access_denied"
 		failed = failure(code, "the provider refused cleanup; no deletion was confirmed", domain.RecommendedActionConfigure)
 	}
-	return result, failed
+	return result, failed, nil
 }

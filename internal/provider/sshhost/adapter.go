@@ -703,7 +703,7 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 			Remote: &provider.RemoteReference{Identity: prepared.Identity, Resource: prepared.Resource, Version: ref.ID}}
 		return nil
 	})
-	if err != nil && sent {
+	if provider.IsLocalStateError(err) || err != nil && sent {
 		return unknownSubmission()
 	}
 	return outcome

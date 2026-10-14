@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 const fingerprintKey = "request_fingerprint_v1"
@@ -304,7 +305,10 @@ func (s *Service) readCredential(ctx context.Context, id string) ([]byte, error)
 	defer s.secretMu.Unlock()
 	key, err := s.repo.ResolveConnectionCredential(ctx, id)
 	if err != nil {
-		return nil, credentials.ErrUnavailable
+		if err == credentials.ErrInvalid || err == credentials.ErrUnconfigured {
+			return nil, credentials.ErrUnavailable
+		}
+		return nil, provider.LocalStateError{Err: err}
 	}
 	var owned []byte
 	err = s.vault.WithSecret(ctx, key, func(secret []byte) error {

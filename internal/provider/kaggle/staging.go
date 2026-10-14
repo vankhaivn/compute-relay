@@ -166,6 +166,9 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		result, err = s.run(ctx, s.config, mode, secret, p, s.blobs)
 		return err
 	})
+	if provider.IsLocalStateError(err) {
+		return none, err
+	}
 	if ctx.Err() != nil {
 		return none, ctx.Err()
 	}

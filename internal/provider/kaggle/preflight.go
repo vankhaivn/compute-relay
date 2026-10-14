@@ -14,6 +14,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 const (
@@ -209,6 +210,9 @@ func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 		r, runErr = p.run(ctx, p.config, ReadOnly, secret)
 		return runErr
 	})
+	if provider.IsLocalStateError(err) {
+		return Report{}, err
+	}
 	if ctx.Err() != nil {
 		return Report{}, ctx.Err()
 	}

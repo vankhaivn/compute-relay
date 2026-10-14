@@ -11,6 +11,8 @@ import (
 // pin/publication acknowledgement failure. It must not become a failed operation.
 type progressWriteError struct{ error }
 
+func (e progressWriteError) Unwrap() error { return e.error }
+
 type progressTracker struct {
 	engine                              *Engine
 	work                                Work

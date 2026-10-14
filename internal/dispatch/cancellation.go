@@ -61,6 +61,9 @@ func (s *session) cancelOnce(p provider.Provider) (bool, error) {
 	outcome, err := control(s.ctx, s.e.config.ControlTimeout, func(ctx context.Context) (provider.CancellationOutcome, error) {
 		return p.Cancel(ctx, *w.Journal.Remote, w.Cancellation.Operation.ID)
 	})
+	if provider.IsLocalStateError(err) {
+		return true, err
+	}
 	if err != nil || outcome.Validate() != nil {
 		return true, s.commitCancellation(CancellationAction{Code: domain.CodeRemoteExecutionUnresolved})
 	}

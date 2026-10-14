@@ -33,6 +33,9 @@ func (a *Adapter) CleanupResource(ctx context.Context, request provider.CleanupR
 		return provider.CleanupOutcome{}, provider.ErrCleanupUnsupported
 	}
 	outcome, err := a.cleanup(ctx, request)
+	if provider.IsLocalStateError(err) {
+		return outcome, err
+	}
 	if errors.Is(err, ErrIdentity) {
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "container ownership no longer matches the original receipt")
 	}

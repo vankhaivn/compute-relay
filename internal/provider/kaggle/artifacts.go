@@ -266,7 +266,13 @@ func (a *ArtifactReader) Fetch(parent context.Context, ref provider.RemoteRefere
 	checked := &artifactWriter{ctx: ctx, dst: dst, limit: file.Bytes, hash: sha256.New(), cancel: cancel}
 	_, err = a.call(ctx, "fetch", ref, &artifactEntry{file.Path, file.Bytes, file.SHA256}, checked)
 	if observer != nil && observer.err != nil {
+		if provider.IsLocalStateError(err) {
+			return none, errors.Join(err, observer.err)
+		}
 		return none, observer.err
+	}
+	if provider.IsLocalStateError(err) {
+		return none, err
 	}
 	if err != nil || checked.failed || checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
 		return none, ErrArtifactTransfer
@@ -340,6 +346,9 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 		raw, inner = a.run(ctx, a.executor.stager.config, mode, token, request, dst)
 		return inner
 	})
+	if provider.IsLocalStateError(err) {
+		return nil, err
+	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}

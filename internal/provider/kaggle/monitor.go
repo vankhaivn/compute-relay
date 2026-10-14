@@ -167,6 +167,9 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 		result, err = m.run(ctx, m.config, mode, token, request)
 		return err
 	})
+	if provider.IsLocalStateError(err) {
+		return monitorResponse{}, err
+	}
 	if ctx.Err() != nil {
 		return monitorResponse{}, ctx.Err()
 	}

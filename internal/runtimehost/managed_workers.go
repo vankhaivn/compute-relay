@@ -193,11 +193,11 @@ func (r *managedSnapshotResolver) ResolveContext(parent context.Context, expecte
 	defer cancel()
 	binding, err := r.read(ctx, expected)
 	if err != nil {
-		return nil, ErrState
+		return nil, provider.LocalStateError{Err: err}
 	}
 	actual := provider.BindingSnapshot{Binding: binding.Profile.Binding, AccountScope: binding.Profile.AccountScope, CredentialRef: binding.Profile.CredentialRef}
 	if actual != expected {
-		return nil, ErrState
+		return nil, provider.LocalStateError{Err: ErrState}
 	}
 	return r.make(binding)
 }

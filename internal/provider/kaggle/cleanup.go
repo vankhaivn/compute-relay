@@ -49,7 +49,10 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 		return provider.CleanupOutcome{}, ErrRuntimeBinding
 	}
 	plan, prepared, err := p.load(ctx, request.Remote.Identity)
-	if err != nil || plan.Job.Identity != request.Remote.Identity || plan.Job.Binding != p.binding.Binding || plan.Digest() != request.PlanSHA256 || prepared.Validate(plan, request.CreationOperationID) != nil {
+	if err != nil {
+		return provider.CleanupOutcome{}, provider.LocalStateError{Err: err}
+	}
+	if plan.Job.Identity != request.Remote.Identity || plan.Job.Binding != p.binding.Binding || plan.Digest() != request.PlanSHA256 || prepared.Validate(plan, request.CreationOperationID) != nil {
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "original cleanup plan or preparation could not be verified")
 	}
 	query := cleanupRequest{Protocol: 1, Owner: p.config.AccountName, Slug: strings.SplitN(description.Name, "/", 2)[1], Kind: description.Kind, ID: description.ID}
@@ -93,6 +96,9 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 		response, err = p.runCleanup(ctx, p.config, mode, secret, query)
 		return err
 	})
+	if provider.IsLocalStateError(err) {
+		return provider.CleanupOutcome{}, err
+	}
 	if err != nil || !called || violated || !response.valid() {
 		return provider.CleanupOutcome{}, ErrUnavailable
 	}

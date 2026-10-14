@@ -118,6 +118,9 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 	// the first-pinned numeric dataset ID, version, marker, privacy and readiness.
 	stage, err := e.stager.ReconcilePrepare(parent, e.plan, e.prepared.PreparationID)
 	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return unknownExecution()
+		}
 		return rejectedExecution(reasonStagingRecheck)
 	}
 	if stage.Status != provider.ReconciliationFound || stage.Prepared == nil || *stage.Prepared != e.prepared {
@@ -292,6 +295,9 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 		result, err = e.run(ctx, e.stager.config, mode, secret, request)
 		return err
 	})
+	if provider.IsLocalStateError(err) {
+		return executionResponse{}, "", err
+	}
 	if !invoked {
 		if ctx.Err() != nil {
 			return executionResponse{}, stopReason(ctx, ""), ctx.Err()

@@ -60,6 +60,10 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 		resultErr = worker.HeartbeatError(resultErr, stop())
 	}()
 	recordFailure := func(err error) error {
+		var progressErr progressWriteError
+		if provider.IsLocalStateError(err) || errors.As(err, &progressErr) {
+			return err
+		}
 		if renewalErr := stop(); renewalErr != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return worker.HeartbeatError(err, renewalErr)
@@ -85,10 +89,6 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	}
 	proof, err := e.verifyFiles(call, src, *w)
 	if err != nil {
-		var progressErr progressWriteError
-		if errors.As(err, &progressErr) {
-			return true, progressErr.error
-		}
 		return true, recordFailure(err)
 	}
 	if err := stop(); err != nil {
@@ -125,6 +125,9 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, er
 	}()
 	p, err := e.resolver.Resolve(w.Binding)
 	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return nil, err
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -135,6 +138,9 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, er
 		return nil, ErrUnavailable
 	}
 	if err := src.Verify(ctx, w.Binding); err != nil {
+		if provider.IsLocalStateError(err) {
+			return nil, err
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -154,6 +160,9 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 	}
 	catalog, err := src.ListArtifacts(ctx, w.Observation.Remote)
 	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return Snapshot{}, err
+		}
 		return Snapshot{}, ErrUnavailable
 	}
 	if len(catalog) > e.config.MaxFiles {
@@ -192,6 +201,9 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 	writer := newCheckedWriter(ctx, &raw, manifestFile.Bytes)
 	result, err := src.Fetch(ctx, w.Observation.Remote, *manifestFile, writer, manifestFile.Bytes, nil)
 	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return Snapshot{}, err
+		}
 		return Snapshot{}, ErrUnavailable
 	}
 	if !writer.matches(*manifestFile, result) {
@@ -225,7 +237,7 @@ func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work)
 		var progressErr progressWriteError
 		if err != nil && ctx.Err() == nil && !errors.As(err, &progressErr) {
 			if sampleErr := progress.checkpoint(ctx, "transferring", true); sampleErr != nil {
-				err = sampleErr
+				err = errors.Join(err, sampleErr)
 			}
 		}
 	}()
@@ -327,8 +339,8 @@ func (e *Engine) transfer(ctx context.Context, src provider.Provider, remote pro
 		if err != nil {
 			var progressErr progressWriteError
 			final = ErrUnavailable
-			if errors.As(err, &progressErr) {
-				final = progressErr
+			if provider.IsLocalStateError(err) || errors.As(err, &progressErr) {
+				final = err
 			}
 			return
 		}
@@ -419,6 +431,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay}, func(ctx context.Context, _ int) (bool, error) {
 		return e.RunOnce(ctx)
 	}, func(err error) worker.Decision {
+		if provider.IsLocalStateError(err) {
+			return worker.Classify(err)
+		}
 		var failedAttempt Failure
 		if errors.As(err, &failedAttempt) || errors.Is(err, ErrLeaseLost) {
 			return worker.Continue

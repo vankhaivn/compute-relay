@@ -120,6 +120,9 @@ func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSn
 		return ErrRuntimeBinding
 	}
 	r, err := p.preflight.Check(ctx, ReadOnly)
+	if provider.IsLocalStateError(err) {
+		return err
+	}
 	if err != nil || r.Local != "ready" || r.Authentication != "verified" || r.AccountBinding != "matched" {
 		return ErrUnavailable
 	}
@@ -133,6 +136,9 @@ func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob)
 	}
 	if p.policy.MachineShape != "" {
 		q, err := p.monitor.ReadQuota(ctx)
+		if provider.IsLocalStateError(err) {
+			return provider.Plan{}, err
+		}
 		if err != nil || q.Status != provider.QuotaKnown || q.Remaining == nil || *q.Remaining < float64(job.WallSeconds) {
 			return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch")
 		}
@@ -205,7 +211,10 @@ func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*ru
 		return nil, ErrRuntimeBinding
 	}
 	plan, prepared, err := p.load(ctx, id)
-	if err != nil || plan.Job.Identity != id || plan.Job.Binding != p.binding.Binding || prepared.Validate(plan, prepared.PreparationID) != nil {
+	if err != nil {
+		return nil, provider.LocalStateError{Err: err}
+	}
+	if plan.Job.Identity != id || plan.Job.Binding != p.binding.Binding || prepared.Validate(plan, prepared.PreparationID) != nil {
 		return nil, ErrRuntimeBinding
 	}
 	digest := plan.Digest()
