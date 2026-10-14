@@ -167,6 +167,19 @@ func TestControlledStartGatesAndLostAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestControlledPreparationNeverInstallsMissingImage(t *testing.T) {
+	h, _ := controlledHarness(t)
+	h.host.image = false
+	h.host.registry = true
+	plan, err := h.adapter.Validate(context.Background(), h.job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.adapter.Prepare(context.Background(), plan, testOperation); err == nil || h.host.image || h.host.created != 0 {
+		t.Fatal("prepare installed missing image", err)
+	}
+}
+
 func TestStartRejectsChangedPinnedIdentityBeforeAnyStartEffect(t *testing.T) {
 	for _, controlled := range []bool{false, true} {
 		for _, field := range []string{"workspace", "job", "nonce", "plan", "engine", "missing_engine"} {
