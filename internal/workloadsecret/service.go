@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
 type Command struct {
@@ -110,21 +112,18 @@ func (s *Service) Get(ctx context.Context, p auth.Principal, workspace domain.Wo
 	return s.repo.ReadWorkloadSecrets(ctx, workspace, fresh.TokenID(), job, id)
 }
 func (s *Service) Run(ctx context.Context) error {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			s.pool.Close()
-			return ctx.Err()
-		case <-ticker.C:
-			now := s.clock.Now().UTC()
-			s.pool.Sweep(now, func(key Key, id domain.OperationID) bool {
-				bounded, cancel := context.WithTimeout(ctx, time.Second)
-				defer cancel()
-				usable, err := s.repo.WorkloadSecretsUsable(bounded, key, id)
-				return err == nil && usable
-			})
-		}
-	}
+	defer s.pool.Close()
+	return worker.Run(ctx, worker.Config{Workers: 1, PollDelay: time.Second}, func(ctx context.Context, _ int) (bool, error) {
+		var failures []error
+		s.pool.Sweep(s.clock.Now().UTC(), func(key Key, id domain.OperationID) bool {
+			bounded, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			usable, err := s.repo.WorkloadSecretsUsable(bounded, key, id)
+			if err != nil {
+				failures = append(failures, err)
+			}
+			return err == nil && usable
+		})
+		return false, errors.Join(failures...)
+	}, worker.Classify)
 }

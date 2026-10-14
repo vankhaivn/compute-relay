@@ -2,7 +2,6 @@ package runtimehost
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -16,6 +15,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -206,24 +206,18 @@ type connectionOperationRunner interface {
 	RunOnce(context.Context) (bool, error)
 }
 
-func runConnectionOperations(ctx context.Context, worker connectionOperationRunner) error {
-	for {
-		delay := time.Second
-		if _, err := worker.RunOnce(ctx); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if !errors.Is(err, connections.ErrVault) {
-				return ErrState
-			}
-			delay = 30 * time.Second // Exact deletion intents survive denied storage; other accounts stay available.
+func runConnectionOperations(ctx context.Context, runner connectionOperationRunner) error {
+	err := worker.Run(ctx, worker.Config{Workers: 1, PollDelay: time.Second}, func(ctx context.Context, _ int) (bool, error) {
+		return runner.RunOnce(ctx)
+	}, func(err error) worker.Decision {
+		if err == connections.ErrVault {
+			// The pending vault intent remains retryable while unrelated accounts run.
+			return worker.Continue
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
+		return worker.Classify(err)
+	})
+	if err != nil && ctx.Err() == nil {
+		return ErrState
 	}
+	return err
 }

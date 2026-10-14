@@ -45,16 +45,22 @@ func (p *scriptedPass) SweepOnce(_ context.Context, _ retention.Policy, after in
 }
 
 func TestSweepRetentionFollowsTheScanAndStopsWithoutProgress(t *testing.T) {
-	failed := errors.New("deletion failed")
+	failed := context.DeadlineExceeded
 	// A page with failed deletions still advances; an empty page restarts the tombstone
 	// cursor until the inventory scan wraps.
 	pass := &scriptedPass{steps: []sweepStep{{2, 4, failed}, {1, 0, nil}, {0, 0, nil}}}
-	sweepRetention(context.Background(), pass)
+	err := sweepRetention(context.Background(), pass)
+	if !errors.Is(err, failed) {
+		t.Fatal("deletion failure was hidden", err)
+	}
 	if fmt.Sprint(pass.calls) != "[0 4 0]" || len(pass.steps) != 0 {
 		t.Fatal("pass did not follow the scan", pass.calls)
 	}
-	early := &scriptedPass{steps: []sweepStep{{0, 0, errors.New("expiry failed")}}}
-	sweepRetention(context.Background(), early)
+	expiryFailure := errors.New("expiry failed")
+	early := &scriptedPass{steps: []sweepStep{{0, 0, expiryFailure}}}
+	if err := sweepRetention(context.Background(), early); !errors.Is(err, expiryFailure) {
+		t.Fatal("expiry failure was hidden", err)
+	}
 	if len(early.calls) != 1 {
 		t.Fatal("a failure before progress did not end the pass", early.calls)
 	}
@@ -128,7 +134,11 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pass := func() { sweepRetention(ctx, sweeper) }
+	pass := func() {
+		if err := sweepRetention(ctx, sweeper); err != nil {
+			t.Fatal(err)
+		}
+	}
 	present := func(object domain.ObjectMetadata) bool {
 		stream, err := h.inputs.Open(ctx, "app", object.ID)
 		if err != nil {
