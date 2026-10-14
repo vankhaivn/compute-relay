@@ -254,12 +254,18 @@ func TestExecutionGateExpiryReplayAndCancellationPreventStart(t *testing.T) {
 
 func TestExecutionGateBoundsAndScopedReadiness(t *testing.T) {
 	f := gateFixture(t, fake.Accept)
+	const workers = 2
+	settings := scheduler.DefaultSettings()
+	settings.MaxWorkers = workers
+	if err := f.s.ConfigureScheduler(context.Background(), settings); err != nil {
+		t.Fatal(err)
+	}
 	service, p := authorizationService(t, f, "a", auth.Execute, auth.Read)
-	for n := 1; n <= executionauth.MaxHeldPerAccount+1; n++ {
+	for n := 1; n <= workers+1; n++ {
 		id := gateSeed(t, f, n)
 		raw, _ := json.Marshal(executionauth.PrepareRequest{AttemptID: id.AttemptID, MaxPreparationSeconds: 60, ReadyUntil: f.clock.Now().Add(time.Minute).UTC().Format(time.RFC3339), MaxStagedBytes: 1 << 20, AuthorizePrivateStaging: true})
 		_, err := service.Prepare(context.Background(), p, "a", id.JobID, "bounded-"+string(id.JobID), raw)
-		if n <= executionauth.MaxHeldPerAccount && err != nil || n > executionauth.MaxHeldPerAccount && !errors.Is(err, admission.ErrLimit) {
+		if n <= workers && err != nil || n > workers && !errors.Is(err, admission.ErrLimit) {
 			t.Fatal("unbounded holds", n, err)
 		}
 	}
@@ -278,7 +284,7 @@ func TestExecutionGateBoundsAndScopedReadiness(t *testing.T) {
 	}
 	control, op, _ := controlService(t, f, "a", auth.Operate)
 	cancelControl(t, f, control, op, id)
-	if n := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0"); n != executionauth.MaxHeldPerAccount-1 {
+	if n := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0"); n != workers-1 {
 		t.Fatal("never-staged reservation leaked", n)
 	}
 }

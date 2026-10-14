@@ -14,8 +14,6 @@ const (
 	MaxPreparationSeconds int64 = 600
 	MaxReadyHold                = time.Hour
 	MaxStagedBytes        int64 = (4 << 30) + (100 << 20)
-	MaxHeldPerAccount           = 4
-	MaxHeldGlobal               = 16
 )
 
 type PrepareRequest struct {

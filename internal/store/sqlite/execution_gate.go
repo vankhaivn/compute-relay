@@ -145,12 +145,18 @@ func (s *Store) PrepareExecution(ctx context.Context, c executionauth.GateComman
 		if total < 1 || total > req.MaxStagedBytes {
 			return executionauth.ErrRequest
 		}
-		var accountCount, globalCount int
-		var accountBytes, globalBytes int64
-		if err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(reserved_bytes),0),COALESCE(sum(account_scope=?),0),COALESCE(sum(CASE WHEN account_scope=? THEN reserved_bytes ELSE 0 END),0) FROM attempt_grants WHERE kind='prepare' AND storage_released=0`, r.Profile.AccountScope, r.Profile.AccountScope).Scan(&globalCount, &globalBytes, &accountCount, &accountBytes); err != nil {
+		settings, _, err := schedulerControl(ctx, tx)
+		if err != nil {
+			return err
+		}
+		var globalCount int
+		var globalBytes int64
+		if err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(reserved_bytes),0) FROM attempt_grants WHERE kind='prepare' AND storage_released=0`).Scan(&globalCount, &globalBytes); err != nil {
 			return dbError(err)
 		}
-		if accountCount >= executionauth.MaxHeldPerAccount || globalCount >= executionauth.MaxHeldGlobal || accountBytes+total > executionauth.MaxHeldPerAccount*executionauth.MaxStagedBytes || globalBytes+total > executionauth.MaxHeldGlobal*executionauth.MaxStagedBytes {
+		// The global reservation bound also bounds every individual account.
+		budget := int64(settings.MaxWorkers) * executionauth.MaxStagedBytes
+		if globalCount >= settings.MaxWorkers || globalBytes > budget-total {
 			return admission.ErrLimit
 		}
 		receipt, err = newGateReceipt(now, c, req.AttemptID, "prepare")
