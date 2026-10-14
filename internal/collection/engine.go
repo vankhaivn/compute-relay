@@ -237,7 +237,11 @@ func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work)
 		var progressErr progressWriteError
 		if err != nil && ctx.Err() == nil && !errors.As(err, &progressErr) {
 			if sampleErr := progress.checkpoint(ctx, "transferring", true); sampleErr != nil {
-				err = errors.Join(err, sampleErr)
+				if provider.IsLocalStateError(err) {
+					err = errors.Join(err, sampleErr)
+				} else {
+					err = sampleErr
+				}
 			}
 		}
 	}()

@@ -434,6 +434,69 @@ func TestCollectionLocalAndProgressFailuresBothSurvive(t *testing.T) {
 	assertLocalWorkPreserved(t, f, job, "")
 }
 
+type recoveringCollectionProgressRepository struct {
+	localReadLoopRepository
+	samples int
+	failure error
+}
+
+func (r *recoveringCollectionProgressRepository) RecordCollectionProgress(ctx context.Context, work collection.Work, stage string, sample domain.CollectionProgress) error {
+	r.samples++
+	if r.samples == 2 {
+		return r.failure
+	}
+	return r.Store.RecordCollectionProgress(ctx, work, stage, sample)
+}
+
+type failingCollectionTransfer struct {
+	provider.Provider
+	failed bool
+}
+
+func (p *failingCollectionTransfer) Fetch(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+	if strings.HasPrefix(artifact.Path, "outputs/") && !p.failed {
+		p.failed = true
+		return provider.TransferResult{}, errors.New("provider transfer unavailable")
+	}
+	return p.Provider.Fetch(ctx, remote, artifact, dst, limit, progress)
+}
+
+func TestCollectionProviderFailureKeepsProgressRetryPolicy(t *testing.T) {
+	for _, cause := range []error{sqlite.ErrBusy, context.DeadlineExceeded, sqlite.ErrCorrupt} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			f, job, _ := localFailureFixture(t, "collection")
+			p := &failingCollectionTransfer{}
+			f.wrapProvider = func(base provider.Provider) provider.Provider { p.Provider = base; return p }
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			resumed := false
+			repo := &recoveringCollectionProgressRepository{failure: cause,
+				localReadLoopRepository: localReadLoopRepository{Store: f.host.store, clock: f.clock.(*fixedClock), success: func() { resumed = true; cancel() }}}
+			cfg := collection.DefaultConfig()
+			cfg.Workers, cfg.PollDelay = 1, time.Millisecond
+			engine, err := collection.New(repo, f.services.resolver, f.host.results, f.clock, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = engine.Run(ctx)
+			if cause == sqlite.ErrCorrupt {
+				if !errors.Is(err, cause) || resumed || repo.samples != 2 {
+					t.Fatal("fatal checkpoint did not stop original collection", err, resumed, repo.samples)
+				}
+				assertLocalWorkPreserved(t, f, job, "")
+			} else {
+				if !errors.Is(err, context.Canceled) || !resumed {
+					t.Fatal("provider failure overrode transient checkpoint recovery", err, resumed)
+				}
+				result, err := f.host.store.ReadCollection(t.Context(), "app", f.actor.TokenID(), job.JobID, job.AttemptID)
+				if err != nil || len(result.Files) == 0 {
+					t.Fatal("original accepted collection did not publish", err)
+				}
+			}
+		})
+	}
+}
+
 type localCanceledProvider struct{ provider.Provider }
 
 func (p localCanceledProvider) Verify(ctx context.Context, _ provider.BindingSnapshot) error {
