@@ -140,7 +140,7 @@ func TestAuthorizationConcurrentReplayAndOneGrantAcrossKeys(t *testing.T) {
 			fresh++
 		}
 	}
-	if fresh != 1 || controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations") != 1 {
+	if fresh != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 {
 		t.Fatal("concurrent permit multiplication", fresh)
 	}
 	for _, request := range []struct {
@@ -238,7 +238,7 @@ func TestAuthorizationReplayOriginalAndReadConsumedAfterRestart(t *testing.T) {
 	if err = f.step(t); err != nil {
 		t.Fatal(err)
 	}
-	if f.backend.Stats().PrepareCalls != 1 || controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations") != 1 {
+	if f.backend.Stats().PrepareCalls != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 {
 		t.Fatal("restart minted grant or duplicated preparation")
 	}
 	f.restart(t)
@@ -319,7 +319,7 @@ func TestAuthorizationAmbiguousSubmissionAndRetryNeedSeparateGrant(t *testing.T)
 		if err = f.step(t); err != nil {
 			t.Fatal(err)
 		}
-		if f.backend.Stats().PrepareCalls != 1 || controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations") != 2 {
+		if f.backend.Stats().PrepareCalls != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 2 {
 			t.Fatal("retry did not keep separate permit")
 		}
 	})
@@ -441,7 +441,7 @@ func TestCollectionRecoveryReusesOriginalPermitAndOperation(t *testing.T) {
 	if err != nil || work == nil || work.Lease.OperationID != original.OperationID || work.Lease.AttemptID != original.AttemptID || work.Lease.Generation != original.Generation+1 || work.Lease.Fence == original.Fence {
 		t.Fatal("collection recovery changed identity or lost fencing", work, err)
 	}
-	if count := controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations"); count != 1 {
+	if count := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'"); count != 1 {
 		t.Fatal("collection created authorization", count)
 	}
 	assertNoNewCompute(t, f)
@@ -472,7 +472,7 @@ func TestAuthorizationConcurrentDifferentKeysHaveOneWinner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if won != 1 || controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations") != 1 {
+	if won != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 {
 		t.Fatal("distinct keys multiplied grant", won)
 	}
 }
@@ -509,15 +509,15 @@ func TestAuthorizationFrozenPermitMismatchPreventsMutation(t *testing.T) {
 	id := f.seed(t, "a", 1, false)
 	grantAuthorization(t, f, id)
 	work := managedClaim(t, f)
-	if _, err := f.s.db.Exec("UPDATE execution_authorizations SET inputs_sha256=?", strings.Repeat("b", 64)); err == nil {
+	if _, err := f.s.db.Exec("UPDATE attempt_grants SET inputs_sha256=?", strings.Repeat("b", 64)); err == nil {
 		t.Fatal("frozen permit allowed routine update")
 	}
 	// Corrupt only a disposable fixture, then prove dispatch fails closed instead of
 	// treating the row's existence as sufficient permission for different input bytes.
-	if _, err := f.s.db.Exec("DROP TRIGGER immutable_execution_authorization"); err != nil {
+	if _, err := f.s.db.Exec("DROP TRIGGER immutable_attempt_grant"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.db.Exec("UPDATE execution_authorizations SET inputs_sha256=?", strings.Repeat("b", 64)); err != nil {
+	if _, err := f.s.db.Exec("UPDATE attempt_grants SET inputs_sha256=?", strings.Repeat("b", 64)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.s.ConsumeAuthorization(context.Background(), work.Handle); !errors.Is(err, ErrCorrupt) {

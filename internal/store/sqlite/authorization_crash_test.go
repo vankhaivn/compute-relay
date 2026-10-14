@@ -55,7 +55,7 @@ func TestAuthorizationProcessKillAtConsumptionBoundary(t *testing.T) {
 			f.s = s
 			attachManaged(t, f)
 			var status string
-			if err = s.db.QueryRow("SELECT status FROM execution_authorizations").Scan(&status); err != nil {
+			if err = s.db.QueryRow("SELECT status FROM attempt_grants WHERE kind='execution'").Scan(&status); err != nil {
 				t.Fatal(err)
 			}
 			want := executionauth.Consumed
@@ -82,7 +82,7 @@ func TestAuthorizationProcessKillAtConsumptionBoundary(t *testing.T) {
 			if stats.PrepareCalls != expectedPrepare || stats.SubmitCalls != 0 || stats.Executions != 0 {
 				t.Fatal("crash repeated remote mutation", stats)
 			}
-			if count := controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations"); count != 1 {
+			if count := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'"); count != 1 {
 				t.Fatal("restart refilled permit", count)
 			}
 		})
@@ -119,7 +119,7 @@ func TestAuthorizationCrashHelper(t *testing.T) {
 		}
 		defer tx.Rollback()
 		// This intentional uncommitted fault prefix is confined to a disposable test DB.
-		if _, err = tx.Exec("UPDATE execution_authorizations SET status='consumed',consumed_at=?", now.Format(time.RFC3339Nano)); err != nil {
+		if _, err = tx.Exec("UPDATE attempt_grants SET status='consumed',consumed_at=?", now.Format(time.RFC3339Nano)); err != nil {
 			t.Fatal(err)
 		}
 	} else {

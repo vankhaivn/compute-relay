@@ -104,36 +104,48 @@ func TestWorkloadSecretKeyRejectsUnsafeOrCorruptState(t *testing.T) {
 }
 
 func TestWorkloadSecretMissingKeyWithReceiptNeverReinitializes(t *testing.T) {
-	ctx := context.Background()
-	root := initialized(t)
-	host, err := Open(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer host.Close()
-	// Even an incomplete restored receipt must prevent key regeneration. This
-	// artificial damaged database intentionally has no related attempt or key.
-	db, err := sql.Open("sqlite", filepath.Join(root, "state", "runtime.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if _, err = conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
-		t.Fatal(err)
-	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO workload_secret_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_hmac,metadata,original_receipt,expires_at_ms) VALUES('app','secret_1','job_1','attempt_1',?,?,'{}','{}',1)`, strings.Repeat("a", 64), strings.Repeat("b", 64))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = host.workloadSecretPool(ctx); err != ErrState {
-		t.Fatal("missing replay key was regenerated", err)
-	}
-	if _, err = os.Lstat(filepath.Join(root, "state", "workload-secret-key")); !os.IsNotExist(err) {
-		t.Fatal("failure wrote replacement evidence", err)
+	for _, evidence := range []string{"grant", "receipt", "revocation"} {
+		t.Run(evidence, func(t *testing.T) {
+			ctx := context.Background()
+			root := initialized(t)
+			host, err := Open(ctx, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer host.Close()
+			// Even an incomplete restored authorization must prevent key regeneration. This
+			// artificial damaged database intentionally has no related attempt or key.
+			db, err := sql.Open("sqlite", filepath.Join(root, "state", "runtime.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if _, err = conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+				t.Fatal(err)
+			}
+			if evidence == "grant" {
+				_, err = conn.ExecContext(ctx, `INSERT INTO attempt_grants(workspace_id,kind,authorization_id,job_id,attempt_id,key_sha256,status,metadata,expires_at_ms) VALUES('app','secret','secret_1','job_1','attempt_1',?,'granted','{}',1)`, strings.Repeat("a", 64))
+			} else {
+				namespace, scope := "grant", "secret"
+				if evidence == "revocation" {
+					namespace, scope = "revoke", "secret_1"
+				}
+				_, err = conn.ExecContext(ctx, `INSERT INTO receipts(workspace_id,namespace,scope,key_sha256,request_sha256,canonical_version,subject_id,job_id,attempt_id,receipt) VALUES('app',?,?,?,?,'','secret_1','job_1','attempt_1','{}')`, namespace, scope, strings.Repeat("a", 64), strings.Repeat("b", 64))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = host.workloadSecretPool(ctx); err != ErrState {
+				t.Fatal("missing replay key was regenerated", err)
+			}
+			if _, err = os.Lstat(filepath.Join(root, "state", "workload-secret-key")); !os.IsNotExist(err) {
+				t.Fatal("failure wrote replacement evidence", err)
+			}
+		})
 	}
 }

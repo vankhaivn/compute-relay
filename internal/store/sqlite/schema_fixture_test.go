@@ -121,8 +121,44 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 			columns = "connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at"
 		}
 		sourceTable := "fixture_source." + quote(name)
+		// Reconstruct historical receipt/grant layouts without rewriting their JSON.
+		switch name {
+		case "idempotency":
+			sourceTable = "fixture_source.receipts WHERE namespace='admission'"
+			columns = "workspace_id,scope,key_sha256,request_sha256,canonical_version,job_id,attempt_id,receipt"
+		case "operation_idempotency":
+			sourceTable = "fixture_source.receipts WHERE namespace='operation' AND scope!='cleanup'"
+			columns = "workspace_id,scope,key_sha256,request_sha256,canonical_version,subject_id,receipt"
+		case "cleanup_idempotency":
+			sourceTable = "fixture_source.receipts WHERE namespace='operation' AND scope='cleanup'"
+			columns = "workspace_id,key_sha256,request_sha256,canonical_version,subject_id,receipt"
+		case "managed_connection_operations":
+			sourceTable = "(SELECT o.*,r.request_sha256 AS fingerprint,r.receipt FROM fixture_source.managed_connection_operations o JOIN fixture_source.receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256)"
+			columns = "operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,problem,created_at,updated_at"
+			if version >= 18 {
+				columns += ",installation"
+			}
+		case "execution_authorizations", "preparation_authorizations", "start_authorizations", "workload_secret_authorizations":
+			kind := map[string]string{"execution_authorizations": "execution", "preparation_authorizations": "prepare", "start_authorizations": "start", "workload_secret_authorizations": "secret"}[name]
+			sourceTable = "fixture_source.attempt_grants g JOIN fixture_source.receipts r ON r.workspace_id=g.workspace_id AND r.namespace='grant' AND r.scope=g.kind AND r.key_sha256=g.key_sha256"
+			columns = "g.workspace_id,g.authorization_id,g.job_id,g.attempt_id,g.key_sha256,r.request_sha256,"
+			switch kind {
+			case "execution":
+				columns += "g.binding,g.account_scope,g.inputs_sha256,g.attempt_nonce,g.max_remote_wall_seconds,g.granting_token_id,g.created_at,r.receipt,g.status,g.consumed_at"
+			case "prepare":
+				columns += "g.request,r.receipt,g.binding,g.account_scope,g.inputs_sha256,g.attempt_nonce,g.reserved_bytes,g.ready_until_ms,g.consumed_at,g.ready_revision,g.ready_at,g.storage_released"
+			case "start":
+				columns += "g.request,r.receipt,g.consumed_at"
+			case "secret":
+				columns += "g.metadata,r.receipt,g.expires_at_ms,g.consumed_at,g.revoked_at,g.revocation_key_sha256,v.receipt"
+				sourceTable += " LEFT JOIN fixture_source.receipts v ON v.workspace_id=g.workspace_id AND v.namespace='revoke' AND v.scope=g.authorization_id AND v.key_sha256=g.revocation_key_sha256"
+			}
+			sourceTable += " WHERE g.kind='" + kind + "'"
+		}
 		// Reconstruct the released lease layout when creating an older synthetic fixture.
 		switch name {
+		case "work_leases":
+			columns = "kind,key,generation,owner,fence,until_ms,held,operation_id,attempt_revision"
 		case "scheduler_leases":
 			sourceTable = "fixture_source.work_leases WHERE kind='dispatch'"
 			columns = "queue_seq,generation,CASE held WHEN 0 THEN '' ELSE owner END,CASE held WHEN 0 THEN '' ELSE fence END,CASE held WHEN 0 THEN 0 ELSE until_ms END,held"

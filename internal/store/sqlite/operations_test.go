@@ -397,7 +397,7 @@ func TestControlsCancellationDuringStagingAndTransactionalRollback(t *testing.T)
 	if _, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "rollback-retry-key", controlRequest(id.AttemptID)); err == nil {
 		t.Fatal("event failure acknowledged")
 	}
-	if controlCount(t, f.s, "SELECT count(*) FROM operations") != before || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 || controlCount(t, f.s, "SELECT count(*) FROM operation_idempotency WHERE kind='retry_compute'") != 0 {
+	if controlCount(t, f.s, "SELECT count(*) FROM operations") != before || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 || controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation' AND scope='retry_compute'") != 0 {
 		t.Fatal("failed transaction leaked rows")
 	}
 	if _, err := f.s.db.Exec("DROP TRIGGER fail_control_event"); err != nil {

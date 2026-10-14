@@ -63,20 +63,14 @@ func loadControl(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id domai
 }
 
 func replayControl(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, kind domain.OperationKind, key, hash string) (*operations.Record, error) {
-	var foundHash, version, id, raw string
-	err := tx.QueryRowContext(ctx, `SELECT request_sha256,canonical_version,operation_id,receipt FROM operation_idempotency WHERE workspace_id=? AND kind=? AND key_sha256=?`, string(w), string(kind), key).Scan(&foundHash, &version, &id, &raw)
-	if errors.Is(err, sql.ErrNoRows) {
+	prior, found, err := replayOrCreate(ctx, tx, receiptKey{w, "operation", string(kind), key, hash, operations.CanonicalVersion, operations.ErrConflict}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, dbError(err)
-	}
-	if version != operations.CanonicalVersion {
-		return nil, ErrSchema
-	}
-	if foundHash != hash {
-		return nil, operations.ErrConflict
-	}
+	id, raw := prior.subject, prior.raw
 	r, err := decodeControl(raw, 4096)
 	if err != nil || string(r.Operation.ID) != id || r.Operation.WorkspaceID != w || r.Operation.Kind != kind {
 		return nil, ErrCorrupt
@@ -232,6 +226,6 @@ func saveControlReceipt(ctx context.Context, tx *sql.Tx, c operations.Command, r
 	if err != nil || len(raw) > 4096 {
 		return ErrInvalid
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO operation_idempotency VALUES(?,?,?,?,?,?,?)`, string(c.WorkspaceID), string(c.Kind), c.KeyDigest, c.RequestHash, operations.CanonicalVersion, string(r.Operation.ID), string(raw))
-	return dbError(err)
+	_, _, err = replayOrCreate(ctx, tx, receiptKey{c.WorkspaceID, "operation", string(c.Kind), c.KeyDigest, c.RequestHash, operations.CanonicalVersion, operations.ErrConflict}, &savedReceipt{string(r.Operation.ID), r.Operation.JobID, r.Operation.AttemptID, string(raw)})
+	return err
 }

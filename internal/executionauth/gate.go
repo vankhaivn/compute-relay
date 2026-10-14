@@ -1,13 +1,11 @@
 package executionauth
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"time"
-	"unicode/utf8"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/jsonwire"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
@@ -57,51 +55,18 @@ func (r StartRequest) Validate() error {
 	return nil
 }
 
-// gateParse rejects duplicate, unknown, missing and null fields before decoding.
-func gateParse(raw []byte, fields []string, out any) error {
-	if len(raw) == 0 || len(raw) > MaxRequestBytes || !utf8.Valid(raw) {
-		return ErrRequest
-	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	t, err := d.Token()
-	if err != nil || t != json.Delim('{') {
-		return ErrRequest
-	}
-	remaining := map[string]bool{}
-	for _, field := range fields {
-		remaining[field] = true
-	}
-	for d.More() {
-		t, err = d.Token()
-		key, ok := t.(string)
-		if err != nil || !ok || !remaining[key] {
-			return ErrRequest
-		}
-		delete(remaining, key)
-		var value json.RawMessage
-		if d.Decode(&value) != nil || bytes.Equal(value, []byte("null")) {
-			return ErrRequest
-		}
-	}
-	if t, err = d.Token(); err != nil || t != json.Delim('}') || len(remaining) != 0 || d.Decode(new(any)) != io.EOF || json.Unmarshal(raw, out) != nil {
-		return ErrRequest
-	}
-	return nil
-}
 func ParsePrepare(raw []byte) (PrepareRequest, error) {
 	var r PrepareRequest
-	if gateParse(raw, []string{"attempt_id", "max_preparation_seconds", "ready_until", "max_staged_bytes", "authorize_private_staging"}, &r) != nil || r.Validate() != nil {
+	fields, err := jsonwire.Object(raw, MaxRequestBytes)
+	if err != nil || jsonwire.Fields(fields, []string{"attempt_id", "max_preparation_seconds", "ready_until", "max_staged_bytes", "authorize_private_staging"}, nil) != nil || json.Unmarshal(raw, &r) != nil || r.Validate() != nil {
 		return PrepareRequest{}, ErrRequest
 	}
 	return r, nil
 }
 func ParseStart(raw []byte) (StartRequest, error) {
 	var r StartRequest
-	if workloadsecret.StrictDecode(raw, MaxRequestBytes, &r) != nil || r.Validate() != nil {
-		return StartRequest{}, ErrRequest
-	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil {
+	fields, err := jsonwire.Object(raw, MaxRequestBytes)
+	if err != nil || jsonwire.Fields(fields, []string{"attempt_id", "readiness_revision", "max_remote_wall_seconds", "execution_deadline", "authorize_compute"}, []string{"secret_authorization_id"}) != nil || json.Unmarshal(raw, &r) != nil || r.Validate() != nil {
 		return StartRequest{}, ErrRequest
 	}
 	if _, present := fields["secret_authorization_id"]; present && !r.SecretAuthorizationID.Valid() {

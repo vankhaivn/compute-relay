@@ -203,20 +203,14 @@ func loadCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id domai
 }
 
 func replayCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, key, hash string) (*cleanup.Record, error) {
-	var foundHash, version, id, raw string
-	err := tx.QueryRowContext(ctx, `SELECT request_sha256,canonical_version,operation_id,receipt FROM cleanup_idempotency WHERE workspace_id=? AND key_sha256=?`, string(w), key).Scan(&foundHash, &version, &id, &raw)
-	if errors.Is(err, sql.ErrNoRows) {
+	prior, found, err := replayOrCreate(ctx, tx, receiptKey{w, "operation", "cleanup", key, hash, cleanup.CanonicalVersion, operations.ErrConflict}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, dbError(err)
-	}
-	if version != cleanup.CanonicalVersion {
-		return nil, ErrSchema
-	}
-	if foundHash != hash {
-		return nil, operations.ErrConflict
-	}
+	id, raw := prior.subject, prior.raw
 	r, err := decodeCleanup(raw, 4096)
 	if err != nil || string(r.Operation.ID) != id || r.Operation.WorkspaceID != w {
 		return nil, ErrCorrupt
@@ -386,6 +380,6 @@ func saveCleanupReceipt(ctx context.Context, tx *sql.Tx, c cleanup.Command, r cl
 	if err != nil || len(raw) > 4096 {
 		return ErrInvalid
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO cleanup_idempotency VALUES(?,?,?,?,?,?)`, string(c.WorkspaceID), c.KeyDigest, c.RequestHash, cleanup.CanonicalVersion, string(r.Operation.ID), string(raw))
-	return dbError(err)
+	_, _, err = replayOrCreate(ctx, tx, receiptKey{c.WorkspaceID, "operation", "cleanup", c.KeyDigest, c.RequestHash, cleanup.CanonicalVersion, operations.ErrConflict}, &savedReceipt{string(r.Operation.ID), r.Operation.JobID, r.Operation.AttemptID, string(raw)})
+	return err
 }

@@ -42,8 +42,8 @@ func (s *Store) ClaimRecovery(ctx context.Context, owner string) (*scheduler.Cla
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id AND j.active_attempt_id=q.attempt_id
  JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
  LEFT JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
- LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
- LEFT JOIN start_authorizations x ON x.workspace_id=q.workspace_id AND x.job_id=q.job_id AND x.attempt_id=q.attempt_id
+ LEFT JOIN attempt_grants g ON g.kind='prepare' AND g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
+ LEFT JOIN attempt_grants x ON x.kind='start' AND x.workspace_id=q.workspace_id AND x.job_id=q.job_id AND x.attempt_id=q.attempt_id
  WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=q.workspace_id AND r.job_id=q.job_id AND r.attempt_id=q.attempt_id)
  AND q.dispatch_barrier=1 AND d.phase IN ('staging','ready','submitting','submitted')
  AND a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out')

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
@@ -24,22 +23,18 @@ func (s *Store) ReplayConnection(ctx context.Context, in connections.Accept) (co
 		if _, err := actorInTx(ctx, tx, in.Workspace, in.TokenID, auth.Manage); err != nil {
 			return err
 		}
-		var id, fingerprint, receipt string
-		err := tx.QueryRowContext(ctx, `SELECT operation_id,fingerprint,receipt FROM managed_connection_operations WHERE workspace_id=? AND key_sha256=?`, in.Workspace, in.KeyHash).Scan(&id, &fingerprint, &receipt)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return dbError(err)
-		}
-		if fingerprint != in.Fingerprint {
-			return connections.ErrConflict
-		}
-		result, err = loadManagedOperation(ctx, tx, domain.OperationID(id))
+		prior, exists, err := replayOrCreate(ctx, tx, receiptKey{in.Workspace, "connection", "", in.KeyHash, in.Fingerprint, "", connections.ErrConflict}, nil)
 		if err != nil {
 			return err
 		}
-		if json.Unmarshal([]byte(receipt), &result.Operation) != nil {
+		if !exists {
+			return nil
+		}
+		result, err = loadManagedOperation(ctx, tx, domain.OperationID(prior.subject))
+		if err != nil {
+			return err
+		}
+		if json.Unmarshal([]byte(prior.raw), &result.Operation) != nil {
 			return ErrCorrupt
 		}
 		result.Operation.Replay = true

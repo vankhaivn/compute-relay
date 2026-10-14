@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/jsonwire"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/worker"
 )
@@ -91,7 +93,8 @@ func (s *Service) Revoke(ctx context.Context, p auth.Principal, workspace domain
 	var request struct {
 		AttemptID domain.AttemptID `json:"attempt_id"`
 	}
-	if !id.Valid() || StrictDecode(raw, 4096, &request) != nil || !request.AttemptID.Valid() {
+	fields, decodeErr := jsonwire.Object(raw, 4096)
+	if !id.Valid() || decodeErr != nil || jsonwire.Fields(fields, []string{"attempt_id"}, nil) != nil || json.Unmarshal(raw, &request) != nil || !request.AttemptID.Valid() {
 		return Receipt{}, ErrRequest
 	}
 	return s.pool.Revoke(Key{workspace, job, request.AttemptID}, id, func() (Receipt, error) {

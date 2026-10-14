@@ -3,17 +3,16 @@
 package operations
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/jsonwire"
 )
 
 const MaxRequestBytes = 4096
@@ -62,34 +61,8 @@ func (r Request) Validate(kind domain.OperationKind) error {
 // as well as invalid UTF-8. A null/empty body is not an implicit active attempt.
 func Parse(kind domain.OperationKind, raw []byte) (Request, error) {
 	var r Request
-	if len(raw) == 0 || len(raw) > MaxRequestBytes || !utf8.Valid(raw) {
-		return r, ErrRequest
-	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	token, err := d.Token()
-	if err != nil || token != json.Delim('{') {
-		return r, ErrRequest
-	}
-	seen := map[string]bool{}
-	for d.More() {
-		token, err = d.Token()
-		key, ok := token.(string)
-		if err != nil || !ok || seen[key] || key != "attempt_id" && key != "reason" {
-			return Request{}, ErrRequest
-		}
-		seen[key] = true
-		var value json.RawMessage
-		var text string
-		if d.Decode(&value) != nil || len(value) == 0 || value[0] != '"' || json.Unmarshal(value, &text) != nil {
-			return Request{}, ErrRequest
-		}
-		if key == "attempt_id" {
-			r.AttemptID = domain.AttemptID(text)
-		} else {
-			r.Reason = text
-		}
-	}
-	if token, err = d.Token(); err != nil || token != json.Delim('}') || d.Decode(new(any)) != io.EOF || !seen["attempt_id"] || r.Validate(kind) != nil {
+	fields, err := jsonwire.Object(raw, MaxRequestBytes)
+	if err != nil || jsonwire.Fields(fields, []string{"attempt_id"}, []string{"reason"}) != nil || json.Unmarshal(raw, &r) != nil || r.Validate(kind) != nil {
 		return Request{}, ErrRequest
 	}
 	return r, nil

@@ -131,7 +131,7 @@ func TestDeadlineAuthorizationReplayCannotConsumeExpiredGrant(t *testing.T) {
 	if _, err = f.s.ConsumeAuthorization(context.Background(), work.Handle); !errors.Is(err, admission.ErrExpired) {
 		t.Fatal("expired grant became a mutation permit", err)
 	}
-	if n := controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations WHERE status='consumed'"); n != 0 {
+	if n := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution' AND status='consumed'"); n != 0 {
 		t.Fatal("expiry consumed the grant", n)
 	}
 }
@@ -157,7 +157,7 @@ func TestDeadlineRefusesNewAuthorizationAndRetry(t *testing.T) {
 					t.Fatal("expired job received new authority", err)
 				}
 			}
-			if controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations") != 0 || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 {
+			if controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 {
 				t.Fatal("expiry created a grant or replacement attempt")
 			}
 		})

@@ -221,7 +221,7 @@ func TestCollectionSchemaSixUpgradePreservesDispatchAndReceipts(t *testing.T) {
 		t.Fatal("upgrade lost accepted collection", err)
 	}
 	var receipt string
-	if err = f.s.db.QueryRow("SELECT receipt FROM operation_idempotency WHERE operation_id=?", string(op.Operation.ID)).Scan(&receipt); err != nil {
+	if err = f.s.db.QueryRow("SELECT receipt FROM receipts WHERE namespace='operation' AND subject_id=?", string(op.Operation.ID)).Scan(&receipt); err != nil {
 		t.Fatal(err)
 	}
 	var stored operations.Record

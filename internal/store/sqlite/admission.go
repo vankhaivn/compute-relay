@@ -176,23 +176,17 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err != nil {
 			return err
 		}
-		var hash, version, raw, jobID, attemptID string
-		err = tx.QueryRowContext(ctx, `SELECT request_sha256,canonical_version,receipt,job_id,attempt_id FROM idempotency WHERE workspace_id=? AND operation=? AND key_sha256=?`, string(w), createJobOperation, keyHash).Scan(&hash, &version, &raw, &jobID, &attemptID)
-		if err == nil {
-			if version != admission.CanonicalVersion {
-				return ErrSchema
-			}
-			if hash != string(req.Hash()) {
-				return admission.ErrConflict
-			}
-			if len(raw) > 4096 || json.Unmarshal([]byte(raw), &receipt) != nil || receipt.JobID != domain.JobID(jobID) || receipt.AttemptID != domain.AttemptID(attemptID) || !receipt.JobID.Valid() || !receipt.AttemptID.Valid() || receipt.Replay || receipt.Status != "queued" || receipt.CreatedAt.IsZero() || receipt.Links != admission.JobLinks(w, receipt.JobID) {
+		key := receiptKey{w, "admission", createJobOperation, keyHash, string(req.Hash()), admission.CanonicalVersion, admission.ErrConflict}
+		prior, found, err := replayOrCreate(ctx, tx, key, nil)
+		if err != nil {
+			return err
+		}
+		if found {
+			if json.Unmarshal([]byte(prior.raw), &receipt) != nil || receipt.JobID != prior.job || receipt.AttemptID != prior.attempt || !receipt.JobID.Valid() || !receipt.AttemptID.Valid() || receipt.Replay || receipt.Status != "queued" || receipt.CreatedAt.IsZero() || receipt.Links != admission.JobLinks(w, receipt.JobID) {
 				return ErrCorrupt
 			}
 			receipt.Replay = true
 			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
 		}
 		profile, refs, err := resolveJob(ctx, tx, w, req)
 		if err != nil {
@@ -257,8 +251,8 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err != nil {
 			return ErrInvalid
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO idempotency VALUES(?,?,?,?,?,?,?,?)`, string(w), createJobOperation, keyHash, string(req.Hash()), admission.CanonicalVersion, job, attempt, string(encoded))
-		return dbError(err)
+		_, _, err = replayOrCreate(ctx, tx, key, &savedReceipt{job, domain.JobID(job), domain.AttemptID(attempt), string(encoded)})
+		return err
 	})
 	// Never return assigned IDs/success for a failed or uncertain transaction acknowledgement.
 	if err != nil {

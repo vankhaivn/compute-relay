@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
@@ -27,24 +26,21 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		if _, err := actorInTx(ctx, tx, in.Workspace, in.TokenID, auth.Manage); err != nil {
 			return err
 		}
-		var priorID, hash, receipt string
-		err := tx.QueryRowContext(ctx, `SELECT operation_id,fingerprint,receipt FROM managed_connection_operations WHERE workspace_id=? AND key_sha256=?`, in.Workspace, in.KeyHash).Scan(&priorID, &hash, &receipt)
-		if err == nil {
-			if hash != in.Fingerprint {
-				return connections.ErrConflict
-			}
-			result, err = loadManagedOperation(ctx, tx, domain.OperationID(priorID))
+		key := receiptKey{in.Workspace, "connection", "", in.KeyHash, in.Fingerprint, "", connections.ErrConflict}
+		priorReceipt, found, err := replayOrCreate(ctx, tx, key, nil)
+		if err != nil {
+			return err
+		}
+		if found {
+			result, err = loadManagedOperation(ctx, tx, domain.OperationID(priorReceipt.subject))
 			if err != nil {
 				return err
 			}
-			if json.Unmarshal([]byte(receipt), &result.Operation) != nil {
+			if json.Unmarshal([]byte(priorReceipt.raw), &result.Operation) != nil {
 				return ErrCorrupt
 			}
 			result.Operation.Replay = true
 			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
 		}
 		id := in.ConnectionID
 		revision := int64(1)
@@ -152,9 +148,13 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 				return dbError(err)
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,created_at,updated_at,installation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, in.Fingerprint, stage, op.Status, credentialKey, string(receiptBytes), stamp, stamp, installation)
+		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,stage,status,credential_key,created_at,updated_at,installation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, stage, op.Status, credentialKey, stamp, stamp, installation)
 		if err != nil {
 			return dbError(err)
+		}
+		_, _, err = replayOrCreate(ctx, tx, key, &savedReceipt{operationID, "", "", string(receiptBytes)})
+		if err != nil {
+			return err
 		}
 		result, err = loadManagedOperation(ctx, tx, op.ID)
 		return err

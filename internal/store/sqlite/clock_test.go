@@ -47,21 +47,27 @@ func clockStore(t *testing.T, options Options, version int) (*Store, string) {
 func TestClockLegacySubmillisecondWriteSurvivesRollback(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Clock = func() time.Time { return schedulerNow }
-	s, root := clockStore(t, opts, 24)
+	s, _ := clockStore(t, opts, len(migrations))
 	if err := s.ConfigureScheduler(testctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
 	id := schedulerSeed(t, s, "fraction", "a", "p", "account")
+	root := copyFixtureAtSchema(t, s, 24)
+	legacy, err := connect(filepath.Join(root, databaseName), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
 	historical := time.Now().UTC().Truncate(time.Millisecond).Add(time.Hour).Add(123 * time.Nanosecond)
 	stamp := historical.Format(time.RFC3339Nano)
-	if _, err := s.db.Exec(`UPDATE attempts SET updated_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=?`, stamp, id.WorkspaceID, id.JobID, id.AttemptID); err != nil {
+	if _, err := legacy.Exec(`UPDATE attempts SET updated_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=?`, stamp, id.WorkspaceID, id.JobID, id.AttemptID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`UPDATE scheduler_control SET clock_ms=? WHERE singleton=1`, historical.UnixMilli()); err != nil {
+	if _, err := legacy.Exec(`UPDATE scheduler_control SET clock_ms=? WHERE singleton=1`, historical.UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
-	before := upgradeRows(t, s.db, `SELECT state,revision,created_at,updated_at FROM attempts`)
-	if err := s.Close(); err != nil {
+	before := upgradeRows(t, legacy, `SELECT state,revision,created_at,updated_at FROM attempts`)
+	if err := legacy.Close(); err != nil {
 		t.Fatal(err)
 	}
 	opts.Clock = func() time.Time { return historical.Add(-time.Second) }

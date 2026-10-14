@@ -5,16 +5,15 @@
 package cleanup
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/jsonwire"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
@@ -54,54 +53,8 @@ func (r Request) Validate() error {
 // UTF-8, matching the other control requests. A missing attempt is never implicit.
 func Parse(raw []byte) (Request, error) {
 	var r Request
-	if len(raw) == 0 || len(raw) > MaxRequestBytes || !utf8.Valid(raw) {
-		return r, operations.ErrRequest
-	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	token, err := d.Token()
-	if err != nil || token != json.Delim('{') {
-		return r, operations.ErrRequest
-	}
-	seen := map[string]bool{}
-	for d.More() {
-		token, err = d.Token()
-		key, ok := token.(string)
-		if err != nil || !ok || seen[key] {
-			return Request{}, operations.ErrRequest
-		}
-		seen[key] = true
-		var value json.RawMessage
-		if d.Decode(&value) != nil || len(value) == 0 {
-			return Request{}, operations.ErrRequest
-		}
-		switch key {
-		case "attempt_id", "reason":
-			var text string
-			if value[0] != '"' || json.Unmarshal(value, &text) != nil {
-				return Request{}, operations.ErrRequest
-			}
-			if key == "attempt_id" {
-				r.AttemptID = domain.AttemptID(text)
-			} else {
-				r.Reason = text
-			}
-		case "discard_uncollected", "accept_name_based_delete":
-			switch string(value) {
-			case "true":
-				if key == "discard_uncollected" {
-					r.DiscardUncollected = true
-				} else {
-					r.AcceptNameBasedDelete = true
-				}
-			case "false":
-			default:
-				return Request{}, operations.ErrRequest
-			}
-		default:
-			return Request{}, operations.ErrRequest
-		}
-	}
-	if token, err = d.Token(); err != nil || token != json.Delim('}') || d.Decode(new(any)) != io.EOF || !seen["attempt_id"] || r.Validate() != nil {
+	fields, err := jsonwire.Object(raw, MaxRequestBytes)
+	if err != nil || jsonwire.Fields(fields, []string{"attempt_id"}, []string{"reason", "discard_uncollected", "accept_name_based_delete"}) != nil || json.Unmarshal(raw, &r) != nil || r.Validate() != nil {
 		return Request{}, operations.ErrRequest
 	}
 	return r, nil

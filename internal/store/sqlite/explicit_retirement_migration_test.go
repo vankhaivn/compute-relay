@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,7 +166,16 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 		t.Fatal("migration rewrote remote facts or attempt identity", after, expected)
 	}
 	for i, query := range queries {
-		if got := upgradeRows(t, upgraded.db, query); !reflect.DeepEqual(got, before[i]) {
+		afterQuery := query
+		switch {
+		case strings.Contains(query, "FROM idempotency"):
+			afterQuery = "SELECT workspace_id,scope,key_sha256,request_sha256,canonical_version,job_id,attempt_id,receipt FROM receipts WHERE namespace='admission' ORDER BY workspace_id,scope,key_sha256"
+		case strings.Contains(query, "FROM operation_idempotency"):
+			afterQuery = "SELECT workspace_id,scope,key_sha256,request_sha256,canonical_version,subject_id,receipt FROM receipts WHERE namespace='operation' AND scope!='cleanup' ORDER BY workspace_id,scope,key_sha256"
+		case strings.Contains(query, "FROM cleanup_idempotency"):
+			afterQuery = "SELECT workspace_id,key_sha256,request_sha256,canonical_version,subject_id,receipt FROM receipts WHERE namespace='operation' AND scope='cleanup' ORDER BY workspace_id,key_sha256"
+		}
+		if got := upgradeRows(t, upgraded.db, afterQuery); !reflect.DeepEqual(got, before[i]) {
 			t.Fatal("migration changed frozen evidence", query)
 		}
 	}

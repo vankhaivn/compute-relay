@@ -28,8 +28,8 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
  JOIN workspaces w ON w.workspace_id=q.workspace_id
  JOIN profile_revisions r ON r.profile=j.profile AND r.revision=j.profile_revision
  LEFT JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
- LEFT JOIN execution_authorizations e ON e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
- LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
+ LEFT JOIN attempt_grants e ON e.kind='execution' AND e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
+ LEFT JOIN attempt_grants g ON g.kind='prepare' AND g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
  LEFT JOIN scheduler_resource_reservations rr ON rr.queue_seq=q.queue_seq
  WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out') OR (l.held=1 AND l.until_ms>?)
  ORDER BY q.queue_seq LIMIT ?`, now.UnixMilli(), scheduler.ScanLimit+1)

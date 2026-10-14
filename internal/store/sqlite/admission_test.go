@@ -98,7 +98,7 @@ func newAdmission(t *testing.T) admissionFixture {
 func tableCount(t *testing.T, s *Store, table string) int {
 	t.Helper()
 	switch table {
-	case "jobs", "attempts", "events", "idempotency", "job_objects":
+	case "jobs", "attempts", "events", "receipts", "job_objects":
 	default:
 		t.Fatal("unsafe test table")
 	}
@@ -171,7 +171,7 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 	if err != nil || replay != expected {
 		t.Fatal("restart lost receipt", err)
 	}
-	if tableCount(t, s, "jobs") != 1 || tableCount(t, s, "attempts") != 1 || tableCount(t, s, "idempotency") != 1 || tableCount(t, s, "events") != 1 {
+	if tableCount(t, s, "jobs") != 1 || tableCount(t, s, "attempts") != 1 || tableCount(t, s, "receipts") != 1 || tableCount(t, s, "events") != 1 {
 		t.Fatal("replay created rows")
 	}
 	for _, suffix := range []string{"", "-wal"} {
@@ -230,7 +230,7 @@ func TestAdmissionConcurrentKeysAndConflicts(t *testing.T) {
 	}
 }
 func TestAdmissionAtomicRollbackAtEveryInsert(t *testing.T) {
-	for _, table := range []string{"jobs", "attempts", "job_objects", "events", "idempotency"} {
+	for _, table := range []string{"jobs", "attempts", "job_objects", "events", "receipts"} {
 		t.Run(table, func(t *testing.T) {
 			f := newAdmission(t)
 			// Identifiers are the static allowlist above, never input data.
@@ -241,7 +241,7 @@ func TestAdmissionAtomicRollbackAtEveryInsert(t *testing.T) {
 			if err == nil || r.JobID != "" {
 				t.Fatal("failed transaction exposed success")
 			}
-			for _, name := range []string{"jobs", "attempts", "job_objects", "events", "idempotency"} {
+			for _, name := range []string{"jobs", "attempts", "job_objects", "events", "receipts"} {
 				if tableCount(t, f.s, name) != 0 {
 					t.Fatalf("partial %s survived", name)
 				}
@@ -259,7 +259,7 @@ func TestAdmissionPinsAndRevisionImmutability(t *testing.T) {
 	f := newAdmission(t)
 	r := submit(t, f, "pin-input-key")
 	ctx := context.Background()
-	for _, query := range []string{"DELETE FROM objects WHERE workspace_id='a' AND object_id='data'", "UPDATE objects SET bytes=8 WHERE workspace_id='a' AND object_id='data'", "UPDATE job_objects SET sha256='changed'", "UPDATE jobs SET profile_revision='rev_other'", "UPDATE attempts SET nonce='changed'", "UPDATE idempotency SET request_sha256='changed'", "UPDATE events SET type='changed'"} {
+	for _, query := range []string{"DELETE FROM objects WHERE workspace_id='a' AND object_id='data'", "UPDATE objects SET bytes=8 WHERE workspace_id='a' AND object_id='data'", "UPDATE job_objects SET sha256='changed'", "UPDATE jobs SET profile_revision='rev_other'", "UPDATE attempts SET nonce='changed'", "UPDATE receipts SET request_sha256='changed'", "UPDATE events SET type='changed'"} {
 		if _, err := f.s.db.Exec(query); err == nil {
 			t.Fatalf("immutable reference changed by %s", query)
 		}
@@ -344,7 +344,7 @@ func TestDiskFullAdmissionLeavesNoPartialRows(t *testing.T) {
 	if !errors.Is(err, ErrDiskFull) || r.JobID != "" {
 		t.Fatalf("disk failure: %v", err)
 	}
-	for _, table := range []string{"jobs", "attempts", "events", "idempotency", "job_objects"} {
+	for _, table := range []string{"jobs", "attempts", "events", "receipts", "job_objects"} {
 		if tableCount(t, f.s, table) != 0 {
 			t.Fatal("disk-full left partial rows")
 		}

@@ -73,7 +73,7 @@ func TestAdmissionProcessCrashBeforeAndAfterCommit(t *testing.T) {
 					t.Fatal("post-commit crash changed IDs/receipt")
 				}
 			}
-			for _, table := range []string{"jobs", "attempts", "events", "idempotency"} {
+			for _, table := range []string{"jobs", "attempts", "events", "receipts"} {
 				if tableCount(t, s, table) != 1 {
 					t.Fatal("crash lost or duplicated admission", table)
 				}

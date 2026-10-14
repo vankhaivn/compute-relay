@@ -65,7 +65,7 @@ func TestHistoricalLogsAndProviderPlanRemainExactAfterRetry(t *testing.T) {
 	if retry.NewAttemptID == id.AttemptID || !retry.NewAttemptID.Valid() {
 		t.Fatal("retry did not select a new attempt")
 	}
-	tables := []string{"jobs", "attempts", "operations", "events", "submission_intents", "provider_resources", "collection_publications", "execution_authorizations"}
+	tables := []string{"jobs", "attempts", "operations", "events", "submission_intents", "provider_resources", "collection_publications", "attempt_grants"}
 	counts := map[string]int{}
 	for _, table := range tables {
 		counts[table] = controlCount(t, f.s, "SELECT count(*) FROM "+table)

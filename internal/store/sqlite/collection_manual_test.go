@@ -346,7 +346,7 @@ func TestManagedManualCollectionRecoveryNeedsNoNewGrant(t *testing.T) {
 	if w == nil || err != nil || w.Lease.Generation != 2 || w.Lease.OperationID != r.Operation.ID {
 		t.Fatal(w, err)
 	}
-	if count := controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations"); count != 1 {
+	if count := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'"); count != 1 {
 		t.Fatal("collection created grant", count)
 	}
 	assertNoNewCompute(t, f)

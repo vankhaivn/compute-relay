@@ -106,7 +106,7 @@ func TestReconcileExhaustedStagingPreservesConsumedPermitAndNeverPreparesAgain(t
 				t.Fatal("staging observation invented another intent or submitted")
 			}
 			afterPermit, err := authService.Get(context.Background(), authPrincipal, "a", id.JobID, grant.AuthorizationID)
-			if err != nil || !reflect.DeepEqual(afterPermit, permit) || controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations") != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 || controlCount(t, f.s, "SELECT count(*) FROM submission_intents") != 0 {
+			if err != nil || !reflect.DeepEqual(afterPermit, permit) || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='execution'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM attempts") != 1 || controlCount(t, f.s, "SELECT count(*) FROM submission_intents") != 0 {
 				t.Fatal("recovery changed permit, attempt or submission history", err)
 			}
 			stats := f.backend.Stats()

@@ -183,7 +183,7 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 	var problem sql.NullString
 	var wall sql.NullInt64
 	var maxActive, maxProcesses int
-	err := tx.QueryRowContext(ctx, `SELECT o.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation FROM managed_connection_operations o JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation)
+	err := tx.QueryRowContext(ctx, `SELECT r.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}

@@ -134,7 +134,7 @@ func TestCleanupAdmissionReplayConflictAndCoalescing(t *testing.T) {
 	if n := controlCount(t, f.s, "SELECT count(*) FROM cleanup_operations"); n != 1 {
 		t.Fatal("coalescing created extra cleanups", n)
 	}
-	if n := controlCount(t, f.s, "SELECT count(*) FROM cleanup_idempotency"); n != 2 {
+	if n := controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation' AND scope='cleanup'"); n != 2 {
 		t.Fatal("each accepted key needs its own durable receipt", n)
 	}
 	if f.backend.Stats().CleanupCalls != 0 {
@@ -258,7 +258,7 @@ func TestCleanupSchemaFourteenUpgradePreservesState(t *testing.T) {
 	before := f.journal(t, id)
 	state := f.state(t, id)
 	counts := map[string]int{}
-	for _, table := range []string{"operations", "operation_idempotency", "provider_resources", "events", "artifacts", "collection_publications"} {
+	for _, table := range []string{"operations", "receipts", "provider_resources", "events", "artifacts", "collection_publications"} {
 		counts[table] = controlCount(t, f.s, "SELECT count(*) FROM "+table)
 	}
 	f.root = copyFixtureAtSchema(t, f.s, 14)
@@ -293,8 +293,8 @@ func TestCleanupStorageRejectsForgedRows(t *testing.T) {
 	}
 	for _, statement := range []string{
 		"DELETE FROM cleanup_operations",
-		"DELETE FROM cleanup_idempotency",
-		"UPDATE cleanup_idempotency SET receipt=receipt",
+		"DELETE FROM receipts WHERE namespace='operation' AND scope='cleanup'",
+		"UPDATE receipts SET receipt=receipt WHERE namespace='operation' AND scope='cleanup'",
 		"UPDATE cleanup_operations SET resource_id='res_execution_x'",
 		"UPDATE cleanup_operations SET status='succeeded',revision=2",
 		"INSERT INTO work_leases(kind,key,generation,owner,fence,until_ms,held) VALUES('cleanup',json_array('a','" + string(r.Operation.ID) + "'),1,'','0000000000000000000000000000000000000000000000000000000000000000',1,1)",

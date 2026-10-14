@@ -58,13 +58,13 @@ func TestManagedConfigurationMigrationPreservesOperationsAndConstraints(t *testi
 	if err = db.QueryRow("SELECT installation_id FROM runtime_installation").Scan(&afterID); err != nil || afterID != installation {
 		t.Fatal("migration changed installation identity", err)
 	}
-	if err = db.QueryRow(`SELECT receipt,stage,key_sha256,fingerprint FROM managed_connection_operations WHERE operation_id='op_old'`).Scan(&afterReceipt, &stage, &key, &fingerprint); err != nil || afterReceipt != string(receipt) || stage != "waiting_secret" || key != strings.Repeat("a", 64) || fingerprint != strings.Repeat("b", 64) {
+	if err = db.QueryRow(`SELECT r.receipt,o.stage,o.key_sha256,r.request_sha256 FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 WHERE o.operation_id='op_old'`).Scan(&afterReceipt, &stage, &key, &fingerprint); err != nil || afterReceipt != string(receipt) || stage != "waiting_secret" || key != strings.Repeat("a", 64) || fingerprint != strings.Repeat("b", 64) {
 		t.Fatal("migration changed original intent or receipt", err)
 	}
 	if err = db.QueryRow(`SELECT pending_operation,max_remote_wall_seconds FROM managed_connections WHERE connection_id='con_old'`).Scan(&pending, &wall); err != nil || pending != "op_old" || wall.Valid {
 		t.Fatal("migration changed pending operation or invented an override", err)
 	}
-	if _, err = db.Exec(`UPDATE managed_connection_operations SET receipt='{}' WHERE operation_id='op_old'`); err == nil {
+	if _, err = db.Exec(`UPDATE receipts SET receipt='{}' WHERE namespace='connection' AND subject_id='op_old'`); err == nil {
 		t.Fatal("migration removed operation immutability")
 	}
 	if _, err = db.Exec(`UPDATE managed_connections SET max_remote_wall_seconds=0 WHERE connection_id='con_old'`); err == nil {

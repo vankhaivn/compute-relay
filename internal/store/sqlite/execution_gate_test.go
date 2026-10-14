@@ -22,7 +22,7 @@ import (
 
 func (p *probeProvider) Start(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
 	var count int
-	err := p.store.db.QueryRowContext(ctx, `SELECT count(*) FROM start_authorizations g JOIN scheduler_queue q ON q.workspace_id=g.workspace_id AND q.job_id=g.job_id AND q.attempt_id=g.attempt_id JOIN submission_intents s ON s.queue_seq=q.queue_seq WHERE g.authorization_id=? AND g.consumed_at IS NOT NULL AND s.intent_id=? AND s.status='started'`, string(start.AuthorizationID), string(prepared.Identity.IntentID)).Scan(&count)
+	err := p.store.db.QueryRowContext(ctx, `SELECT count(*) FROM attempt_grants g JOIN scheduler_queue q ON q.workspace_id=g.workspace_id AND q.job_id=g.job_id AND q.attempt_id=g.attempt_id JOIN submission_intents s ON s.queue_seq=q.queue_seq WHERE g.kind='start' AND g.authorization_id=? AND g.consumed_at IS NOT NULL AND s.intent_id=? AND s.status='started'`, string(start.AuthorizationID), string(prepared.Identity.IntentID)).Scan(&count)
 	if err != nil || count != 1 {
 		panic("controlled start lacks atomic consumed authority and intent")
 	}
@@ -278,7 +278,7 @@ func TestExecutionGateBoundsAndScopedReadiness(t *testing.T) {
 	}
 	control, op, _ := controlService(t, f, "a", auth.Operate)
 	cancelControl(t, f, control, op, id)
-	if n := controlCount(t, f.s, "SELECT count(*) FROM preparation_authorizations WHERE storage_released=0"); n != executionauth.MaxHeldPerAccount-1 {
+	if n := controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0"); n != executionauth.MaxHeldPerAccount-1 {
 		t.Fatal("never-staged reservation leaked", n)
 	}
 }
@@ -394,14 +394,14 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 	if err != nil || w == nil || w.Request.Remote.Resource != j.Prepared.Resource || w.Request.ResultsCollected || w.Request.Remote.Version != "prepared" {
 		t.Fatal("never-started cleanup required a result or changed identity", w, err)
 	}
-	if controlCount(t, f.s, "SELECT count(*) FROM preparation_authorizations WHERE storage_released=0") != 1 {
+	if controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0") != 1 {
 		t.Fatal("cleanup request guessed released storage")
 	}
 	finishCleanupResourceFixtures(t, f, *w)
 	if err = f.s.CompleteCleanup(ctx, *w, cleanup.Outcome{Effect: cleanup.RemoteDeleted}); err != nil {
 		t.Fatal(err)
 	}
-	if current, err := service.Get(ctx, p, "a", receipt.Operation.ID); err != nil || current.Effect != cleanup.RemoteDeleted || controlCount(t, f.s, "SELECT count(*) FROM preparation_authorizations WHERE storage_released=0") != 0 {
+	if current, err := service.Get(ctx, p, "a", receipt.Operation.ID); err != nil || current.Effect != cleanup.RemoteDeleted || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0") != 0 {
 		t.Fatal("confirmed deletion did not release hold", current, err)
 	}
 }
@@ -452,7 +452,7 @@ func TestExecutionGateUnsupportedProviderHasNoRemoteEffects(t *testing.T) {
 		t.Fatal("unsupported preparation mode passed")
 	}
 	j := f.journal(t, id)
-	if j.Problem == nil || j.Problem.Code != domain.CodeUnsupportedCapability || f.backend.Stats().PrepareCalls != 0 || f.backend.Stats().SubmitCalls != 0 || controlCount(t, f.s, "SELECT count(*) FROM preparation_authorizations WHERE storage_released=0") != 0 {
+	if j.Problem == nil || j.Problem.Code != domain.CodeUnsupportedCapability || f.backend.Stats().PrepareCalls != 0 || f.backend.Stats().SubmitCalls != 0 || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0") != 0 {
 		t.Fatal("unsupported provider mutated or retained a hold", j)
 	}
 }

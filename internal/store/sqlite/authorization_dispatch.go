@@ -22,7 +22,7 @@ func dispatchAuthorization(ctx context.Context, tx *sql.Tx, work dispatch.Work, 
 	var binding, account, inputs, nonce, status, created string
 	var consumed sql.NullString
 	var wall int64
-	err := tx.QueryRowContext(ctx, "SELECT binding,account_scope,inputs_sha256,attempt_nonce,max_remote_wall_seconds,status,created_at,consumed_at FROM execution_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?", string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID)).Scan(&binding, &account, &inputs, &nonce, &wall, &status, &created, &consumed)
+	err := tx.QueryRowContext(ctx, "SELECT binding,account_scope,inputs_sha256,attempt_nonce,max_remote_wall_seconds,status,created_at,consumed_at FROM attempt_grants WHERE kind='execution' AND workspace_id=? AND job_id=? AND attempt_id=?", string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID)).Scan(&binding, &account, &inputs, &nonce, &wall, &status, &created, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", dispatch.ErrPolicy
 	}
@@ -84,16 +84,8 @@ func (s *Store) ConsumeAuthorization(ctx context.Context, h dispatch.Handle) (di
 				return err
 			}
 		} else if status == executionauth.Granted {
-			updated, err := tx.ExecContext(ctx, "UPDATE execution_authorizations SET status='consumed',consumed_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status='granted'", now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID))
-			if err != nil {
-				return dbError(err)
-			}
-			count, err := updated.RowsAffected()
-			if err != nil {
-				return dbError(err)
-			}
-			if count != 1 {
-				return dispatch.ErrConflict
+			if err = consumeGrant(ctx, tx, work.Job.Job.WorkspaceID, work.Job.Job.ID, work.Job.Attempt.ID, "execution", now, dispatch.ErrConflict); err != nil {
+				return err
 			}
 		}
 		result = work
