@@ -41,14 +41,12 @@ func TestLogReadAuthorizesExactAttemptWithoutDispatchEffects(t *testing.T) {
 			t.Fatal(tc, err)
 		}
 	}
-	if err := f.s.RevokeToken(context.Background(), p.TokenID()); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.RevokeToken(context.Background(), p.TokenID()))
 	if _, err := f.s.ReadLogAttempt(context.Background(), "a", p.TokenID(), id.JobID, id.AttemptID); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("revoked read accepted", err)
 	}
 }
-func TestHistoricalLogsAndProviderPlanRemainExactAfterRetry(t *testing.T) {
+func TestHistoricalProviderReadsKeepDurableRowsUnchanged(t *testing.T) {
 	scenario := fake.DefaultScenario()
 	scenario.States = []domain.ExecutionState{domain.ExecutionQueued, domain.ExecutionRunning, domain.ExecutionFailed}
 	f, id, adapter, blobs := collectionScenarioFixture(t, scenario)
@@ -59,13 +57,11 @@ func TestHistoricalLogsAndProviderPlanRemainExactAfterRetry(t *testing.T) {
 	}
 	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	retry, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationRetryCompute, "logs-history-retry", controlRequest(id.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if retry.NewAttemptID == id.AttemptID || !retry.NewAttemptID.Valid() {
 		t.Fatal("retry did not select a new attempt")
 	}
-	tables := []string{"jobs", "attempts", "operations", "events", "submission_intents", "provider_resources", "collection_publications", "execution_authorizations"}
+	tables := []string{"jobs", "attempts", "operations", "events", "submission_intents", "provider_resources", "collection_publications", "attempt_grants"}
 	counts := map[string]int{}
 	for _, table := range tables {
 		counts[table] = controlCount(t, f.s, "SELECT count(*) FROM "+table)

@@ -17,16 +17,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
-func gateTable(kind string) string {
-	if kind == "prepare" {
-		return "preparation_authorizations"
-	}
-	if kind == "start" {
-		return "start_authorizations"
-	}
-	panic("invalid internal authorization kind")
-}
-
 func gateReceipt(raw, kind string, consumed sql.NullString) (executionauth.GateReceipt, error) {
 	var r executionauth.GateReceipt
 	if len(raw) > executionauth.MaxRequestBytes || json.Unmarshal([]byte(raw), &r) != nil || r.Validate() != nil || r.Kind != kind || r.Status != executionauth.Granted || r.Replay {
@@ -47,17 +37,11 @@ func gateReceipt(raw, kind string, consumed sql.NullString) (executionauth.GateR
 
 // Replay precedes temporal/state validation. It never recreates or rearms consent.
 func replayGate(ctx context.Context, tx *sql.Tx, c executionauth.GateCommand, kind string, request any) (executionauth.GateReceipt, bool, error) {
-	var hash, raw string
-	err := tx.QueryRowContext(ctx, "SELECT request_sha256,original_receipt FROM "+gateTable(kind)+" WHERE workspace_id=? AND key_sha256=?", string(c.WorkspaceID), c.KeyDigest).Scan(&hash, &raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return executionauth.GateReceipt{}, false, nil
+	prior, found, err := replayOrCreate(ctx, tx, receiptKey{c.WorkspaceID, "grant", kind, c.KeyDigest, string(executionauth.GateDigest(kind, c.JobID, request)), "", executionauth.ErrConflict}, nil)
+	if err != nil || !found {
+		return executionauth.GateReceipt{}, found, err
 	}
-	if err != nil {
-		return executionauth.GateReceipt{}, false, dbError(err)
-	}
-	if hash != string(executionauth.GateDigest(kind, c.JobID, request)) {
-		return executionauth.GateReceipt{}, true, executionauth.ErrConflict
-	}
+	raw := prior.raw
 	r, err := gateReceipt(raw, kind, sql.NullString{})
 	if err != nil || r.WorkspaceID != c.WorkspaceID || r.JobID != c.JobID {
 		return executionauth.GateReceipt{}, true, ErrCorrupt
@@ -66,15 +50,15 @@ func replayGate(ctx context.Context, tx *sql.Tx, c executionauth.GateCommand, ki
 	return r, true, nil
 }
 
-func newGateReceipt(c executionauth.GateCommand, attempt domain.AttemptID, kind string) (executionauth.GateReceipt, error) {
+func newGateReceipt(now time.Time, c executionauth.GateCommand, attempt domain.AttemptID, kind string) (executionauth.GateReceipt, error) {
 	id, err := randomID("grant_", 16)
 	if err != nil {
 		return executionauth.GateReceipt{}, err
 	}
-	return executionauth.GateReceipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: attempt, Kind: kind, Status: executionauth.Granted, CreatedAt: c.Now.UTC()}, nil
+	return executionauth.GateReceipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: attempt, Kind: kind, Status: executionauth.Granted, CreatedAt: now.UTC()}, nil
 }
 
-func gateRecord(ctx context.Context, tx *sql.Tx, c executionauth.GateCommand, attempt domain.AttemptID) (admission.Record, error) {
+func gateRecord(ctx context.Context, tx *sql.Tx, now time.Time, c executionauth.GateCommand, attempt domain.AttemptID) (admission.Record, error) {
 	r, err := readJobRecord(ctx, tx, c.WorkspaceID, c.JobID)
 	if errors.Is(err, admission.ErrNotFound) {
 		return r, executionauth.ErrNotFound
@@ -85,13 +69,13 @@ func gateRecord(ctx context.Context, tx *sql.Tx, c executionauth.GateCommand, at
 	if r.Attempt.ID != attempt {
 		return r, executionauth.ErrConflict
 	}
-	if !r.Request.Spec().SeparateStart() || !executionauth.Managed(r.Profile) || !scheduler.LocalOnly(r.Attempt.State) {
+	if !r.Request.Spec().SeparateStart() || !scheduler.LocalOnly(r.Attempt.State) {
 		return r, executionauth.ErrState
 	}
-	if c.Now.Before(r.Attempt.UpdatedAt) {
-		return r, scheduler.ErrClock
+	if now.Before(r.Attempt.UpdatedAt) {
+		return r, ErrCorrupt
 	}
-	if r.Request.Spec().Expired(c.Now) {
+	if r.Request.Spec().Expired(now) {
 		return r, admission.ErrExpired
 	}
 	if err = managedProfileOwned(ctx, tx, c.WorkspaceID, r.Profile); err != nil {
@@ -115,13 +99,8 @@ func (s *Store) PrepareExecution(ctx context.Context, c executionauth.GateComman
 	if c.Validate() != nil || req.Validate() != nil {
 		return executionauth.GateReceipt{}, executionauth.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.GateReceipt{}, err
-	}
-	defer done()
 	var receipt executionauth.GateReceipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -130,15 +109,15 @@ func (s *Store) PrepareExecution(ctx context.Context, c executionauth.GateComman
 			receipt = prior
 			return err
 		}
-		r, err := gateRecord(ctx, tx, c, req.AttemptID)
+		r, err := gateRecord(ctx, tx, now, c, req.AttemptID)
 		if err != nil {
 			return err
 		}
 		until, _ := time.Parse(time.RFC3339, req.ReadyUntil)
-		if !c.Now.Before(until) {
+		if !now.Before(until) {
 			return admission.ErrExpired
 		}
-		if until.After(c.Now.Add(executionauth.MaxReadyHold)) || !r.Request.Spec().Deadline().IsZero() && until.After(r.Request.Spec().Deadline()) {
+		if until.After(now.Add(executionauth.MaxReadyHold)) || !r.Request.Spec().Deadline().IsZero() && until.After(r.Request.Spec().Deadline()) {
 			return executionauth.ErrRequest
 		}
 		work, err := controlWork(ctx, tx, r)
@@ -149,7 +128,7 @@ func (s *Store) PrepareExecution(ctx context.Context, c executionauth.GateComman
 			return executionauth.ErrState
 		}
 		var existing bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM preparation_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?)`, string(c.WorkspaceID), string(c.JobID), string(req.AttemptID)).Scan(&existing); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attempt_grants WHERE kind='prepare' AND workspace_id=? AND job_id=? AND attempt_id=?)`, string(c.WorkspaceID), string(c.JobID), string(req.AttemptID)).Scan(&existing); err != nil {
 			return dbError(err)
 		}
 		if existing {
@@ -166,23 +145,33 @@ func (s *Store) PrepareExecution(ctx context.Context, c executionauth.GateComman
 		if total < 1 || total > req.MaxStagedBytes {
 			return executionauth.ErrRequest
 		}
-		var accountCount, globalCount int
-		var accountBytes, globalBytes int64
-		if err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(reserved_bytes),0),COALESCE(sum(account_scope=?),0),COALESCE(sum(CASE WHEN account_scope=? THEN reserved_bytes ELSE 0 END),0) FROM preparation_authorizations WHERE storage_released=0`, r.Profile.AccountScope, r.Profile.AccountScope).Scan(&globalCount, &globalBytes, &accountCount, &accountBytes); err != nil {
+		settings, _, err := schedulerControl(ctx, tx)
+		if err != nil {
+			return err
+		}
+		var globalCount int
+		var globalBytes int64
+		if err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(reserved_bytes),0) FROM attempt_grants WHERE kind='prepare' AND storage_released=0`).Scan(&globalCount, &globalBytes); err != nil {
 			return dbError(err)
 		}
-		if accountCount >= executionauth.MaxHeldPerAccount || globalCount >= executionauth.MaxHeldGlobal || accountBytes+total > executionauth.MaxHeldPerAccount*executionauth.MaxStagedBytes || globalBytes+total > executionauth.MaxHeldGlobal*executionauth.MaxStagedBytes {
+		// The global reservation bound also bounds every individual account.
+		budget := int64(settings.MaxWorkers) * executionauth.MaxStagedBytes
+		if globalCount >= settings.MaxWorkers || globalBytes > budget-total {
 			return admission.ErrLimit
 		}
-		receipt, err = newGateReceipt(c, req.AttemptID, "prepare")
+		receipt, err = newGateReceipt(now, c, req.AttemptID, "prepare")
 		if err != nil {
 			return err
 		}
 		raw, _ := json.Marshal(req)
 		encoded, _ := json.Marshal(receipt)
 		binding, _ := json.Marshal(r.Profile)
-		_, err = tx.ExecContext(ctx, `INSERT INTO preparation_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_sha256,request,original_receipt,binding,account_scope,inputs_sha256,attempt_nonce,reserved_bytes,ready_until_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, string(c.WorkspaceID), string(receipt.AuthorizationID), string(c.JobID), string(req.AttemptID), c.KeyDigest, string(executionauth.GateDigest("prepare", c.JobID, req)), string(raw), string(encoded), string(binding), r.Profile.AccountScope, inputs, r.AttemptNonce, total, until.UnixMilli())
-		return dbError(err)
+		_, err = tx.ExecContext(ctx, `INSERT INTO attempt_grants(workspace_id,kind,authorization_id,job_id,attempt_id,key_sha256,status,request,binding,account_scope,inputs_sha256,attempt_nonce,reserved_bytes,ready_until_ms) VALUES(?,'prepare',?,?,?,?,'granted',?,?,?,?,?,?,?)`, string(c.WorkspaceID), string(receipt.AuthorizationID), string(c.JobID), string(req.AttemptID), c.KeyDigest, string(raw), string(binding), r.Profile.AccountScope, inputs, r.AttemptNonce, total, until.UnixMilli())
+		if err != nil {
+			return dbError(err)
+		}
+		_, _, err = replayOrCreate(ctx, tx, receiptKey{c.WorkspaceID, "grant", "prepare", c.KeyDigest, string(executionauth.GateDigest("prepare", c.JobID, req)), "", executionauth.ErrConflict}, &savedReceipt{string(receipt.AuthorizationID), c.JobID, req.AttemptID, string(encoded)})
+		return err
 	})
 	if err != nil {
 		return executionauth.GateReceipt{}, err
@@ -197,7 +186,7 @@ func loadExecutionGate(ctx context.Context, tx *sql.Tx, record admission.Record,
 	var request, raw, binding, account, inputs, nonce string
 	var consumed, revision, observed sql.NullString
 	var until, total int64
-	err := tx.QueryRowContext(ctx, `SELECT request,original_receipt,binding,account_scope,inputs_sha256,attempt_nonce,reserved_bytes,ready_until_ms,consumed_at,ready_revision,ready_at FROM preparation_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?`, string(record.Job.WorkspaceID), string(record.Job.ID), string(record.Attempt.ID)).Scan(&request, &raw, &binding, &account, &inputs, &nonce, &total, &until, &consumed, &revision, &observed)
+	err := tx.QueryRowContext(ctx, `SELECT g.request,r.receipt,g.binding,g.account_scope,g.inputs_sha256,g.attempt_nonce,g.reserved_bytes,g.ready_until_ms,g.consumed_at,g.ready_revision,g.ready_at FROM attempt_grants g JOIN receipts r ON r.workspace_id=g.workspace_id AND r.namespace='grant' AND r.scope=g.kind AND r.key_sha256=g.key_sha256 WHERE g.kind='prepare' AND g.workspace_id=? AND g.job_id=? AND g.attempt_id=?`, string(record.Job.WorkspaceID), string(record.Job.ID), string(record.Attempt.ID)).Scan(&request, &raw, &binding, &account, &inputs, &nonce, &total, &until, &consumed, &revision, &observed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -224,7 +213,7 @@ func loadExecutionGate(ctx context.Context, tx *sql.Tx, record admission.Record,
 		return nil, ErrCorrupt
 	}
 	if now.Before(g.Preparation.CreatedAt) || g.Preparation.ConsumedAt != nil && now.Before(*g.Preparation.ConsumedAt) {
-		return nil, scheduler.ErrClock
+		return nil, ErrCorrupt
 	}
 	if revision.Valid {
 		at, err := time.Parse(time.RFC3339Nano, observed.String)
@@ -233,11 +222,11 @@ func loadExecutionGate(ctx context.Context, tx *sql.Tx, record admission.Record,
 			return nil, ErrCorrupt
 		}
 		if now.Before(at) {
-			return nil, scheduler.ErrClock
+			return nil, ErrCorrupt
 		}
 		g.ReadyAt = &at
 	}
-	err = tx.QueryRowContext(ctx, `SELECT request,original_receipt,consumed_at FROM start_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?`, string(record.Job.WorkspaceID), string(record.Job.ID), string(record.Attempt.ID)).Scan(&request, &raw, &consumed)
+	err = tx.QueryRowContext(ctx, `SELECT g.request,r.receipt,g.consumed_at FROM attempt_grants g JOIN receipts r ON r.workspace_id=g.workspace_id AND r.namespace='grant' AND r.scope=g.kind AND r.key_sha256=g.key_sha256 WHERE g.kind='start' AND g.workspace_id=? AND g.job_id=? AND g.attempt_id=?`, string(record.Job.WorkspaceID), string(record.Job.ID), string(record.Attempt.ID)).Scan(&request, &raw, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return g, nil
 	}
@@ -253,7 +242,7 @@ func loadExecutionGate(ctx context.Context, tx *sql.Tx, record admission.Record,
 		return nil, ErrCorrupt
 	}
 	if now.Before(receipt.CreatedAt) || receipt.ConsumedAt != nil && now.Before(*receipt.ConsumedAt) {
-		return nil, scheduler.ErrClock
+		return nil, ErrCorrupt
 	}
 	stop, _ := time.Parse(time.RFC3339, req.ExecutionDeadline)
 	if !stop.After(receipt.CreatedAt) || stop.After(receipt.CreatedAt.Add(time.Duration(req.MaxRemoteWallSeconds)*time.Second)) || !record.Request.Spec().Deadline().IsZero() && stop.After(record.Request.Spec().Deadline()) || !receipt.CreatedAt.Before(deadline) {
@@ -292,13 +281,8 @@ func (s *Store) StartExecution(ctx context.Context, c executionauth.GateCommand,
 	if c.Validate() != nil || req.Validate() != nil {
 		return executionauth.GateReceipt{}, executionauth.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.GateReceipt{}, err
-	}
-	defer done()
 	var receipt executionauth.GateReceipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -307,11 +291,11 @@ func (s *Store) StartExecution(ctx context.Context, c executionauth.GateCommand,
 			receipt = prior
 			return err
 		}
-		r, err := gateRecord(ctx, tx, c, req.AttemptID)
+		r, err := gateRecord(ctx, tx, now, c, req.AttemptID)
 		if err != nil {
 			return err
 		}
-		g, err := loadExecutionGate(ctx, tx, r, c.Now)
+		g, err := loadExecutionGate(ctx, tx, r, now)
 		if err != nil {
 			return err
 		}
@@ -321,7 +305,7 @@ func (s *Store) StartExecution(ctx context.Context, c executionauth.GateCommand,
 		if g.Start != nil {
 			return executionauth.ErrConflict
 		}
-		if g.Expired(c.Now) {
+		if g.Expired(now) {
 			return admission.ErrExpired
 		}
 		if g.ReadyRevision != req.ReadinessRevision {
@@ -335,30 +319,34 @@ func (s *Store) StartExecution(ctx context.Context, c executionauth.GateCommand,
 			return executionauth.ErrState
 		}
 		stop, _ := time.Parse(time.RFC3339, req.ExecutionDeadline)
-		if !c.Now.Before(stop) {
+		if !now.Before(stop) {
 			return admission.ErrExpired
 		}
-		if req.MaxRemoteWallSeconds <= r.Request.Spec().Timeouts.SetupSeconds+r.Request.Spec().Timeouts.FinalizationGraceSeconds || req.MaxRemoteWallSeconds > r.Request.Spec().Timeouts.RemoteWallSeconds || stop.After(c.Now.Add(time.Duration(req.MaxRemoteWallSeconds)*time.Second)) || !r.Request.Spec().Deadline().IsZero() && stop.After(r.Request.Spec().Deadline()) {
+		if req.MaxRemoteWallSeconds <= r.Request.Spec().Timeouts.SetupSeconds+r.Request.Spec().Timeouts.FinalizationGraceSeconds || req.MaxRemoteWallSeconds > r.Request.Spec().Timeouts.RemoteWallSeconds || stop.After(now.Add(time.Duration(req.MaxRemoteWallSeconds)*time.Second)) || !r.Request.Spec().Deadline().IsZero() && stop.After(r.Request.Spec().Deadline()) {
 			return executionauth.ErrRequest
 		}
-		secret, err := secretForStart(ctx, tx, r, req.SecretAuthorizationID, req.ReadinessRevision, req.ExecutionDeadline, c.Now)
+		secret, err := secretForStart(ctx, tx, r, req.SecretAuthorizationID, req.ReadinessRevision, req.ExecutionDeadline, now)
 		if err != nil {
 			return err
 		}
 		if secret != nil && !c.SecretAvailable {
 			return workloadsecret.ErrUnavailable
 		}
-		if err = authorizationQuota(ctx, tx, r, c.Now); err != nil {
+		if err = authorizationQuota(ctx, tx, r, now); err != nil {
 			return err
 		}
-		receipt, err = newGateReceipt(c, req.AttemptID, "start")
+		receipt, err = newGateReceipt(now, c, req.AttemptID, "start")
 		if err != nil {
 			return err
 		}
 		raw, _ := json.Marshal(req)
 		encoded, _ := json.Marshal(receipt)
-		_, err = tx.ExecContext(ctx, `INSERT INTO start_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_sha256,request,original_receipt) VALUES(?,?,?,?,?,?,?,?)`, string(c.WorkspaceID), string(receipt.AuthorizationID), string(c.JobID), string(req.AttemptID), c.KeyDigest, string(executionauth.GateDigest("start", c.JobID, req)), string(raw), string(encoded))
-		return dbError(err)
+		_, err = tx.ExecContext(ctx, `INSERT INTO attempt_grants(workspace_id,kind,authorization_id,job_id,attempt_id,key_sha256,status,request) VALUES(?,'start',?,?,?,?,'granted',?)`, string(c.WorkspaceID), string(receipt.AuthorizationID), string(c.JobID), string(req.AttemptID), c.KeyDigest, string(raw))
+		if err != nil {
+			return dbError(err)
+		}
+		_, _, err = replayOrCreate(ctx, tx, receiptKey{c.WorkspaceID, "grant", "start", c.KeyDigest, string(executionauth.GateDigest("start", c.JobID, req)), "", executionauth.ErrConflict}, &savedReceipt{string(receipt.AuthorizationID), c.JobID, req.AttemptID, string(encoded)})
+		return err
 	})
 	if err != nil {
 		return executionauth.GateReceipt{}, err
@@ -370,20 +358,15 @@ func (s *Store) ReadGateAuthorization(ctx context.Context, w domain.WorkspaceID,
 	if !w.Valid() || !job.Valid() || !id.Valid() {
 		return executionauth.GateReceipt{}, executionauth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.GateReceipt{}, err
-	}
-	defer done()
 	var receipt executionauth.GateReceipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Execute); err != nil {
 			return err
 		}
 		for _, kind := range []string{"prepare", "start"} {
 			var raw string
 			var used sql.NullString
-			err := tx.QueryRowContext(ctx, "SELECT original_receipt,consumed_at FROM "+gateTable(kind)+" WHERE workspace_id=? AND job_id=? AND authorization_id=?", string(w), string(job), string(id)).Scan(&raw, &used)
+			err := tx.QueryRowContext(ctx, `SELECT r.receipt,g.consumed_at FROM attempt_grants g JOIN receipts r ON r.workspace_id=g.workspace_id AND r.namespace='grant' AND r.scope=g.kind AND r.key_sha256=g.key_sha256 WHERE g.kind=? AND g.workspace_id=? AND g.job_id=? AND g.authorization_id=?`, kind, string(w), string(job), string(id)).Scan(&raw, &used)
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -404,17 +387,12 @@ func (s *Store) ReadGateAuthorization(ctx context.Context, w domain.WorkspaceID,
 	return receipt, nil
 }
 
-func (s *Store) ReadReadiness(ctx context.Context, w domain.WorkspaceID, token string, job domain.JobID, now time.Time) (executionauth.Readiness, error) {
-	if !w.Valid() || !job.Valid() || !scheduler.ValidTime(now) {
+func (s *Store) ReadReadiness(ctx context.Context, w domain.WorkspaceID, token string, job domain.JobID) (executionauth.Readiness, error) {
+	if !w.Valid() || !job.Valid() {
 		return executionauth.Readiness{}, executionauth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.Readiness{}, err
-	}
-	defer done()
 	var result executionauth.Readiness
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}

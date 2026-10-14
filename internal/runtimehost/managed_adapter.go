@@ -30,9 +30,8 @@ var _ connections.Adapter = (*managedKaggleAdapter)(nil)
 func (a *managedKaggleAdapter) Descriptor() connections.Descriptor {
 	return connections.Descriptor{
 		Type: "kaggle", Label: "Kaggle",
-		Fields: []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: credentials.MaxBytes}},
-		Capabilities: connections.Capabilities{RemoteCleanup: "supported", EphemeralSecrets: "unsupported", Accelerators: []string{a.config.accelerator()}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "unsupported", SeparateStart: "unsupported",
-			Concurrency: &connections.ConcurrencyCapability{Support: "supported", Scope: "account", Minimum: 1, Maximum: 64, Default: 1}},
+		Fields:       []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: credentials.MaxBytes}},
+		Capabilities: connections.ProjectCapabilities(kaggle.RuntimeCapabilities(a.config.MachineShape), "account"),
 	}
 }
 
@@ -103,9 +102,9 @@ type managedKaggleProvider struct {
 	outer, inner provider.BindingSnapshot
 }
 
-func (p *managedKaggleProvider) VerifyBinding(ctx context.Context, expected provider.BindingSnapshot) error {
+func (p *managedKaggleProvider) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if expected != p.outer {
 		return kaggle.ErrRuntimeBinding
 	}
-	return p.RuntimeAdapter.VerifyBinding(ctx, p.inner)
+	return p.RuntimeAdapter.Verify(ctx, p.inner)
 }

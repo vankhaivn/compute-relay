@@ -5,12 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/ports"
 )
 
 // RetryInputs is a read/verify/compare snapshot. The SQL commit must independently
@@ -31,12 +29,11 @@ type Command struct {
 	RequestHash string
 	Inputs      *RetryInputs
 	Limits      admission.Limits
-	Now         time.Time
 }
 
 func (c Command) Validate() error {
 	digest, err := c.Request.Digest(c.JobID, c.Kind)
-	if err != nil || !c.WorkspaceID.Valid() || c.TokenID == "" || !domain.SHA256Digest(c.KeyDigest).Valid() || digest != c.RequestHash || !c.Limits.Valid() || c.Now.IsZero() {
+	if err != nil || !c.WorkspaceID.Valid() || c.TokenID == "" || !domain.SHA256Digest(c.KeyDigest).Valid() || digest != c.RequestHash || !c.Limits.Valid() {
 		return ErrRequest
 	}
 	if (c.Kind == domain.OperationRetryCompute) != (c.Inputs != nil) {
@@ -60,20 +57,16 @@ type Service struct {
 	access *auth.Service
 	repo   Repository
 	blobs  BlobReader
-	clock  ports.Clock
 	limits admission.Limits
 }
 
 // A nil blob reader disables compute retry, not cancellation or observation. There
 // is deliberately no fallback to current URL contents or an alternate blob source.
-func New(access *auth.Service, repo Repository, blobs BlobReader, clock ports.Clock, limits admission.Limits) (*Service, error) {
+func New(access *auth.Service, repo Repository, blobs BlobReader, limits admission.Limits) (*Service, error) {
 	if access == nil || repo == nil || !limits.Valid() {
 		return nil, ErrRequest
 	}
-	if clock == nil {
-		clock = ports.SystemClock{}
-	}
-	return &Service{access: access, repo: repo, blobs: blobs, clock: clock, limits: limits}, nil
+	return &Service{access: access, repo: repo, blobs: blobs, limits: limits}, nil
 }
 
 func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.WorkspaceID, job domain.JobID, kind domain.OperationKind, key string, raw []byte) (Record, error) {
@@ -116,7 +109,6 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 		}
 		command.Inputs = &inputs
 	}
-	command.Now = s.clock.Now().UTC()
 	return s.repo.AdmitOperation(ctx, command)
 }
 

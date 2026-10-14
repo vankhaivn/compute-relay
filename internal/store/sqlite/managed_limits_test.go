@@ -28,24 +28,19 @@ func TestManagedLimitsFreezeAndShareCapacityAcrossWorkspaces(t *testing.T) {
 	f := newManagedStateFixture(t)
 	ctx := context.Background()
 	var err error
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{limitedStateAdapter{f.discovery}}, f.clock.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{limitedStateAdapter{f.discovery}})
+	requireNoError(t, err)
 	settings := scheduler.DefaultSettings()
 	settings.MaxWorkers, settings.MaxActivePerAccount = 4, 64
-	if err = f.s.ConfigureScheduler(ctx, settings); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.ConfigureScheduler(ctx, settings)
+	requireNoError(t, err)
 	first := f.create(t, "a", "limited-first", managedStateSecret)
 	alias := f.create(t, "b", "limited-alias", managedStateSecret)
 	if first.Selection.MaxActiveAttempts != 1 || first.Selection.MaxProcesses != 4096 || *first.AccountID != *alias.AccountID {
 		t.Fatal("wrong defaults or account grouping")
 	}
 	frozen, _, err := f.s.ReadProfile(ctx, first.Selection.Profile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	configure := func(w domain.WorkspaceID, c connections.Connection, key string, active, processes int) connections.Connection {
 		t.Helper()
 		body := []byte(fmt.Sprintf(`{"action":"configure","expected_revision":%d,"configuration":{"max_remote_wall_seconds":1800,"max_active_attempts":%d,"max_processes":%d}}`, c.Revision, active, processes))
@@ -80,17 +75,13 @@ func TestManagedLimitsFreezeAndShareCapacityAcrossWorkspaces(t *testing.T) {
 	}
 	// Load the exact immutable profile directly, independent of its current alias.
 	var raw string
-	if err := f.s.db.QueryRow(`SELECT snapshot FROM profile_revisions WHERE profile=? AND revision=?`, frozen.Binding.Profile, frozen.Binding.ConfigurationRevision).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.db.QueryRow(`SELECT snapshot FROM profile_revisions WHERE profile=? AND revision=?`, frozen.Binding.Profile, frozen.Binding.ConfigurationRevision).Scan(&raw))
 	var retained admission.Profile
 	if json.Unmarshal([]byte(raw), &retained) != nil || retained != frozen || retained.MaxProcesses != 4096 || retained.MaxActiveAttempts != 1 {
 		t.Fatal("configuration rewrote the old profile")
 	}
 	permits, err := executionauth.New(f.access, f.s, f.clock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for i, c := range []connections.Connection{first, alias, first} {
 		w := c.Workspace
 		receipt, _ := f.admit(t, w, c, fmt.Sprintf("limited-job-%d", i))
@@ -99,12 +90,12 @@ func TestManagedLimitsFreezeAndShareCapacityAcrossWorkspaces(t *testing.T) {
 		}
 	}
 	for i := range 2 {
-		result, err := f.s.ClaimNextManaged(ctx, fmt.Sprintf("limited-worker-%d", i), f.clock.Now())
+		result, err := f.s.ClaimNext(ctx, fmt.Sprintf("limited-worker-%d", i))
 		if err != nil || result.Claim == nil {
 			t.Fatalf("slot %d not available: %+v %v", i, result.View, err)
 		}
 	}
-	result, err := f.s.ClaimNextManaged(ctx, "limited-third", f.clock.Now())
+	result, err := f.s.ClaimNext(ctx, "limited-third")
 	if err != nil || result.Claim != nil || result.View.AccountReservations[*first.AccountID] != 2 {
 		t.Fatal("shared host allowed a third attempt", result, err)
 	}

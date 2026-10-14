@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
 
 // RetentionIdentity binds pending deletion tickets to this physical store instance,
@@ -29,7 +30,7 @@ func (s *Store) RetentionIdentity(ctx context.Context) (string, error) {
 	path := filepath.Join(s.root, ".retention-id")
 	info, err := os.Lstat(path)
 	if err == nil {
-		if !info.Mode().IsRegular() || info.Size() != 70 || !privateMode(info.Mode()) || checkPrivatePath(path) != nil {
+		if !info.Mode().IsRegular() || info.Size() != 70 || statefs.CheckFile(path) != nil {
 			return "", ErrCorrupt
 		}
 		raw, err := os.ReadFile(path)
@@ -68,7 +69,7 @@ func (s *Store) RetentionIdentity(ctx context.Context) (string, error) {
 	if err := s.rename(file.Name(), path); err != nil {
 		return "", ErrUnavailable
 	}
-	if err := syncDirectory(s.root); err != nil {
+	if err := statefs.SyncDir(s.root); err != nil {
 		return "", ErrUnavailable
 	}
 	return id, nil

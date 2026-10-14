@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -84,7 +83,7 @@ func newTestStager(t *testing.T, allow bool) (*Stager, provider.Plan, *stagingTe
 	c, plan := stagingFixture(t)
 	b := &stagingTestBlobs{data: map[domain.ObjectID][]byte{"code": []byte("synthetic-code"), "input": []byte("abc")}}
 	reads := new(int)
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { *reads++; return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { *reads++; return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +91,6 @@ func newTestStager(t *testing.T, allow bool) (*Stager, provider.Plan, *stagingTe
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.local = func(context.Context, Config, Mode, []byte) (Report, error) { return baseline(Local), nil }
 	s.run = func(context.Context, Config, string, []byte, stagingPlan, StagingBlobs) (stagingResponse, error) {
 		t.Fatal("unexpected helper invocation")
 		return stagingResponse{}, nil
@@ -113,19 +111,12 @@ func TestStagingCreateChecksAllInputsBeforeCredentials(t *testing.T) {
 }
 
 func TestStagingLocalFailureAndOptInMakeNoSideEffects(t *testing.T) {
-	for _, mode := range []string{"disabled", "pins", "cancelled", "remapped"} {
+	for _, mode := range []string{"disabled", "cancelled", "remapped"} {
 		t.Run(mode, func(t *testing.T) {
 			s, plan, b, reads := newTestStager(t, mode != "disabled")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			switch mode {
-			case "pins":
-				s.local = func(context.Context, Config, Mode, []byte) (Report, error) {
-					r := baseline(Local)
-					r.Local = "version_mismatch"
-					r.Problem = "version_mismatch"
-					return r, nil
-				}
 			case "cancelled":
 				cancel()
 			case "remapped":
@@ -151,7 +142,7 @@ func TestStagingRecoveryReadsRemoteOnlyAndPreservesReadiness(t *testing.T) {
 				}
 				return stageResponse(p, status), nil
 			}
-			result, err := s.ReconcilePreparation(context.Background(), plan, "prep")
+			result, err := s.ReconcilePrepare(context.Background(), plan, "prep")
 			if *reads != 1 || b.reads != 0 || calls != 1 {
 				t.Fatal("recovery reread or repeated work")
 			}
@@ -207,7 +198,7 @@ func TestStagingRejectsFalseOrChangedHelperIdentity(t *testing.T) {
 				}
 				return r, nil
 			}
-			if result, err := s.ReconcilePreparation(context.Background(), plan, "prep"); err == nil || result.Prepared != nil {
+			if result, err := s.ReconcilePrepare(context.Background(), plan, "prep"); err == nil || result.Prepared != nil {
 				t.Fatal("invalid observation accepted", result, err)
 			}
 		})
@@ -245,7 +236,7 @@ func TestStagingCredentialAndHelperErrorsAreSanitized(t *testing.T) {
 				}
 				return stageResponse(p, "ready"), nil
 			}
-			result, err := s.ReconcilePreparation(context.Background(), plan, "prep")
+			result, err := s.ReconcilePrepare(context.Background(), plan, "prep")
 			if err == nil || strings.Contains(err.Error(), "SYNTHETIC_SECRET") || result.Prepared != nil || calls > 1 {
 				t.Fatal("unsafe error/callback", result, err, calls)
 			}

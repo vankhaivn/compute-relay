@@ -2,7 +2,6 @@ package executionauth
 
 import (
 	"context"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
@@ -16,11 +15,10 @@ type GateCommand struct {
 	TokenID         string
 	JobID           domain.JobID
 	KeyDigest       string
-	Now             time.Time
 }
 
 func (c GateCommand) Validate() error {
-	if !c.WorkspaceID.Valid() || !domain.ObjectID(c.TokenID).Valid() || !c.JobID.Valid() || !domain.SHA256Digest(c.KeyDigest).Valid() || c.Now.IsZero() || c.Now.Year() < 1970 || c.Now.Year() >= 9999 {
+	if !c.WorkspaceID.Valid() || !domain.ObjectID(c.TokenID).Valid() || !c.JobID.Valid() || !domain.SHA256Digest(c.KeyDigest).Valid() {
 		return ErrRequest
 	}
 	return nil
@@ -34,7 +32,7 @@ func (s *Service) gateCommand(ctx context.Context, p auth.Principal, w domain.Wo
 	if err != nil {
 		return GateCommand{}, err
 	}
-	c := GateCommand{WorkspaceID: w, TokenID: fresh.TokenID(), JobID: job, KeyDigest: digest, Now: s.clock.Now().UTC()}
+	c := GateCommand{WorkspaceID: w, TokenID: fresh.TokenID(), JobID: job, KeyDigest: digest}
 	return c, c.Validate()
 }
 func (s *Service) Prepare(ctx context.Context, p auth.Principal, w domain.WorkspaceID, job domain.JobID, key string, raw []byte) (GateReceipt, error) {
@@ -58,7 +56,7 @@ func (s *Service) Start(ctx context.Context, p auth.Principal, w domain.Workspac
 		return GateReceipt{}, err
 	}
 	var receipt GateReceipt
-	err = s.secrets.WithAvailability(workloadsecret.Key{WorkspaceID: w, JobID: job, AttemptID: req.AttemptID}, req.SecretAuthorizationID, c.Now, func(available bool) error {
+	err = s.secrets.WithAvailability(workloadsecret.Key{WorkspaceID: w, JobID: job, AttemptID: req.AttemptID}, req.SecretAuthorizationID, s.clock.Now().UTC(), func(available bool) error {
 		c.SecretAvailable = available
 		var err error
 		receipt, err = s.repo.StartExecution(ctx, c, req)
@@ -88,7 +86,7 @@ func (s *Service) Readiness(ctx context.Context, p auth.Principal, w domain.Work
 		return Readiness{}, ErrNotFound
 	}
 	now := s.clock.Now().UTC()
-	result, err := s.repo.ReadReadiness(ctx, w, fresh.TokenID(), job, now)
+	result, err := s.repo.ReadReadiness(ctx, w, fresh.TokenID(), job)
 	if err == nil && result.Secrets != nil && result.Secrets.Status == "granted" {
 		key := workloadsecret.Key{WorkspaceID: w, JobID: job, AttemptID: result.AttemptID}
 		result.Secrets.Status = "available"

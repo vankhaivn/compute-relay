@@ -10,17 +10,13 @@ import (
 func TestLoadProviderAttemptReturnsOnlyOriginalDurablePlanAndPreparation(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.step(t))
 	journal := f.journal(t, id)
 	if journal.Plan == nil || journal.Prepared == nil {
 		t.Fatal("fixture did not reach durable prepared state")
 	}
 	plan, prepared, err := f.s.LoadProviderAttempt(context.Background(), journal.Plan.Job.Identity)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if plan.Digest() != journal.Plan.Digest() || prepared != *journal.Prepared {
 		t.Fatal("trusted loader changed the original provider attempt")
 	}

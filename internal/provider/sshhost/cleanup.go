@@ -8,8 +8,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-var _ provider.ResourceCleaner = (*Adapter)(nil)
-
 func (a *Adapter) DescribeCleanup(request provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
 	if !request.Valid() || request.Remote.Identity.InstanceID != a.config.InstanceID {
 		return provider.CleanupDescription{}, ErrIdentity
@@ -34,7 +32,10 @@ func (a *Adapter) CleanupResource(ctx context.Context, request provider.CleanupR
 	if description.Support != domain.CapabilitySupportSupported {
 		return provider.CleanupOutcome{}, provider.ErrCleanupUnsupported
 	}
-	outcome, err := a.cleanup(ctx, request.CleanupRequest, request.PlanSHA256)
+	outcome, err := a.cleanup(ctx, request)
+	if provider.IsLocalStateError(err) {
+		return outcome, err
+	}
 	if errors.Is(err, ErrIdentity) {
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "container ownership no longer matches the original receipt")
 	}

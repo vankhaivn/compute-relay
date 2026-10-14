@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -42,8 +43,6 @@ type Config struct {
 	Operations     *operations.Service    // nil disables durable controls; never use an in-memory fallback.
 	Cleanup        *cleanup.Service       // nil disables explicit remote cleanup admission; requires Operations.
 	Jobs           *admission.Service     // nil disables durable job routes; never use a memory fallback.
-	HTTPSInputs    *objects.Ingestor      // nil disables HTTPS ingestion; operator composition supplies the guarded client.
-	LocalImports   *objects.Importer      // nil disables local import; configured by the operator composition root.
 	Listen         string
 	MaxJSONBytes   int64
 	MaxUploadBytes int64
@@ -97,6 +96,7 @@ func NewServer(cfg Config, access *auth.Service, objectService *objects.Service,
 	h := &handler{config: cfg, auth: access, objects: objectService, ready: ready,
 		global: newLimiter(cfg.GlobalRate, 1), spaces: newLimiter(cfg.WorkspaceRate, cfg.MaxRateKeys),
 		inFlight: make(chan struct{}, cfg.MaxInFlight), uploads: make(chan struct{}, cfg.MaxUploads)}
+	h.routes()
 	return &http.Server{
 		Addr: cfg.Listen, Handler: h, MaxHeaderBytes: 32 << 10,
 		ReadHeaderTimeout: cfg.HeaderTimeout, ReadTimeout: cfg.UploadTimeout,
@@ -105,6 +105,8 @@ func NewServer(cfg Config, access *auth.Service, objectService *objects.Service,
 }
 
 type handler struct {
+	mux      *http.ServeMux
+	policies map[string]routePolicy
 	config   Config
 	auth     *auth.Service
 	objects  *objects.Service
@@ -157,19 +159,21 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.limited(w, r, 1)
 		return
 	}
-	isArtifact := artifactPath(r.URL.Path)
-	isLogs := logPath(r.URL.Path)
-	isCleanupPreview := r.Method == http.MethodGet && cleanupPreviewPath(r.URL.Path)
+	_, pattern := h.mux.Handler(r)
+	policy := h.policies[pattern]
+	if pattern == "/" {
+		_, policy = h.allowed(r)
+	}
 	queryLimit := 512
-	if isLogs {
+	if policy.logs {
 		queryLimit = 2048
 	}
-	if r.URL.RawQuery != "" && !isArtifact && !isLogs && !isCleanupPreview || len(r.URL.Path) > 2048 || r.URL.RawPath != "" || len(r.URL.RawQuery) > queryLimit {
+	if (r.URL.RawQuery != "" || r.URL.ForceQuery) && !policy.query || len(r.URL.Path) > 2048 || r.URL.RawPath != "" || len(r.URL.RawQuery) > queryLimit || path.Clean(r.URL.Path) != r.URL.Path {
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "unexpected query or encoded path")
 		return
 	}
-	if r.URL.Path == "/healthz" && r.Method == http.MethodGet {
-		respond(w, 200, map[string]string{"status": "ok"})
+	if policy.public {
+		h.mux.ServeHTTP(w, r)
 		return
 	}
 
@@ -181,25 +185,20 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mapError(w, r, err)
 		return
 	}
-	segments := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
-	isUpload := len(segments) == 4 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && r.Method == http.MethodPost
 	// Upload slots and byte limits bound uploads. A rejection sent before a large body is
 	// read reaches the client only as a reset connection, so one job's inputs must not
 	// exhaust the per-workspace bucket.
-	if !isUpload {
+	if !policy.upload {
 		if ok, wait := h.spaces.allow(string(principal.WorkspaceID()), h.config.Now()); !ok {
 			h.limited(w, r, wait)
 			return
 		}
 	}
-	isImport := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "import" && r.Method == http.MethodPost
-	isIngest := len(segments) == 5 && segments[0] == "v1" && segments[1] == "workspaces" && segments[3] == "objects" && segments[4] == "ingest" && r.Method == http.MethodPost
-	isDownload := isArtifact && len(segments) == 8 && r.Method == http.MethodGet
 	timeout, maxBody := h.config.RequestTimeout, h.config.MaxJSONBytes
-	if isUpload {
+	if policy.upload {
 		timeout, maxBody = h.config.UploadTimeout, h.config.MaxUploadBytes
 	}
-	if isImport || isIngest || isDownload {
+	if policy.download {
 		timeout = h.config.UploadTimeout // JSON body stays bounded by MaxJSONBytes.
 	}
 	if r.ContentLength > maxBody {
@@ -207,7 +206,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Body != nil {
-		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		limit := maxBody
+		if policy.bodyLimit > 0 && policy.bodyLimit < limit {
+			limit = policy.bodyLimit
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		defer r.Body.Close()
 	}
 	// A context alone cannot interrupt a blocked body Read. Bound the connection's read
@@ -216,7 +219,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mapError(w, r, objects.ErrUnavailable)
 		return
 	}
-	if isDownload {
+	if policy.download {
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 			artifactError(w, r, collection.ErrUnavailable)
 			return
@@ -225,123 +228,50 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel = context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	r = r.WithContext(ctx)
-	if r.URL.Path == "/readyz" && r.Method == http.MethodGet {
-		if h.ready == nil || h.ready(ctx) != nil {
-			respondError(w, r, 503, domain.CodeStateStoreUnavailable, domain.FailureStageLocalRuntime, "local runtime dependencies are not ready")
-		} else {
-			respond(w, 200, map[string]string{"status": "ready"})
-		}
-		return
+	r = r.WithContext(context.WithValue(r.Context(), principalKey{}, principal))
+	h.mux.ServeHTTP(w, r)
+}
+
+func (h *handler) readiness(w http.ResponseWriter, r *http.Request) {
+	if h.ready == nil || h.ready(r.Context()) != nil {
+		respondError(w, r, 503, domain.CodeStateStoreUnavailable, domain.FailureStageLocalRuntime, "local runtime dependencies are not ready")
+	} else {
+		respond(w, 200, map[string]string{"status": "ready"})
 	}
-	if r.URL.Path == "/v1/info" && r.Method == http.MethodGet {
-		features := []string{"workspace_auth", "object_upload", "object_metadata"}
-		admissionStatus := "not_implemented"
+}
+
+func (h *handler) info(w http.ResponseWriter, r *http.Request) {
+	features := []string{"workspace_auth", "object_upload", "object_metadata"}
+	admissionStatus := "not_implemented"
+	if h.config.Jobs != nil {
+		features = append(features, "job_admission", "job_validation", "job_status")
+		admissionStatus = "implemented-offline"
+	}
+	if h.config.Operations != nil {
+		features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", FeatureJobCleanup, "operation_status")
 		if h.config.Jobs != nil {
-			features = append(features, "job_admission", "job_validation", "job_status")
-			admissionStatus = "implemented-offline"
+			features = append(features, FeatureManualResultCollection)
 		}
-		if h.config.Operations != nil {
-			features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", "operation_status")
-			if h.config.Jobs != nil {
-				features = append(features, FeatureManualResultCollection)
-			}
-			if h.config.Cleanup != nil {
-				features = append(features, FeatureJobCleanup)
-				if h.config.Cleanup.PreviewAvailable() {
-					features = append(features, FeatureJobCleanupPreview)
-				}
-			}
+		if h.config.Cleanup != nil {
+			features = append(features, FeatureJobCleanupPreview)
 		}
-		if h.config.Connections != nil {
-			features = append(features, "managed_connections", "connection_configuration")
-		}
-		if h.config.Authorizations != nil {
-			features = append(features, "attempt_authorization", "separate_prepare_start")
-		}
-		if h.config.Secrets != nil {
-			features = append(features, "ephemeral_workload_secrets")
-		}
-		if h.config.Logs != nil {
-			features = append(features, "job_logs")
-		}
-		if h.config.Results != nil {
-			features = append(features, "artifact_list", "artifact_metadata", "artifact_download")
-		}
-		respond(w, 200, map[string]any{"api_version": "compute-connector/v1alpha1", "runtime_version": buildinfo.Current().Version, "implementation_status": "implemented-offline", "features": features, "job_admission": admissionStatus})
-		return
 	}
-	if len(segments) < 4 || segments[0] != "v1" || segments[1] != "workspaces" || (segments[3] != "objects" && segments[3] != "jobs" && segments[3] != "operations" && segments[3] != "providers" && segments[3] != "connections" && segments[3] != "connection-operations") {
-		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "route not implemented")
-		return
+	if h.config.Connections != nil {
+		features = append(features, "managed_connections", "connection_configuration")
 	}
-	workspace, err := domain.ParseWorkspaceID(segments[2])
-	if err != nil {
-		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "invalid workspace identifier")
-		return
+	if h.config.Authorizations != nil {
+		features = append(features, "attempt_authorization", "separate_prepare_start")
 	}
-	if workspace != principal.WorkspaceID() {
-		mapError(w, r, auth.ErrForbidden)
-		return
+	if h.config.Secrets != nil {
+		features = append(features, "ephemeral_workload_secrets")
 	}
-	if segments[3] == "providers" || segments[3] == "connections" || segments[3] == "connection-operations" {
-		h.connections(w, r, principal, workspace, segments)
-		return
+	if h.config.Logs != nil {
+		features = append(features, "job_logs")
 	}
-	if segments[3] == "jobs" && len(segments) >= 6 && segments[5] == "workload-secrets" {
-		h.workloadSecrets(w, r, principal, workspace, segments)
-		return
+	if h.config.Results != nil {
+		features = append(features, "artifact_list", "artifact_metadata", "artifact_download")
 	}
-	if segments[3] == "jobs" && (len(segments) == 6 && (segments[5] == "prepare" || segments[5] == "start" || segments[5] == "readiness") || len(segments) == 7 && segments[5] == "gate-authorizations") {
-		h.executionGate(w, r, principal, workspace, segments)
-		return
-	}
-	if segments[3] == "jobs" && (len(segments) == 6 && segments[5] == "authorize" || len(segments) == 7 && segments[5] == "authorizations") {
-		h.authorizations(w, r, principal, workspace, segments)
-		return
-	}
-	if isLogs {
-		h.logs(w, r, principal, workspace, segments)
-		return
-	}
-	if isArtifact {
-		h.artifacts(w, r, principal, workspace, segments)
-		return
-	}
-	if segments[3] == "operations" || segments[3] == "jobs" && len(segments) == 6 {
-		h.controls(w, r, principal, workspace, segments)
-		return
-	}
-	if segments[3] == "jobs" {
-		h.jobs(w, r, principal, workspace, segments)
-		return
-	}
-	if isIngest {
-		h.ingestObject(w, r, principal, workspace)
-		return
-	}
-	if isImport {
-		h.importObject(w, r, principal, workspace)
-		return
-	}
-	if isUpload {
-		h.upload(w, r, principal, workspace)
-		return
-	}
-	if len(segments) == 5 && r.Method == http.MethodGet {
-		meta, err := h.objects.Get(ctx, principal, workspace, domain.ObjectID(segments[4]))
-		if err != nil {
-			mapError(w, r, err)
-			return
-		}
-		respond(w, 200, meta)
-		return
-	}
-	if len(segments) == 4 {
-		w.Header().Set("Allow", "POST")
-	} else if len(segments) == 5 {
-		w.Header().Set("Allow", "GET")
-	}
-	respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "method not implemented for this route")
+	respond(w, 200, map[string]any{"api_version": "compute-connector/v1alpha1", "runtime_version": buildinfo.Current().Version, "implementation_status": "implemented-offline", "features": features, "job_admission": admissionStatus})
 }
 
 func (h *handler) authenticate(ctx context.Context, r *http.Request) (auth.Principal, error) {

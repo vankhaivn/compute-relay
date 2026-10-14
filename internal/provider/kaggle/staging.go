@@ -46,7 +46,7 @@ type stagingInvocation func(context.Context, Config, string, []byte, stagingPlan
 
 // Stager is a preparation-only component, NOT a Provider or a scheduler. Only a
 // caller that just committed a NEW M3 BeginPreparation may invoke Prepare with
-// creation enabled. Recovery must use ReconcilePreparation. No registration or
+// creation enabled. Recovery must use ReconcilePrepare. No registration or
 // executable mutation command is installed by NewStager.
 type Stager struct {
 	config      Config
@@ -55,17 +55,14 @@ type Stager struct {
 	blobs       StagingBlobs
 	allowCreate bool
 	slot        chan struct{}
-	local       invocation
 	run         stagingInvocation
 }
-
-var _ provider.PreparationObserver = (*Stager)(nil)
 
 func NewStager(c Config, policy StagingPolicy, resolver ports.CredentialResolver, blobs StagingBlobs, allowCreate bool) (*Stager, error) {
 	if c.Validate() != nil || !policy.valid() || resolver == nil || blobs == nil {
 		return nil, ErrConfig
 	}
-	return &Stager{config: c, policy: policy, credentials: resolver, blobs: blobs, allowCreate: allowCreate, slot: make(chan struct{}, 1), local: runPython, run: runStaging}, nil
+	return &Stager{config: c, policy: policy, credentials: resolver, blobs: blobs, allowCreate: allowCreate, slot: make(chan struct{}, 1), run: runStaging}, nil
 }
 
 func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.Prepared, error) {
@@ -111,7 +108,7 @@ func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan,
 
 // A miss is not permission to create/upload/version anything. This path does not
 // read local payload bytes; it verifies remote bytes against the original pins.
-func (s *Stager) ReconcilePreparation(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig
 	}
@@ -136,13 +133,9 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	if err := ctx.Err(); err != nil {
 		return none, err
 	}
-	local, err := s.local(ctx, s.config, Local, nil)
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return none, ErrProcess
-	}
 	if mode == "create" {
 		// Reject every missing/corrupt local file BEFORE looking up a credential or
-		// creating even a provider upload session. The helper rehashes actual upload.
+		// creating even a provider upload session. Uploads are rehashed by the client.
 		for _, object := range p.objects {
 			if err := verifyStagingInput(ctx, s.blobs, object); err != nil {
 				return none, err
@@ -151,8 +144,10 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	}
 	var result stagingResponse
 	called := false
+	violated := false
 	err = s.credentials.WithCredential(ctx, s.config.CredentialRef, func(secret []byte) error {
 		if called {
+			violated = true
 			return ErrProtocol
 		}
 		called = true
@@ -171,12 +166,15 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		result, err = s.run(ctx, s.config, mode, secret, p, s.blobs)
 		return err
 	})
+	if provider.IsLocalStateError(err) {
+		return none, err
+	}
 	if ctx.Err() != nil {
 		return none, ctx.Err()
 	}
-	if err != nil || !called {
+	if err != nil || !called || violated {
 		return none, ErrStaging
-	} // Do not reflect secret-bearing callback/process errors.
+	} // Do not reflect secret-bearing callback or API errors.
 	return result.observation(p, frozen, operation)
 }
 

@@ -16,7 +16,7 @@ import (
 // controlState changes the exact target revision and appends its operation-linked
 // fact together. Advancing the revision fences any older dispatch callback without
 // prematurely releasing its local worker reservation.
-func controlState(ctx context.Context, tx *sql.Tx, r controlRecord, a domain.Attempt, state domain.AttemptState, event domain.EventType, now time.Time) (domain.Attempt, error) {
+func controlState(ctx context.Context, tx *sql.Tx, r operationRow, a domain.Attempt, state domain.AttemptState, event domain.EventType, now time.Time) (domain.Attempt, error) {
 	next, err := a.Transition(state, now.UTC())
 	if err != nil || next.Revision > math.MaxInt64 {
 		return domain.Attempt{}, operations.ErrState
@@ -70,7 +70,7 @@ func controlJournal(ctx context.Context, tx *sql.Tx, work dispatch.Work, next di
 	return nil
 }
 
-func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record, r controlRecord, now time.Time) (controlRecord, error) {
+func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record, r operationRow, now time.Time) (operationRow, error) {
 	state := target.Attempt.State
 	// A historical terminal orchestration outcome is immutable. Recording an
 	// explicit late request does not rewrite it or manufacture a cancellation.
@@ -154,7 +154,7 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 	return r, dbError(err)
 }
 
-func admitReconciliation(ctx context.Context, tx *sql.Tx, target admission.Record, r controlRecord, now time.Time) (controlRecord, error) {
+func admitReconciliation(ctx context.Context, tx *sql.Tx, target admission.Record, r operationRow, now time.Time) (operationRow, error) {
 	if target.Attempt.State.Orchestration.Terminal() || target.Attempt.State.Execution.Terminal() {
 		return finishControl(ctx, tx, r, domain.OperationSucceeded, operations.ObservationRefreshed, nil, now)
 	}
@@ -179,7 +179,7 @@ func admitReconciliation(ctx context.Context, tx *sql.Tx, target admission.Recor
 	return r, dbError(err)
 }
 
-func admitCollection(ctx context.Context, tx *sql.Tx, target admission.Record, r controlRecord, now time.Time) (controlRecord, error) {
+func admitCollection(ctx context.Context, tx *sql.Tx, target admission.Record, r operationRow, now time.Time) (operationRow, error) {
 	state := target.Attempt.State
 	if !state.Execution.Terminal() {
 		return r, operations.ErrUnresolved

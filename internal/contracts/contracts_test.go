@@ -1,32 +1,65 @@
 package contracts
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 func TestRepositoryContracts(t *testing.T) {
 	root := repositoryRoot(t)
-	if err := Check(root); err != nil {
-		t.Fatalf("Check() error = %v", err)
+	if err := validateLocalRefs(filepath.Join(root, "api", "schemas")); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestBuildLockIsDeterministic(t *testing.T) {
-	root := repositoryRoot(t)
-	first, err := BuildLock(root)
+	if err := validateDomainEnums(root); err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.DefaultDraft(jsonschema.Draft2020)
+	compiler.AssertFormat()
+	schemaPaths, err := filepath.Glob(filepath.Join(root, "api", "schemas", "*.schema.json"))
+	if err != nil || len(schemaPaths) == 0 {
+		t.Fatal("schema files missing", err)
+	}
+	schemas := map[string]*jsonschema.Schema{}
+	for _, path := range schemaPaths {
+		name := strings.Split(filepath.Base(path), ".")[0]
+		schema, err := compiler.Compile(path)
+		if err != nil {
+			t.Fatalf("compile %s: %v", name, err)
+		}
+		schemas[name] = schema
+	}
+	// JobSpec fixtures predate the job-spec schema filename.
+	schemas["job"] = schemas["job-spec"]
+	err = filepath.WalkDir(filepath.Join(root, "api", "examples"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || filepath.Ext(path) != ".json" {
+			return err
+		}
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			name := strings.Split(entry.Name(), ".")[0]
+			schema := schemas[name]
+			if schema == nil {
+				t.Fatalf("no schema for example %s", path)
+			}
+			value, err := readJSONValue(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			valid := filepath.Base(filepath.Dir(path)) != "invalid"
+			if err := schema.Validate(value); (err == nil) != valid {
+				t.Fatalf("valid=%v, want %v: %v", err == nil, valid, err)
+			}
+		})
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("BuildLock(first): %v", err)
-	}
-	second, err := BuildLock(root)
-	if err != nil {
-		t.Fatalf("BuildLock(second): %v", err)
-	}
-	if !reflect.DeepEqual(first, second) {
-		t.Fatal("BuildLock() returned different snapshots for unchanged files")
+		t.Fatal(err)
 	}
 }
 

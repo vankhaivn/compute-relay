@@ -3,17 +3,15 @@
 package workloadsecret
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io"
 	"regexp"
 	"slices"
 	"time"
-	"unicode/utf8"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/jsonwire"
 )
 
 const (
@@ -118,67 +116,10 @@ func (r Supply) Names() []string {
 	return names
 }
 
-// StrictDecode rejects duplicate keys at every depth as well as unknown/null
-// fields. Values are decoded directly into byte slices and errors are sanitized.
-func StrictDecode(raw []byte, limit int, out any) error {
-	if len(raw) == 0 || len(raw) > limit || !utf8.Valid(raw) {
-		return ErrRequest
-	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	var visit func(int) bool
-	visit = func(depth int) bool {
-		if depth > 8 {
-			return false
-		}
-		token, err := d.Token()
-		if err != nil || token == nil {
-			return false
-		}
-		delim, ok := token.(json.Delim)
-		if !ok {
-			return true
-		}
-		switch delim {
-		case '{':
-			seen := map[string]bool{}
-			for d.More() {
-				key, err := d.Token()
-				name, ok := key.(string)
-				if err != nil || !ok || seen[name] {
-					return false
-				}
-				seen[name] = true
-				if !visit(depth + 1) {
-					return false
-				}
-			}
-			end, err := d.Token()
-			return err == nil && end == json.Delim('}')
-		case '[':
-			for d.More() {
-				if !visit(depth + 1) {
-					return false
-				}
-			}
-			end, err := d.Token()
-			return err == nil && end == json.Delim(']')
-		default:
-			return false
-		}
-	}
-	if !visit(0) || d.Decode(new(any)) != io.EOF {
-		return ErrRequest
-	}
-	d = json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if d.Decode(out) != nil {
-		return ErrRequest
-	}
-	return nil
-}
 func ParseSupply(raw []byte) (Supply, error) {
 	var r Supply
-	if StrictDecode(raw, MaxRequestBytes, &r) != nil || r.Validate() != nil {
+	fields, err := jsonwire.Object(raw, MaxRequestBytes)
+	if err != nil || jsonwire.Fields(fields, []string{"attempt_id", "readiness_revision", "expires_at", "values"}, nil) != nil || json.Unmarshal(raw, &r) != nil || r.Validate() != nil {
 		r.Clear()
 		return Supply{}, ErrRequest
 	}

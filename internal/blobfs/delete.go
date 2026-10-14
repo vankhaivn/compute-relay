@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
 
 // SameRoot supports fail-closed composition of the independent input/result stores.
@@ -53,7 +54,7 @@ func (s *Store) Delete(ctx context.Context, expected domain.ObjectMetadata) (boo
 		if err := removeRetired(retired); err != nil {
 			return true, err
 		}
-		if err := syncDirectory(filepath.Join(base, "temporary")); err != nil {
+		if err := statefs.SyncDir(filepath.Join(base, "temporary")); err != nil {
 			return true, ErrUnavailable
 		}
 		return true, nil
@@ -105,23 +106,22 @@ func (s *Store) Delete(ctx context.Context, expected domain.ObjectMetadata) (boo
 	}
 	// Both paths are beneath the same exclusively locked blob root. Never unlink
 	// individual final files: a crash must leave a complete object or quarantine.
-	// On Windows, an outstanding reader may prevent this rename; leave the durable
-	// tombstone pending and retry later. POSIX readers retain their open descriptor.
+	// If the rename fails, leave the durable tombstone pending and retry later.
 	if err := s.rename(final, retired); err != nil {
 		return false, ErrUnavailable
 	}
 	s.used -= meta.Bytes
 	s.count--
-	if err := syncDirectory(filepath.Join(base, "objects")); err != nil {
+	if err := statefs.SyncDir(filepath.Join(base, "objects")); err != nil {
 		return false, ErrUnavailable
 	}
-	if err := syncDirectory(filepath.Join(base, "temporary")); err != nil {
+	if err := statefs.SyncDir(filepath.Join(base, "temporary")); err != nil {
 		return false, ErrUnavailable
 	}
 	if err := removeRetired(retired); err != nil {
 		return false, err
 	}
-	if err := syncDirectory(filepath.Join(base, "temporary")); err != nil {
+	if err := statefs.SyncDir(filepath.Join(base, "temporary")); err != nil {
 		return false, ErrUnavailable
 	}
 	return false, nil

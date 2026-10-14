@@ -16,6 +16,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
+// registerRetention precedes metadata insertion in the same transaction. SQL guards
+// require matching retained identity; a later failure rolls both rows back together.
+func registerRetention(ctx context.Context, tx *sql.Tx, kind retention.Kind, m domain.ObjectMetadata, now time.Time) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO retention_inventory(kind,workspace_id,object_id,bytes,sha256,recorded_at) VALUES(?,?,?,?,?,?)`, kind, m.WorkspaceID, m.ID, m.Bytes, m.SHA256, now.Format(time.RFC3339Nano))
+	return dbError(err)
+}
+
 type retentionItem struct {
 	sequence         int64
 	deletion         retention.Deletion
@@ -45,101 +52,6 @@ func readRetentionItem(ctx context.Context, tx *sql.Tx, kind retention.Kind, w d
 	return r, nil
 }
 
-func retentionHeld(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, kind, id string) (bool, error) {
-	var held bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM retention_holds WHERE workspace_id=? AND target_kind=? AND target_id=? AND active=1)`, string(w), kind, id).Scan(&held)
-	return held, dbError(err)
-}
-
-// SetRetentionHold is local operator configuration, not an application route. Holds
-// cannot resurrect expired data. Releasing one named hold cannot release other holds.
-func (s *Store) SetRetentionHold(ctx context.Context, w domain.WorkspaceID, kind, id, hold string, active bool, now time.Time) error {
-	if !w.Valid() || !domain.ObjectID(id).Valid() || !domain.ObjectID(hold).Valid() {
-		return retention.ErrInvalid
-	}
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
-		var query string
-		switch kind {
-		case "input":
-			query = `SELECT EXISTS(SELECT 1 FROM objects WHERE workspace_id=? AND object_id=?)`
-		case "job":
-			query = `SELECT EXISTS(SELECT 1 FROM jobs WHERE workspace_id=? AND job_id=?)`
-		case "attempt":
-			query = `SELECT EXISTS(SELECT 1 FROM attempts WHERE workspace_id=? AND attempt_id=?)`
-		default:
-			return retention.ErrInvalid
-		}
-		var found bool
-		if err := tx.QueryRowContext(ctx, query, string(w), id).Scan(&found); err != nil {
-			return dbError(err)
-		}
-		if !found {
-			return admission.ErrNotFound
-		}
-		if active {
-			switch kind {
-			case "input":
-				item, err := readRetentionItem(ctx, tx, retention.Input, w, domain.ObjectID(id))
-				if err != nil {
-					return err
-				}
-				if item.expired.Valid {
-					return retention.ErrExpired
-				}
-			case "job", "attempt":
-				clause := "job_id"
-				if kind == "attempt" {
-					clause = "attempt_id"
-				}
-				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM retention_expirations WHERE workspace_id=? AND `+clause+`=?)`, string(w), id).Scan(&found); err != nil {
-					return dbError(err)
-				}
-				if found {
-					return retention.ErrExpired
-				}
-				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM job_objects j JOIN retention_inventory r ON r.kind='input' AND r.workspace_id=j.workspace_id AND r.object_id=j.object_id JOIN attempts a ON a.workspace_id=j.workspace_id AND a.job_id=j.job_id WHERE a.workspace_id=? AND a.`+clause+`=? AND r.expired_at IS NOT NULL)`, string(w), id).Scan(&found); err != nil {
-					return dbError(err)
-				}
-				if found {
-					return retention.ErrExpired
-				}
-			}
-		}
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM retention_holds WHERE workspace_id=? AND target_kind=? AND target_id=?`, string(w), kind, id).Scan(&count); err != nil {
-			return dbError(err)
-		}
-		var previous bool
-		err := tx.QueryRowContext(ctx, `SELECT active FROM retention_holds WHERE workspace_id=? AND target_kind=? AND target_id=? AND hold_id=?`, string(w), kind, id, hold).Scan(&previous)
-		if err == nil && previous == active {
-			return nil
-		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		if errors.Is(err, sql.ErrNoRows) && count >= 100 {
-			return retention.ErrPinned
-		}
-		if errors.Is(err, sql.ErrNoRows) && !active {
-			return nil
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO retention_holds VALUES(?,?,?,?,?,?) ON CONFLICT(workspace_id,target_kind,target_id,hold_id) DO UPDATE SET active=excluded.active,updated_at=excluded.updated_at`, string(w), kind, id, hold, active, now.UTC().Format(time.RFC3339Nano))
-		if err != nil {
-			return dbError(err)
-		}
-		action := "release"
-		if active {
-			action = "hold"
-		}
-		return retentionAudit(ctx, tx, w, kind, id, action, now)
-	})
-}
-
-func retentionAudit(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, kind, id, action string, now time.Time) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO retention_audit(workspace_id,target_kind,target_id,action,occurred_at) VALUES(?,?,?,?,?)`, string(w), kind, id, action, now.UTC().Format(time.RFC3339Nano))
-	return dbError(err)
-}
-
 func retentionReference(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID) (retention.Reference, error) {
 	var ref retention.Reference
 	target, err := controlTarget(ctx, tx, w, job, attempt)
@@ -147,15 +59,8 @@ func retentionReference(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, j
 		return ref, err
 	}
 	ref.State, ref.UpdatedAt = target.Attempt.State, target.Attempt.UpdatedAt
-	for kind, id := range map[string]string{"job": string(job), "attempt": string(attempt)} {
-		held, err := retentionHeld(ctx, tx, w, kind, id)
-		if err != nil {
-			return ref, err
-		}
-		ref.Held = ref.Held || held
-	}
 	var busy bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduler_queue q JOIN scheduler_leases l ON l.queue_seq=q.queue_seq WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1) OR EXISTS(SELECT 1 FROM collection_leases WHERE workspace_id=? AND job_id=? AND attempt_id=? AND held=1) OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))`, string(w), string(job), string(attempt), string(w), string(job), string(attempt), string(w), string(job), string(attempt)).Scan(&busy); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduler_queue q JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq) WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1) OR EXISTS(SELECT 1 FROM work_leases WHERE kind='collection' AND key=json_array(?,?,?) AND held=1) OR EXISTS(SELECT 1 FROM operations WHERE kind!='cleanup' AND workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))`, string(w), string(job), string(attempt), string(w), string(job), string(attempt), string(w), string(job), string(attempt)).Scan(&busy); err != nil {
 		return ref, dbError(err)
 	}
 	ref.Busy = busy
@@ -233,12 +138,12 @@ func retentionInputReferences(ctx context.Context, tx *sql.Tx, w domain.Workspac
 
 // ExpireRetention scans a bounded rotating page and commits only metadata tombstones.
 // The cursor and decisions share the transaction; a failed commit authorizes no I/O.
-func (s *Store) ExpireRetention(ctx context.Context, now time.Time, p retention.Policy, limit int) (retention.SweepReport, error) {
+func (s *Store) ExpireRetention(ctx context.Context, p retention.Policy, limit int) (retention.SweepReport, error) {
 	var report retention.SweepReport
 	if !p.Valid() || limit < 1 || limit > 100 {
 		return report, retention.ErrInvalid
 	}
-	err := s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var cursor int64
 		if err := tx.QueryRowContext(ctx, `SELECT inventory_seq FROM retention_cursor WHERE singleton=1`).Scan(&cursor); err != nil {
 			return dbError(err)
@@ -301,11 +206,7 @@ func expireInput(ctx context.Context, tx *sql.Tx, item retentionItem, now time.T
 	if err != nil {
 		return 0, err
 	}
-	held, err := retentionHeld(ctx, tx, m.WorkspaceID, "input", string(m.ID))
-	if err != nil {
-		return 0, err
-	}
-	decision, err := p.Assess(now, item.recorded, refs, held)
+	decision, err := p.Assess(now, item.recorded, refs)
 	if err != nil {
 		return 0, err
 	}
@@ -321,9 +222,6 @@ func expireInput(ctx context.Context, tx *sql.Tx, item retentionItem, now time.T
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE retention_inventory SET expired_at=? WHERE inventory_seq=? AND expired_at IS NULL`, now.UTC().Format(time.RFC3339Nano), item.sequence); err != nil {
 		return 0, dbError(err)
-	}
-	if err := retentionAudit(ctx, tx, m.WorkspaceID, "input", string(m.ID), "expire", now); err != nil {
-		return 0, err
 	}
 	return 1, nil
 }
@@ -351,7 +249,7 @@ func expireResult(ctx context.Context, tx *sql.Tx, item retentionItem, now time.
 	if err != nil {
 		return 0, ErrCorrupt
 	}
-	decision, err := p.Assess(now, recorded, []retention.Reference{ref}, false)
+	decision, err := p.Assess(now, recorded, []retention.Reference{ref})
 	if err != nil {
 		return 0, err
 	}
@@ -391,9 +289,6 @@ func expireResult(ctx context.Context, tx *sql.Tx, item retentionItem, now time.
 		return 0, dbError(err)
 	}
 	if err := controlEvent(ctx, tx, m.WorkspaceID, job, attempt, "", domain.EventResultExpired, now); err != nil {
-		return 0, err
-	}
-	if err := retentionAudit(ctx, tx, m.WorkspaceID, "attempt", string(attempt), "expire", now); err != nil {
 		return 0, err
 	}
 	return count, nil

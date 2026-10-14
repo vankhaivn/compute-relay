@@ -2,7 +2,6 @@ package provider
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -85,11 +84,6 @@ func (s InputSnapshot) InputDigest() domain.SHA256Digest {
 	return Digest(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
 }
 
-// PreparationObserver is read-only, including when no resource can be found. A miss
-// never authorizes another Prepare call. Adapters without it cannot enter orchestration.
-type PreparationObserver interface {
-	ReconcilePreparation(context.Context, Plan, domain.OperationID) (PreparationObservation, error)
-}
 type PreparationObservation struct {
 	Status   ReconciliationStatus
 	Prepared *Prepared
@@ -130,12 +124,6 @@ func (s BindingSnapshot) Valid() bool {
 	return s.Binding.Validate() == nil && domain.ObjectID(s.AccountScope).Valid() && len(s.CredentialRef) <= 1030 && !strings.ContainsAny(s.CredentialRef, "\x00\r\n")
 }
 
-// VerifyBinding must check the effective configured revision and actual credential
-// account through the supported adapter path. A config label alone is not live evidence.
-type BindingVerifier interface {
-	VerifyBinding(context.Context, BindingSnapshot) error
-}
-
 // SnapshotRegistry retains exact revisions needed by accepted jobs and recovery. It
 // neither replaces old entries nor falls back to a current profile/instance alias.
 type SnapshotRegistry struct {
@@ -149,12 +137,6 @@ func NewSnapshotRegistry() *SnapshotRegistry {
 func (r *SnapshotRegistry) Register(s BindingSnapshot, p Provider) error {
 	if !s.Valid() || nilProvider(p) || p.Describe().InstanceID != s.Binding.ProviderInstanceID {
 		return errors.New("invalid provider snapshot")
-	}
-	if _, ok := p.(BindingVerifier); !ok {
-		return errors.New("provider cannot verify account binding")
-	}
-	if _, ok := p.(PreparationObserver); !ok {
-		return errors.New("provider cannot reconcile staging")
 	}
 	check := NewRegistry()
 	if err := check.Register(p); err != nil {

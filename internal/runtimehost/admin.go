@@ -92,7 +92,7 @@ func (h *Host) issueToken(ctx context.Context, id domain.WorkspaceID, scopes []a
 	if err != nil {
 		return receipt, err
 	}
-	secret, record, err := h.access.Issue(ctx, id, scopes, time.Now().UTC().Add(ttl))
+	secret, record, err := h.access.IssueForLifetime(ctx, id, scopes, ttl)
 	if err != nil {
 		return receipt, ErrState
 	}

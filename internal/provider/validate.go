@@ -221,9 +221,8 @@ func Problem(code domain.ErrorCode, stage domain.FailureStage, message string) d
 	return p
 }
 
-// ValidateManifestIdentity is the identity gate before associating downloaded outputs with
-// an attempt. M3 must additionally validate the complete M2-03 manifest schema, execution
-// outcome, required output set and each checksum before publishing success.
+// ValidateManifestIdentity checks only the attempt identity. Complete result validation
+// belongs to runnerplan.ParseResult, which imports provider for the frozen identity type.
 func ValidateManifestIdentity(expected Identity, data []byte) error {
 	if err := expected.Validate(); err != nil {
 		return err

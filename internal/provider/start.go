@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -10,16 +9,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
-
-// ControlledStarter is optional. A preparation permit never authorizes this call;
-// orchestration must first durably consume the separate exact-attempt start permit.
-type ControlledStarter interface {
-	Start(context.Context, Prepared, StartAuthorization) SubmissionOutcome
-}
-
-type SecretStarter interface {
-	StartWithSecrets(context.Context, Prepared, StartAuthorization, workloadsecret.Material) SubmissionOutcome
-}
 
 // SecretAuthorization is non-secret immutable delivery policy, not material.
 type SecretAuthorization struct {

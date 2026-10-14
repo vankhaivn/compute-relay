@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // Provider is the required finite-batch surface. Implementations must honor context,
@@ -16,30 +17,30 @@ import (
 // Instances are already configured; job inputs never carry account credentials.
 type Provider interface {
 	Describe() Descriptor
-	Check(context.Context) (DiagnosticReport, error)
+	// Validate checks a new immutable job before any preparation intent is committed.
 	Validate(context.Context, ResolvedJob) (Plan, error)
+	// Verify proves the exact frozen configuration/account without granting mutation authority.
+	Verify(context.Context, BindingSnapshot) error
 	Prepare(context.Context, Plan, domain.OperationID) (Prepared, error)
-	// Submit has no bare error return: even a transport failure must say whether
-	// acceptance is rejected or unknown. A zero outcome is invalid, never success.
-	Submit(context.Context, Prepared) SubmissionOutcome
+	ReconcilePrepare(context.Context, Plan, domain.OperationID) (PreparationObservation, error)
+	// Start has no bare error: transport uncertainty must remain unknown, never a retry.
+	// Authorization and material are nil for ordinary starts; material requires exact authorization.
+	Start(context.Context, Prepared, *StartAuthorization, *workloadsecret.Material) SubmissionOutcome
+	Reconcile(context.Context, Identity) (Reconciliation, error)
 	Observe(context.Context, RemoteReference) (Observation, error)
-	ReconcileSubmission(context.Context, Identity) (Reconciliation, error)
-	ListArtifacts(context.Context, RemoteReference, PageRequest) (ArtifactPage, error)
+	Cancel(context.Context, RemoteReference, domain.OperationID) (CancellationOutcome, error)
+	Logs(context.Context, RemoteReference, PageRequest) (LogPage, error)
+	// ListArtifacts returns the complete catalog or an error; never a truncated page.
+	ListArtifacts(context.Context, RemoteReference) ([]Artifact, error)
 	// Destination must be temporary/unpublished. On any error discard its bytes.
-	FetchArtifact(context.Context, RemoteReference, Artifact, io.Writer, int64) (TransferResult, error)
-	Cleanup(context.Context, CleanupRequest) (CleanupOutcome, error)
+	// Progress reports absolute target bytes after destination writes; errors stop transfer.
+	Fetch(context.Context, RemoteReference, Artifact, io.Writer, int64, func(int64) error) (TransferResult, error)
+	DescribeCleanup(CleanupResourceRequest) (CleanupDescription, error)
+	CleanupResource(context.Context, CleanupResourceRequest) (CleanupOutcome, error)
 }
 
-// Optional behavior is segregated: absence must not masquerade as successful work.
-type Canceller interface {
-	Cancel(context.Context, RemoteReference, domain.OperationID) (CancellationOutcome, error)
-}
-type LogReader interface {
-	ReadLogs(context.Context, RemoteReference, PageRequest) (LogPage, error)
-}
-type QuotaReader interface {
-	ReadQuota(context.Context) (QuotaObservation, error)
-}
+const MaxArtifactFiles = 10004
+const MaxArtifactBytes int64 = 4 << 30
 
 // Identity is written BEFORE provider mutations. The resource key and nonce are opaque,
 // non-secret values selected by orchestration, not human workload names.
@@ -92,15 +93,8 @@ type Descriptor struct {
 	Type         string
 	InstanceID   domain.ProviderInstanceID
 	Version      string
-	Capabilities []domain.CapabilityStatus
+	Capabilities Capabilities
 }
-type DiagnosticReport struct {
-	Evidence  domain.EvidenceLevel
-	CheckedAt time.Time
-	Ready     bool
-	Problems  []domain.Problem
-}
-
 type RemoteReference struct {
 	Identity Identity
 	Resource string
@@ -136,7 +130,7 @@ const (
 )
 
 // NotFound is an observation, NOT proof that a previous submission was rejected. Neither
-// NotFound nor Unknown authorizes another Submit; M3 owns explicit resolution policy.
+// NotFound nor Unknown authorizes another Start; M3 owns explicit resolution policy.
 type Reconciliation struct {
 	Status ReconciliationStatus
 	Remote *RemoteReference
@@ -152,20 +146,9 @@ type Artifact struct {
 	Bytes  int64
 	SHA256 domain.SHA256Digest
 }
-type ArtifactPage struct {
-	Artifacts  []Artifact
-	NextCursor string
-}
 type TransferResult struct {
 	Bytes  int64
 	SHA256 domain.SHA256Digest
-}
-
-// ArtifactProgressReader optionally reports absolute bytes received in the exact
-// selected target stream, after destination writes. No cache/protocol overhead is
-// counted. Callback errors must stop transfer; progress is not verification.
-type ArtifactProgressReader interface {
-	FetchArtifactWithProgress(context.Context, RemoteReference, Artifact, io.Writer, int64, func(int64) error) (TransferResult, error)
 }
 
 // Cleanup requires an exact persisted ownership ledger entry and an explicit mode.

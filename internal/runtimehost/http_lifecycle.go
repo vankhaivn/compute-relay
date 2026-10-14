@@ -48,10 +48,6 @@ func (d *requestDrain) stop() { d.mu.Lock(); d.stopping = true; d.mu.Unlock() }
 // Shutdown returning (or Serve returning ErrServerClosed) is not enough to prove
 // handlers have exited after forced close. Keep ownership until the drain joins.
 // Existing handlers do not hijack connections and must honor context/body closure.
-func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener, grace time.Duration, announce func() error) error {
-	return serveHTTPMode(ctx, server, listener, grace, "local-admission-only", announce)
-}
-
 func serveHTTPMode(ctx context.Context, server *http.Server, listener net.Listener, grace time.Duration, mode string, announce func() error) error {
 	if mode == "" {
 		return ErrRequest

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -34,15 +35,15 @@ func TestControlledPreparationVerifiesBytesWithoutExecution(t *testing.T) {
 		t.Fatal("readiness lacks nonexecuting proof")
 	}
 	before := append([]byte(nil), c.files["relay/manifest.json"].data...)
-	observed, err := h.adapter.ReconcilePreparation(context.Background(), plan, testOperation)
+	observed, err := h.adapter.ReconcilePrepare(context.Background(), plan, testOperation)
 	if err != nil || observed.Prepared == nil || *observed.Prepared != prepared || h.host.starts != 0 {
 		t.Fatal("readiness reconciliation changed preparation", err)
 	}
-	if out := h.adapter.Submit(context.Background(), prepared); out.Status != provider.SubmissionRejected || h.host.starts != 0 {
+	if out := h.adapter.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionRejected || h.host.starts != 0 {
 		t.Fatal("legacy submit bypassed start grant")
 	}
 	control := startAuthority(prepared, clock)
-	out := h.adapter.Start(context.Background(), prepared, control)
+	out := h.adapter.Start(context.Background(), prepared, &control, nil)
 	if out.Status != provider.SubmissionAccepted || h.host.starts != 1 {
 		t.Fatal("controlled start failed", out.Status, out.Problem)
 	}
@@ -53,7 +54,7 @@ func TestControlledPreparationVerifiesBytesWithoutExecution(t *testing.T) {
 	if json.Unmarshal(c.files["relay/start.json"].data, &start) != nil || start.StartAuthorization != control || start.ManifestSHA256 != prepared.ManifestSHA256 || start.AttemptNonce != prepared.Identity.Nonce {
 		t.Fatal("control is not bound to original preparation")
 	}
-	if again := h.adapter.Start(context.Background(), prepared, control); again.Status != provider.SubmissionUnknown || h.host.starts != 1 {
+	if again := h.adapter.Start(context.Background(), prepared, &control, nil); again.Status != provider.SubmissionUnknown || h.host.starts != 1 {
 		t.Fatal("start repeated")
 	}
 }
@@ -85,7 +86,7 @@ func TestControlledReadinessInvalidatesChangedResources(t *testing.T) {
 			case "missing_marker":
 				delete(c.files, "relay/staged.json")
 			}
-			seen, err := h.adapter.ReconcilePreparation(context.Background(), plan, testOperation)
+			seen, err := h.adapter.ReconcilePrepare(context.Background(), plan, testOperation)
 			if err == nil && seen.Status == provider.ReconciliationFound && seen.Prepared != nil && seen.Prepared.ReadinessRevision() == prepared.ReadinessRevision() {
 				t.Fatal("changed resources retained readiness")
 			}
@@ -139,7 +140,7 @@ func TestControlledStartGatesAndLostAcknowledgement(t *testing.T) {
 					return Result{}, false
 				}
 			}
-			out := h.adapter.Start(context.Background(), prepared, start)
+			out := h.adapter.Start(context.Background(), prepared, &start, nil)
 			if kind == "expired_hold" && (out.Problem == nil || out.Problem.Details[domain.ReasonDetail] != "preparation_expired") {
 				t.Fatal("hold expiry lost its reason", out)
 			}
@@ -148,7 +149,7 @@ func TestControlledStartGatesAndLostAcknowledgement(t *testing.T) {
 					t.Fatal("uncertain control became rejection", out.Status)
 				}
 				h.host.fail = nil
-				again := h.adapter.Start(context.Background(), prepared, start)
+				again := h.adapter.Start(context.Background(), prepared, &start, nil)
 				if again.Status != provider.SubmissionUnknown {
 					t.Fatal("possible original start became repeatable", again.Status)
 				}
@@ -176,5 +177,47 @@ func TestControlledPreparationNeverInstallsMissingImage(t *testing.T) {
 	}
 	if _, err = h.adapter.Prepare(context.Background(), plan, testOperation); err == nil || h.host.image || h.host.created != 0 {
 		t.Fatal("prepare installed missing image", err)
+	}
+}
+
+func TestStartRejectsChangedPinnedIdentityBeforeAnyStartEffect(t *testing.T) {
+	for _, controlled := range []bool{false, true} {
+		for _, field := range []string{"workspace", "job", "nonce", "plan", "engine", "missing_engine"} {
+			t.Run(fmt.Sprintf("controlled_%t/%s", controlled, field), func(t *testing.T) {
+				var h *harness
+				var clock *deadlineClock
+				if controlled {
+					h, clock = controlledHarness(t)
+				} else {
+					h = newHarness(t)
+				}
+				_, prepared := h.prepare(t)
+				var authorization *provider.StartAuthorization
+				if controlled {
+					start := startAuthority(prepared, clock)
+					authorization = &start
+				}
+				c := h.host.container(t)
+				if field == "missing_engine" {
+					ref, err := decodeRef(prepared.Resource, prepared.Identity)
+					if err != nil {
+						t.Fatal(err)
+					}
+					prepared.Resource = encodeRef(ref.Container, ref.ID)
+					if authorization != nil {
+						authorization.ReadinessRevision = prepared.ReadinessRevision()
+					}
+				} else {
+					c.labels[labelPrefix+field] = "changed_original_binding"
+				}
+				out := h.adapter.Start(context.Background(), prepared, authorization, nil)
+				if out.Validate(prepared.Identity) != nil || out.Status != provider.SubmissionRejected || h.host.starts != 0 || h.host.commands("start") != 0 || len(h.host.secretPackets) != 0 {
+					t.Fatal("changed pinned identity reached a start effect", out.Status, out.Problem)
+				}
+				if _, found := c.files["relay/start.json"]; found {
+					t.Fatal("changed identity wrote start authority")
+				}
+			})
+		}
 	}
 }

@@ -17,9 +17,9 @@ type DeletionPage struct {
 
 type Repository interface {
 	BindRetentionStores(context.Context, string, string) error
-	ExpireRetention(context.Context, time.Time, Policy, int) (SweepReport, error)
+	ExpireRetention(context.Context, Policy, int) (SweepReport, error)
 	PendingRetention(context.Context, int64, int) (DeletionPage, error)
-	CompleteRetention(context.Context, Deletion, time.Time) error
+	CompleteRetention(context.Context, Deletion) error
 }
 
 type BlobDeleter interface {
@@ -27,14 +27,11 @@ type BlobDeleter interface {
 	Delete(context.Context, domain.ObjectMetadata) (bool, error)
 }
 
-type Clock interface{ Now() time.Time }
-
 type Sweeper struct {
 	mu      sync.Mutex
 	repo    Repository
 	inputs  BlobDeleter
 	results BlobDeleter
-	clock   Clock
 }
 
 func nilDependency(value any) bool {
@@ -49,11 +46,11 @@ func nilDependency(value any) bool {
 	}
 }
 
-func NewSweeper(repo Repository, inputs, results BlobDeleter, clock Clock) (*Sweeper, error) {
-	if nilDependency(repo) || nilDependency(inputs) || nilDependency(results) || nilDependency(clock) {
+func NewSweeper(repo Repository, inputs, results BlobDeleter) (*Sweeper, error) {
+	if nilDependency(repo) || nilDependency(inputs) || nilDependency(results) {
 		return nil, ErrInvalid
 	}
-	return &Sweeper{repo: repo, inputs: inputs, results: results, clock: clock}, nil
+	return &Sweeper{repo: repo, inputs: inputs, results: results}, nil
 }
 
 // SweepOnce is a finite explicit composition call, never an automatic admission,
@@ -81,7 +78,7 @@ func (s *Sweeper) SweepOnce(ctx context.Context, policy Policy, after int64, lim
 	if err := s.repo.BindRetentionStores(ctx, inputID, resultID); err != nil {
 		return SweepReport{}, after, err
 	}
-	report, err := s.repo.ExpireRetention(ctx, s.clock.Now(), policy, limit)
+	report, err := s.repo.ExpireRetention(ctx, policy, limit)
 	if err != nil {
 		// An uncertain tombstone commit does not authorize filesystem I/O.
 		return SweepReport{}, after, err
@@ -110,7 +107,7 @@ func (s *Sweeper) SweepOnce(ctx context.Context, policy Policy, after int64, lim
 			failures = append(failures, err)
 			continue
 		}
-		if err := s.repo.CompleteRetention(ctx, d, s.clock.Now()); err != nil {
+		if err := s.repo.CompleteRetention(ctx, d); err != nil {
 			report.Pending++
 			failures = append(failures, err)
 			continue

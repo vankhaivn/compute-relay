@@ -146,6 +146,34 @@ func TestDirectoryAndIgnoreChangesFail(t *testing.T) {
 	}
 }
 
+func TestDirectoryMembershipChangeWithRestoredTimestampFails(t *testing.T) {
+	p, root := fixture(t)
+	plan, err := p.Prepare(t.Context(), []string{"src"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "src")
+	before, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Equal-length names preserve directory size on the supported filesystems.
+	// The renamed file was excluded during preview but is now part of the selection.
+	if err := os.Rename(filepath.Join(dir, "generated.txt"), filepath.Join(dir, "generated.bin")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(dir, before.ModTime(), before.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(dir)
+	if err != nil || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatal("fixture did not preserve directory metadata", err)
+	}
+	if _, err := plan.Write(t.Context(), io.Discard); !errors.Is(err, ErrChanged) {
+		t.Fatal("changed directory membership accepted", err)
+	}
+}
+
 type mutateWriter struct {
 	once   bool
 	mutate func()

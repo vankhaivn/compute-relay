@@ -21,7 +21,7 @@ type CancellationAction struct {
 	Code    domain.ErrorCode
 }
 type CancellationRepository interface {
-	CommitCancellation(context.Context, Handle, domain.OperationID, CancellationAction, time.Time) (Work, error)
+	CommitCancellation(context.Context, Handle, domain.OperationID, CancellationAction) (Work, error)
 }
 
 func (s *session) commitCancellation(action CancellationAction) error {
@@ -37,7 +37,7 @@ func (s *session) commitCancellation(action CancellationAction) error {
 	}
 	ctx, stop := context.WithTimeout(base, 5*time.Second)
 	defer stop()
-	work, err := repo.CommitCancellation(ctx, s.current.Handle, s.current.Cancellation.Operation.ID, action, s.e.clock.Now())
+	work, err := repo.CommitCancellation(ctx, s.current.Handle, s.current.Cancellation.Operation.ID, action)
 	if err == nil {
 		s.current = work
 	}
@@ -51,14 +51,7 @@ func (s *session) cancelOnce(p provider.Provider) (bool, error) {
 	if w.Cancellation == nil || w.Cancellation.Started || w.Journal.Phase != Submitted || w.Journal.Remote == nil {
 		return false, nil
 	}
-	canceller, ok := p.(provider.Canceller)
-	verified := false
-	for _, cap := range p.Describe().Capabilities {
-		if cap.Name == domain.CapabilityRemoteCancellation && cap.Validate() == nil && cap.Support == domain.CapabilitySupportSupported && len(cap.Conditions) == 0 && (cap.Evidence == domain.EvidenceImplementedOffline || cap.Evidence == domain.EvidencePassedLive) {
-			verified = true
-		}
-	}
-	if !ok || !verified {
+	if !p.Describe().Capabilities.RemoteCancellation {
 		return true, s.commitCancellation(CancellationAction{Code: domain.CodeRemoteCancelUnsupported})
 	}
 	if err := s.commitCancellation(CancellationAction{Begin: true}); err != nil {
@@ -66,8 +59,11 @@ func (s *session) cancelOnce(p provider.Provider) (bool, error) {
 	}
 	// Only this acknowledged transition grants a call. No error path re-arms it.
 	outcome, err := control(s.ctx, s.e.config.ControlTimeout, func(ctx context.Context) (provider.CancellationOutcome, error) {
-		return canceller.Cancel(ctx, *w.Journal.Remote, w.Cancellation.Operation.ID)
+		return p.Cancel(ctx, *w.Journal.Remote, w.Cancellation.Operation.ID)
 	})
+	if provider.IsLocalStateError(err) {
+		return true, err
+	}
 	if err != nil || outcome.Validate() != nil {
 		return true, s.commitCancellation(CancellationAction{Code: domain.CodeRemoteExecutionUnresolved})
 	}

@@ -1,37 +1,24 @@
-## Summary
+## Change
 
-Describe the focused behavior or documentation change.
-
-## Why
-
-Explain the problem, evidence, or requirement that motivates this change.
+Describe the concrete problem and resulting behavior. Link the issue when applicable.
 
 ## Validation
 
-- [ ] Relevant formatting, linting, tests, schemas, or documentation checks were run.
-- [ ] The exact commands and results are listed below.
-- [ ] Offline/fake-provider validation is not represented as live-provider evidence.
-
-Commands and results:
+List exact commands/results, unrun checks with reasons and remaining risks.
+Distinguish offline tests, host checks and authorized live-provider evidence.
 
 ```text
-not run
+./scripts/check.sh — not run
 ```
 
-## External effects
+## Compatibility and effects
 
-- [ ] No provider credentials, private inputs, account exports, or sensitive logs are included.
-- [ ] No provider compute or quota was consumed, or the authorized finite live test is documented.
-- [ ] No paid service, public resource, deployment, or remote deletion was introduced without authorization.
+Describe public/API/schema/installation impact and any required operator actions.
+Summarize authorized finite compute/quota/deletion effects without credentials or private logs.
 
-## Documentation and compatibility
-
-- [ ] Relevant public documentation and examples were updated.
-- [ ] A material architectural decision has an ADR, or no ADR is required.
-- [ ] Breaking behavior is marked with `!` and a `BREAKING CHANGE:` footer.
-
-## Checklist
-
-- [ ] The PR title follows Conventional Commits.
-- [ ] Commits are focused and follow the repository convention.
-- [ ] The change preserves the invariants in `CLAUDE.md` and `docs/development/proposal.md`.
+- [ ] Relevant docs and examples match the resulting behavior.
+- [ ] Safety invariants in `CLAUDE.md` and `docs/design.md` are preserved.
+- [ ] No credentials, private inputs, account exports or sensitive logs are included.
+- [ ] No unauthorized provider mutation, paid capacity or deployment is introduced.
+- [ ] PR title and focused commits follow `docs/development.md#commit-convention`.
+- [ ] Breaking behavior has `!` and a `BREAKING CHANGE:` footer where required.

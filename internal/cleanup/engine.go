@@ -3,11 +3,12 @@ package cleanup
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
 // Lease is a fenced claim on one running cleanup. A claim after expiry advances the
@@ -28,29 +29,28 @@ func (l Lease) Valid() bool {
 // Work is rebuilt from the durable ledger and dispatch journal at claim time. Request
 // always uses CleanupApply; ResultsCollected is the local attestation, never a guess.
 type Work struct {
-	Lease                 Lease
-	Record                Record
-	Binding               provider.BindingSnapshot
-	Request               provider.CleanupRequest
-	Resources             []ResourceWork
-	AcceptNameBasedDelete bool
+	Lease     Lease
+	Record    operations.Record
+	Binding   provider.BindingSnapshot
+	Request   provider.CleanupRequest
+	Resources []ResourceWork
 }
 
 func (w Work) Valid() bool {
 	op, id := w.Record.Operation, w.Request.Remote.Identity
-	if len(w.Resources) > MaxResources {
+	if len(w.Resources) > operations.MaxCleanupResources {
 		return false
 	}
 	seen := map[domain.ProviderResourceID]bool{}
 	for _, resource := range w.Resources {
 		q, r := resource.Resource.Request, resource.Result
-		if !q.Valid() || q.AcceptNameBasedDelete || q.RecoverOnly || !r.Valid() || resource.Resource.Reason != "" || resource.Resource.Fingerprint() != r.Fingerprint || q.LedgerID != r.ResourceID ||
+		if !q.Valid() || q.RecoverOnly || !r.Valid() || resource.Resource.Reason != "" || resource.Resource.Fingerprint() != r.Fingerprint || q.LedgerID != r.ResourceID ||
 			q.Remote.Identity != id || q.Purpose != r.Purpose || seen[r.ResourceID] {
 			return false
 		}
 		seen[r.ResourceID] = true
 	}
-	return w.Lease.Valid() && w.Record.Validate() == nil && !w.Record.Replay && op.Status == domain.OperationRunning &&
+	return w.Lease.Valid() && w.Record.Validate() == nil && op.Kind == domain.OperationCleanup && !w.Record.Replay && op.Status == domain.OperationRunning &&
 		op.ID == w.Lease.OperationID && op.WorkspaceID == w.Lease.WorkspaceID && w.Binding.Valid() &&
 		w.Request.Remote.Validate() == nil && id.WorkspaceID == op.WorkspaceID && id.JobID == op.JobID && id.AttemptID == op.AttemptID &&
 		id.InstanceID == w.Binding.Binding.ProviderInstanceID && w.Request.LedgerID.Valid() && w.Request.CreationOperationID.Valid() &&
@@ -59,15 +59,15 @@ func (w Work) Valid() bool {
 
 // Outcome is the only result a worker records. A failure carries a public problem.
 type Outcome struct {
-	Effect  Effect
+	Effect  operations.Effect
 	Problem *domain.Problem
 }
 
 func (o Outcome) Valid() bool {
 	switch o.Effect {
-	case RemoteDeleted, AlreadyAbsent:
+	case operations.RemoteDeleted, operations.AlreadyAbsent:
 		return o.Problem == nil
-	case Failed:
+	case operations.Failed:
 		return o.Problem != nil && o.Problem.Validate() == nil
 	}
 	return false
@@ -76,17 +76,13 @@ func (o Outcome) Valid() bool {
 // WorkRepository claims accepted cleanups and records exactly one terminal outcome.
 // ClaimCleanup commits the running status and lease before any provider call.
 type WorkRepository interface {
-	ClaimCleanup(context.Context, time.Time, time.Duration) (*Work, error)
-	CompleteCleanup(context.Context, Work, Outcome, time.Time) error
+	ClaimCleanup(context.Context, time.Duration) (*Work, error)
+	RenewCleanup(context.Context, Work, time.Duration) (time.Time, error)
+	CompleteCleanup(context.Context, Work, Outcome) error
 }
 type Resolver interface {
 	Resolve(provider.BindingSnapshot) (provider.Provider, error)
 }
-type Clock interface{ Now() time.Time }
-type wallClock struct{}
-
-func (wallClock) Now() time.Time { return time.Now().UTC() }
-
 type Config struct {
 	Workers   int
 	Timeout   time.Duration
@@ -101,108 +97,62 @@ func (c Config) Valid() bool {
 		c.PollDelay >= time.Millisecond && c.PollDelay <= time.Minute
 }
 
-// The worker may only verify the frozen binding and apply cleanup.
-type target interface {
-	provider.BindingVerifier
-	Cleanup(context.Context, provider.CleanupRequest) (provider.CleanupOutcome, error)
-}
-
 type Engine struct {
 	repo     WorkRepository
 	resolver Resolver
-	clock    Clock
 	config   Config
 	slots    chan struct{}
 }
 
-func New(repo WorkRepository, resolver Resolver, clock Clock, cfg Config) (*Engine, error) {
+func New(repo WorkRepository, resolver Resolver, cfg Config) (*Engine, error) {
 	if repo == nil || resolver == nil || !cfg.Valid() {
 		return nil, ErrInvalid
 	}
-	if clock == nil {
-		clock = wallClock{}
-	}
-	return &Engine{repo: repo, resolver: resolver, clock: clock, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
+	return &Engine{repo: repo, resolver: resolver, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
 }
 
 // RunOnce processes one bounded attempt inventory. If the process stops after a call
 // but before its outcome commits, lease expiry permits the original target again;
 // adapters must therefore prove absence of an already deleted resource.
-func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
+func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	select {
 	case e.slots <- struct{}{}:
 		defer func() { <-e.slots }()
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	w, err := e.repo.ClaimCleanup(ctx, e.clock.Now().UTC(), e.config.Timeout+30*time.Second)
+	w, err := e.repo.ClaimCleanup(ctx, worker.LeaseDuration)
 	if err != nil || w == nil {
 		return false, err
 	}
 	if !w.Valid() {
 		return true, ErrInvalid
 	}
-	call, cancel := context.WithTimeout(ctx, e.config.Timeout)
+	owned, stop := worker.Heartbeat(ctx, w.Lease.Until, nil, func(c context.Context) (time.Time, error) {
+		return e.repo.RenewCleanup(c, *w, worker.LeaseDuration)
+	})
+	defer func() {
+		resultErr = worker.HeartbeatError(resultErr, stop())
+	}()
+	call, cancel := context.WithTimeout(owned, e.config.Timeout)
 	defer cancel()
 	var outcome Outcome
 	if len(w.Resources) > 0 {
-		outcome, err = e.applyResources(ctx, call, *w)
+		outcome, err = e.applyResources(owned, call, *w)
 		if err != nil {
 			return true, err
 		}
 	} else {
-		outcome = e.apply(call, *w)
+		outcome = Outcome{Effect: operations.AlreadyAbsent}
 	}
-	if ctx.Err() != nil {
+	if owned.Err() != nil {
 		// Shutdown leaves the running claim for lease-expiry recovery.
-		return true, ctx.Err()
+		return true, owned.Err()
 	}
-	return true, e.repo.CompleteCleanup(ctx, *w, outcome, e.clock.Now().UTC())
-}
-
-func (e *Engine) apply(ctx context.Context, w Work) (outcome Outcome) {
-	defer func() {
-		if recover() != nil {
-			outcome = failure(domain.CodeProviderStateUnknown, "remote cleanup did not report a result; owned resources may remain, inspect the provider before requesting cleanup again", domain.RecommendedActionInspectProvider)
-		}
-	}()
-	p, err := e.resolver.Resolve(w.Binding)
-	if err != nil || p == nil {
-		return failure(domain.CodeConfigurationInvalid, "the attempt's frozen provider binding is not configured in this runtime; nothing was deleted", domain.RecommendedActionConfigure)
+	if err := stop(); err != nil {
+		return true, err
 	}
-	t, ok := p.(target)
-	if !ok || t.VerifyBinding(ctx, w.Binding) != nil {
-		return failure(domain.CodeRemoteIdentityMismatch, "the provider binding could not be verified for this attempt; nothing was deleted", domain.RecommendedActionInspectProvider)
-	}
-	result, err := t.Cleanup(ctx, w.Request)
-	switch {
-	case err == nil && result.Deleted && !result.AlreadyAbsent && !result.WouldDelete:
-		return Outcome{Effect: RemoteDeleted}
-	case err == nil && result.AlreadyAbsent && !result.Deleted && !result.WouldDelete:
-		return Outcome{Effect: AlreadyAbsent}
-	case err == nil:
-		return failure(domain.CodeProviderStateUnknown, "remote cleanup returned no deletion evidence; owned resources may remain", domain.RecommendedActionInspectProvider)
-	case errors.Is(err, provider.ErrCleanupUnsupported):
-		return failure(domain.CodeUnsupportedCapability, "remote cleanup is not supported for this attempt's provider binding; owned resources were preserved", domain.RecommendedActionInspectProvider)
-	}
-	var value domain.Problem
-	var pointer *domain.Problem
-	code := domain.CodeProviderStateUnknown
-	if errors.As(err, &value) {
-		code = value.Code
-	} else if errors.As(err, &pointer) && pointer != nil {
-		code = pointer.Code
-	}
-	switch code {
-	case domain.CodeRemoteIdentityMismatch:
-		return failure(code, "the remote resource did not match the recorded attempt identity; nothing was deleted", domain.RecommendedActionInspectProvider)
-	case domain.CodeRemoteExecutionUnresolved:
-		return failure(code, "the provider reported active or unresolved compute; nothing was deleted", domain.RecommendedActionReconcile)
-	case domain.CodeProviderAuthFailed, domain.CodeProviderAccessDenied:
-		return failure(code, "the provider refused cleanup for this binding; owned resources were preserved", domain.RecommendedActionConfigure)
-	}
-	// Provider text is never copied into a public receipt.
-	return failure(domain.CodeProviderStateUnknown, "remote cleanup did not complete; owned resources may remain, inspect the provider before requesting cleanup again", domain.RecommendedActionInspectProvider)
+	return true, e.repo.CompleteCleanup(ctx, *w, outcome)
 }
 
 func failure(code domain.ErrorCode, message string, action domain.RecommendedAction) Outcome {
@@ -223,51 +173,17 @@ func failure(code domain.ErrorCode, message string, action domain.RecommendedAct
 		p, _ = domain.NewProblem(domain.CodeProviderStateUnknown, message, domain.FailureStageObservation)
 	}
 	p = p.WithRetrySemantics(false, false).WithRecommendedAction(action)
-	return Outcome{Effect: Failed, Problem: &p}
+	return Outcome{Effect: operations.Failed, Problem: &p}
 }
 
-// Run polls until ctx ends. A lost fence only means another owner recovered the claim;
-// any other repository error stops the loop so the host can surface it.
+// Run polls until ctx ends. Lost fences continue; transient store failures back off.
 func (e *Engine) Run(ctx context.Context) error {
-	run, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
-	errs := make(chan error, e.config.Workers)
-	for i := 0; i < e.config.Workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				worked, err := e.RunOnce(run)
-				if errors.Is(err, ErrLeaseLost) {
-					worked, err = false, nil
-				}
-				if err != nil && run.Err() == nil {
-					select {
-					case errs <- err:
-					default:
-					}
-					cancel()
-					return
-				}
-				if worked && err == nil {
-					continue
-				}
-				timer := time.NewTimer(e.config.PollDelay)
-				select {
-				case <-run.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	select {
-	case err := <-errs:
-		return err
-	default:
-		return ctx.Err()
-	}
+	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay, Drain: true}, func(ctx context.Context, _ int) (bool, error) {
+		return e.RunOnce(ctx)
+	}, func(err error) worker.Decision {
+		if errors.Is(err, ErrLeaseLost) {
+			return worker.Continue
+		}
+		return worker.Classify(err)
+	})
 }

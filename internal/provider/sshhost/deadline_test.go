@@ -59,7 +59,7 @@ func TestDeadlinePreparationAndStartGates(t *testing.T) {
 			case "clock_ahead":
 				h.host.engineTime = c.at.Add(6 * time.Second)
 			}
-			out := h.adapter.Submit(context.Background(), prepared)
+			out := h.adapter.Start(context.Background(), prepared, nil, nil)
 			if out.Validate(h.job.Identity) != nil {
 				t.Fatal("invalid submission outcome")
 			}
@@ -70,8 +70,8 @@ func TestDeadlinePreparationAndStartGates(t *testing.T) {
 				// Even after expiry an earlier Docker start is possible execution, never
 				// a fresh rejection that could release capacity or authorize replacement.
 				c.at = c.at.Add(2 * time.Minute)
-				again := h.adapter.Submit(context.Background(), prepared)
-				seen, err := h.adapter.ReconcileSubmission(context.Background(), h.job.Identity)
+				again := h.adapter.Start(context.Background(), prepared, nil, nil)
+				seen, err := h.adapter.Reconcile(context.Background(), h.job.Identity)
 				if again.Status != provider.SubmissionUnknown || err != nil || seen.Status != provider.ReconciliationFound || *seen.Remote != *out.Remote || h.host.starts != 1 {
 					t.Fatal("deadline rearmed or obscured the original start", err)
 				}

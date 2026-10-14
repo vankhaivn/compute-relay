@@ -9,17 +9,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-var _ provider.ResourceCleaner = (*RuntimeAdapter)(nil)
-
-const nameBasedDeleteWarning = "Kaggle deletes by owner/name. Renaming may leave the original undeleted. If someone replaces it after Relay checks it, the replacement may be deleted, including its versions and outputs."
-
 func (p *RuntimeAdapter) DescribeCleanup(request provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
 	if p == nil || !request.Valid() || string(request.Remote.Identity.InstanceID) != p.config.InstanceID {
 		return provider.CleanupDescription{}, ErrRuntimeBinding
 	}
 	id := request.Remote.Identity
 	description := provider.CleanupDescription{Version: "1", Support: domain.CapabilitySupportSupported,
-		Reason: "name_based_delete_requires_acceptance", NameBasedDelete: true, Warning: nameBasedDeleteWarning}
+		Reason: "recorded_attempt_resource"}
 	switch request.Purpose {
 	case "staging":
 		var ref stagingReference
@@ -49,17 +45,17 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 	if err != nil {
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "recorded Kaggle resource identity is incomplete or changed")
 	}
-	if request.Mode == provider.CleanupApply && !request.AcceptNameBasedDelete {
-		return provider.CleanupOutcome{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, nameBasedDeleteWarning+" Set accept_name_based_delete to confirm this risk.")
-	}
 	if p.load == nil || p.stager == nil || p.runCleanup == nil {
 		return provider.CleanupOutcome{}, ErrRuntimeBinding
 	}
 	plan, prepared, err := p.load(ctx, request.Remote.Identity)
-	if err != nil || plan.Job.Identity != request.Remote.Identity || plan.Job.Binding != p.binding.Binding || plan.Digest() != request.PlanSHA256 || prepared.Validate(plan, request.CreationOperationID) != nil {
+	if err != nil {
+		return provider.CleanupOutcome{}, provider.LocalStateError{Err: err}
+	}
+	if plan.Job.Identity != request.Remote.Identity || plan.Job.Binding != p.binding.Binding || plan.Digest() != request.PlanSHA256 || prepared.Validate(plan, request.CreationOperationID) != nil {
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "original cleanup plan or preparation could not be verified")
 	}
-	query := cleanupRequest{Protocol: 1, Owner: p.config.AccountName, Slug: strings.SplitN(description.Name, "/", 2)[1], Kind: description.Kind, ID: description.ID, AcceptNameBasedDelete: request.AcceptNameBasedDelete}
+	query := cleanupRequest{Protocol: 1, Owner: p.config.AccountName, Slug: strings.SplitN(description.Name, "/", 2)[1], Kind: description.Kind, ID: description.ID}
 	if request.Purpose == "staging" {
 		var ref stagingReference
 		if prepared.Resource != request.Remote.Resource || closedObject([]byte(prepared.Resource), &ref) != nil {
@@ -79,14 +75,12 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 	} else if request.RecoverOnly {
 		mode = "recover"
 	}
-	local, err := p.stager.local(ctx, p.config, Local, nil)
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return provider.CleanupOutcome{}, ErrProcess
-	}
 	var response cleanupResponse
 	called := false
+	violated := false
 	err = p.stager.credentials.WithCredential(ctx, p.config.CredentialRef, func(secret []byte) error {
 		if called || len(secret) == 0 || len(secret) > 8192 {
+			violated = true
 			return ErrProtocol
 		}
 		called = true
@@ -102,8 +96,11 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 		response, err = p.runCleanup(ctx, p.config, mode, secret, query)
 		return err
 	})
-	if err != nil || !called || !response.valid() {
-		return provider.CleanupOutcome{}, ErrProcess
+	if provider.IsLocalStateError(err) {
+		return provider.CleanupOutcome{}, err
+	}
+	if err != nil || !called || violated || !response.valid() {
+		return provider.CleanupOutcome{}, ErrUnavailable
 	}
 	switch response.Status {
 	case "absent":
@@ -125,13 +122,12 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 }
 
 type cleanupRequest struct {
-	Protocol              int                 `json:"protocol"`
-	Owner                 string              `json:"owner"`
-	Slug                  string              `json:"slug"`
-	Kind                  string              `json:"kind"`
-	ID                    string              `json:"id"`
-	SHA256                domain.SHA256Digest `json:"sha256"`
-	AcceptNameBasedDelete bool                `json:"accept_name_based_delete"`
+	Protocol int                 `json:"protocol"`
+	Owner    string              `json:"owner"`
+	Slug     string              `json:"slug"`
+	Kind     string              `json:"kind"`
+	ID       string              `json:"id"`
+	SHA256   domain.SHA256Digest `json:"sha256"`
 }
 
 type cleanupResponse struct {

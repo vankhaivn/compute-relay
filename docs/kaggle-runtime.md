@@ -1,279 +1,77 @@
-# Run jobs on Kaggle
+# Kaggle runtime
 
-The operator path for running bounded GPU jobs through `compute-relay serve` in explicit Kaggle
-mode. It assumes an installation and `app` workspace from [Getting started](getting-started.md).
+Kaggle is a managed provider adapter implemented in Go. Relay uses authenticated HTTPS directly;
+it needs no Kaggle CLI, Python SDK, companion package or local interpreter. The embedded Python
+runner is executed by Kaggle's remote environment. Public jobs and provider-neutral state remain
+separate from Kaggle-specific resource identities.
 
-Provider mode is **explicit and pre-release**. With no provider flags, `serve` remains
-local-admission-only and cannot consume provider quota. With the complete provider flag set below,
-the server performs a read-only account check before it starts workers, then runs one durable
-dispatch worker and one collection worker.
+## Connect and select resources
 
-Live evidence so far is listed in [current status](status.md). Re-qualify a new environment or
-account before claiming support for it.
+Start [the local runtime](local-runtime.md), discover `/providers`, then create a Kaggle connection
+with its write-only token field using [managed connections](managed-connections.md). The adapter
+discovers the account itself; the application does not supply a username. Verification reads
+account/quota information without starting compute. A successful connection publishes an immutable
+selection. A new account requires a new connection; credential replacement must keep the account.
 
-## 1. Install the locked Kaggle client
+The default machine policy is CPU. `--managed-machine-shape NvidiaTeslaT4` or
+`NvidiaTeslaP100` requests that GPU policy explicitly. CPU never means fallback from an unavailable
+GPU. Use the exact returned profile and accelerator in jobs. Changes require a new checked
+selection for future jobs; old attempts retain their binding.
 
-From the repository root, install `uv` 0.12.13 and create/check the repository-owned client
-environment:
+Fresh sufficient cached GPU quota is required before a finite GPU authorization. A missing, stale
+or exhausted allowance does not become unlimited. CPU does not reserve GPU seconds; unknown CPU
+allowance remains a warning, and known exhaustion blocks work. Connections sharing one account
+share capacity and reservations. Quota observations do not authorize compute or prove a device
+has been allocated. The adapter supplies no authoritative quota-reset timestamp.
 
-```sh
-./scripts/kaggle-client.sh sync
-./scripts/kaggle-client.sh check
-```
+## Stage and execute
 
-PowerShell and CMD wrappers are documented in [tools/kaggle-client](../tools/kaggle-client/README.md).
-The provider config below must use the absolute Python executable from this environment.
+Upload a bounded [bundle and input objects](packaging-and-import.md), admit the job and authorize
+its exact attempt and wall limit. The adapter stages private attempt-owned data with a bound marker,
+checks readiness and original bytes, then submits the private kernel once after the durable
+intent barrier. Finite preparation and execution budgets apply. Remote internet is disabled unless
+both the selected policy permits it and the job requests it.
 
-## 2. Configure the credential outside Git
+Staging identity, account, numeric resource identity, version, source hash, nonce and privacy must
+match the frozen plan. Upload success is not readiness. A lost staging or submission response
+leaves the original intent for observation; not-found alone never permits another create or submit.
+There is no automatic account/provider rotation, resubmission, CPU fallback or paid capacity.
 
-Provision the Kaggle token in an explicitly named environment variable, for example
-`CR_KAGGLE_TOKEN`. Do not put the token value in the provider JSON, profile, command line,
-job specification, logs or repository.
+Kaggle uses the combined `/authorize` flow. Separate preparation/start, absolute execution deadlines
+and ephemeral workload secrets are unsupported requirements and are rejected before preparation.
+Read logs and job status for the original attempt. GPU success requires runner hardware evidence;
+a requested GPU, quota deduction or provider terminal state alone is insufficient.
 
-Create a private provider file outside the checkout, for example
-`/absolute/private/kaggle.json`:
+## Results, cancellation and cleanup
 
-```json
-{
-  "instance_id": "kaggle-personal",
-  "revision": "runtime-1",
-  "account_name": "your_canonical_username",
-  "credential_ref": "env:CR_KAGGLE_TOKEN",
-  "python_executable": "/absolute/path/compute-relay/tools/kaggle-client/.venv/bin/python"
-}
-```
+The collector uses a complete bounded listing, exact version and original result manifest, then
+verifies bytes and publishes the whole artifact set atomically. Signed downloads accept only the
+reviewed `storage.googleapis.com` and `www.kaggleusercontent.com` hosts over HTTPS (optional 443).
+Unexpected redirects, identities, paths, sizes, digests or completion acknowledgements fail closed.
+See [artifact delivery](artifact-delivery.md).
 
-The configured account, instance, revision and credential reference must exactly match the
-admission profile in the next step. Field rules are in the
-[client configuration reference](development/providers/kaggle-preflight.md).
+Cancellation can remain manual-required when a verified usable session target is absent.
+A local timeout or cancellation receipt does not prove remote termination or hardware release.
+Use [recovery](recovery.md) for uncertainty. Resources persist until explicit
+[attempt cleanup](remote-cleanup.md); Kaggle name-based deletion retains a replacement/rename race despite
+matching original ownership/version checks.
 
-## 3. Apply the matching admission profile
+## Qualification boundary
 
-Stop `serve` before local administration. Create
-`/absolute/private/kaggle-t4-profile.json`:
+The native candidate completed finite CPU execution, live logs, a restart while running without
+resubmission, verified artifacts and exact cleanup on 2026-10-14. Cleanup acknowledgements plus
+complete authenticated owner inventories confirmed the original dataset and kernel absent. A
+separately bound finite GPU job completed with two Tesla T4 devices, CUDA 12.8 and Torch
+2.11.0+cu128. Runner hardware evidence and all five artifacts passed verification; exact cleanup
+and complete authenticated inventories confirmed its dataset and kernel absent. Test credentials,
+installation fingerprints and temporary roots were removed after preserving sanitized evidence.
 
-```json
-{
-  "schema_version": 1,
-  "name": "kaggle-t4",
-  "instance_id": "kaggle-personal",
-  "revision": "runtime-1",
-  "account_scope": "your_canonical_username",
-  "credential_ref": "env:CR_KAGGLE_TOKEN",
-  "enabled": true,
-  "cost_class": "free_allowance",
-  "allow_remote_internet": false,
-  "max_remote_wall_seconds": 120,
-  "max_bundle_bytes": 104857600,
-  "max_input_bytes": 4294967296
-}
-```
+A credential created by the original Python-backed binary remained usable across a native restart
+without token re-entry after explicit macOS item-access and code-hash permission. The original
+helper removed those legacy test items. This establishes format continuity; changed executable
+identity may still require owner permission. See [compatibility](compatibility.md).
 
-Apply and grant it to the application workspace:
-
-```sh
-./compute-relay profile apply \
-  --root /absolute/private/runtime \
-  --file /absolute/private/kaggle-t4-profile.json
-
-./compute-relay profile grant \
-  --root /absolute/private/runtime \
-  --workspace app \
-  --name kaggle-t4
-```
-
-Provider mode accepts only the `free_allowance` cost class. There is no CPU, second-provider,
-paid-capacity or account fallback.
-
-## 4. Start provider-enabled serve
-
-Choose a finite number of **distinct new attempt identities** that this process may authorize for
-provider mutation. Start with one when proving a new environment:
-
-```sh
-./compute-relay serve \
-  --root /absolute/private/runtime \
-  --listen 127.0.0.1:7331 \
-  --provider-config /absolute/private/kaggle.json \
-  --provider-profile kaggle-t4 \
-  --provider-machine-shape NvidiaTeslaT4 \
-  --max-provider-attempts 1 \
-  --allow-private-staging \
-  --allow-gpu
-```
-
-A successful startup reports:
-
-```text
-mode = kaggle-workers
-dispatch_enabled = true
-```
-
-All provider options are required together. Omitting them starts the safe local-admission-only
-mode instead; supplying a partial set is rejected.
-
-`--max-provider-attempts` is a per-process mutation budget, not a quota claim. Once that many
-distinct attempts have received a new staging/submission permit, the dispatcher stops claiming
-additional queued jobs. Recovery/observation of already-started attempts and collection of their
-results remain available. Starting another provider-enabled process with a fresh budget is a new
-operator authorization; resolve uncertain remote activity first.
-
-Stopping the local process does **not** cancel remote compute or prove hardware release.
-
-## 5. Package and upload a GPU job
-
-For a minimal smoke workload, create `gpu-job/main.py`:
-
-```python
-from pathlib import Path
-import json
-import os
-import torch
-
-x = torch.tensor([6, 7], device="cuda")
-answer = int((x[0] * x[1]).item())
-Path(os.environ.get('CC_OUTPUT_DIR', '.'), 'answer.json').write_text(
-    json.dumps({"answer": answer}) + "\n",
-    encoding="utf-8",
-)
-```
-
-Declared outputs must be written under `CC_OUTPUT_DIR`. The runner executes code from its code
-working directory but collects declared artifacts from the separate output directory; writing
-`answer.json` only to the current working directory will result in `ARTIFACT_MISSING`.
-
-Package and upload it while provider-enabled `serve` is running:
-
-```sh
-./compute-relay bundle preview --root ./gpu-job --include main.py
-./compute-relay bundle create --root ./gpu-job --include main.py --output ./gpu-job.tar.gz
-
-./compute-relay object upload \
-  --workspace app \
-  --token-file /absolute/private/runtime/app-token \
-  --file ./gpu-job.tar.gz
-```
-
-Keep the returned `object_id`.
-
-The current normal provider composition does not enable direct HTTPS input fetching. Upload code
-and input objects first and reference their immutable object IDs in the job.
-
-## 6. Validate and submit
-
-Create `gpu-job.json`, replacing `obj_ACTUAL_UPLOAD_ID`:
-
-```json
-{
-  "api_version": "compute-connector/v1alpha1",
-  "name": "kaggle-gpu-smoke",
-  "profile": "kaggle-t4",
-  "bundle": {"object_id": "obj_ACTUAL_UPLOAD_ID"},
-  "execution": {
-    "kind": "python",
-    "command": ["python", "main.py"]
-  },
-  "inputs": [],
-  "outputs": [
-    {"path": "answer.json", "required": true}
-  ],
-  "resources": {
-    "accelerator": "gpu",
-    "minimum_gpu_count": 1
-  },
-  "network": {
-    "remote_internet": "disabled"
-  },
-  "timeouts": {
-    "remote_wall_seconds": 120,
-    "setup_seconds": 30,
-    "finalization_grace_seconds": 10
-  }
-}
-```
-
-Then:
-
-```sh
-./compute-relay validate --file ./gpu-job.json
-
-./compute-relay job validate \
-  --workspace app \
-  --token-file /absolute/private/runtime/app-token \
-  --file ./gpu-job.json
-
-./compute-relay job submit \
-  --workspace app \
-  --token-file /absolute/private/runtime/app-token \
-  --file ./gpu-job.json \
-  --idempotency-key kaggle-gpu-smoke-001
-```
-
-Save the returned job and attempt IDs. `202 Accepted` proves durable local admission only; it is
-not remote-success evidence.
-
-For GPU jobs the runtime requires a known positive free-quota observation before a new provider
-mutation. Unknown or insufficient quota fails closed rather than selecting CPU, another account,
-another provider or paid capacity.
-
-## 7. Observe the original attempt
-
-Poll the same job identity:
-
-```sh
-./compute-relay job status \
-  --workspace app \
-  --token-file /absolute/private/runtime/app-token \
-  --id job_ACTUAL_RECEIPT_ID
-```
-
-The runtime stages private inputs once, submits once after its write-ahead intent and observes
-the exact remote identity, including after restart; it never creates a replacement execution after
-response loss. A terminal provider state is not yet a published result: collection verifies the
-original result set first.
-
-## 8. Download the published result
-
-After the attempt has a committed publication:
-
-```sh
-./compute-relay job artifacts \
-  --workspace app \
-  --token-file /absolute/private/runtime/app-token \
-  --id job_ID \
-  --attempt att_ID \
-  --limit 100
-
-./compute-relay artifact download \
-  --workspace app \
-  --token-file /absolute/private/runtime/app-token \
-  --job job_ID \
-  --attempt att_ID \
-  --id art_ID \
-  --output /absolute/private/results/answer.json
-```
-
-Artifact downloads are create-only and independently verify the bytes and final stream
-acknowledgement. See [Artifact delivery](artifact-delivery.md).
-
-## Recovery and limits
-
-Preserve the runtime root, provider config, profile revision, job/attempt IDs and idempotency keys.
-Replay only the identical request with its original key after a lost response. Once a submission
-intent exists, restart recovery observes the original identity and never authorizes another
-submission; do not create a new root, clear intent rows or resubmit because the outcome is
-uncertain. See [Safe recovery](recovery.md).
-
-This path is intentionally narrow:
-
-- Kaggle T4/P100 machine shapes, one dispatch worker, one collection worker and one active
-  attempt per account. For configurable account concurrency, use
-  [managed connections](managed-connections.md#configure-and-observe-concurrency).
-- Uploaded immutable inputs only; direct HTTPS input is not enabled in this mode.
-- Attempt log pages through the `job_logs` capability ([API usage](../api/README.md#reading-attempt-logs));
-  delivery is best effort.
-- Cancellation is manual-required without a verified session target, and remote cleanup apply,
-  provider timeout enforcement and exact hardware release are not shipped or verified.
-
-Offline tests do not replace live evidence. Re-qualify the intended account, toolchain and workload
-before promoting a new support claim.
+Provider timeout enforcement, exact same-version execution count and hardware release cannot be
+inferred from local clocks, a successful output or an offline fixture. Record the exact binary,
+account scope, selected hardware and finite authorized live behavior when extending support.
+Keep private resource details and raw logs outside Git. See [compatibility](compatibility.md).

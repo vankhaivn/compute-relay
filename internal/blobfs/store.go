@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
 
 var (
@@ -46,13 +47,12 @@ func DefaultLimits() Limits {
 	return Limits{MaxObjectBytes: 2 << 30, MaxTotalBytes: 20 << 30, MinFreeBytes: 2 << 30, MaxObjects: 100000}
 }
 
-// Store holds an OS lock for the blob root, so recovery cannot delete another writer's
-// active temporary files. The operator must supply a dedicated private directory.
-// The root lock is not the future M3 runtime/database state-directory lock.
+// Store pins its standalone or host-owned root lock while operations and recovery run.
+// The operator must supply a dedicated private directory.
 type Store struct {
 	root   string
 	limits Limits
-	lock   *os.File
+	lock   *statefs.Root
 	life   sync.RWMutex
 	closed bool
 	mu     sync.Mutex
@@ -66,55 +66,65 @@ type Store struct {
 	rename    func(string, string) error
 }
 
-func New(root string, limits Limits) (_ *Store, err error) {
+func (l Limits) valid() bool {
+	return l.MaxObjects >= 0 && l.MaxObjectBytes > 0 && l.MaxTotalBytes >= l.MaxObjectBytes
+}
+
+func New(path string, limits Limits) (*Store, error) {
+	if path == "" || !limits.valid() {
+		return nil, ErrInvalid
+	}
+	// Standalone blob roots historically create missing parents.
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
+		return nil, ErrUnavailable
+	}
+	root, err := statefs.OpenNamed(absolute, ".lock")
+	if err != nil {
+		return nil, rootError(err)
+	}
+	return openRoot(root, limits)
+}
+
+// NewRoot retains a locked child capability. The caller may close its own handle
+// immediately; this store keeps the host lock pinned until Close.
+func NewRoot(root *statefs.Root, limits Limits) (*Store, error) {
+	if !limits.valid() {
+		return nil, ErrInvalid
+	}
+	retained, err := root.Retain()
+	if err != nil {
+		return nil, rootError(err)
+	}
+	return openRoot(retained, limits)
+}
+
+func rootError(err error) error {
+	switch {
+	case errors.Is(err, statefs.ErrLocked):
+		return ErrLocked
+	case errors.Is(err, statefs.ErrUnsafe):
+		return ErrCorrupt
+	case errors.Is(err, statefs.ErrClosed):
+		return ErrClosed
+	default:
+		return ErrUnavailable
+	}
+}
+
+func openRoot(root *statefs.Root, limits Limits) (_ *Store, err error) {
 	if limits.MaxObjects == 0 {
 		limits.MaxObjects = 100000
 	}
-	if root == "" || limits.MaxObjects < 0 || limits.MaxObjectBytes <= 0 || limits.MaxTotalBytes < limits.MaxObjectBytes {
-		return nil, ErrInvalid
-	}
-	absolute, err := filepath.Abs(root)
-	if err != nil {
-		return nil, ErrUnavailable
-	}
-	_, statErr := os.Lstat(absolute)
-	created := errors.Is(statErr, os.ErrNotExist)
-	if err := os.MkdirAll(absolute, 0o700); err != nil {
-		return nil, ErrUnavailable
-	}
-	if err := prepareRootPermissions(absolute, created); err != nil {
-		return nil, err
-	}
-	if err := privateDirectory(absolute); err != nil {
-		return nil, err
-	}
-	// Canonicalize trusted operator-selected ancestors (e.g. /var on macOS). The root
-	// itself and all connector-managed descendants must not be symlinks.
-	absolute, err = filepath.EvalSymlinks(absolute)
-	if err != nil {
-		return nil, ErrUnavailable
-	}
-	lockPath := filepath.Join(absolute, ".lock")
-	if info, statErr := os.Lstat(lockPath); statErr == nil && !info.Mode().IsRegular() {
-		return nil, ErrCorrupt
-	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return nil, ErrUnavailable
-	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, ErrUnavailable
-	}
-	if err := acquireLock(lock); err != nil {
-		_ = lock.Close()
-		return nil, err
-	}
-	s := &Store{root: absolute, limits: limits, lock: lock, freeBytes: diskAvailable,
+	s := &Store{root: root.Path, limits: limits, lock: root, freeBytes: diskAvailable,
 		write:    func(f *os.File, b []byte) (int, error) { return f.Write(b) },
 		syncFile: (*os.File).Sync, rename: os.Rename}
 	defer func() {
 		if err != nil {
-			_ = releaseLock(lock)
-			_ = lock.Close()
+			_ = root.Close()
 		}
 	}()
 	if err = s.initialize(); err != nil {
@@ -135,7 +145,7 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.closed = true
-	return errors.Join(releaseLock(s.lock), s.lock.Close())
+	return s.lock.Close()
 }
 
 func (s *Store) Put(ctx context.Context, declaration domain.ObjectMetadata, source io.Reader) (result domain.ObjectMetadata, err error) {
@@ -231,10 +241,10 @@ func (s *Store) Put(ctx context.Context, declaration domain.ObjectMetadata, sour
 	if err != nil {
 		return domain.ObjectMetadata{}, ErrInvalid
 	}
-	if err := writeSynced(filepath.Join(temporary, "metadata.json"), encoded); err != nil {
+	if err := statefs.WriteNew(filepath.Join(temporary, "metadata.json"), encoded); err != nil {
 		return domain.ObjectMetadata{}, ErrUnavailable
 	}
-	if err := syncDirectory(temporary); err != nil {
+	if err := statefs.SyncDir(temporary); err != nil {
 		return domain.ObjectMetadata{}, ErrUnavailable
 	}
 	if err := ctx.Err(); err != nil {
@@ -254,7 +264,7 @@ func (s *Store) Put(ctx context.Context, declaration domain.ObjectMetadata, sour
 		return domain.ObjectMetadata{}, ErrUnavailable
 	}
 	published = true
-	if err := syncDirectory(filepath.Dir(final)); err != nil {
+	if err := statefs.SyncDir(filepath.Dir(final)); err != nil {
 		// Publication may have happened. Keep the complete orphan for reconciliation;
 		// never delete data after an uncertain publication/metadata commit.
 		return domain.ObjectMetadata{}, ErrUnavailable
@@ -371,17 +381,14 @@ func encodedID(raw string) string {
 }
 
 func privateDirectory(path string) error {
-	info, err := os.Lstat(path)
+	err := statefs.CheckDir(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
 	}
 	if err != nil {
-		return ErrUnavailable
+		return rootError(err)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !privateMode(info.Mode()) {
-		return ErrCorrupt
-	}
-	return checkPrivatePath(path)
+	return nil
 }
 
 func ensureDirectory(path string) error {
@@ -398,28 +405,13 @@ func (s *Store) workspace(id domain.WorkspaceID) (string, error) {
 			return "", err
 		}
 	}
-	if err := syncDirectory(filepath.Dir(base)); err != nil {
+	if err := statefs.SyncDir(filepath.Dir(base)); err != nil {
 		return "", err
 	}
-	if err := syncDirectory(base); err != nil {
+	if err := statefs.SyncDir(base); err != nil {
 		return "", err
 	}
 	return base, nil
-}
-
-func writeSynced(path string, bytes []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Write(bytes); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	return f.Close()
 }
 
 func readMetadata(directory string) (domain.ObjectMetadata, error) {
@@ -432,7 +424,7 @@ func readMetadata(directory string) (domain.ObjectMetadata, error) {
 		if err != nil || !info.Mode().IsRegular() {
 			return meta, ErrCorrupt
 		}
-		if !privateMode(info.Mode()) || checkPrivatePath(filepath.Join(directory, name)) != nil {
+		if statefs.CheckFile(filepath.Join(directory, name)) != nil {
 			return meta, ErrCorrupt
 		}
 		if name == "metadata.json" && info.Size() > 4096 {
@@ -471,7 +463,7 @@ func (s *Store) initialize() error {
 				return fmt.Errorf("%w: dedicated empty blob root required", ErrInvalid)
 			}
 		}
-		if err := writeSynced(marker, []byte(formatMarker)); err != nil {
+		if err := statefs.WriteNew(marker, []byte(formatMarker)); err != nil {
 			return ErrUnavailable
 		}
 	} else if err != nil || !info.Mode().IsRegular() || info.Size() > 64 {
@@ -484,7 +476,7 @@ func (s *Store) initialize() error {
 	if err := ensureDirectory(filepath.Join(s.root, "workspaces")); err != nil {
 		return err
 	}
-	return syncDirectory(s.root)
+	return statefs.SyncDir(s.root)
 }
 
 // recover removes only unfinished staging in this versioned, exclusively locked root.
@@ -521,7 +513,7 @@ func (s *Store) recover() error {
 				return ErrUnavailable
 			}
 		}
-		if err := syncDirectory(temporary); err != nil {
+		if err := statefs.SyncDir(temporary); err != nil {
 			return err
 		}
 		objects, err := os.ReadDir(filepath.Join(base, "objects"))

@@ -9,18 +9,22 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
-type fixedClock struct{ now time.Time }
+type fixedClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
 
-func (c *fixedClock) Now() time.Time { return c.now }
+func (c *fixedClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
+func (c *fixedClock) advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.now = c.now.Add(d) }
 
 type sweepStep struct {
 	examined int
@@ -41,16 +45,22 @@ func (p *scriptedPass) SweepOnce(_ context.Context, _ retention.Policy, after in
 }
 
 func TestSweepRetentionFollowsTheScanAndStopsWithoutProgress(t *testing.T) {
-	failed := errors.New("deletion failed")
+	failed := context.DeadlineExceeded
 	// A page with failed deletions still advances; an empty page restarts the tombstone
 	// cursor until the inventory scan wraps.
 	pass := &scriptedPass{steps: []sweepStep{{2, 4, failed}, {1, 0, nil}, {0, 0, nil}}}
-	sweepRetention(context.Background(), pass)
+	err := sweepRetention(context.Background(), pass)
+	if !errors.Is(err, failed) {
+		t.Fatal("deletion failure was hidden", err)
+	}
 	if fmt.Sprint(pass.calls) != "[0 4 0]" || len(pass.steps) != 0 {
 		t.Fatal("pass did not follow the scan", pass.calls)
 	}
-	early := &scriptedPass{steps: []sweepStep{{0, 0, errors.New("expiry failed")}}}
-	sweepRetention(context.Background(), early)
+	expiryFailure := errors.New("expiry failed")
+	early := &scriptedPass{steps: []sweepStep{{0, 0, expiryFailure}}}
+	if err := sweepRetention(context.Background(), early); !errors.Is(err, expiryFailure) {
+		t.Fatal("expiry failure was hidden", err)
+	}
 	if len(early.calls) != 1 {
 		t.Fatal("a failure before progress did not end the pass", early.calls)
 	}
@@ -85,9 +95,7 @@ func (f passFunc) SweepOnce(context.Context, retention.Policy, int64, int) (rete
 func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = h.Close() })
 	if _, err := h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)
@@ -97,9 +105,7 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(tokenPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	token := strings.TrimSuffix(string(raw), "\n")
 	url, stop := startHost(t, h)
 	upload := func(body string) domain.ObjectMetadata {
@@ -112,23 +118,19 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 		return object
 	}
 	referenced, unreferenced := upload("bundle bytes of an admitted job"), upload("bytes no job references")
-	if err := h.store.PutWorkspace(ctx, auth.Workspace{ID: "app", Enabled: true, AllowedProfiles: []string{"local-test"}}); err != nil {
-		t.Fatal(err)
-	}
-	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "local-test", ProviderInstanceID: "fixture", ConfigurationRevision: "one"}, "offline_account")
-	if err := h.store.PutProfile(ctx, profile, true); err != nil {
-		t.Fatal(err)
-	}
+	profile := createLocalManagedProfile(t, h)
 	spec := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"retained fixture","profile":"local-test","bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","main.py"]},"inputs":[],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`, referenced.ID)
+	spec = strings.Replace(spec, `"profile":"local-test"`, `"profile":"`+profile+`"`, 1)
 	requestHost(t, url+"/v1/workspaces/app/jobs", "POST", token, spec, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "retention-fixture-001"}, 202)
 	stop()
 
 	clock := &fixedClock{now: time.Now().UTC().Add(time.Hour)}
-	sweeper, err := h.retentionSweeper(clock)
-	if err != nil {
-		t.Fatal(err)
+	injectHostClock(t, h, clock.Now)
+	sweeper, err := h.retentionSweeper()
+	requireNoError(t, err)
+	pass := func() {
+		requireNoError(t, sweepRetention(ctx, sweeper))
 	}
-	pass := func() { sweepRetention(ctx, sweeper) }
 	present := func(object domain.ObjectMetadata) bool {
 		stream, err := h.inputs.Open(ctx, "app", object.ID)
 		if err != nil {
@@ -141,7 +143,7 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 	if !present(referenced) || !present(unreferenced) {
 		t.Fatal("an object younger than the unreferenced window was deleted")
 	}
-	clock.now = clock.now.Add(24 * time.Hour)
+	clock.advance(24 * time.Hour)
 	pass()
 	if !present(referenced) || present(unreferenced) {
 		t.Fatal("expected only the unreferenced object past its window to be deleted", present(referenced), present(unreferenced))

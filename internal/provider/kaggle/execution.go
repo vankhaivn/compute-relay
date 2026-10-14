@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // Closed reasons for a stop before SaveKernel is sent. They name where the attempt
@@ -17,17 +18,15 @@ import (
 const (
 	reasonSubmissionDisabled  = "submission_disabled"
 	reasonPreparationMismatch = "preparation_mismatch"
-	reasonMutationBudget      = "mutation_budget_exhausted"
 	reasonStagingRecheck      = "staging_recheck_failed"
 	reasonStagingUnconfirmed  = "staging_not_confirmed"
 	reasonCallTimeout         = "call_timeout"
 	reasonRuntimeStopped      = "runtime_stopped"
-	reasonLocalRuntime        = "local_runtime_unavailable"
 	reasonCredential          = "credential_unavailable"
 )
 
-// helperReasons are the helper's own refusals, each before its save call.
-var helperReasons = map[string]bool{
+// submissionRefusals are closed refusals before the save call.
+var submissionRefusals = map[string]bool{
 	"token_inactive": true, "account_mismatch": true, "gpu_quota_unverified": true,
 	"auth_read_failed": true, "kernel_read_failed": true, "quota_read_failed": true, "helper_failed": true,
 }
@@ -54,8 +53,8 @@ type executionInvocation func(context.Context, Config, string, []byte, execution
 // Executor is bound to ONE immutable attempt. Reconstruct it on recovery from the
 // original M3 plan/preparation and frozen configuration, never a current alias.
 // It is not a full Provider, queue or durable mutation authority. Only a caller
-// receiving a successful NEW BeginSubmission commit may invoke Submit. All other
-// paths use ReconcileSubmission/Observe; even a genuine miss cannot rearm Submit.
+// receiving a successful NEW BeginSubmission commit may invoke Start. All other
+// paths use Reconcile/Observe; even a genuine miss cannot rearm Start.
 type Executor struct {
 	stager      *Stager
 	plan        provider.Plan
@@ -94,7 +93,10 @@ func unknownExecution() provider.SubmissionOutcome {
 	return provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: &p}
 }
 
-func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (out provider.SubmissionOutcome) {
+func (e *Executor) Start(parent context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) (out provider.SubmissionOutcome) {
+	if authorization != nil || material != nil {
+		return rejectedExecution(reasonSubmissionDisabled)
+	}
 	out = unknownExecution()
 	defer func() {
 		if recover() != nil {
@@ -111,11 +113,14 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 		return unknownExecution()
 	}
 	// Staging byte verification has its own bounded preparation budget. Do not
-	// charge it to the shorter SDK-call timeout before submission can begin.
+	// charge it to the shorter API-call timeout before submission can begin.
 	// Recheck complete remote staging without creating anything. Equality includes
 	// the first-pinned numeric dataset ID, version, marker, privacy and readiness.
-	stage, err := e.stager.ReconcilePreparation(parent, e.plan, e.prepared.PreparationID)
+	stage, err := e.stager.ReconcilePrepare(parent, e.plan, e.prepared.PreparationID)
 	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return unknownExecution()
+		}
 		return rejectedExecution(reasonStagingRecheck)
 	}
 	if stage.Status != provider.ReconciliationFound || stage.Prepared == nil || *stage.Prepared != e.prepared {
@@ -141,7 +146,7 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 	return provider.SubmissionOutcome{Status: provider.SubmissionAccepted, Remote: &remote}
 }
 
-func (e *Executor) ReconcileSubmission(ctx context.Context, identity provider.Identity) (provider.Reconciliation, error) {
+func (e *Executor) Reconcile(ctx context.Context, identity provider.Identity) (provider.Reconciliation, error) {
 	if e == nil || identity != e.plan.Job.Identity {
 		return provider.Reconciliation{}, ErrExecutionIdentity
 	}
@@ -182,7 +187,7 @@ func (e *Executor) Observe(ctx context.Context, expected provider.RemoteReferenc
 		return none, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "kernel identity or source was replaced; retain the original reference")
 	}
 	if r.Status != "found" {
-		return none, ErrProcess
+		return none, ErrUnavailable
 	}
 	actual, err := e.remote(r)
 	if err != nil || actual != expected {
@@ -231,7 +236,7 @@ func (r executionResponse) valid() bool {
 	}
 	switch r.Status {
 	case "rejected":
-		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && helperReasons[r.Reason]
+		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && submissionRefusals[r.Reason]
 	case "unknown", "not_found", "invalid":
 		return r == (executionResponse{Protocol: 1, Status: r.Status})
 	case "found":
@@ -246,7 +251,7 @@ func (r executionResponse) valid() bool {
 	return false
 }
 
-// call returns a closed stop reason when the helper was never invoked; after
+// call returns a closed stop reason when the native client was never invoked; after
 // invocation any failure is ambiguous and the reason is empty.
 func (e *Executor) call(parent context.Context, mode, kernelID string) (executionResponse, string, error) {
 	var result executionResponse
@@ -261,18 +266,16 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 	if err := ctx.Err(); err != nil {
 		return result, stopReason(ctx, ""), err
 	}
-	local, err := e.stager.local(ctx, e.stager.config, Local, nil)
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return result, stopReason(ctx, reasonLocalRuntime), ErrProcess
-	}
 	request := e.request
 	request.KernelID = kernelID
 	if mode != "submit" {
 		request.Source = "" // observations need its digest, not another copy of private code
 	}
 	called, invoked := false, false
-	err = e.stager.credentials.WithCredential(ctx, e.stager.config.CredentialRef, func(secret []byte) error {
+	violated := false
+	err := e.stager.credentials.WithCredential(ctx, e.stager.config.CredentialRef, func(secret []byte) error {
 		if called {
+			violated = true
 			return ErrProtocol
 		}
 		called = true
@@ -292,17 +295,20 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 		result, err = e.run(ctx, e.stager.config, mode, secret, request)
 		return err
 	})
+	if provider.IsLocalStateError(err) {
+		return executionResponse{}, "", err
+	}
 	if !invoked {
 		if ctx.Err() != nil {
 			return executionResponse{}, stopReason(ctx, ""), ctx.Err()
 		}
-		return executionResponse{}, reasonCredential, ErrProcess
+		return executionResponse{}, reasonCredential, ErrUnavailable
 	}
 	if ctx.Err() != nil {
 		return executionResponse{}, "", ctx.Err()
 	}
-	if err != nil {
-		return executionResponse{}, "", ErrProcess
+	if err != nil || violated {
+		return executionResponse{}, "", ErrUnavailable
 	}
 	if !result.valid() || (mode != "submit" && result.Status == "rejected") {
 		return executionResponse{}, "", ErrProtocol

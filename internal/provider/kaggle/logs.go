@@ -23,8 +23,6 @@ type LogReader struct {
 	monitor  *Monitor
 }
 
-var _ provider.LogReader = (*LogReader)(nil)
-
 func NewLogReader(e *Executor, m *Monitor) (*LogReader, error) {
 	if e == nil || m == nil || e.stager.config != m.config {
 		return nil, ErrConfig
@@ -38,7 +36,7 @@ type logCursor struct {
 	Offset    int                 `json:"offset"`
 }
 
-func (l *LogReader) ReadLogs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+func (l *LogReader) Logs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
 	var none provider.LogPage
 	if l == nil || page.Validate() != nil {
 		return none, ErrLogCursor

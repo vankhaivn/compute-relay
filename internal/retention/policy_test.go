@@ -22,7 +22,6 @@ func TestPolicyConservativePinsAndWindows(t *testing.T) {
 		want string
 	}{
 		{"complete", func(*Reference) {}, "retention_elapsed"},
-		{"hold", func(r *Reference) { r.Held = true }, "manual_hold"},
 		{"busy", func(r *Reference) { r.Busy = true }, "local_work"},
 		{"recovery", func(r *Reference) { r.RecoveryRequired = true }, "recovery_required"},
 		{"queued", func(r *Reference) { r.State = domain.InitialAttemptState() }, "active_or_unresolved"},
@@ -41,7 +40,7 @@ func TestPolicyConservativePinsAndWindows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := ref
 			tc.edit(&r)
-			d, err := DefaultPolicy().Assess(now, old, []Reference{ref, r}, false)
+			d, err := DefaultPolicy().Assess(now, old, []Reference{ref, r})
 			if err != nil || d.Reason != tc.want || d.Eligible != (tc.want == "retention_elapsed") {
 				t.Fatalf("decision = %+v, %v", d, err)
 			}
@@ -49,18 +48,15 @@ func TestPolicyConservativePinsAndWindows(t *testing.T) {
 	}
 	p := DefaultPolicy()
 	for _, delta := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
-		d, err := p.Assess(now, now.Add(-p.UnreferencedFor).Add(-delta), nil, false)
+		d, err := p.Assess(now, now.Add(-p.UnreferencedFor).Add(-delta), nil)
 		if err != nil || d.Eligible != (delta >= 0) {
 			t.Fatal("unreferenced boundary", delta, d, err)
 		}
 	}
-	if _, err := p.Assess(now, now.Add(time.Second), nil, false); err == nil {
+	if _, err := p.Assess(now, now.Add(time.Second), nil); err == nil {
 		t.Fatal("future evidence accepted")
 	}
-	if _, err := p.Assess(now, old, make([]Reference, MaxReferences+1), false); err == nil {
+	if _, err := p.Assess(now, old, make([]Reference, MaxReferences+1)); err == nil {
 		t.Fatal("unbounded reference inventory accepted")
-	}
-	if d, err := p.Assess(now, old, nil, true); err != nil || d.Eligible {
-		t.Fatal("manual object hold bypassed")
 	}
 }

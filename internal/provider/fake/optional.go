@@ -9,8 +9,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-// Complete exposes optional fixture capabilities for contract testing. Basic remains a
-// truly minimal Provider; a caller cannot type-assert optional methods on it.
+// Complete enables simulated cancellation and logs for contract testing.
 type Complete struct{ *Basic }
 
 func NewComplete(b *Backend, clock ports.Clock, instance domain.ProviderInstanceID) (*Complete, error) {
@@ -22,20 +21,6 @@ func NewComplete(b *Backend, clock ports.Clock, instance domain.ProviderInstance
 	return &Complete{Basic: base}, nil
 }
 
-var _ provider.Canceller = (*Complete)(nil)
-var _ provider.LogReader = (*Complete)(nil)
-var _ provider.QuotaReader = (*Complete)(nil)
-
-func (p *Complete) Describe() provider.Descriptor {
-	d := p.Basic.Describe()
-	for i := range d.Capabilities {
-		switch d.Capabilities[i].Name {
-		case domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting:
-			d.Capabilities[i].Support = domain.CapabilitySupportSupported
-		}
-	}
-	return d
-}
 func (p *Complete) Cancel(ctx context.Context, remote provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.CancellationOutcome{}, err
@@ -55,7 +40,7 @@ func (p *Complete) Cancel(ctx context.Context, remote provider.RemoteReference, 
 	r.cancelRequested = true
 	return provider.CancellationOutcome{Status: domain.CancellationAccepted, TerminationConfirmed: false}, nil
 }
-func (p *Complete) ReadLogs(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+func (p *Complete) Logs(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.LogPage{}, err
 	}
@@ -89,12 +74,22 @@ func (p *Complete) ReadLogs(ctx context.Context, remote provider.RemoteReference
 	}
 	return result, nil
 }
-func (p *Complete) ReadQuota(ctx context.Context) (provider.QuotaObservation, error) {
+
+func (p *Basic) Cancel(ctx context.Context, remote provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
 	if err := ctx.Err(); err != nil {
-		return provider.QuotaObservation{}, err
+		return provider.CancellationOutcome{}, err
 	}
-	// Synthetic values are NOT an account allowance or an estimate from elapsed time.
-	limit, used, remaining := 10.0, 1.0, 9.0
-	return provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "fixture", Unit: "hours", Limit: &limit, Used: &used, Remaining: &remaining,
-		ObservedAt: p.clock.Now(), Source: "fake fixture", Precision: "synthetic"}, nil
+	if !operation.Valid() || remote.Validate() != nil || remote.Identity.InstanceID != p.instance {
+		return provider.CancellationOutcome{}, identityError()
+	}
+	return provider.CancellationOutcome{Status: domain.CancellationManual}, nil
+}
+func (p *Basic) Logs(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+	if err := ctx.Err(); err != nil {
+		return provider.LogPage{}, err
+	}
+	if remote.Validate() != nil || remote.Identity.InstanceID != p.instance || page.Validate() != nil {
+		return provider.LogPage{}, identityError()
+	}
+	return provider.LogPage{Source: "provider", Availability: "unavailable"}, nil
 }

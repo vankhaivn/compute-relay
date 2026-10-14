@@ -24,9 +24,8 @@ var (
 	ErrCorrupt     = errors.New("state integrity check failed")
 	ErrConflict    = errors.New("state record conflicts with an existing record")
 	ErrInvalid     = errors.New("invalid state record or options")
-	ErrBusy        = errors.New("state store is busy")
+	ErrBusy        = busyError{}
 	ErrDiskFull    = errors.New("state storage is full")
-	ErrBackup      = errors.New("backup is incomplete or invalid")
 )
 
 const (
@@ -38,15 +37,15 @@ const (
 
 type Options struct {
 	OperationTimeout time.Duration
-	BackupTimeout    time.Duration
-	MaxBackupBytes   int64
+	// Clock must be safe for concurrent calls; nil selects the system clock.
+	Clock func() time.Time
 }
 
 func DefaultOptions() Options {
-	return Options{OperationTimeout: 5 * time.Second, BackupTimeout: time.Minute, MaxBackupBytes: 256 << 20}
+	return Options{OperationTimeout: 5 * time.Second}
 }
 func (o Options) valid() bool {
-	return o.OperationTimeout > 0 && o.OperationTimeout <= time.Minute && o.BackupTimeout >= o.OperationTimeout && o.BackupTimeout <= time.Hour && o.MaxBackupBytes > 0 && o.MaxBackupBytes <= 1<<40
+	return o.OperationTimeout > 0 && o.OperationTimeout <= time.Minute
 }
 
 // Store has one connection. All operations are bounded; a busy connection queues at
@@ -57,6 +56,7 @@ type Store struct {
 	options Options
 	life    sync.RWMutex
 	closed  bool
+	hosted  bool
 }
 
 func Open(ctx context.Context, path string, options Options) (*Store, error) {
@@ -70,7 +70,29 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{root: root, options: options}
+	return openRoot(ctx, root, options, false, "")
+}
+
+// OpenRoot retains a host-locked child instead of acquiring another OS lock.
+// expectedInstallation is required when reopening an established host; its DB
+// identity is checked before journal or schema changes.
+func OpenRoot(ctx context.Context, root *statefs.Root, options Options, expectedInstallation string) (*Store, error) {
+	if !options.valid() || expectedInstallation != "" && !validID(expectedInstallation) {
+		return nil, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	retained, err := root.Retain()
+	if err != nil {
+		return nil, err
+	}
+	return openRoot(ctx, retained, options, true, expectedInstallation)
+}
+
+func openRoot(ctx context.Context, root *statefs.Root, options Options, hosted bool, expectedInstallation string) (*Store, error) {
+	var err error
+	s := &Store{root: root, options: options, hosted: hosted}
 	success := false
 	defer func() {
 		if !success {
@@ -80,13 +102,19 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 			_ = root.Close()
 		}
 	}()
-	if _, err := os.Lstat(filepath.Join(root.Path, databaseName+".restore")); !errors.Is(err, os.ErrNotExist) {
-		return nil, ErrBackup
+	path := filepath.Join(root.Path, databaseName)
+	if expectedInstallation != "" {
+		if err := preflightFiles(root.Path); err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.Size() == 0 {
+			return nil, ErrCorrupt
+		}
 	}
 	if err := initializeRoot(root.Path); err != nil {
 		return nil, err
 	}
-	path = filepath.Join(root.Path, databaseName)
 	if err := preflightFiles(root.Path); err != nil {
 		return nil, err
 	}
@@ -98,7 +126,7 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 			return nil, err
 		}
 	}
-	s.db, err = connect(path, false)
+	s.db, err = connect(path)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +134,9 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	defer cancel()
 	// Inspect identity/version BEFORE any persistent journal or migration change.
 	if _, err := inspectSchema(ctx, s.db, migrations, true); err != nil {
+		return nil, err
+	}
+	if err := checkInstallation(ctx, s.db, root.Path, expectedInstallation); err != nil {
 		return nil, err
 	}
 	var journal string
@@ -118,8 +149,10 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	if err := migrate(ctx, s.db, migrations); err != nil {
 		return nil, err
 	}
-	if err := recordInstallation(ctx, s.db, root.Path); err != nil {
-		return nil, err
+	if !hosted {
+		if err := recordInstallation(ctx, s.db, root.Path); err != nil {
+			return nil, err
+		}
 	}
 	if err := integrity(ctx, s.db); err != nil {
 		return nil, err
@@ -189,22 +222,16 @@ func preflightFiles(path string) error {
 	return nil
 }
 
-func connect(path string, readonly bool) (*sql.DB, error) {
-	// Never treat operator paths as raw DSNs. Escaping preserves #, ?, spaces and Windows
-	// drive letters; arbitrary URI parameters cannot enable shared cache or change mode.
+func connect(path string) (*sql.DB, error) {
+	// Never treat operator paths as raw DSNs. Escaping preserves #, ? and spaces;
+	// arbitrary URI parameters cannot enable shared cache or change mode.
 	p := filepath.ToSlash(path)
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
 	u := url.URL{Scheme: "file", Path: p}
 	q := url.Values{}
-	if readonly {
-		q.Set("mode", "ro")
-		// Only validated, copied standalone backup snapshots use immutable, never a live DB.
-		q.Set("immutable", "1")
-	} else {
-		q.Set("mode", "rw")
-	}
+	q.Set("mode", "rw")
 	q.Set("cache", "private")
 	q.Set("_txlock", "immediate")
 	for _, pragma := range []string{"busy_timeout(1000)", "foreign_keys(ON)", "synchronous(FULL)", "trusted_schema(OFF)", "wal_autocheckpoint(1000)"} {
@@ -234,14 +261,31 @@ func (s *Store) Close() error {
 
 // operation pins the store lifetime and always applies a finite timeout, including
 // connection-pool wait. No exported transaction callback can hold a lock over a transfer.
-func (s *Store) operation(ctx context.Context, timeout time.Duration) (context.Context, func(), error) {
+func (s *Store) operation(ctx context.Context) (context.Context, func(), error) {
 	s.life.RLock()
 	if s.closed {
 		s.life.RUnlock()
 		return nil, nil, ErrClosed
 	}
-	bounded, cancel := context.WithTimeout(ctx, timeout)
+	bounded, cancel := context.WithTimeout(ctx, s.options.OperationTimeout)
 	return bounded, func() { cancel(); s.life.RUnlock() }, nil
+}
+
+// read bounds a query's lifetime and discards incomplete results on failure.
+// Reads that depend on logical time or a consistent transaction use write instead.
+func read[T any](ctx context.Context, s *Store, fn func(context.Context) (T, error)) (T, error) {
+	ctx, done, err := s.operation(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	defer done()
+	value, err := fn(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return value, nil
 }
 
 type Info struct {
@@ -254,27 +298,24 @@ type Info struct {
 }
 
 func (s *Store) Info(ctx context.Context) (Info, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return Info{}, err
-	}
-	defer done()
-	var info Info
-	var fk int
-	for _, query := range []struct {
-		sql  string
-		dest any
-	}{
-		{"SELECT installation_id FROM runtime_installation WHERE singleton=1", &info.InstallationID},
-		{"PRAGMA user_version", &info.SchemaVersion}, {"SELECT sqlite_version()", &info.SQLiteVersion},
-		{"PRAGMA journal_mode", &info.JournalMode}, {"PRAGMA synchronous", &info.Synchronous}, {"PRAGMA foreign_keys", &fk},
-	} {
-		if err := s.db.QueryRowContext(ctx, query.sql).Scan(query.dest); err != nil {
-			return Info{}, dbError(err)
+	return read(ctx, s, func(ctx context.Context) (Info, error) {
+		var info Info
+		var fk int
+		for _, query := range []struct {
+			sql  string
+			dest any
+		}{
+			{"SELECT installation_id FROM runtime_installation WHERE singleton=1", &info.InstallationID},
+			{"PRAGMA user_version", &info.SchemaVersion}, {"SELECT sqlite_version()", &info.SQLiteVersion},
+			{"PRAGMA journal_mode", &info.JournalMode}, {"PRAGMA synchronous", &info.Synchronous}, {"PRAGMA foreign_keys", &fk},
+		} {
+			if err := s.db.QueryRowContext(ctx, query.sql).Scan(query.dest); err != nil {
+				return Info{}, dbError(err)
+			}
 		}
-	}
-	info.ForeignKeys = fk == 1
-	return info, nil
+		info.ForeignKeys = fk == 1
+		return info, nil
+	})
 }
 
 func (s *Store) Ready(ctx context.Context) error {
@@ -300,6 +341,12 @@ func withTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 	// Never replay after Commit returns an error; its outcome may be uncertain.
 	return dbError(tx.Commit())
 }
+
+// busyError retains safe diagnostics while identifying retryable contention.
+type busyError struct{}
+
+func (busyError) Error() string   { return "state store is busy" }
+func (busyError) Temporary() bool { return true }
 
 func dbError(err error) error {
 	if err == nil {

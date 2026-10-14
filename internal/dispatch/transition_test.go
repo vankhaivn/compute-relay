@@ -235,10 +235,7 @@ func TestResolvedSnapshotNeverTransmitsSourceURLOrChangesOriginal(t *testing.T) 
 }
 func TestRunnerCompatibilityAndNoCapabilityDowngrade(t *testing.T) {
 	w, p, _ := fixtureWork(t)
-	d := provider.Descriptor{InstanceID: p.Job.Identity.InstanceID}
-	for _, name := range p.Job.Required {
-		d.Capabilities = append(d.Capabilities, domain.CapabilityStatus{Name: name, Support: domain.CapabilitySupportSupported, Evidence: domain.EvidenceImplementedOffline})
-	}
+	d := provider.Descriptor{InstanceID: p.Job.Identity.InstanceID, Capabilities: fixtureCapabilities()}
 	if err := ValidatedPlan(p.Job, p, d); err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +252,14 @@ func TestRunnerCompatibilityAndNoCapabilityDowngrade(t *testing.T) {
 	if disjointRunnerPaths([]string{"A/x", "a/y"}) || disjointRunnerPaths([]string{"a", "a/x"}) || !disjointRunnerPaths([]string{"a/x", "a/y"}) {
 		t.Fatal("implicit-directory/case collision")
 	}
+}
+
+func fixtureCapabilities() provider.Capabilities {
+	return provider.Capabilities{BatchExecution: true, Python: true, Shell: true,
+		GPU: domain.CapabilitySupportUnsupported, PrivateInputStaging: true,
+		LogsWhileRunning: domain.CapabilitySupportUnsupported,
+		QuotaReporting:   domain.CapabilitySupportUnsupported,
+		ExecutionTimeout: true, RemoteNetworkControl: true, StrongIdentity: true}
 }
 func FuzzApplyNeverRepeatsMutation(f *testing.F) {
 	f.Add([]byte{0, 1, 2, 3, 4})

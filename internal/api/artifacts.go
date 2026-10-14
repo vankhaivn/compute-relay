@@ -9,17 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vankhaivn/compute-relay/internal/artifactwire"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/retention"
 )
-
-func artifactPath(path string) bool {
-	s := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	return len(s) >= 6 && len(s) <= 8 && s[0] == "v1" && s[1] == "workspaces" && s[3] == "jobs" && s[5] == "artifacts" && (len(s) != 8 || s[7] == "content")
-}
 
 type artifactQuery struct {
 	attempt domain.AttemptID
@@ -28,68 +22,63 @@ type artifactQuery struct {
 }
 
 func parseArtifactQuery(r *http.Request, listing bool) (artifactQuery, error) {
-	q := artifactQuery{limit: artifactwire.MaxPage}
+	q := artifactQuery{limit: maxArtifactPage}
 	v, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil || len(r.URL.RawQuery) > 512 || r.URL.ForceQuery || r.ContentLength > 0 || len(r.TransferEncoding) != 0 || r.Header.Get("Range") != "" || r.Header.Get("If-Range") != "" {
-		return q, artifactwire.ErrInvalid
+		return q, errArtifactEvidence
 	}
 	for key, values := range v {
 		if len(values) != 1 || (key != "attempt_id" && (!listing || key != "limit" && key != "cursor")) {
-			return q, artifactwire.ErrInvalid
+			return q, errArtifactEvidence
 		}
 	}
 	q.attempt = domain.AttemptID(v.Get("attempt_id"))
 	q.cursor = v.Get("cursor")
 	if !q.attempt.Valid() || len(q.cursor) > 80 {
-		return q, artifactwire.ErrInvalid
+		return q, errArtifactEvidence
 	}
 	if values, ok := v["limit"]; ok {
 		q.limit, err = strconv.Atoi(values[0])
-		if err != nil || q.limit < 1 || q.limit > artifactwire.MaxPage || strconv.Itoa(q.limit) != values[0] {
-			return q, artifactwire.ErrInvalid
+		if err != nil || q.limit < 1 || q.limit > maxArtifactPage || strconv.Itoa(q.limit) != values[0] {
+			return q, errArtifactEvidence
 		}
 	}
 	return q, nil
 }
 
-func publishedView(result collection.Result, target artifactwire.Target) (artifactwire.Page, error) {
-	p := artifactwire.Page{Target: target, ResultPhase: result.Phase, VerifiedAt: result.VerifiedAt, Total: len(result.Files), Artifacts: make([]artifactwire.File, 0, len(result.Files))}
-	if !target.Valid() || string(result.WorkspaceID) != target.WorkspaceID || string(result.JobID) != target.JobID || string(result.AttemptID) != target.AttemptID || result.VerifiedAt.IsZero() || result.Phase == "" || len(result.Phase) > 64 || p.Total < 1 || p.Total > artifactwire.MaxFiles {
-		return artifactwire.Page{}, collection.ErrUnavailable
+func publishedView(result collection.Result, target artifactTarget) (artifactPage, error) {
+	p := artifactPage{artifactTarget: target, ResultPhase: result.Phase, VerifiedAt: result.VerifiedAt, Total: len(result.Files), Artifacts: make([]artifactFile, 0, len(result.Files))}
+	if !target.Valid() || string(result.WorkspaceID) != target.WorkspaceID || string(result.JobID) != target.JobID || string(result.AttemptID) != target.AttemptID || result.VerifiedAt.IsZero() || result.Phase == "" || len(result.Phase) > 64 || p.Total < 1 || p.Total > maxArtifactFiles {
+		return artifactPage{}, collection.ErrUnavailable
 	}
 	seenID, seenPath := map[string]bool{}, map[string]bool{}
 	var total int64
 	for _, f := range result.Files {
-		v := artifactwire.File{ID: string(f.ID), Path: f.Path, Role: f.Role, Bytes: f.Object.Bytes, SHA256: string(f.Object.SHA256)}
-		if !v.Valid() || !f.Object.Valid() || string(f.Object.WorkspaceID) != target.WorkspaceID || seenID[v.ID] || seenPath[strings.ToLower(v.Path)] || v.Bytes > artifactwire.MaxBytes-total {
-			return artifactwire.Page{}, collection.ErrUnavailable
+		v := artifactFile{ID: string(f.ID), Path: f.Path, Role: f.Role, Bytes: f.Object.Bytes, SHA256: string(f.Object.SHA256)}
+		if !v.Valid() || !f.Object.Valid() || string(f.Object.WorkspaceID) != target.WorkspaceID || seenID[v.ID] || seenPath[strings.ToLower(v.Path)] || v.Bytes > maxArtifactBytes-total {
+			return artifactPage{}, collection.ErrUnavailable
 		}
 		seenID[v.ID], seenPath[strings.ToLower(v.Path)] = true, true
 		total += v.Bytes
 		p.Artifacts = append(p.Artifacts, v)
 	}
 	sort.Slice(p.Artifacts, func(i, j int) bool { return p.Artifacts[i].Path < p.Artifacts[j].Path })
-	p.SnapshotSHA256 = artifactwire.Snapshot(target, p.ResultPhase, p.VerifiedAt, p.Artifacts)
+	p.SnapshotSHA256 = artifactSnapshot(target, p.ResultPhase, p.VerifiedAt, p.Artifacts)
 	return p, nil
 }
 
-func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal auth.Principal, workspace domain.WorkspaceID, segments []string) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "artifact routes are read-only")
-		return
-	}
+func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Results == nil {
 		artifactError(w, r, collection.ErrNotFound)
 		return
 	}
-	query, err := parseArtifactQuery(r, len(segments) == 6)
-	job := domain.JobID(segments[4])
-	if err != nil || !job.Valid() || len(segments) > 6 && !domain.ArtifactID(segments[6]).Valid() {
+	query, err := parseArtifactQuery(r, r.PathValue("artifact") == "")
+	job := domain.JobID(r.PathValue("job"))
+	if err != nil || !job.Valid() || r.PathValue("artifact") != "" && !domain.ArtifactID(r.PathValue("artifact")).Valid() {
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "explicit attempt and bounded artifact parameters required")
 		return
 	}
-	target := artifactwire.Target{WorkspaceID: string(workspace), JobID: string(job), AttemptID: string(query.attempt)}
+	target := artifactTarget{WorkspaceID: string(workspace), JobID: string(job), AttemptID: string(query.attempt)}
 	result, err := h.config.Results.Read(r.Context(), principal, workspace, job, query.attempt)
 	if err != nil {
 		artifactError(w, r, err)
@@ -100,8 +89,8 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 		artifactError(w, r, err)
 		return
 	}
-	if len(segments) == 6 {
-		offset, err := artifactwire.Offset(query.cursor, page.SnapshotSHA256, page.Total)
+	if r.PathValue("artifact") == "" {
+		offset, err := artifactOffset(query.cursor, page.SnapshotSHA256, page.Total)
 		if err != nil {
 			respondError(w, r, 409, domain.CodeInvalidRequest, domain.FailureStageValidation, "artifact cursor does not match this publication")
 			return
@@ -109,14 +98,14 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 		end := min(offset+query.limit, page.Total)
 		page.Artifacts = page.Artifacts[offset:end]
 		if end < page.Total {
-			page.NextCursor = artifactwire.Cursor(page.SnapshotSHA256, end)
+			page.NextCursor = artifactCursor(page.SnapshotSHA256, end)
 		}
 		respond(w, 200, page)
 		return
 	}
-	var selected *artifactwire.File
+	var selected *artifactFile
 	for i := range page.Artifacts {
-		if page.Artifacts[i].ID == segments[6] {
+		if page.Artifacts[i].ID == r.PathValue("artifact") {
 			selected = &page.Artifacts[i]
 			break
 		}
@@ -125,8 +114,8 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 		artifactError(w, r, collection.ErrNotFound)
 		return
 	}
-	if len(segments) == 7 {
-		respond(w, 200, artifactwire.Metadata{Target: target, ResultPhase: page.ResultPhase, VerifiedAt: page.VerifiedAt, Artifact: *selected})
+	if !strings.HasSuffix(r.Pattern, "/content") {
+		respond(w, 200, artifactMetadata{artifactTarget: target, ResultPhase: page.ResultPhase, VerifiedAt: page.VerifiedAt, Artifact: *selected})
 		return
 	}
 	// Share the existing finite expensive-transfer pool with uploads. No unbounded
@@ -149,7 +138,7 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 			_ = closeArtifact(stream)
 		}
 	}()
-	actual := artifactwire.File{ID: string(meta.ID), Path: meta.Path, Role: meta.Role, Bytes: meta.Object.Bytes, SHA256: string(meta.Object.SHA256)}
+	actual := artifactFile{ID: string(meta.ID), Path: meta.Path, Role: meta.Role, Bytes: meta.Object.Bytes, SHA256: string(meta.Object.SHA256)}
 	stillPublished := func() bool {
 		current, err := h.config.Results.Read(r.Context(), principal, workspace, job, query.attempt)
 		if err != nil {
@@ -174,7 +163,7 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 	w.Header().Set("X-Attempt-ID", target.AttemptID)
 	w.Header().Set("X-Content-Bytes", strconv.FormatInt(selected.Bytes, 10))
 	w.Header().Set("X-Content-SHA256", selected.SHA256)
-	w.Header().Set("Trailer", artifactwire.VerifiedTrailer)
+	w.Header().Set("Trailer", verifiedArtifactTrailer)
 	// From this boundary, all panics abort the response without diagnostics or JSON
 	// appended to private binary bytes. The outer API recovery must preserve this.
 	defer func() {
@@ -183,13 +172,13 @@ func (h *handler) artifacts(w http.ResponseWriter, r *http.Request, principal au
 		}
 	}()
 	w.WriteHeader(http.StatusOK)
-	copyErr := artifactwire.Copy(r.Context(), w, stream, *selected)
+	copyErr := copyArtifact(r.Context(), w, stream, *selected)
 	closeErr := closeArtifact(stream)
 	closed = true
 	if copyErr != nil || closeErr != nil || r.Context().Err() != nil || !stillPublished() {
 		panic(http.ErrAbortHandler)
 	}
-	w.Header().Set(artifactwire.VerifiedTrailer, "true")
+	w.Header().Set(verifiedArtifactTrailer, "true")
 }
 
 func closeArtifact(c io.Closer) (err error) {

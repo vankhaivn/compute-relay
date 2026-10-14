@@ -3,40 +3,12 @@ package cleanup
 import (
 	"context"
 	"encoding/json"
-	"regexp"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
-
-// The ledger currently permits one staging and one execution row per attempt.
-// Keep the bound explicit at every read and wire boundary.
-const MaxResources = 2
-
-var resourceReason = regexp.MustCompile(`^[a-z][a-z0-9_]{0,95}$`)
-
-type ResourceState string
-
-const (
-	ResourcePending  ResourceState = "pending"
-	ResourceRunning  ResourceState = "running"
-	ResourceDeleted  ResourceState = "deleted"
-	ResourceAbsent   ResourceState = "absent"
-	ResourceRetained ResourceState = "retained"
-	ResourceFailed   ResourceState = "failed"
-	ResourceUnknown  ResourceState = "unknown"
-)
-
-func (s ResourceState) Valid() bool {
-	switch s {
-	case ResourcePending, ResourceRunning, ResourceDeleted, ResourceAbsent, ResourceRetained, ResourceFailed, ResourceUnknown:
-		return true
-	}
-	return false
-}
-
-func (s ResourceState) Confirmed() bool { return s == ResourceDeleted || s == ResourceAbsent }
 
 // Resource is private durable ownership evidence. Only its typed provider description
 // or fingerprint may appear in an operator preview; never serialize Request to HTTP.
@@ -50,29 +22,16 @@ func (r Resource) Fingerprint() domain.SHA256Digest {
 	return provider.Digest(raw)
 }
 
-type ResourceResult struct {
-	ResourceID  domain.ProviderResourceID `json:"resource_id"`
-	Purpose     string                    `json:"purpose"`
-	Fingerprint domain.SHA256Digest       `json:"target_sha256"`
-	State       ResourceState             `json:"state"`
-	Reason      string                    `json:"reason"`
-}
-
-func (r ResourceResult) Valid() bool {
-	return r.ResourceID.Valid() && (r.Purpose == "staging" || r.Purpose == "execution") && r.Fingerprint.Valid() &&
-		r.State.Valid() && resourceReason.MatchString(r.Reason)
-}
-
 type ResourceWork struct {
 	Resource Resource
-	Result   ResourceResult
+	Result   operations.ResourceResult
 }
 
 // ResourceRepository commits each intent before its call and fences every outcome.
 // Begin rechecks current eligibility and the immutable target; a preview is irrelevant.
 type ResourceRepository interface {
-	BeginCleanupResource(context.Context, Work, ResourceWork, time.Time) error
-	CompleteCleanupResource(context.Context, Work, ResourceResult, time.Time) error
+	BeginCleanupResource(context.Context, Work, ResourceWork) error
+	CompleteCleanupResource(context.Context, Work, operations.ResourceResult) error
 }
 
 type PreviewPlan struct {
@@ -92,7 +51,7 @@ func (p PreviewPlan) Fingerprint() domain.SHA256Digest {
 }
 
 type PreviewRepository interface {
-	PlanCleanup(context.Context, domain.WorkspaceID, string, domain.JobID, domain.AttemptID, bool, time.Time) (PreviewPlan, error)
+	PlanCleanup(context.Context, domain.WorkspaceID, string, domain.JobID, domain.AttemptID, bool) (PreviewPlan, error)
 }
 
 type ResourcePreview struct {

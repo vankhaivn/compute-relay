@@ -4,7 +4,6 @@
 package scheduler
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -15,7 +14,6 @@ var (
 	ErrInvalid   = errors.New("invalid scheduler record or policy")
 	ErrLeaseLost = errors.New("scheduler claim is expired or no longer owned")
 	ErrPhaseGate = errors.New("remote side effects require durable orchestration")
-	ErrClock     = errors.New("scheduler clock moved backwards")
 	ErrScanLimit = errors.New("scheduler snapshot exceeds safe scan bound")
 )
 
@@ -131,14 +129,4 @@ type View struct {
 type Result struct {
 	Claim *Claim
 	View  View
-}
-
-// Repository serializes selection, capacity, fencing, state/event and fairness
-// cursor writes in one transaction. There is no process-local queue fallback.
-type Repository interface {
-	ClaimNext(context.Context, string, time.Time) (Result, error)
-	RenewClaim(context.Context, Claim, time.Time) (Claim, error)
-	DeferClaim(context.Context, Claim, time.Time) error
-	ReleaseClaim(context.Context, Claim, time.Time) error
-	InspectScheduler(context.Context, time.Time) (View, error)
 }

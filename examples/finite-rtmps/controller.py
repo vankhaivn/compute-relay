@@ -11,9 +11,11 @@ import json
 import os
 from pathlib import Path
 import stat
+import socket
 import subprocess
 import sys
 import time
+import threading
 import urllib.parse
 import uuid
 
@@ -43,6 +45,30 @@ def private_token(path):
     value = path.read_text().strip()
     require(value and not any(c.isspace() for c in value), "invalid_token_file")
     return value
+
+
+VERIFIED_TRAILER = "X-Compute-Relay-Verified"
+MAX_ARTIFACT_BYTES = 8 << 20
+
+
+class ArtifactResponse(http.client.HTTPResponse):
+    """Expose the bounded final trailer that HTTPResponse otherwise discards."""
+
+    def _read_and_discard_trailer(self):
+        self.verified_trailers = []
+        total = 0
+        for _ in range(100):
+            line = self.fp.readline(32769)
+            total += len(line)
+            require(total <= 32768 and line.endswith(b"\r\n"), "invalid_artifact_trailer")
+            if line == b"\r\n":
+                return
+            name, separator, value = line[:-2].partition(b":")
+            require(separator and name and all(c in b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                                              for c in name), "invalid_artifact_trailer")
+            if name.lower() == VERIFIED_TRAILER.lower().encode("ascii"):
+                self.verified_trailers.append(value.strip(b" \t"))
+        raise Failure("invalid_artifact_trailer")
 
 
 class API:
@@ -88,6 +114,83 @@ class API:
         except (OSError, http.client.HTTPException, ValueError):
             raise Failure("request_uncertain_use_observe" if method != "GET" else "observation_unavailable") from None
         finally:
+            connection.close()
+
+
+    def download(self, job, attempt, item, output):
+        job, attempt = identifier(job), identifier(attempt)
+        artifact = identifier(item["artifact_id"])
+        size, expected_hash = item["bytes"], item["sha256"]
+        require(artifact.startswith("art_") and type(size) is int and 0 <= size <= MAX_ARTIFACT_BYTES and
+                isinstance(expected_hash, str) and len(expected_hash) == 64 and
+                all(c in "0123456789abcdef" for c in expected_hash), "invalid_artifact_metadata")
+        require(not output.exists() and not output.is_symlink(), "download_uncertain_preserve_file")
+        temporary = output.with_name(output.name + ".partial")
+        route = self.base + "/jobs/" + job + "/artifacts/" + artifact + "/content?" + urllib.parse.urlencode({"attempt_id": attempt})
+        connection_type = http.client.HTTPSConnection if self.scheme == "https" else http.client.HTTPConnection
+        connection = connection_type(self.host, self.port, timeout=40)
+        connection.response_class = ArtifactResponse
+        timer = None
+        deadline = time.monotonic() + 120
+        try:
+            # One connection and one request; no redirect, proxy, decompression or retry.
+            connection.connect()
+            sock = connection.sock
+            def expire():
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            timer = threading.Timer(max(0, deadline - time.monotonic()), expire)
+            timer.daemon = True
+            timer.start()
+            connection.request("GET", route, headers={"Authorization": "Bearer " + self.token,
+                               "Accept": "application/octet-stream", "Accept-Encoding": "identity", "Connection": "close"})
+            response = connection.getresponse()
+            require(response.status == 200, "artifact_delivery_not_verified")
+            headers = {"Content-Type": "application/octet-stream", "X-Artifact-ID": artifact,
+                       "X-Workspace-ID": self.workspace, "X-Job-ID": job, "X-Attempt-ID": attempt,
+                       "X-Content-Bytes": str(size), "X-Content-SHA256": expected_hash}
+            require(all(response.headers.get_all(key) == [value] for key, value in headers.items()),
+                    "artifact_delivery_not_verified")
+            require(response.headers.get_all("Transfer-Encoding") == ["chunked"] and
+                    response.headers.get_all("Content-Length") is None and
+                    response.headers.get_all(VERIFIED_TRAILER) is None and
+                    response.headers.get_all("Trailer") == [VERIFIED_TRAILER] and
+                    response.headers.get_all("Content-Encoding", []) in ([], ["identity"]), "artifact_delivery_not_verified")
+            measured, checksum = 0, hashlib.sha256()
+            # Keep uncertain bytes under their exclusive temporary name for inspection.
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as target:
+                while True:
+                    chunk = response.read(min(65536, size - measured + 1))
+                    if not chunk:
+                        break
+                    measured += len(chunk)
+                    require(measured <= size, "artifact_delivery_not_verified")
+                    checksum.update(chunk)
+                    target.write(chunk)
+                require(measured == size and checksum.hexdigest() == expected_hash and
+                        getattr(response, "verified_trailers", None) == [b"true"], "artifact_delivery_not_verified")
+                response.close()
+                target.flush()
+                os.fsync(target.fileno())
+            # Linking publishes atomically and refuses every existing destination, including symlinks.
+            require(time.monotonic() < deadline, "artifact_delivery_not_verified")
+            os.link(temporary, output)
+            temporary.unlink()
+            directory = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            return {"delivery": "verified-new-file", "workspace_id": self.workspace, "job_id": job,
+                    "attempt_id": attempt, "artifact": item}
+        except (OSError, http.client.HTTPException, ValueError):
+            raise Failure("artifact_delivery_not_verified_preserve_files") from None
+        finally:
+            if timer is not None:
+                timer.cancel()
             connection.close()
 
 
@@ -385,6 +488,9 @@ def finish(args, api, session):
         query = urllib.parse.urlencode({"attempt_id": attempt, "limit": 100})
         page = api.request("GET", base + "/artifacts?" + query)
         require(not page.get("next_cursor"), "unexpected_artifact_pagination")
+        require(all(page.get(key) == value for key, value in {"workspace_id": api.workspace,
+                "job_id": session.state["job_id"], "attempt_id": attempt}.items()), "artifact_identity_mismatch")
+        require(isinstance(page.get("artifacts"), list) and len(page["artifacts"]) <= 100, "invalid_artifact_listing")
         directory = session.directory / attempt
         directory.mkdir(mode=0o700, exist_ok=True)
         for item in page["artifacts"]:
@@ -393,11 +499,7 @@ def finish(args, api, session):
                 continue
             output = directory / artifact_id
             require(not output.exists(), "download_uncertain_preserve_file")
-            # The native public client verifies the mandatory final HTTP trailer.
-            # Python's http.client does not expose it, so a hash-only reader is insufficient.
-            receipt = local_command([args.relay_binary, "artifact", "download", "--url", args.url,
-                "--workspace", args.workspace, "--token-file", args.token_file, "--job", session.state["job_id"],
-                "--attempt", attempt, "--id", artifact_id, "--output", output])
+            receipt = api.download(session.state["job_id"], attempt, item, output)
             require(receipt.get("delivery") == "verified-new-file" and receipt.get("workspace_id") == api.workspace and
                     receipt.get("job_id") == session.state["job_id"] and receipt.get("attempt_id") == attempt and
                     receipt.get("artifact") == item, "artifact_delivery_not_verified")

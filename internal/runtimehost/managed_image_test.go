@@ -66,18 +66,16 @@ func TestManagedImageInstallationRecoveryNeverRepeatsMutation(t *testing.T) {
 			if err != nil || op.Status != "accepted" {
 				t.Fatal(op, err)
 			}
-			repo := &lostImageCompletion{Repository: managedConnectionRepository{f.host.store}, lose: !beforeBuild}
+			repo := &lostImageCompletion{Repository: f.host.store, lose: !beforeBuild}
 			resetWorker := func() {
 				t.Helper()
 				var err error
-				f.services.connections, err = connections.New(f.host.access, repo, f.vault, []connections.Adapter{adapter}, time.Now)
-				if err != nil {
-					t.Fatal(err)
-				}
+				f.services.connections, err = connections.New(f.host.access, repo, f.vault, []connections.Adapter{adapter})
+				requireNoError(t, err)
 			}
 			resetWorker()
 			if beforeBuild {
-				started, err := f.host.store.BeginConnectionInstall(ctx, op.ID, time.Now().UTC())
+				started, err := f.host.store.BeginConnectionInstall(ctx, op.ID)
 				if err != nil || !started {
 					t.Fatal("could not simulate consumed permit", err)
 				}
@@ -109,16 +107,12 @@ func TestManagedImageInstallationRecoveryNeverRepeatsMutation(t *testing.T) {
 				t.Fatal("terminal installation queued another call", worked, err)
 			}
 			current, err := f.services.connections.Get(ctx, f.actor, "app", connection.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if beforeBuild {
 				// A later explicit check may observe a delayed installation; it cannot build.
 				installed = "sha256:" + strings.Repeat("2", 64)
 				_, err = f.services.connections.Submit(ctx, f.actor, "app", current.ID, "image-check", []byte(fmt.Sprintf(`{"action":"check","expected_revision":%d}`, current.Revision)))
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				if _, err = f.services.connections.RunOnce(ctx); err != nil {
 					t.Fatal(err)
 				}
@@ -131,9 +125,7 @@ func TestManagedImageInstallationRecoveryNeverRepeatsMutation(t *testing.T) {
 				t.Fatal("verified installed image has no selection", current)
 			}
 			frozen, err := f.host.store.ReadManagedBinding(ctx, f.binding(t, current))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			config, err := parseManagedSSHRuntimeConfig(frozen.RuntimeConfig)
 			if err != nil || config.Version != 3 || config.Image != installed || config.Architecture != "amd64" || config.RecipeSHA256 != sshhost.ImageRecipeDigest() || config.MachineID != strings.Repeat("2", 64) || config.EngineID != strings.Repeat("3", 64) {
 				t.Fatal("image ID or platform was not frozen", config, err)

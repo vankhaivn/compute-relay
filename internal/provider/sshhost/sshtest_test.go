@@ -1,9 +1,12 @@
 package sshhost
 
 import (
+	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"io"
 	"testing"
 
 	"github.com/vankhaivn/compute-relay/internal/testsupport/sshtest"
@@ -14,6 +17,25 @@ import (
 type testServer struct{ *sshtest.Server }
 
 func newTestServer(t *testing.T) *testServer { return &testServer{sshtest.New(t)} }
+
+func fakeHostOverSSH(t *testing.T, host *fakeHost, password string, key ssh.PublicKey, record func(string, []byte)) *testServer {
+	t.Helper()
+	server := newTestServer(t)
+	server.Password, server.ClientKey = password, key
+	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
+		input, _ := io.ReadAll(stdin)
+		if record != nil {
+			record(command, input)
+		}
+		result, err := host.Run(context.Background(), nil, commandArgs(t, command), bytes.NewReader(input), stdout)
+		if err != nil {
+			return 255
+		}
+		_, _ = stderr.Write(result.Stderr)
+		return result.ExitCode
+	}
+	return server
+}
 
 func (s *testServer) target() Target {
 	host, port, fingerprint := s.Start()

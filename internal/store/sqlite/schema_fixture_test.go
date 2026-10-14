@@ -21,50 +21,32 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old-state")
 	root, err := statefs.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer root.Close()
-	if err := initializeRoot(path); err != nil {
-		t.Fatal(err)
-	}
-	if err := statefs.WriteNew(filepath.Join(path, databaseName), nil); err != nil {
-		t.Fatal(err)
-	}
-	db, err := connect(filepath.Join(path, databaseName), false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, initializeRoot(path))
+	requireNoError(t, statefs.WriteNew(filepath.Join(path, databaseName), nil))
+	db, err := connect(filepath.Join(path, databaseName))
+	requireNoError(t, err)
 	defer db.Close()
-	if err := migrate(ctx, db, migrations[:version]); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, migrate(ctx, db, migrations[:version]))
 	type trigger struct{ name, sql string }
 	triggers := []trigger{}
 	tables := []string{}
 	rows, err := db.Query("SELECT type,name,sql FROM sqlite_schema WHERE type IN ('table','trigger') AND name NOT LIKE 'sqlite_%' ORDER BY name")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for rows.Next() {
 		var kind, name, definition string
-		if err := rows.Scan(&kind, &name, &definition); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, rows.Scan(&kind, &name, &definition))
 		if kind == "trigger" {
 			triggers = append(triggers, trigger{name, definition})
 		} else if name != "schema_migrations" {
 			tables = append(tables, name)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, rows.Err())
 	rows.Close()
 	conn, err := db.Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "ATTACH DATABASE ? AS fixture_source", filepath.Join(source.root.Path, databaseName)); err != nil {
 		t.Fatal(err)
@@ -73,9 +55,7 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		t.Fatal(err)
 	}
 	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer tx.Rollback()
 	quote := func(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
 	for _, tr := range triggers {
@@ -84,10 +64,29 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		}
 	}
 	for _, name := range tables {
+		// These unused tables were retired at schema 23; older fixtures need empty tables.
+		if name == "retention_holds" || name == "retention_audit" || name == "cleanup_previews" {
+			continue
+		}
 		if _, err := tx.Exec("DELETE FROM " + quote(name)); err != nil {
 			t.Fatal("clear fixture table", name, err)
 		}
-		columns := "*"
+		columnRows, err := tx.Query("PRAGMA table_xinfo(" + quote(name) + ")")
+		requireNoError(t, err)
+		var writable []string
+		for columnRows.Next() {
+			var ordinal, notNull, primaryKey, hidden int
+			var column, kind string
+			var defaultValue any
+			requireNoError(t, columnRows.Scan(&ordinal, &column, &kind, &notNull, &defaultValue, &primaryKey, &hidden))
+			if hidden == 0 {
+				writable = append(writable, column)
+			}
+		}
+		requireNoError(t, columnRows.Err())
+		columnRows.Close()
+		targetColumns := strings.Join(writable, ",")
+		columns := targetColumns
 		if name == "managed_connection_operations" && version < 18 {
 			var installed int
 			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connection_operations WHERE action='install_image' OR length(installation)>0").Scan(&installed); err != nil || installed != 0 {
@@ -116,7 +115,67 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 			}
 			columns = "connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at"
 		}
-		if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT " + columns + " FROM fixture_source." + quote(name)); err != nil {
+		sourceTable := "fixture_source." + quote(name)
+		// Reconstruct historical receipt/grant layouts without rewriting their JSON.
+		switch name {
+		case "operations":
+			if version < 28 {
+				sourceTable += " WHERE kind!='cleanup'"
+			}
+		case "cleanup_operations":
+			sourceTable = "(SELECT operation_seq AS cleanup_seq,workspace_id,operation_id,job_id,attempt_id,resource_id,status,revision,created_at,request_sha256,request_json,record FROM fixture_source.operations WHERE kind='cleanup')"
+		case "idempotency":
+			sourceTable = "fixture_source.receipts WHERE namespace='admission'"
+			columns = "workspace_id,scope,key_sha256,request_sha256,canonical_version,job_id,attempt_id,receipt"
+		case "operation_idempotency":
+			sourceTable = "fixture_source.receipts WHERE namespace='operation' AND scope!='cleanup'"
+			columns = "workspace_id,scope,key_sha256,request_sha256,canonical_version,subject_id,receipt"
+		case "cleanup_idempotency":
+			sourceTable = "fixture_source.receipts WHERE namespace='operation' AND scope='cleanup'"
+			columns = "workspace_id,key_sha256,request_sha256,canonical_version,subject_id,receipt"
+		case "managed_connection_operations":
+			if version >= 27 {
+				break
+			}
+			sourceTable = "(SELECT o.*,r.request_sha256 AS fingerprint,r.receipt FROM fixture_source.managed_connection_operations o JOIN fixture_source.receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256)"
+			columns = "operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,problem,created_at,updated_at"
+			if version >= 18 {
+				columns += ",installation"
+			}
+		case "execution_authorizations", "preparation_authorizations", "start_authorizations", "workload_secret_authorizations":
+			kind := map[string]string{"execution_authorizations": "execution", "preparation_authorizations": "prepare", "start_authorizations": "start", "workload_secret_authorizations": "secret"}[name]
+			sourceTable = "fixture_source.attempt_grants g JOIN fixture_source.receipts r ON r.workspace_id=g.workspace_id AND r.namespace='grant' AND r.scope=g.kind AND r.key_sha256=g.key_sha256"
+			columns = "g.workspace_id,g.authorization_id,g.job_id,g.attempt_id,g.key_sha256,r.request_sha256,"
+			switch kind {
+			case "execution":
+				columns += "g.binding,g.account_scope,g.inputs_sha256,g.attempt_nonce,g.max_remote_wall_seconds,g.granting_token_id,g.created_at,r.receipt,g.status,g.consumed_at"
+			case "prepare":
+				columns += "g.request,r.receipt,g.binding,g.account_scope,g.inputs_sha256,g.attempt_nonce,g.reserved_bytes,g.ready_until_ms,g.consumed_at,g.ready_revision,g.ready_at,g.storage_released"
+			case "start":
+				columns += "g.request,r.receipt,g.consumed_at"
+			case "secret":
+				columns += "g.metadata,r.receipt,g.expires_at_ms,g.consumed_at,g.revoked_at,g.revocation_key_sha256,v.receipt"
+				sourceTable += " LEFT JOIN fixture_source.receipts v ON v.workspace_id=g.workspace_id AND v.namespace='revoke' AND v.scope=g.authorization_id AND v.key_sha256=g.revocation_key_sha256"
+			}
+			sourceTable += " WHERE g.kind='" + kind + "'"
+		}
+		// Reconstruct the released lease layout when creating an older synthetic fixture.
+		switch name {
+		case "work_leases":
+			columns = "kind,key,generation,owner,fence,until_ms,held,operation_id,attempt_revision"
+		case "scheduler_leases":
+			sourceTable = "fixture_source.work_leases WHERE kind='dispatch'"
+			columns = "queue_seq,generation,CASE held WHEN 0 THEN '' ELSE owner END,CASE held WHEN 0 THEN '' ELSE fence END,CASE held WHEN 0 THEN 0 ELSE until_ms END,held"
+		case "collection_leases":
+			sourceTable = "fixture_source.work_leases WHERE kind='collection'"
+			columns = "workspace_id,job_id,attempt_id,operation_id,generation,fence,until_ms,attempt_revision,held"
+		case "cleanup_leases":
+			sourceTable = "fixture_source.work_leases WHERE kind='cleanup'"
+			columns = "workspace_id,cleanup_operation_id,generation,fence,until_ms"
+		case "collection_progress":
+			columns = "workspace_id,job_id,attempt_id,operation_id,generation,fence,stage,progress"
+		}
+		if _, err := tx.Exec("INSERT INTO " + quote(name) + "(" + targetColumns + ") SELECT " + columns + " FROM " + sourceTable); err != nil {
 			t.Fatal("copy fixture table", name, err)
 		}
 	}
@@ -138,12 +197,8 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 	if _, err := conn.ExecContext(ctx, "DETACH DATABASE fixture_source"); err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := recordInstallation(ctx, db, path); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, conn.Close())
+	requireNoError(t, recordInstallation(ctx, db, path))
 	if err := integrity(ctx, db); err != nil {
 		t.Fatal("released fixture integrity/foreign keys", err)
 	}

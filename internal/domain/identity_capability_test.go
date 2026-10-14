@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestOpaqueIDValidation(t *testing.T) {
@@ -116,105 +115,5 @@ func TestSHA256DigestValidation(t *testing.T) {
 		if _, err := ParseSHA256Digest(invalid); err == nil {
 			t.Fatalf("invalid digest %q accepted", invalid)
 		}
-	}
-}
-
-func TestCapabilityStatusValidation(t *testing.T) {
-	t.Parallel()
-
-	checkedAt := time.Date(2026, 9, 13, 13, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name    string
-		status  CapabilityStatus
-		wantErr bool
-	}{
-		{
-			name: "unknown and not tested",
-			status: CapabilityStatus{
-				Name:     CapabilityRemoteCancellation,
-				Support:  CapabilitySupportUnknown,
-				Evidence: EvidenceNotTested,
-			},
-		},
-		{
-			name: "documented support",
-			status: CapabilityStatus{
-				Name:          CapabilityQuotaReporting,
-				Support:       CapabilitySupportSupported,
-				Evidence:      EvidenceDocumentedUpstream,
-				CheckedAt:     checkedAt,
-				ClientVersion: "2.2.4",
-			},
-		},
-		{
-			name: "live support",
-			status: CapabilityStatus{
-				Name:           CapabilityGPU,
-				Support:        CapabilitySupportSupported,
-				Evidence:       EvidencePassedLive,
-				CheckedAt:      checkedAt,
-				AccountChecked: true,
-			},
-		},
-		{
-			name: "supported without evidence",
-			status: CapabilityStatus{
-				Name:     CapabilityGPU,
-				Support:  CapabilitySupportSupported,
-				Evidence: EvidenceNotTested,
-			},
-			wantErr: true,
-		},
-		{
-			name: "documented without timestamp",
-			status: CapabilityStatus{
-				Name:     CapabilityBatchExecution,
-				Support:  CapabilitySupportSupported,
-				Evidence: EvidenceDocumentedUpstream,
-			},
-			wantErr: true,
-		},
-		{
-			name: "live without account check",
-			status: CapabilityStatus{
-				Name:      CapabilityGPU,
-				Support:   CapabilitySupportSupported,
-				Evidence:  EvidencePassedLive,
-				CheckedAt: checkedAt,
-			},
-			wantErr: true,
-		},
-		{
-			name: "empty condition",
-			status: CapabilityStatus{
-				Name:       CapabilityQuotaReporting,
-				Support:    CapabilitySupportUnknown,
-				Evidence:   EvidenceNotTested,
-				Conditions: []string{""},
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid support",
-			status: CapabilityStatus{
-				Name:     CapabilityBatchExecution,
-				Support:  "probably",
-				Evidence: EvidenceNotTested,
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			err := test.status.Validate()
-			if test.wantErr && err == nil {
-				t.Fatal("Validate() succeeded, want error")
-			}
-			if !test.wantErr && err != nil {
-				t.Fatalf("Validate() error = %v", err)
-			}
-		})
 	}
 }

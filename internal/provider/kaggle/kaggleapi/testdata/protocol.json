@@ -1,0 +1,89 @@
+{
+  "provenance": "Synthetic protocol fixtures derived from kagglesdk 0.1.35 generated _fields/service calls and Relay tools/kaggle-client/tests/test_{execution,staging,monitor_protocol,cleanup,artifacts,discovery}.py. These are representative offline responses, not live captures. All identifiers, credentials and signatures are synthetic.",
+  "calls": [
+    {
+      "operation": "security.OAuthService/IntrospectToken",
+      "request": {"token": "SYNTHETIC_TOKEN"},
+      "response": {"active": true, "username": "fixture_user", "clientId": "fixture-client"}
+    },
+    {
+      "operation": "kernels.KernelsApiService/GetAcceleratorQuotaStatistics",
+      "request": {},
+      "response": {"gpuQuota": {"totalTimeAllowed": "19.999999999s", "timeUsed": "2.000000001s", "timeReserved": "3.000000001s", "hasEverRun": true}}
+    },
+    {
+      "operation": "datasets.DatasetApiService/GetDataset",
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage"},
+      "response": {"id": 123, "ref": "fixture_user/fixture-stage", "currentVersionNumber": 1, "isPrivate": true, "description": "fixture staging", "licenseName": "Other (specified in description)", "lastUpdated": "2026-01-01T00:00:00.123Z"}
+    },
+    {
+      "operation": "datasets.DatasetApiService/GetDatasetStatus",
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage"},
+      "response": {"status": "READY"}
+    },
+    {
+      "operation": "datasets.DatasetApiService/ListDatasetFiles",
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage", "datasetVersionNumber": 1, "pageSize": 20},
+      "response": {"datasetFiles": [{"name": "relay-stage.bin", "totalBytes": 3}], "nextPageToken": "fixture-page-two"}
+    },
+    {
+      "operation": "datasets.DatasetApiService/ListDatasetFiles",
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage", "datasetVersionNumber": 1, "pageSize": 20, "pageToken": "fixture-page-two"},
+      "response": {"datasetFiles": [{"name": "code.bin"}]}
+    },
+    {
+      "operation": "datasets.DatasetApiService/DownloadDataset",
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage", "datasetVersionNumber": 1, "fileName": "relay-stage.bin", "raw": true},
+      "status": 302,
+      "location": "https://storage.googleapis.com/fixture-object?signature=fixture",
+      "body": "Unread redirect body"
+    },
+    {
+      "operation": "blobs.BlobApiService/StartBlobUpload",
+      "request": {"type": "DATASET", "name": "relay-stage.bin", "contentType": "application/octet-stream", "contentLength": 3},
+      "response": {"token": "fixture-blob-marker", "createUrl": "https://storage.googleapis.com/fixture-upload?signature=fixture"}
+    },
+    {
+      "operation": "blobs.BlobApiService/StartBlobUpload",
+      "request": {"type": "DATASET", "name": "code.bin", "contentType": "application/octet-stream"},
+      "response": {"token": "fixture-blob-code", "createUrl": "https://www.googleapis.com/upload/storage/v1/b/fixture/o?signature=fixture"}
+    },
+    {
+      "operation": "datasets.DatasetApiService/CreateDataset",
+      "request": {"ownerSlug": "fixture_user", "slug": "fixture-stage", "title": "fixture-stage", "licenseName": "other", "description": "fixture staging", "isPrivate": true, "files": [{"token": "fixture-blob-marker"}, {"token": "fixture-blob-code"}]},
+      "response": {"status": "ok", "ref": "fixture_user/fixture-stage"}
+    },
+    {
+      "operation": "kernels.KernelsApiService/SaveKernel",
+      "request": {"slug": "fixture_user/fixture-run", "newTitle": "fixture-run", "text": "print('fixture')\n", "language": "python", "kernelType": "script", "isPrivate": true, "enableGpu": false, "enableTpu": false, "enableInternet": false, "datasetDataSources": ["fixture_user/fixture-stage"], "sessionTimeoutSeconds": 60, "kernelExecutionType": "SAVE_AND_RUN_ALL"},
+      "response": {"ref": "fixture_user/fixture-run", "versionNumber": 1, "kernelId": 42}
+    },
+    {
+      "operation": "kernels.KernelsApiService/GetKernel",
+      "request": {"userName": "fixture_user", "kernelSlug": "fixture-run"},
+      "response": {"metadata": {"id": "42", "ref": "fixture_user/fixture-run", "slug": "fixture-run", "currentVersionNumber": 1, "language": "python", "kernelType": "script", "isPrivate": true, "enableGpu": false, "enableTpu": false, "enableInternet": false, "datasetDataSources": ["fixture_user/fixture-stage"], "kernelDataSources": null, "competitionDataSources": [], "modelDataSources": []}, "blob": {"source": "print('fixture')\n"}}
+    },
+    {
+      "operation": "kernels.KernelsApiService/GetKernelSessionStatus",
+      "request": {"userName": "fixture_user", "kernelSlug": "fixture-run"},
+      "response": {"status": "COMPLETE"}
+    },
+    {
+      "operation": "kernels.KernelsApiService/DownloadKernelOutput",
+      "request": {"ownerSlug": "fixture_user", "kernelSlug": "fixture-run", "versionNumber": 1, "filePath": "relay-result/outputs/result.txt"},
+      "status": 307,
+      "location": "https://www.kaggleusercontent.com/fixture-output?signature=fixture",
+      "body": "Unread redirect body"
+    },
+    {
+      "operation": "kernels.KernelsApiService/DeleteKernel",
+      "request": {"userName": "fixture_user", "kernelSlug": "fixture-run"},
+      "response": {}
+    },
+    {
+      "operation": "datasets.DatasetApiService/DeleteDataset",
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage"},
+      "response": {"error": null}
+    }
+  ]
+}

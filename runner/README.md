@@ -32,12 +32,12 @@ There is no overwrite, resume or automatic retry of a payload.
 | `python/relay_runner/process.py` | Process-group supervision and bounded logs. |
 | `python/relay_runner/deadline.py` | Immutable deadline checks against UTC and Linux `CLOCK_BOOTTIME`. |
 | `python/relay_runner/main.py` | Preparation, setup, resource checks, execution and finalization. |
-| `manifest.schema.json` / `examples/` | Adapter-to-runner contract `compute-relay/runner/v1`. |
-| `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the seven modules. |
+| `contract.py` / `examples/` | Adapter-to-runner contract `compute-relay/runner/v1`. |
+| `assets.go` | Inert Go embedding of the seven modules. |
 | `check.py` / `tests/` | Offline checks and repository-owned CPU fixtures. |
 
-The [Kaggle execution component](../docs/development/providers/kaggle-execution.md) constructs the remote
-script from the locked modules and frozen plan. Packaging those modules is not local execution.
+The [Kaggle adapter](../docs/kaggle-runtime.md) constructs the remote
+script from the embedded modules and frozen plan. Packaging those modules is not local execution.
 The runner receives staged relative paths, job/attempt/nonce and digests, not provider tokens,
 source URLs, account configuration or callback addresses.
 
@@ -102,7 +102,7 @@ one-second grace, subject to a schedulable Linux host. Finalization has its inde
 `finalization_grace_seconds` bound. The SSH container supervisor may add up to two seconds.
 Software cannot stop a powered-off or suspended host; after resume it observes expiry. These
 limits do not cover deliberate session escape, uninterruptible kernel I/O, SIGKILL/OOM or provider
-loss. See [execution deadlines](../docs/execution-deadlines.md) for the full contract.
+loss. See [execution deadlines](../docs/execution-gates.md#execution-deadlines) for the full contract.
 
 The SSH adapter requires an advertised `absolute_execution_deadline` capability for absolute
 deadlines. It checks engine clock skew is at most five seconds and rejects skewed or unverifiable
@@ -115,7 +115,7 @@ verification. Execution requires a separate `--start-control` file with version
 `compute-relay/start/v1`, exact manifest SHA-256, job/attempt/nonce, readiness revision,
 authorization identity and finite start/wall/deadline bounds. The trusted supervisor and child
 validate this control before creating a work root; budgets tighten only in memory. The control
-contains no workload secrets. See [preparation gates](../docs/preparation-gates.md).
+contains no workload secrets. See [preparation gates](../docs/execution-gates.md).
 
 Stdout/stderr default to 20 MiB retained per stream, with seen/stored counts and truncation.
 Known credential-pattern redaction is best-effort hygiene, not a universal secret detector.
@@ -137,7 +137,7 @@ A runner cancellation phase does not prove provider cancellation or hardware rel
 
 The control plane still requires matching provider termination and verified artifact
 publication. Code/input/scratch files are not application artifacts. See
-[collection](../docs/development/collection.md) and [artifact retrieval](../docs/development/providers/kaggle-artifacts.md).
+[collection and artifact retrieval](../docs/artifact-delivery.md).
 
 ## Contributor checks
 
@@ -146,13 +146,11 @@ python runner/check.py
 go test ./runner
 ```
 
-The Python check validates source/JSON syntax, the asset lock, decoder and explicit CPU
-fixtures. It can execute those repository-owned fixtures on Linux; it does not call Kaggle
-or allocate GPU. Go tests check the embedded source inventory/lock. For an intentional,
-reviewed asset change only, update hashes with `python runner/check.py --lock` and rerun checks.
-Never refresh the lock to conceal an unexpected source difference.
+The Python check validates source/JSON syntax, the decoder and explicit CPU
+fixtures. It does not contact providers or allocate GPU. Go tests check the exact
+embedded source inventory and independent copies returned to callers.
 
-The locked client/CI Python is 3.11.16. Native control-plane checks on macOS/Windows do not
+The development/CI Python is pinned to 3.11.16. Native control-plane checks on macOS do not
 mean the remote runner supports those hosts. Keep full operator/provider run records outside this
 guide; put only support-changing sanitized evidence in a focused issue/PR. Design constraints are
-in [ADR-0007](../docs/development/decisions/0007-finite-remote-runner.md).
+in [design](../docs/design.md).

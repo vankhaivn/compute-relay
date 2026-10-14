@@ -6,9 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/statefs"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
@@ -52,33 +50,4 @@ func (h *Host) workloadSecretPool(ctx context.Context) (*workloadsecret.Pool, er
 	}
 	h.secretPool = pool
 	return pool, nil
-}
-
-type managedSecretRepository struct{ workloadsecret.Repository }
-
-func (r managedSecretRepository) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Command, metadata workloadsecret.Metadata, fingerprint string) (workloadsecret.Receipt, bool, error) {
-	type result struct {
-		receipt workloadsecret.Receipt
-		usable  bool
-	}
-	value, err := retryManagedClock(ctx, c.Now, func(at time.Time) (result, error) {
-		c.Now = at
-		receipt, usable, err := r.Repository.SupplyWorkloadSecrets(ctx, c, metadata, fingerprint)
-		return result{receipt, usable}, err
-	})
-	return value.receipt, value.usable, err
-}
-func (r managedSecretRepository) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Command, attempt domain.AttemptID, id domain.OperationID) (workloadsecret.Receipt, error) {
-	return retryManagedClock(ctx, c.Now, func(at time.Time) (workloadsecret.Receipt, error) {
-		c.Now = at
-		return r.Repository.RevokeWorkloadSecrets(ctx, c, attempt, id)
-	})
-}
-func (r managedSecretRepository) ReadWorkloadSecrets(ctx context.Context, w domain.WorkspaceID, token string, job domain.JobID, id domain.OperationID, now time.Time) (workloadsecret.Receipt, error) {
-	return retryManagedClock(ctx, now, func(at time.Time) (workloadsecret.Receipt, error) {
-		return r.Repository.ReadWorkloadSecrets(ctx, w, token, job, id, at)
-	})
-}
-func (r managedSecretRepository) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Key, id domain.OperationID, now time.Time) (bool, error) {
-	return retryManagedClock(ctx, now, func(at time.Time) (bool, error) { return r.Repository.WorkloadSecretsUsable(ctx, key, id, at) })
 }

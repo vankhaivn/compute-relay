@@ -15,7 +15,7 @@ import (
 
 func discoveryFixture(t *testing.T) *Discovery {
 	t.Helper()
-	d, err := NewDiscovery(testConfig(t).PythonExecutable, &stagingClock{at: time.Now().UTC()})
+	d, err := NewDiscovery(&stagingClock{at: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func discoveryVerified() discoveryResponse {
 func TestDiscoverySameAccountUsesFreshTokenAndKeepsBindingPrivate(t *testing.T) {
 	d := discoveryFixture(t)
 	var tokens []string
-	d.run = func(_ context.Context, _ string, token []byte) (discoveryResponse, error) {
+	d.run = func(_ context.Context, token []byte) (discoveryResponse, error) {
 		tokens = append(tokens, string(token))
 		r := discoveryVerified()
 		r.QuotaStatus, r.QuotaReason = "known", "none"
@@ -69,7 +69,7 @@ func TestDiscoveryKeepsUnknownUnavailableAndKnownZeroQuotaDistinct(t *testing.T)
 	} {
 		t.Run(tc.status+tc.reason, func(t *testing.T) {
 			d := discoveryFixture(t)
-			d.run = func(context.Context, string, []byte) (discoveryResponse, error) {
+			d.run = func(context.Context, []byte) (discoveryResponse, error) {
 				r := discoveryVerified()
 				r.QuotaStatus, r.QuotaReason = tc.status, tc.reason
 				if tc.status == "known" {
@@ -95,7 +95,7 @@ func TestDiscoveryKeepsUnknownUnavailableAndKnownZeroQuotaDistinct(t *testing.T)
 
 func TestDiscoveryInvalidTokenCannotInvokeChild(t *testing.T) {
 	d := discoveryFixture(t)
-	d.run = func(context.Context, string, []byte) (discoveryResponse, error) {
+	d.run = func(context.Context, []byte) (discoveryResponse, error) {
 		t.Fatal("invalid token reached child")
 		return discoveryResponse{}, nil
 	}
@@ -115,7 +115,7 @@ func TestDiscoveryFailureNeverRetainsAccountOrReflectsProviderText(t *testing.T)
 		{"credential_rejected", ErrCredentialRejected}, {"unavailable", ErrDiscoveryUnavailable}, {"invalid_response", ErrProtocol},
 	} {
 		d := discoveryFixture(t)
-		d.run = func(context.Context, string, []byte) (discoveryResponse, error) {
+		d.run = func(context.Context, []byte) (discoveryResponse, error) {
 			return discoveryResponse{Protocol: 1, Status: tc.status}, nil
 		}
 		result, err := d.Discover(context.Background(), []byte("SYNTHETIC_TOKEN"))
@@ -125,7 +125,7 @@ func TestDiscoveryFailureNeverRetainsAccountOrReflectsProviderText(t *testing.T)
 	}
 	for _, account := range []string{"", "Fixture_User", " leading", "a", "../other", "fixturé", "fixture_user\n", strings.Repeat("a", 51), "synthetic_token"} {
 		d := discoveryFixture(t)
-		d.run = func(context.Context, string, []byte) (discoveryResponse, error) {
+		d.run = func(context.Context, []byte) (discoveryResponse, error) {
 			r := discoveryVerified()
 			r.Account = account
 			return r, nil
@@ -137,14 +137,14 @@ func TestDiscoveryFailureNeverRetainsAccountOrReflectsProviderText(t *testing.T)
 	}
 	for _, panicInstead := range []bool{false, true} {
 		d := discoveryFixture(t)
-		d.run = func(context.Context, string, []byte) (discoveryResponse, error) {
+		d.run = func(context.Context, []byte) (discoveryResponse, error) {
 			if panicInstead {
 				panic("SYNTHETIC_TOKEN")
 			}
 			return discoveryVerified(), errors.New("SYNTHETIC_TOKEN")
 		}
 		result, err := d.Discover(context.Background(), []byte("SYNTHETIC_TOKEN"))
-		if err != ErrProcess || result.CanonicalAccount() != "" {
+		if err != ErrUnavailable || result.CanonicalAccount() != "" {
 			t.Fatal("raw error leaked or identity retained", err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestDiscoveryCancellationSerializesAndTimestampPrecedesRead(t *testing.T) {
 	d := discoveryFixture(t)
 	at := d.clock.Now()
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	d.run = func(context.Context, string, []byte) (discoveryResponse, error) {
+	d.run = func(context.Context, []byte) (discoveryResponse, error) {
 		close(entered)
 		<-release
 		d.clock.(*stagingClock).at = at.Add(4 * time.Minute)
@@ -175,7 +175,7 @@ func TestDiscoveryCancellationSerializesAndTimestampPrecedesRead(t *testing.T) {
 	}
 	close(release)
 	<-done
-	d.run = func(context.Context, string, []byte) (discoveryResponse, error) {
+	d.run = func(context.Context, []byte) (discoveryResponse, error) {
 		d.clock.(*stagingClock).at = at.Add(-time.Minute)
 		return discoveryVerified(), nil
 	}
@@ -186,25 +186,19 @@ func TestDiscoveryCancellationSerializesAndTimestampPrecedesRead(t *testing.T) {
 
 func TestDiscoveryConfigurationAndVaultBindings(t *testing.T) {
 	c := testConfig(t)
-	for _, ref := range []ports.CredentialRef{"env:PROBE_TOKEN", "vault:con_fixture"} {
+	for _, ref := range []ports.CredentialRef{"vault:con_fixture"} {
 		c.CredentialRef = ref
-		raw, _ := json.Marshal(c)
-		if _, err := ParseConfig(raw); err != nil {
+		if err := c.Validate(); err != nil {
 			t.Fatal("explicit credential reference rejected", err)
 		}
 	}
-	for _, ref := range []ports.CredentialRef{"vault:", "vault:other", "vault:con_", "vault:con_bad/path", "file:/token", "ambient"} {
+	for _, ref := range []ports.CredentialRef{"env:PROBE_TOKEN", "vault:", "vault:other", "vault:con_", "vault:con_bad/path", "file:/token", "ambient"} {
 		c.CredentialRef = ref
 		if c.Validate() == nil {
 			t.Fatal("invalid reference accepted")
 		}
 	}
-	for _, path := range []string{"", "relative/python", "/tmp/helper.sh", "/tmp/helper.cmd", "/tmp/helper\n"} {
-		if _, err := NewDiscovery(path, &stagingClock{}); err != ErrConfig {
-			t.Fatal("invalid interpreter accepted", err)
-		}
-	}
-	if _, err := NewDiscovery(c.PythonExecutable, nil); err != ErrConfig {
+	if _, err := NewDiscovery(nil); err != ErrConfig {
 		t.Fatal("missing clock accepted", err)
 	}
 }

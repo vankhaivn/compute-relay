@@ -19,56 +19,39 @@ func (s *Store) ConfigureScheduler(ctx context.Context, settings scheduler.Setti
 		return scheduler.ErrInvalid
 	}
 	raw, _ := json.Marshal(settings)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	_, err = s.db.ExecContext(ctx, "UPDATE scheduler_control SET settings=? WHERE singleton=1", string(raw))
-	return dbError(err)
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		_, err := tx.ExecContext(ctx, "UPDATE scheduler_control SET settings=? WHERE singleton=1", string(raw))
+		return dbError(err)
+	})
 }
 func (s *Store) ConfigureAccount(ctx context.Context, scope string, policy scheduler.AccountPolicy) error {
 	if !domain.ObjectID(scope).Valid() || !policy.Valid() {
 		return scheduler.ErrInvalid
 	}
 	raw, _ := json.Marshal(policy)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO scheduler_accounts VALUES(?,?) ON CONFLICT(account_scope) DO UPDATE SET policy=excluded.policy`, scope, string(raw))
-	return dbError(err)
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO scheduler_accounts VALUES(?,?) ON CONFLICT(account_scope) DO UPDATE SET policy=excluded.policy`, scope, string(raw))
+		return dbError(err)
+	})
 }
 
-func schedulerControl(ctx context.Context, tx *sql.Tx, now time.Time) (scheduler.Settings, string, error) {
+func schedulerControl(ctx context.Context, tx *sql.Tx) (scheduler.Settings, string, error) {
 	var settings scheduler.Settings
-	if !scheduler.ValidTime(now) {
-		return settings, "", scheduler.ErrInvalid
-	}
 	var raw, last string
-	var clock int64
-	if err := tx.QueryRowContext(ctx, "SELECT settings,last_workspace,clock_ms FROM scheduler_control WHERE singleton=1").Scan(&raw, &last, &clock); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT settings,last_workspace FROM scheduler_control WHERE singleton=1").Scan(&raw, &last); err != nil {
 		return settings, "", dbError(err)
 	}
 	if len(raw) > 4096 || json.Unmarshal([]byte(raw), &settings) != nil || !settings.Valid() || last != "" && !domain.WorkspaceID(last).Valid() {
 		return settings, "", ErrCorrupt
 	}
-	if now.UnixMilli() < clock {
-		return settings, "", scheduler.ErrClock
-	}
 	return settings, last, nil
-}
-func advanceSchedulerClock(ctx context.Context, tx *sql.Tx, now time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE scheduler_control SET clock_ms=? WHERE singleton=1", now.UnixMilli())
-	return dbError(err)
 }
 
 // RecordQuota stores an explicit observation; it never polls, estimates account quota,
 // assumes reset or changes credential/account identity. Unknown/error observations do
 // not clear an exhausted latch. Only newer fresh positive evidence can do so.
-func (s *Store) RecordQuota(ctx context.Context, scope, resource string, q provider.QuotaObservation, now time.Time) error {
-	if !domain.ObjectID(scope).Valid() || (resource != "cpu" && resource != "gpu") || q.Resource != resource || q.Validate() != nil || !scheduler.ValidTime(now) || !scheduler.ValidTime(q.ObservedAt) || q.ObservedAt.After(now) {
+func (s *Store) RecordQuota(ctx context.Context, scope string, resource string, q provider.QuotaObservation) error {
+	if !domain.ObjectID(scope).Valid() || (resource != "cpu" && resource != "gpu") || q.Resource != resource || q.Validate() != nil || !scheduler.ValidTime(q.ObservedAt) {
 		return scheduler.ErrInvalid
 	}
 	if q.ResetAt != nil && !scheduler.ValidTime(*q.ResetAt) {
@@ -78,12 +61,9 @@ func (s *Store) RecordQuota(ctx context.Context, scope, resource string, q provi
 	if err != nil || len(raw) > 4096 {
 		return scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error { return recordQuota(ctx, tx, scope, resource, q, now) })
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		return recordQuota(ctx, tx, scope, resource, q, now)
+	})
 }
 
 // recordQuota shares the existing monotonic observation/latch semantics with managed
@@ -97,7 +77,7 @@ func recordQuota(ctx context.Context, tx *sql.Tx, scope, resource string, q prov
 		return scheduler.ErrInvalid
 	}
 
-	settings, _, err := schedulerControl(ctx, tx, now)
+	settings, _, err := schedulerControl(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -126,5 +106,5 @@ func recordQuota(ctx context.Context, tx *sql.Tx, scope, resource string, q prov
 	if err != nil {
 		return dbError(err)
 	}
-	return advanceSchedulerClock(ctx, tx, now)
+	return nil
 }

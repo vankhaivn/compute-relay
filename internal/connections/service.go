@@ -7,13 +7,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"sync"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 const fingerprintKey = "request_fingerprint_v1"
@@ -23,20 +23,16 @@ type Service struct {
 	repo          Repository
 	vault         credentials.Vault
 	adapters      map[string]Adapter
-	now           func() time.Time
 	fingerprintMu sync.Mutex
 	secretMu      sync.Mutex
 	workerMu      sync.Mutex
 }
 
-func New(access *auth.Service, repo Repository, vault credentials.Vault, adapters []Adapter, now func() time.Time) (*Service, error) {
+func New(access *auth.Service, repo Repository, vault credentials.Vault, adapters []Adapter) (*Service, error) {
 	if access == nil || repo == nil || len(adapters) == 0 || len(adapters) > 32 {
 		return nil, ErrUnavailable
 	}
-	if now == nil {
-		now = time.Now
-	}
-	service := &Service{access: access, repo: repo, vault: vault, adapters: map[string]Adapter{}, now: now}
+	service := &Service{access: access, repo: repo, vault: vault, adapters: map[string]Adapter{}}
 	for _, adapter := range adapters {
 		if adapter == nil {
 			return nil, ErrUnavailable
@@ -80,7 +76,7 @@ func (s *Service) Get(ctx context.Context, p auth.Principal, w domain.WorkspaceI
 	if err != nil {
 		return Connection{}, err
 	}
-	c, err := s.repo.ReadConnection(ctx, w, p.TokenID(), id, s.now().UTC())
+	c, err := s.repo.ReadConnection(ctx, w, p.TokenID(), id)
 	return s.project(c), err
 }
 func (s *Service) List(ctx context.Context, p auth.Principal, w domain.WorkspaceID) ([]Connection, error) {
@@ -88,7 +84,7 @@ func (s *Service) List(ctx context.Context, p auth.Principal, w domain.Workspace
 	if err != nil {
 		return nil, err
 	}
-	items, err := s.repo.ListConnections(ctx, w, p.TokenID(), s.now().UTC())
+	items, err := s.repo.ListConnections(ctx, w, p.TokenID())
 	for i := range items {
 		items[i] = s.project(items[i])
 	}
@@ -159,7 +155,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	// delayed replay must not recreate a generation that removal already erased.
 	s.secretMu.Lock()
 	defer s.secretMu.Unlock()
-	input := Accept{Workspace: w, TokenID: p.TokenID(), KeyHash: string(keyHash), Fingerprint: fingerprint, ConnectionID: connection, ExpectedRevision: req.Revision, ProviderType: req.ProviderType, Label: req.Label, Action: req.Action, Secret: req.Credentials != nil, Configuration: req.Configuration, Now: s.now().UTC()}
+	input := Accept{Workspace: w, TokenID: p.TokenID(), KeyHash: string(keyHash), Fingerprint: fingerprint, ConnectionID: connection, ExpectedRevision: req.Revision, ProviderType: req.ProviderType, Label: req.Label, Action: req.Action, Secret: req.Credentials != nil, Configuration: req.Configuration}
 	record, replay, err := s.repo.ReplayConnection(ctx, input)
 	if err != nil {
 		return Operation{}, err
@@ -172,7 +168,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	if req.Configuration != nil && (req.Configuration.MaxActiveAttempts != 0 || req.Configuration.MaxProcesses != 0) {
 		providerType := req.ProviderType
 		if connection != "" {
-			current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection, s.now().UTC())
+			current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection)
 			if err != nil {
 				return Operation{}, err
 			}
@@ -188,7 +184,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 		providerType := req.ProviderType
 		if connection != "" {
 			// Management authority may inspect private target type without requiring read scope.
-			current, readErr := s.repo.ReadConnection(ctx, w, p.TokenID(), connection, s.now().UTC())
+			current, readErr := s.repo.ReadConnection(ctx, w, p.TokenID(), connection)
 			if readErr != nil {
 				return Operation{}, readErr
 			}
@@ -214,7 +210,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 		return Operation{}, ErrUnsupported
 	}
 	if !replay && req.Action == "install_image" {
-		current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection, s.now().UTC())
+		current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection)
 		if err != nil {
 			return Operation{}, err
 		}
@@ -240,7 +236,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 			if ctx.Err() != nil {
 				return Operation{}, ctx.Err()
 			}
-			if failErr := s.repo.FailConnection(ctx, record.Operation.ID, "credential_store_unavailable", s.now().UTC()); failErr != nil {
+			if failErr := s.repo.FailConnection(ctx, record.Operation.ID, "credential_store_unavailable"); failErr != nil {
 				return Operation{}, failErr
 			}
 		} else if err = s.repo.ReadyConnection(ctx, w, p.TokenID(), record.Operation.ID); err != nil {
@@ -309,7 +305,10 @@ func (s *Service) readCredential(ctx context.Context, id string) ([]byte, error)
 	defer s.secretMu.Unlock()
 	key, err := s.repo.ResolveConnectionCredential(ctx, id)
 	if err != nil {
-		return nil, credentials.ErrUnavailable
+		if err == credentials.ErrInvalid || err == credentials.ErrUnconfigured {
+			return nil, credentials.ErrUnavailable
+		}
+		return nil, provider.LocalStateError{Err: err}
 	}
 	var owned []byte
 	err = s.vault.WithSecret(ctx, key, func(secret []byte) error {

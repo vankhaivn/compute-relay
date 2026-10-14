@@ -34,16 +34,16 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 ## Create the connection
 
-Start SSH-only managed serve without Python:
+Start the managed runtime:
 
 ```sh
-compute-relay serve --root /absolute/private/runtime --managed
+compute-relay serve --root /absolute/private/runtime
 ```
 
-For installations that also use Kaggle, use `--managed-python` as described in
-[managed connections](managed-connections.md). New installations use private file credentials.
-When Keychain is selected, existing Python-created entries may require explicit macOS approval
-for the Go binary before switching modes. The SSH descriptor appears in `GET /v1/workspaces/{w}/providers` with type `ssh`. Every field is
+It includes SSH and Kaggle without a local Python interpreter. New installations use private file
+credentials. Existing Keychain items retain their native identity; a changed executable may need
+macOS access permission. The SSH descriptor appears in `GET /v1/workspaces/{w}/providers` with
+type `ssh`. Every field is
 write-only:
 
 | Field | Required | Meaning |
@@ -145,7 +145,7 @@ attempt as usual. Jobs may include an immutable absolute `timeouts.execution_dea
 the host advertises `absolute_execution_deadline`. Before start, SSH requires engine clock skew
 of at most five seconds and rejects skewed or unverifiable checks. The runner observes UTC and
 Linux `CLOCK_BOOTTIME`; deadlines, setup and payload supervision are described in the
-[execution deadline contract](execution-deadlines.md). Host sleep, VM clock behavior and reboot
+[execution deadline contract](execution-gates.md#execution-deadlines). Host sleep, VM clock behavior and reboot
 remain unqualified pending explicit live tests.
 
 Each attempt gets one container named `compute-relay-cr-…`. Preparation checks
@@ -156,7 +156,7 @@ For `execution_control: "prepare_then_start"`, preparation checks the installed 
 verifies the staged input, runtime and manifest bytes plus container policy while the container is
 stopped; it does not start workload code. A missing or changed prepared resource requires a new
 explicitly admitted attempt. Relay does not restage it or pull an image automatically. See
-[preparation gates](preparation-gates.md) for the readiness and start requests.
+[preparation gates](execution-gates.md) for the readiness and start requests.
 
 Hosts advertising `ephemeral_workload_secrets` can supply declared slot values after readiness.
 Values are base64 in the request and held only in process memory and a private 128 KiB tmpfs. Relay
@@ -207,8 +207,9 @@ standard image stay on the host. Receipts without an original engine ID remain r
 | No selection and `host.image.status=missing` | Request `install_image` and inspect its operation receipt. |
 | `image_installation_unknown` | Check the host, registry access and non-interactive Docker credential helpers; use `check` to discover a completed image. Do not assume the remote build stopped. |
 | Preparation fails after deleting an image | Restore the exact frozen image for retained jobs. Installing a new image only changes future selections. |
-| Credential store unavailable | Preserve the runtime and its selected store. For file storage, check the original private file and permissions; for Keychain, grant the intended binary access to the existing items or keep the working mode. Do not reset the runtime. |
+| Credential store unavailable | Preserve the runtime and its selected store. For file storage, check the original private file and permissions; for Keychain, grant the intended binary access to the existing items or retain the original working binary. Do not reset the runtime. |
 
-The Dockerfile pins the base digest; its SHA256 identifies the repository recipe.
-The legacy base reference remains in [docker.go](../internal/provider/sshhost/docker.go). See the [SSH host reference](development/providers/ssh-host.md)
-for exact Docker behavior and [current status](status.md) for evidence.
+The [Dockerfile](../internal/provider/sshhost/image/Dockerfile) pins the base digest; its SHA-256
+identifies the repository recipe. The [Docker adapter](../internal/provider/sshhost/docker.go)
+implements the bounded operations. [Compatibility](compatibility.md) describes qualification limits;
+provider contract fixtures do not replace an authorized live host test.

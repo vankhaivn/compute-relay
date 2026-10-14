@@ -14,22 +14,18 @@ import (
 
 // jobs is reached only after the existing server's auth, Host/Origin, rate, body,
 // deadline and workspace guards. A nil service never creates a nondurable fallback.
-func (h *handler) jobs(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
+func (h *handler) jobs(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Jobs == nil {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "job admission is not configured")
 		return
 	}
-	if len(segments) == 5 && segments[4] != "validate" && r.Method == http.MethodGet {
-		record, err := h.config.Jobs.Get(r.Context(), p, workspace, domain.JobID(segments[4]))
+	if r.Method == http.MethodGet {
+		record, err := h.config.Jobs.Get(r.Context(), p, workspace, domain.JobID(r.PathValue("job")))
 		if err != nil {
 			jobError(w, r, err)
 			return
 		}
 		respond(w, 200, jobStatus(record))
-		return
-	}
-	if (len(segments) != 4 && !(len(segments) == 5 && segments[4] == "validate")) || r.Method != http.MethodPost {
-		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "job route not implemented")
 		return
 	}
 	media, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -38,7 +34,7 @@ func (h *handler) jobs(w http.ResponseWriter, r *http.Request, p auth.Principal,
 		return
 	}
 	key := ""
-	if len(segments) == 4 {
+	if r.Pattern == "POST /v1/workspaces/{workspace}/jobs" {
 		keys := r.Header.Values("Idempotency-Key")
 		if len(keys) != 1 {
 			jobError(w, r, admission.ErrKey)
@@ -50,12 +46,12 @@ func (h *handler) jobs(w http.ResponseWriter, r *http.Request, p auth.Principal,
 			return
 		}
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, admission.MaxRequestBytes))
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		mapError(w, r, err)
 		return
 	}
-	if len(segments) == 5 {
+	if r.Pattern == "POST /v1/workspaces/{workspace}/jobs/validate" {
 		report, err := h.config.Jobs.Validate(r.Context(), p, workspace, body)
 		if err != nil {
 			jobError(w, r, err)
@@ -105,6 +101,8 @@ func jobStatus(record admission.Record) map[string]any {
 }
 func jobError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, admission.ErrUnsupportedInput):
+		respondError(w, r, 422, domain.CodeUnsupportedCapability, domain.FailureStageValidation, "HTTPS input sources are unsupported; upload inputs as objects")
 	case errors.Is(err, admission.ErrSpec):
 		respondError(w, r, 400, domain.CodeInvalidJobSpec, domain.FailureStageValidation, "invalid job specification")
 	case errors.Is(err, admission.ErrKey):

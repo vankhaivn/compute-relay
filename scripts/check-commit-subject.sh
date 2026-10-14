@@ -9,7 +9,7 @@ fail() {
   printf '%s\n' "Invalid commit subject: $subject" >&2
   printf '%s\n' 'Expected: <type>(<scope>)!: <lowercase summary>' >&2
   printf '%s\n' 'Types: feat, fix, docs, refactor, perf, test, build, ci, chore, style, revert' >&2
-  printf '%s\n' 'See docs/development/commit-convention.md' >&2
+  printf '%s\n' 'See docs/development.md#commit-convention' >&2
   exit 1
 }
 

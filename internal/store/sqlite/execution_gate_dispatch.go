@@ -12,16 +12,8 @@ import (
 )
 
 func consumeGatePreparation(ctx context.Context, tx *sql.Tx, work *dispatch.Work, now time.Time) error {
-	result, err := tx.ExecContext(ctx, `UPDATE preparation_authorizations SET consumed_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND consumed_at IS NULL`, now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID))
-	if err != nil {
-		return dbError(err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return dbError(err)
-	}
-	if count != 1 {
-		return dispatch.ErrConflict
+	if err := consumeGrant(ctx, tx, work.Job.Job.WorkspaceID, work.Job.Job.ID, work.Job.Attempt.ID, "prepare", now, dispatch.ErrConflict); err != nil {
+		return err
 	}
 	work.Gate.Preparation.Status, work.Gate.Preparation.ConsumedAt = executionauth.Consumed, &now
 	return nil
@@ -55,7 +47,7 @@ func commitGateStep(ctx context.Context, tx *sql.Tx, work *dispatch.Work, action
 			}
 			return nil
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE preparation_authorizations SET ready_revision=?,ready_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND ready_revision IS NULL AND consumed_at IS NOT NULL`, string(revision), now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID))
+		result, err := tx.ExecContext(ctx, `UPDATE attempt_grants SET ready_revision=?,ready_at=? WHERE kind='prepare' AND workspace_id=? AND job_id=? AND attempt_id=? AND ready_revision IS NULL AND consumed_at IS NOT NULL`, string(revision), now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID))
 		if err != nil {
 			return dbError(err)
 		}
@@ -83,28 +75,12 @@ func commitGateStep(ctx context.Context, tx *sql.Tx, work *dispatch.Work, action
 			if !action.SecretsAvailable {
 				return workloadsecret.ErrUnavailable
 			}
-			result, err := tx.ExecContext(ctx, `UPDATE workload_secret_authorizations SET consumed_at=? WHERE workspace_id=? AND authorization_id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at_ms>?`, now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(secretID), now.UnixMilli())
-			if err != nil {
-				return dbError(err)
-			}
-			count, err := result.RowsAffected()
-			if err != nil {
-				return dbError(err)
-			}
-			if count != 1 {
-				return workloadsecret.ErrUnavailable
+			if err := consumeGrant(ctx, tx, work.Job.Job.WorkspaceID, work.Job.Job.ID, work.Job.Attempt.ID, "secret", now, workloadsecret.ErrUnavailable); err != nil {
+				return err
 			}
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE start_authorizations SET consumed_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND consumed_at IS NULL`, now.UTC().Format(time.RFC3339Nano), string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID))
-		if err != nil {
-			return dbError(err)
-		}
-		count, err := result.RowsAffected()
-		if err != nil {
-			return dbError(err)
-		}
-		if count != 1 {
-			return dispatch.ErrConflict
+		if err := consumeGrant(ctx, tx, work.Job.Job.WorkspaceID, work.Job.Job.ID, work.Job.Attempt.ID, "start", now, dispatch.ErrConflict); err != nil {
+			return err
 		}
 		copy := g.Start.Clone()
 		action.StartAuthorization = &copy
@@ -117,6 +93,6 @@ func commitGateStep(ctx context.Context, tx *sql.Tx, work *dispatch.Work, action
 	return nil
 }
 func releaseGateStorage(ctx context.Context, tx *sql.Tx, workspace, job, attempt string) error {
-	_, err := tx.ExecContext(ctx, `UPDATE preparation_authorizations SET storage_released=1 WHERE workspace_id=? AND job_id=? AND attempt_id=? AND storage_released=0`, workspace, job, attempt)
+	_, err := tx.ExecContext(ctx, `UPDATE attempt_grants SET storage_released=1 WHERE kind='prepare' AND workspace_id=? AND job_id=? AND attempt_id=? AND storage_released=0`, workspace, job, attempt)
 	return dbError(err)
 }

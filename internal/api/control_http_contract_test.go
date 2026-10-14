@@ -25,9 +25,7 @@ func transportControlSchema(t *testing.T, file, fragment string) *jsonschema.Sch
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.AssertFormat()
 	schema, err := c.Compile((&url.URL{Scheme: "file", Path: path, Fragment: fragment}).String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return schema
 }
 
@@ -36,7 +34,7 @@ func TestControlHTTPResponsesSatisfyPublishedContracts(t *testing.T) {
 	job := admitControlJob(t, f)
 	operation := transportControlSchema(t, "schemas/control-operation.v1alpha1.schema.json", "")
 	errorSchema := transportControlSchema(t, "schemas/error.v1alpha1.schema.json", "")
-	info := transportControlSchema(t, "openapi.json", "/paths/~1v1~1info/get/responses/200/content/application~1json/schema")
+	info := transportControlSchema(t, "schemas/info.v1alpha1.schema.json", "")
 	validate := func(schema *jsonschema.Schema, raw []byte) {
 		t.Helper()
 		var value any

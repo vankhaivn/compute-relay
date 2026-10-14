@@ -19,9 +19,9 @@ import (
 var _ executionauth.Repository = (*Store)(nil)
 
 // authorizationInputs binds the immutable request and each pinned local object.
-// Unresolved HTTPS sources cannot be authorized as if their bytes were frozen.
+// Every input requires pinned bytes, including requests retained from older schemas.
 func authorizationInputs(record admission.Record) (string, error) {
-	if record.PendingHTTPS != 0 {
+	if len(record.Objects) != 1+len(record.Request.Spec().Inputs) {
 		return "", executionauth.ErrInputs
 	}
 	raw, err := json.Marshal(struct {
@@ -39,30 +39,22 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		return executionauth.Receipt{}, executionauth.ErrRequest
 	}
 	hash, _ := c.Request.Digest(c.JobID)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.Receipt{}, err
-	}
-	defer done()
 	var receipt executionauth.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
-		var priorHash, raw string
-		err := tx.QueryRowContext(ctx, "SELECT request_sha256,original_receipt FROM execution_authorizations WHERE workspace_id=? AND key_sha256=?", string(c.WorkspaceID), c.KeyDigest).Scan(&priorHash, &raw)
-		if err == nil {
-			if priorHash != hash {
-				return executionauth.ErrConflict
-			}
-			if len(raw) > 4096 || json.Unmarshal([]byte(raw), &receipt) != nil || receipt.Validate() != nil || receipt.Status != executionauth.Granted || receipt.Replay || receipt.WorkspaceID != c.WorkspaceID || receipt.JobID != c.JobID || receipt.AttemptID != c.Request.AttemptID {
+		key := receiptKey{c.WorkspaceID, "grant", "execution", c.KeyDigest, hash, "", executionauth.ErrConflict}
+		prior, found, err := replayOrCreate(ctx, tx, key, nil)
+		if err != nil {
+			return err
+		}
+		if found {
+			if json.Unmarshal([]byte(prior.raw), &receipt) != nil || receipt.Validate() != nil || receipt.Status != executionauth.Granted || receipt.Replay || receipt.WorkspaceID != c.WorkspaceID || receipt.JobID != c.JobID || receipt.AttemptID != c.Request.AttemptID {
 				return ErrCorrupt
 			}
 			receipt.Replay = true
 			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
 		}
 		record, err := readJobRecord(ctx, tx, c.WorkspaceID, c.JobID)
 		if errors.Is(err, admission.ErrNotFound) {
@@ -74,10 +66,10 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		if record.Attempt.ID != c.Request.AttemptID {
 			return executionauth.ErrConflict
 		}
-		if record.Request.Spec().Expired(c.Now) {
+		if record.Request.Spec().Expired(now) {
 			return admission.ErrExpired
 		}
-		if record.Request.Spec().SeparateStart() || !executionauth.Managed(record.Profile) || !scheduler.LocalOnly(record.Attempt.State) || c.Now.Before(record.Attempt.UpdatedAt) {
+		if record.Request.Spec().SeparateStart() || !scheduler.LocalOnly(record.Attempt.State) || now.Before(record.Attempt.UpdatedAt) {
 			return executionauth.ErrState
 		}
 		if err = managedProfileOwned(ctx, tx, c.WorkspaceID, record.Profile); err != nil {
@@ -87,7 +79,7 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 			return executionauth.ErrRequest
 		}
 		var count int
-		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM execution_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?", string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID)).Scan(&count); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM attempt_grants WHERE kind='execution' AND workspace_id=? AND job_id=? AND attempt_id=?", string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID)).Scan(&count); err != nil {
 			return dbError(err)
 		}
 		if count != 0 {
@@ -108,18 +100,22 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		if err != nil {
 			return err
 		}
-		if err = authorizationQuota(ctx, tx, record, c.Now); err != nil {
+		if err = authorizationQuota(ctx, tx, record, now); err != nil {
 			return err
 		}
 		id, err := randomID("grant_", 16)
 		if err != nil {
 			return err
 		}
-		receipt = executionauth.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: c.Request.AttemptID, Status: executionauth.Granted, MaxRemoteWallSeconds: c.Request.MaxRemoteWallSeconds, CreatedAt: c.Now.UTC()}
+		receipt = executionauth.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: c.Request.AttemptID, Status: executionauth.Granted, MaxRemoteWallSeconds: c.Request.MaxRemoteWallSeconds, CreatedAt: now.UTC()}
 		encoded, _ := json.Marshal(receipt)
 		binding, _ := json.Marshal(record.Profile)
-		_, err = tx.ExecContext(ctx, `INSERT INTO execution_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_sha256,binding,account_scope,inputs_sha256,attempt_nonce,max_remote_wall_seconds,granting_token_id,created_at,original_receipt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'granted')`, string(c.WorkspaceID), id, string(c.JobID), string(c.Request.AttemptID), c.KeyDigest, hash, string(binding), record.Profile.AccountScope, inputs, record.AttemptNonce, c.Request.MaxRemoteWallSeconds, c.TokenID, c.Now.UTC().Format(time.RFC3339Nano), string(encoded))
-		return dbError(err)
+		_, err = tx.ExecContext(ctx, `INSERT INTO attempt_grants(workspace_id,kind,authorization_id,job_id,attempt_id,key_sha256,binding,account_scope,inputs_sha256,attempt_nonce,max_remote_wall_seconds,granting_token_id,created_at,status) VALUES(?,'execution',?,?,?,?,?,?,?,?,?,?,?,'granted')`, string(c.WorkspaceID), id, string(c.JobID), string(c.Request.AttemptID), c.KeyDigest, string(binding), record.Profile.AccountScope, inputs, record.AttemptNonce, c.Request.MaxRemoteWallSeconds, c.TokenID, now.UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return dbError(err)
+		}
+		_, _, err = replayOrCreate(ctx, tx, key, &savedReceipt{id, c.JobID, c.Request.AttemptID, string(encoded)})
+		return err
 	})
 	if err != nil {
 		return executionauth.Receipt{}, err
@@ -147,7 +143,7 @@ func readAuthorization(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, jo
 	var r executionauth.Receipt
 	var raw, status string
 	var consumed sql.NullString
-	err := tx.QueryRowContext(ctx, "SELECT original_receipt,status,consumed_at FROM execution_authorizations WHERE workspace_id=? AND job_id=? AND authorization_id=?", string(w), string(job), string(id)).Scan(&raw, &status, &consumed)
+	err := tx.QueryRowContext(ctx, "SELECT r.receipt,g.status,g.consumed_at FROM attempt_grants g JOIN receipts r ON r.workspace_id=g.workspace_id AND r.namespace='grant' AND r.scope=g.kind AND r.key_sha256=g.key_sha256 WHERE g.kind='execution' AND g.workspace_id=? AND g.job_id=? AND g.authorization_id=?", string(w), string(job), string(id)).Scan(&raw, &status, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, executionauth.ErrNotFound
 	}
@@ -174,13 +170,8 @@ func (s *Store) ReadExecutionAuthorization(ctx context.Context, w domain.Workspa
 	if !w.Valid() || !job.Valid() || !id.Valid() {
 		return executionauth.Receipt{}, executionauth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.Receipt{}, err
-	}
-	defer done()
 	var r executionauth.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Execute); err != nil {
 			return err
 		}

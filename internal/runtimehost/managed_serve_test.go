@@ -6,8 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,18 +18,10 @@ import (
 func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *testing.T) {
 	f := newManagedTestFixture(t, true)
 	saved := f.connection(t, "saved-account-startup-key", "SYNTHETIC_FIRST")
-	python := filepath.Join(t.TempDir(), "python.exe")
-	// If any constructor/startup path attempts a provider or native-vault helper,
-	// this inert executable records it and fails before accessing any account.
-	if err := os.WriteFile(python, []byte("#!/bin/sh\nprintf unexpected >> \"$0.calls\"\nexit 99\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	config := f.config
-	config.PythonExecutable = python
+	t.Setenv("PATH", t.TempDir())
 	secret, _, err := f.host.access.Issue(context.Background(), "app", []auth.Scope{auth.Read}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	announced, done := make(chan Listening, 1), make(chan error, 1)
@@ -73,20 +63,16 @@ func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *test
 	get := func(path string) []byte {
 		t.Helper()
 		request, err := http.NewRequest(http.MethodGet, "http://"+listening.Address+path, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		request.Header.Set("Authorization", "Bearer "+secret.Reveal())
 		response, err := boundedClient().Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		defer response.Body.Close()
 		raw, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 		if err != nil || response.StatusCode != 200 || response.Header.Get("X-Compute-Relay-Mode") != wantMode {
 			t.Fatal("managed read failed", response.StatusCode, err)
 		}
-		if strings.Contains(string(raw), "fixture_user") || strings.Contains(string(raw), "SYNTHETIC_FIRST") || strings.Contains(string(raw), python) {
+		if strings.Contains(string(raw), "fixture_user") || strings.Contains(string(raw), "SYNTHETIC_FIRST") {
 			t.Fatal("private runtime details escaped in public reads")
 		}
 		return raw
@@ -116,24 +102,14 @@ func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *test
 	get("/v1/workspaces/app/connections/" + saved.ID)
 	get("/readyz")
 	stop()
-	if _, err := os.Stat(python + ".calls"); !os.IsNotExist(err) {
-		t.Fatal("startup/status read invoked a credential or provider helper")
-	}
 	if f.adapter.checks != 1 {
 		t.Fatal("saved account was reverified on startup")
 	}
 }
 
-func TestManagedServeRejectsMixedModeAndInvalidFiniteConfiguration(t *testing.T) {
+func TestManagedServeRejectsInvalidFiniteConfiguration(t *testing.T) {
 	f := newManagedTestFixture(t, true)
-	if err := f.host.ServeConfigured(context.Background(), ServeConfig{Address: "127.0.0.1:0", Managed: &f.config, Kaggle: &KaggleServeConfig{}},
-		func(Listening) error { t.Fatal("mixed mode started"); return nil }); err != ErrRequest {
-		t.Fatal("legacy process budget and managed permits combined", err)
-	}
 	for _, mutate := range []func(*ManagedServeConfig){
-		func(c *ManagedServeConfig) { c.PythonExecutable = "relative/python" },
-		func(c *ManagedServeConfig) { c.PythonExecutable = filepath.Join(t.TempDir(), "missing.exe") },
-		func(c *ManagedServeConfig) { c.PythonExecutable = t.TempDir() },
 		func(c *ManagedServeConfig) { c.MachineShape = "" },
 		func(c *ManagedServeConfig) { c.MachineShape = "paid-gpu" },
 		func(c *ManagedServeConfig) { c.MaxRemoteWallSeconds = 0 },

@@ -8,9 +8,7 @@ import (
 )
 
 const QuotaFreshFor = 5 * time.Minute
-const quotaSource = "kaggle-sdk/0.1.35:gpu_quota:reservations_included"
-
-var _ provider.QuotaReader = (*Monitor)(nil)
+const quotaSource = "kaggle-api/v1:gpu_quota:reservations_included"
 
 // ReadQuota uses the original server-verified account, not a job/workspace quota.
 // The observation timestamp precedes the read so response latency cannot make old

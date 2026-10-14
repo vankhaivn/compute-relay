@@ -1,11 +1,5 @@
 package domain
 
-import (
-	"fmt"
-	"strings"
-	"time"
-)
-
 // CapabilityName is a provider-neutral behavior exposed by a provider instance.
 type CapabilityName string
 
@@ -67,49 +61,4 @@ func (level EvidenceLevel) Valid() bool {
 	default:
 		return false
 	}
-}
-
-// CapabilityStatus is one evidence-bearing capability conclusion.
-type CapabilityStatus struct {
-	Name           CapabilityName
-	Support        CapabilitySupport
-	Reason         string
-	Conditions     []string
-	Evidence       EvidenceLevel
-	CheckedAt      time.Time
-	ClientVersion  string
-	AccountChecked bool
-}
-
-// Validate rejects internally contradictory capability claims.
-func (status CapabilityStatus) Validate() error {
-	if strings.TrimSpace(string(status.Name)) == "" {
-		return fmt.Errorf("capability name must not be empty")
-	}
-	if !status.Support.Valid() {
-		return fmt.Errorf("invalid capability support %q", status.Support)
-	}
-	if !status.Evidence.Valid() {
-		return fmt.Errorf("invalid capability evidence %q", status.Evidence)
-	}
-	if status.Support != CapabilitySupportUnknown {
-		switch status.Evidence {
-		case EvidencePlanned, EvidenceNotTested, EvidenceBlockedEnvironment:
-			return fmt.Errorf("capability %q cannot be %q with evidence %q", status.Name, status.Support, status.Evidence)
-		}
-	}
-	if status.Evidence == EvidenceDocumentedUpstream || status.Evidence == EvidencePassedLive {
-		if status.CheckedAt.IsZero() {
-			return fmt.Errorf("capability %q requires an evidence timestamp", status.Name)
-		}
-	}
-	if status.Evidence == EvidencePassedLive && !status.AccountChecked {
-		return fmt.Errorf("live capability evidence must record an account-scoped check")
-	}
-	for _, condition := range status.Conditions {
-		if strings.TrimSpace(condition) == "" {
-			return fmt.Errorf("capability %q contains an empty condition", status.Name)
-		}
-	}
-	return nil
 }

@@ -2,11 +2,9 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/connections"
 )
@@ -57,9 +55,9 @@ func TestManagedHTTPImageInstallationReceiptsAndReplay(t *testing.T) {
 			connectionPath := base + "/connections/" + created.ConnectionID
 			_, raw = f.call(t, "GET", connectionPath, "read", "", "", 200)
 			wireSchema(t, "connection", raw)
-			var connection connections.Connection
-			if err := json.Unmarshal(raw, &connection); err != nil || connection.Authentication != "verified" || connection.Selection != nil {
-				t.Fatal("missing image published a selection", err)
+			connection := decodeHTTPJSON[connections.Connection](t, raw)
+			if connection.Authentication != "verified" || connection.Selection != nil {
+				t.Fatal("missing image published a selection")
 			}
 			body := fmt.Sprintf(`{"action":"install_image","expected_revision":%d}`, connection.Revision)
 			headers, raw := f.call(t, "POST", connectionPath+"/actions", "manage", "image-install", body, 202)
@@ -81,7 +79,7 @@ func TestManagedHTTPImageInstallationReceiptsAndReplay(t *testing.T) {
 			if got := readManagedOperation(t, raw); got.Status != "accepted" || got.ID != first.ID {
 				t.Fatal("accepted installation is not readable", got)
 			}
-			if _, found, err := f.store.NextConnectionOperation(ctx, time.Now().UTC()); err != nil || !found {
+			if _, found, err := f.store.NextConnectionOperation(ctx); err != nil || !found {
 				t.Fatal("could not claim accepted installation", found, err)
 			}
 			_, raw = f.call(t, "GET", location, "manage", "", "", 200)

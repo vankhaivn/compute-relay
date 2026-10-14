@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
@@ -14,7 +13,7 @@ import (
 
 func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (connections.Record, error) {
 	var result connections.Record
-	if !in.Workspace.Valid() || !validID(in.TokenID) || !domain.SHA256Digest(in.KeyHash).Valid() || !domain.SHA256Digest(in.Fingerprint).Valid() || in.Now.IsZero() {
+	if !in.Workspace.Valid() || !validID(in.TokenID) || !domain.SHA256Digest(in.KeyHash).Valid() || !domain.SHA256Digest(in.Fingerprint).Valid() {
 		return result, connections.ErrRequest
 	}
 	if in.Configuration != nil && (in.Configuration.Validate() != nil || in.Action != "create" && in.Action != "configure") || in.Action == "configure" && in.Configuration == nil {
@@ -23,33 +22,25 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 	if (in.Action == "install_image") != (in.Installation != nil) || in.Installation != nil && in.Installation.Validate() != nil {
 		return result, connections.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return result, err
-	}
-	defer done()
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, in.Workspace, in.TokenID, auth.Manage); err != nil {
 			return err
 		}
-		var priorID, hash, receipt string
-		err := tx.QueryRowContext(ctx, `SELECT operation_id,fingerprint,receipt FROM managed_connection_operations WHERE workspace_id=? AND key_sha256=?`, in.Workspace, in.KeyHash).Scan(&priorID, &hash, &receipt)
-		if err == nil {
-			if hash != in.Fingerprint {
-				return connections.ErrConflict
-			}
-			result, err = loadManagedOperation(ctx, tx, domain.OperationID(priorID))
+		key := receiptKey{in.Workspace, "connection", "", in.KeyHash, in.Fingerprint, "", connections.ErrConflict}
+		priorReceipt, found, err := replayOrCreate(ctx, tx, key, nil)
+		if err != nil {
+			return err
+		}
+		if found {
+			result, err = loadManagedOperation(ctx, tx, domain.OperationID(priorReceipt.subject))
 			if err != nil {
 				return err
 			}
-			if json.Unmarshal([]byte(receipt), &result.Operation) != nil {
+			if json.Unmarshal([]byte(priorReceipt.raw), &result.Operation) != nil {
 				return ErrCorrupt
 			}
 			result.Operation.Replay = true
 			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
 		}
 		id := in.ConnectionID
 		revision := int64(1)
@@ -97,7 +88,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		if err != nil {
 			return err
 		}
-		stamp := in.Now.UTC().Format(time.RFC3339Nano)
+		stamp := now.UTC().Format(time.RFC3339Nano)
 		if in.Action == "create" {
 			var wall any
 			var maxActive, maxProcesses int
@@ -125,7 +116,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		if err != nil {
 			return dbError(err)
 		}
-		op := connections.Operation{ID: domain.OperationID(operationID), Workspace: in.Workspace, ConnectionID: id, Action: in.Action, Status: "accepted", ConnectionRevision: revision, CreatedAt: in.Now.UTC(), UpdatedAt: in.Now.UTC()}
+		op := connections.Operation{ID: domain.OperationID(operationID), Workspace: in.Workspace, ConnectionID: id, Action: in.Action, Status: "accepted", ConnectionRevision: revision, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 		if in.Action == "configure" {
 			// Configuration has no remote or credential mutation. Commit its new alias,
 			// saved override and terminal receipt atomically with the revision change.
@@ -157,9 +148,13 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 				return dbError(err)
 			}
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,created_at,updated_at,installation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, in.Fingerprint, stage, op.Status, credentialKey, string(receiptBytes), stamp, stamp, installation)
+		_, err = tx.ExecContext(ctx, `INSERT INTO managed_connection_operations(operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,stage,status,credential_key,created_at,updated_at,installation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationID, in.Workspace, id, in.Action, revision, in.TokenID, in.KeyHash, stage, op.Status, credentialKey, stamp, stamp, installation)
 		if err != nil {
 			return dbError(err)
+		}
+		_, _, err = replayOrCreate(ctx, tx, key, &savedReceipt{operationID, "", "", string(receiptBytes)})
+		if err != nil {
+			return err
 		}
 		result, err = loadManagedOperation(ctx, tx, op.ID)
 		return err
@@ -181,12 +176,7 @@ func managedRemovalAllowed(ctx context.Context, tx *sql.Tx, id string) error {
 	return nil
 }
 func (s *Store) ReadyConnection(ctx context.Context, w domain.WorkspaceID, token string, id domain.OperationID) error {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Manage); err != nil {
 			return err
 		}

@@ -35,13 +35,9 @@ func TestManagedLiveConfigurationUsesFrozenWallPolicyInWorker(t *testing.T) {
 		valid   bool
 	}{{old, 200, true}, {old, 600, false}, {f.binding(t, updated), 600, true}, {f.binding(t, updated), 7201, false}} {
 		saved, err := f.host.store.ReadManagedBinding(context.Background(), tc.binding)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		p, err := f.host.managedProvider(f.config, f.services.connections, saved)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		job := wallPolicyJob(saved, tc.wall)
 		if err := job.Validate(); err != nil {
 			t.Fatal("invalid test job", err)

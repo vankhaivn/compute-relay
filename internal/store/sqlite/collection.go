@@ -15,35 +15,15 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
 var _ collection.Repository = (*Store)(nil)
 
-func (s *Store) collectionTx(ctx context.Context, now time.Time, fn func(context.Context, *sql.Tx) error) error {
-	if !scheduler.ValidTime(now) {
-		return ErrInvalid
-	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		if _, _, err := schedulerControl(ctx, tx, now); err != nil {
-			return err
-		}
-		if err := fn(ctx, tx); err != nil {
-			return err
-		}
-		return advanceSchedulerClock(ctx, tx, now)
-	})
-}
-
 // ensureInitialCollection creates the first transfer ticket only when a collector
 // is explicitly invoked. Migration, admission, GET and terminal dispatch do not
 // start a collector. A failed ticket is never replaced automatically.
-func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time, managed bool) error {
+func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time) error {
 	var w domain.WorkspaceID
 	var job domain.JobID
 	var attempt domain.AttemptID
@@ -51,12 +31,11 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time, man
  FROM scheduler_queue q JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
  JOIN dispatch_journals d ON d.queue_seq=q.queue_seq
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id
- JOIN profile_revisions p ON p.profile=j.profile AND p.revision=j.profile_revision
- WHERE (COALESCE(json_extract(p.snapshot,'$.credential_ref'),'') LIKE 'vault:%')=?
+ WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=q.workspace_id AND r.job_id=q.job_id AND r.attempt_id=q.attempt_id)
  AND a.orchestration='collecting' AND d.phase='collectible'
  AND COALESCE(json_extract(j.request,'$.result_collection'),'automatic')='automatic'
  AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.workspace_id=q.workspace_id AND o.job_id=q.job_id AND o.attempt_id=q.attempt_id AND o.kind='collect')
- ORDER BY q.queue_seq LIMIT 1`, managed).Scan(&w, &job, &attempt)
+ ORDER BY q.queue_seq LIMIT 1`).Scan(&w, &job, &attempt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -75,7 +54,7 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time, man
 		return collection.ErrInvalid
 	}
 	if now.Before(target.Attempt.UpdatedAt) {
-		return scheduler.ErrClock
+		return ErrCorrupt
 	}
 	id, err := randomID("op_", 16)
 	if err != nil {
@@ -90,9 +69,9 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time, man
 	if err != nil {
 		return err
 	}
-	c := operations.Command{WorkspaceID: w, JobID: job, Kind: domain.OperationCollect, Request: req, RequestHash: hash, Now: now}
+	c := operations.Command{WorkspaceID: w, JobID: job, Kind: domain.OperationCollect, Request: req, RequestHash: hash}
 	r := operations.Record{Operation: op, Effect: operations.CollectionRequested}
-	if err = insertControl(ctx, tx, c, r); err != nil {
+	if err = insertOperation(ctx, tx, c, operationRow{Record: r}); err != nil {
 		return err
 	}
 	if err = controlEvent(ctx, tx, w, job, attempt, op.ID, domain.EventOperationAccepted, now); err != nil {
@@ -101,48 +80,38 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time, man
 	return controlEvent(ctx, tx, w, job, attempt, op.ID, domain.EventCollectionRequested, now)
 }
 
-func (s *Store) ClaimCollection(ctx context.Context, now time.Time, ttl time.Duration, workers int) (*collection.Work, error) {
-	return s.claimCollection(ctx, now, ttl, workers, false)
-}
-
-// ClaimCollectionManaged observes retained managed attempts without a new compute
-// grant. Both modes share the same global collector limit and exact frozen binding.
-func (s *Store) ClaimCollectionManaged(ctx context.Context, now time.Time, ttl time.Duration, workers int) (*collection.Work, error) {
-	return s.claimCollection(ctx, now, ttl, workers, true)
-}
-func (s *Store) claimCollection(ctx context.Context, now time.Time, ttl time.Duration, workers int, managed bool) (*collection.Work, error) {
-	now = now.UTC()
+// ClaimCollection observes retained attempts through their frozen binding.
+func (s *Store) ClaimCollection(ctx context.Context, ttl time.Duration, workers int) (*collection.Work, error) {
 	if ttl < time.Second || ttl > 31*time.Minute || workers < 1 || workers > 16 {
 		return nil, ErrInvalid
 	}
 	var result *collection.Work
-	err := s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM collection_leases WHERE held=1 AND until_ms>?", now.UnixMilli()).Scan(&count); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM work_leases WHERE kind='collection' AND held=1 AND until_ms>?", now.UnixMilli()).Scan(&count); err != nil {
 			return dbError(err)
 		}
 		if count >= workers {
 			return nil
 		}
-		if err := ensureInitialCollection(ctx, tx, now, managed); err != nil {
+		if err := ensureInitialCollection(ctx, tx, now); err != nil {
 			return err
 		}
 		var w domain.WorkspaceID
 		var id domain.OperationID
 		err := tx.QueryRowContext(ctx, `SELECT o.workspace_id,o.operation_id FROM operations o
  JOIN jobs j ON j.workspace_id=o.workspace_id AND j.job_id=o.job_id
- JOIN profile_revisions p ON p.profile=j.profile AND p.revision=j.profile_revision
- LEFT JOIN collection_leases c ON c.workspace_id=o.workspace_id AND c.job_id=o.job_id AND c.attempt_id=o.attempt_id
- WHERE (COALESCE(json_extract(p.snapshot,'$.credential_ref'),'') LIKE 'vault:%')=?
+ LEFT JOIN work_leases c ON c.kind='collection' AND c.key=json_array(o.workspace_id,o.job_id,o.attempt_id)
+ WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=o.workspace_id AND r.job_id=o.job_id AND r.attempt_id=o.attempt_id)
  AND o.kind='collect' AND o.status='accepted' AND (c.held IS NULL OR c.held=0 OR c.until_ms<=?)
- ORDER BY o.operation_seq LIMIT 1`, managed, now.UnixMilli()).Scan(&w, &id)
+ ORDER BY o.operation_seq LIMIT 1`, now.UnixMilli()).Scan(&w, &id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return dbError(err)
 		}
-		op, err := loadControl(ctx, tx, w, id)
+		op, err := loadOperation(ctx, tx, w, id)
 		if err != nil {
 			return err
 		}
@@ -156,7 +125,7 @@ func (s *Store) claimCollection(ctx context.Context, now time.Time, ttl time.Dur
 		}
 		a := target.Attempt
 		if now.Before(a.UpdatedAt) || now.Before(op.Operation.UpdatedAt) {
-			return scheduler.ErrClock
+			return ErrCorrupt
 		}
 		if a.State.Orchestration.Terminal() || !a.State.Execution.Terminal() || work.Journal.Phase != dispatch.Collectible || work.Journal.Observation == nil || work.Journal.Observation.Execution != a.State.Execution {
 			return collection.ErrInvalid
@@ -173,33 +142,17 @@ func (s *Store) claimCollection(ctx context.Context, now time.Time, ttl time.Dur
 		if err != nil {
 			return err
 		}
-		var generation int64
-		err = tx.QueryRowContext(ctx, `SELECT generation FROM collection_leases WHERE workspace_id=? AND job_id=? AND attempt_id=?`, string(w), string(a.JobID), string(a.ID)).Scan(&generation)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		if generation == math.MaxInt64 {
-			return ErrConflict
-		}
-		generation++
-		fence, err := randomID("", 32)
+		lease, err := claimWorkLease(ctx, tx, workLease{kind: collectionWorkKind, key: workKey(w, a.JobID, a.ID),
+			operationID: sql.NullString{String: string(id), Valid: true}, attemptRevision: sql.NullInt64{Int64: int64(a.Revision), Valid: true}}, now, ttl)
 		if err != nil {
 			return err
 		}
-		until := time.UnixMilli(now.Add(ttl).UnixMilli()).UTC()
-		_, err = tx.ExecContext(ctx, `INSERT INTO collection_leases VALUES(?,?,?,?,?,?,?,?,1)
- ON CONFLICT(workspace_id,job_id,attempt_id) DO UPDATE SET operation_id=excluded.operation_id,generation=excluded.generation,
- fence=excluded.fence,until_ms=excluded.until_ms,attempt_revision=excluded.attempt_revision,held=1`,
-			string(w), string(a.JobID), string(a.ID), string(id), generation, fence, until.UnixMilli(), a.Revision)
-		if err != nil {
-			return dbError(err)
-		}
-		lease := collection.Lease{WorkspaceID: w, JobID: a.JobID, AttemptID: a.ID, OperationID: id, Generation: generation, Fence: fence, Until: until, AttemptRevision: a.Revision}
-		loaded, err := collectionWork(ctx, tx, lease)
+		l := collection.Lease{WorkspaceID: w, JobID: a.JobID, AttemptID: a.ID, OperationID: id, Generation: lease.generation, Fence: lease.fence, Until: lease.until, AttemptRevision: a.Revision}
+		loaded, err := collectionWork(ctx, tx, l)
 		if err != nil {
 			return err
 		}
-		if err = saveCollectionProgress(ctx, tx, lease, "discovering", initialProgress(loaded, now)); err != nil {
+		if err = saveCollectionProgress(ctx, tx, l, "discovering", initialProgress(loaded, now)); err != nil {
 			return err
 		}
 		result = &loaded
@@ -209,6 +162,23 @@ func (s *Store) claimCollection(ctx context.Context, now time.Time, ttl time.Dur
 		return nil, err
 	}
 	return result, nil
+}
+
+// RenewCollection extends ownership without changing the pinned proof identity.
+func (s *Store) RenewCollection(ctx context.Context, w collection.Work, ttl time.Duration) (time.Time, error) {
+	if ttl < time.Second || ttl > 31*time.Minute {
+		return time.Time{}, ErrInvalid
+	}
+	var until time.Time
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		if _, _, _, err := checkedCollection(ctx, tx, w, now); err != nil {
+			return err
+		}
+		var err error
+		until, err = renewWorkLease(ctx, tx, collectionLease(w.Lease), now, ttl)
+		return err
+	})
+	return until, err
 }
 
 func collectionWork(ctx context.Context, tx *sql.Tx, l collection.Lease) (collection.Work, error) {
@@ -249,30 +219,18 @@ func collectionWork(ctx context.Context, tx *sql.Tx, l collection.Lease) (collec
 	return result, nil
 }
 
-func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now time.Time) (collection.Work, controlRecord, domain.Attempt, error) {
+func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now time.Time) (collection.Work, operationRow, domain.Attempt, error) {
 	var empty collection.Work
-	var zero controlRecord
+	var zero operationRow
 	var noAttempt domain.Attempt
 	if !w.Valid() {
 		return empty, zero, noAttempt, collection.ErrInvalid
 	}
 	l := w.Lease
-	var id, fence string
-	var generation, until int64
-	var revision uint64
-	var held bool
-	err := tx.QueryRowContext(ctx, `SELECT operation_id,generation,fence,until_ms,attempt_revision,held FROM collection_leases
- WHERE workspace_id=? AND job_id=? AND attempt_id=?`, string(l.WorkspaceID), string(l.JobID), string(l.AttemptID)).Scan(&id, &generation, &fence, &until, &revision, &held)
-	if errors.Is(err, sql.ErrNoRows) {
-		return empty, zero, noAttempt, collection.ErrLeaseLost
+	if _, err := checkWorkLease(ctx, tx, collectionLease(l), now); err != nil {
+		return empty, zero, noAttempt, err
 	}
-	if err != nil {
-		return empty, zero, noAttempt, dbError(err)
-	}
-	if !held || id != string(l.OperationID) || generation != l.Generation || fence != l.Fence || until != l.Until.UnixMilli() || revision != l.AttemptRevision || now.UnixMilli() >= until {
-		return empty, zero, noAttempt, collection.ErrLeaseLost
-	}
-	op, err := loadControl(ctx, tx, l.WorkspaceID, l.OperationID)
+	op, err := loadOperation(ctx, tx, l.WorkspaceID, l.OperationID)
 	if err != nil {
 		return empty, zero, noAttempt, err
 	}
@@ -280,11 +238,11 @@ func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now t
 	if err != nil {
 		return empty, zero, noAttempt, err
 	}
-	if op.Operation.Kind != domain.OperationCollect || op.Operation.Status != domain.OperationAccepted || op.Operation.JobID != l.JobID || op.Operation.AttemptID != l.AttemptID || a.Revision != revision || a.State.Result != domain.ResultCollecting || a.State.Orchestration != domain.OrchestrationCollecting {
+	if op.Operation.Kind != domain.OperationCollect || op.Operation.Status != domain.OperationAccepted || op.Operation.JobID != l.JobID || op.Operation.AttemptID != l.AttemptID || a.Revision != l.AttemptRevision || a.State.Result != domain.ResultCollecting || a.State.Orchestration != domain.OrchestrationCollecting {
 		return empty, zero, noAttempt, collection.ErrLeaseLost
 	}
 	if now.Before(a.UpdatedAt) || now.Before(op.Operation.UpdatedAt) {
-		return empty, zero, noAttempt, scheduler.ErrClock
+		return empty, zero, noAttempt, ErrCorrupt
 	}
 	current, err := collectionWork(ctx, tx, l)
 	if err != nil {
@@ -296,7 +254,7 @@ func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now t
 	return current, op, a, nil
 }
 
-func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot collection.Snapshot, now time.Time) error {
+func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot collection.Snapshot) error {
 	// All decoding/hash checks are over bounded in-memory evidence; no byte/network I/O.
 	if collection.ValidateSnapshot(w, snapshot) != nil {
 		return collection.ErrInvalid
@@ -305,7 +263,7 @@ func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot c
 	if err != nil || len(raw) > collection.MaxSnapshotBytes {
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, _, _, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -321,8 +279,8 @@ func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot c
 	})
 }
 
-func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof collection.Verified, now time.Time) error {
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof collection.Verified) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, op, a, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -341,6 +299,9 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 			return dbError(err)
 		}
 		for _, f := range snapshot.Files {
+			if err = registerRetention(ctx, tx, retention.Result, f.Object, now); err != nil {
+				return err
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO artifacts VALUES(?,?,?,?,?,?,?,?,?,?)`, string(l.WorkspaceID), string(l.JobID), string(l.AttemptID), string(f.ID), string(f.Object.ID), f.Path, f.Role, f.Object.Bytes, string(f.Object.SHA256), f.MediaType)
 			if err != nil {
 				return dbError(err)
@@ -363,16 +324,16 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 		if err = finishCollectionProgress(ctx, tx, current, "available", now); err != nil {
 			return err
 		}
-		return releaseCollection(ctx, tx, l)
+		return releaseWorkLease(ctx, tx, collectionLease(l), now)
 	})
 }
-func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collection.Failure, now time.Time) error {
+func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collection.Failure) error {
 	switch f.Code {
 	case domain.CodeArtifactCollectionFailed, domain.CodeArtifactMissing, domain.CodeArtifactDigestMismatch, domain.CodeResultManifestMissing, domain.CodeRemoteIdentityMismatch:
 	default:
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, op, a, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -407,12 +368,8 @@ func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collect
 		if err = finishCollectionProgress(ctx, tx, current, "failed", now); err != nil {
 			return err
 		}
-		return releaseCollection(ctx, tx, w.Lease)
+		return releaseWorkLease(ctx, tx, collectionLease(w.Lease), now)
 	})
-}
-func releaseCollection(ctx context.Context, tx *sql.Tx, l collection.Lease) error {
-	_, err := tx.ExecContext(ctx, `UPDATE collection_leases SET held=0 WHERE workspace_id=? AND job_id=? AND attempt_id=? AND generation=? AND fence=?`, string(l.WorkspaceID), string(l.JobID), string(l.AttemptID), l.Generation, l.Fence)
-	return dbError(err)
 }
 
 // Cached job status uses the same journal condition as dispatch. Updating it here

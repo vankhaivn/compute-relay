@@ -2,6 +2,7 @@ package admission
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -84,13 +85,6 @@ func TestSpecRejectsInvalidAndContradictoryData(t *testing.T) {
 			t.Fatalf("accepted %s", c[1])
 		}
 	}
-	for _, url := range []string{"http://example.com/data", "https://user:secret@example.com/data", "https://127.0.0.1/data", "https://example.com/data?token=secret"} {
-		input, _ := json.Marshal([]Input{{Name: "x", Target: "x", Source: Source{Kind: "https", URL: url}}})
-		raw := strings.Replace(validJob, `"inputs":[]`, `"inputs":`+string(input), 1)
-		if _, err := Parse([]byte(raw)); err == nil {
-			t.Fatal("unsafe durable URL", url)
-		}
-	}
 	for _, inputs := range [][]Input{
 		{{Name: "x", Target: "a", Source: Source{Kind: "object", ObjectID: "data"}}, {Name: "X", Target: "b", Source: Source{Kind: "object", ObjectID: "data"}}},
 		{{Name: "x", Target: "a", Source: Source{Kind: "object", ObjectID: "data"}}, {Name: "y", Target: "a/b", Source: Source{Kind: "object", ObjectID: "data"}}},
@@ -100,5 +94,21 @@ func TestSpecRejectsInvalidAndContradictoryData(t *testing.T) {
 		if _, err := Parse([]byte(raw)); err == nil {
 			t.Fatal("colliding input accepted")
 		}
+	}
+}
+
+func TestHTTPSInputRejectedForNewAdmissionAndReadableHistorically(t *testing.T) {
+	input, _ := json.Marshal([]Input{{Name: "x", Target: "x", Source: Source{Kind: "https", URL: "https://example.com/input"}}})
+	raw := strings.Replace(validJob, `"inputs":[]`, `"inputs":`+string(input), 1)
+	req, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal("historical request unreadable", err)
+	}
+	if !errors.Is(req.Spec().CheckInputs(), ErrUnsupportedInput) {
+		t.Fatal("HTTPS input accepted for admission")
+	}
+	object, err := Parse([]byte(validJob))
+	if err != nil || object.Spec().CheckInputs() != nil {
+		t.Fatal("object inputs rejected", err)
 	}
 }

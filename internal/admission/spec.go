@@ -11,21 +11,21 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/vankhaivn/compute-relay/api/schemas"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/httpsinput"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 var (
-	ErrSpec         = errors.New("invalid job specification")
-	ErrKey          = errors.New("invalid idempotency key")
-	ErrSelection    = errors.New("selected immutable profile revision is no longer available for new work")
-	ErrConflict     = errors.New("idempotency key was used with a different request")
-	ErrNotFound     = errors.New("job or admission not found")
-	ErrInputs       = errors.New("referenced input is missing or not visible")
-	ErrRequirements = errors.New("job exceeds the resolved profile policy")
-	ErrLimit        = errors.New("local outstanding job limit reached")
-	ErrExpired      = errors.New("absolute execution deadline has expired")
-	ErrUnavailable  = errors.New("durable admission unavailable")
+	ErrUnsupportedInput = errors.New("HTTPS input sources are unsupported; upload inputs as objects")
+	ErrSpec             = errors.New("invalid job specification")
+	ErrKey              = errors.New("invalid idempotency key")
+	ErrSelection        = errors.New("selected immutable profile revision is no longer available for new work")
+	ErrConflict         = errors.New("idempotency key was used with a different request")
+	ErrNotFound         = errors.New("job or admission not found")
+	ErrInputs           = errors.New("referenced input is missing or not visible")
+	ErrRequirements     = errors.New("job exceeds the resolved profile policy")
+	ErrLimit            = errors.New("local outstanding job limit reached")
+	ErrExpired          = errors.New("absolute execution deadline has expired")
+	ErrUnavailable      = errors.New("durable admission unavailable")
 )
 
 type Source struct {
@@ -224,11 +224,6 @@ func semantic(s Spec) error {
 			return ErrSpec
 		}
 		targets = append(targets, in.Target)
-		if in.Source.Kind == "https" {
-			if (httpsinput.Request{URL: in.Source.URL, SHA256: string(in.Source.ExpectedSHA256)}).Validate() != nil {
-				return ErrSpec
-			}
-		}
 	}
 	targets = nil
 	for _, out := range s.Outputs {
@@ -248,4 +243,14 @@ func overlaps(paths []string, next string) bool {
 		}
 	}
 	return false
+}
+
+// CheckInputs applies the current admission policy without altering historical requests.
+func (s Spec) CheckInputs() error {
+	for _, input := range s.Inputs {
+		if input.Source.Kind != "object" {
+			return ErrUnsupportedInput
+		}
+	}
+	return nil
 }

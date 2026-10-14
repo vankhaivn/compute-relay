@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"math"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
@@ -14,25 +13,13 @@ import (
 
 // ClaimRecovery returns an observation/staging-readiness lease, never a repeat-mutation
 // permit. Pausing new dispatch does not discard the ability to observe existing work.
-func (s *Store) ClaimRecovery(ctx context.Context, owner string, now time.Time) (*scheduler.Claim, error) {
-	return s.claimRecovery(ctx, owner, now, false)
-}
-
-func (s *Store) ClaimRecoveryManaged(ctx context.Context, owner string, now time.Time) (*scheduler.Claim, error) {
-	return s.claimRecovery(ctx, owner, now, true)
-}
-func (s *Store) claimRecovery(ctx context.Context, owner string, now time.Time, managed bool) (*scheduler.Claim, error) {
+func (s *Store) ClaimRecovery(ctx context.Context, owner string) (*scheduler.Claim, error) {
 	if !domain.ObjectID(owner).Valid() {
 		return nil, scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
 	var result *scheduler.Claim
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		settings, last, err := schedulerControl(ctx, tx, now)
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		settings, last, err := schedulerControl(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -45,7 +32,7 @@ func (s *Store) claimRecovery(ctx context.Context, owner string, now time.Time, 
 			return err
 		}
 		if view.LiveWorkers >= settings.MaxWorkers {
-			return advanceSchedulerClock(ctx, tx, now)
+			return nil
 		}
 		// Only known journal phases can recover. An old dispatch barrier without this
 		// ledger remains untouched and requires operator inspection, not guessed migration.
@@ -54,19 +41,18 @@ func (s *Store) claimRecovery(ctx context.Context, owner string, now time.Time, 
  JOIN dispatch_journals d ON d.queue_seq=q.queue_seq
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id AND j.active_attempt_id=q.attempt_id
  JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
- JOIN profile_revisions p ON p.profile=j.profile AND p.revision=j.profile_revision
- LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
- LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
- LEFT JOIN start_authorizations x ON x.workspace_id=q.workspace_id AND x.job_id=q.job_id AND x.attempt_id=q.attempt_id
- WHERE (COALESCE(json_extract(p.snapshot,'$.credential_ref'),'') LIKE 'vault:%')=?
+ LEFT JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
+ LEFT JOIN attempt_grants g ON g.kind='prepare' AND g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
+ LEFT JOIN attempt_grants x ON x.kind='start' AND x.workspace_id=q.workspace_id AND x.job_id=q.job_id AND x.attempt_id=q.attempt_id
+ WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=q.workspace_id AND r.job_id=q.job_id AND r.attempt_id=q.attempt_id)
  AND q.dispatch_barrier=1 AND d.phase IN ('staging','ready','submitting','submitted')
  AND a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out')
  AND (d.phase!='ready' OR g.authorization_id IS NULL OR x.authorization_id IS NOT NULL OR g.ready_until_ms<=?
  OR EXISTS(SELECT 1 FROM operations o WHERE o.workspace_id=q.workspace_id AND o.job_id=q.job_id AND o.attempt_id=q.attempt_id AND o.kind='cancel' AND o.status IN ('accepted','running')))
  AND q.not_before_ms<=? AND (l.held IS NULL OR l.held=0 OR l.until_ms<=?)
- ORDER BY q.not_before_ms,q.queue_seq LIMIT 1`, managed, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&sequence)
+ ORDER BY q.not_before_ms,q.queue_seq LIMIT 1`, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&sequence)
 		if errors.Is(err, sql.ErrNoRows) {
-			return advanceSchedulerClock(ctx, tx, now)
+			return nil
 		}
 		if err != nil {
 			return dbError(err)
@@ -86,36 +72,17 @@ func (s *Store) claimRecovery(ctx context.Context, owner string, now time.Time, 
 			return err
 		}
 		if now.Before(a.UpdatedAt) {
-			return scheduler.ErrClock
+			return ErrCorrupt
 		}
-		var generation int64
-		err = tx.QueryRowContext(ctx, "SELECT generation FROM scheduler_leases WHERE queue_seq=?", sequence).Scan(&generation)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		if generation == math.MaxInt64 {
-			return ErrConflict
-		}
-		fence, err := randomID("", 32)
+		lease, err := claimWorkLease(ctx, tx, workLease{kind: dispatchWork, key: workKey(sequence), owner: owner}, now, settings.LeaseDuration)
 		if err != nil {
 			return err
 		}
-		until := time.UnixMilli(now.Add(settings.LeaseDuration).UnixMilli()).UTC()
-		if !scheduler.ValidTime(until) {
-			return scheduler.ErrInvalid
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO scheduler_leases VALUES(?,?,?,?,?,1) ON CONFLICT(queue_seq) DO UPDATE SET generation=excluded.generation,owner=excluded.owner,fence=excluded.fence,until_ms=excluded.until_ms,held=1`, sequence, generation+1, owner, fence, until.UnixMilli())
-		if err != nil {
-			return dbError(err)
-		}
-		c := scheduler.Claim{Identity: row.Identity, Sequence: sequence, Owner: owner, Generation: generation + 1, Fence: fence, ExpiresAt: until, AttemptRevision: a.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
+		c := scheduler.Claim{Identity: row.Identity, Sequence: sequence, Owner: owner, Generation: lease.generation, Fence: lease.fence, ExpiresAt: lease.until, AttemptRevision: a.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
 		if _, err = loadDispatch(ctx, tx, c, now); err != nil {
 			return err
 		}
 		if _, err = schedulerTransition(ctx, tx, row.Identity, a, a.State, domain.EventSchedulerClaimed, now); err != nil {
-			return err
-		}
-		if err = advanceSchedulerClock(ctx, tx, now); err != nil {
 			return err
 		}
 		result = &c
@@ -126,14 +93,9 @@ func (s *Store) claimRecovery(ctx context.Context, owner string, now time.Time, 
 	}
 	return result, nil
 }
-func (s *Store) RenewDispatch(ctx context.Context, h dispatch.Handle, now time.Time) (dispatch.Handle, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Handle{}, err
-	}
-	defer done()
+func (s *Store) RenewDispatch(ctx context.Context, h dispatch.Handle) (dispatch.Handle, error) {
 	var result dispatch.Handle
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -141,23 +103,17 @@ func (s *Store) RenewDispatch(ctx context.Context, h dispatch.Handle, now time.T
 		if err = checkHandle(work, h); err != nil {
 			return err
 		}
-		settings, _, err := schedulerControl(ctx, tx, now)
+		settings, _, err := schedulerControl(ctx, tx)
 		if err != nil {
 			return err
 		}
-		until := time.UnixMilli(now.Add(settings.LeaseDuration).UnixMilli()).UTC()
-		if !scheduler.ValidTime(until) {
-			return scheduler.ErrInvalid
-		}
-		if until.Before(h.Claim.ExpiresAt) {
-			until = h.Claim.ExpiresAt
-		}
-		if _, err = tx.ExecContext(ctx, "UPDATE scheduler_leases SET until_ms=? WHERE queue_seq=?", until.UnixMilli(), h.Claim.Sequence); err != nil {
-			return dbError(err)
+		until, err := renewWorkLease(ctx, tx, dispatchLease(h.Claim), now, settings.LeaseDuration)
+		if err != nil {
+			return err
 		}
 		result = h
 		result.Claim.ExpiresAt = until
-		return advanceSchedulerClock(ctx, tx, now)
+		return nil
 	})
 	if err != nil {
 		return dispatch.Handle{}, err
@@ -167,16 +123,11 @@ func (s *Store) RenewDispatch(ctx context.Context, h dispatch.Handle, now time.T
 
 // YieldDispatch releases LOCAL worker ownership, never the dispatch barrier or remote
 // execution evidence. HoldsAccount continues to reserve possible remote execution.
-func (s *Store) YieldDispatch(ctx context.Context, h dispatch.Handle, now time.Time, delay time.Duration) error {
+func (s *Store) YieldDispatch(ctx context.Context, h dispatch.Handle, delay time.Duration) error {
 	if delay < 0 || delay > time.Hour {
 		return scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -191,12 +142,12 @@ func (s *Store) YieldDispatch(ctx context.Context, h dispatch.Handle, now time.T
 		if _, err = schedulerTransition(ctx, tx, h.Claim.Identity, work.Job.Attempt, work.Job.Attempt.State, domain.EventSchedulerReleased, now); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "UPDATE scheduler_leases SET owner='',fence='',until_ms=0,held=0 WHERE queue_seq=?", h.Claim.Sequence); err != nil {
-			return dbError(err)
+		if err = releaseWorkLease(ctx, tx, dispatchLease(h.Claim), now); err != nil {
+			return err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE scheduler_queue SET not_before_ms=? WHERE queue_seq=?", notBefore.UnixMilli(), h.Claim.Sequence); err != nil {
 			return dbError(err)
 		}
-		return advanceSchedulerClock(ctx, tx, now)
+		return nil
 	})
 }

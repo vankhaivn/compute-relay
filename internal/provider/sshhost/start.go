@@ -197,18 +197,20 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 	return seen, err
 }
 
-func (a *Adapter) Start(ctx context.Context, prepared provider.Prepared, authorization provider.StartAuthorization) provider.SubmissionOutcome {
-	if authorization.Validate(prepared) != nil || authorization.Secrets != nil {
-		return rejected("start_authorization_required")
-	}
-	return a.submit(ctx, prepared, &authorization, nil)
-}
-
-func (a *Adapter) StartWithSecrets(ctx context.Context, prepared provider.Prepared, authorization provider.StartAuthorization, material workloadsecret.Material) provider.SubmissionOutcome {
-	if authorization.ValidateMaterial(prepared, material) != nil {
+// Start sends the prepared container's one-shot start command only after authority checks.
+func (a *Adapter) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
+	if authorization == nil {
+		if material != nil {
+			return rejected("start_authorization_required")
+		}
+	} else if authorization.Secrets == nil {
+		if material != nil || authorization.Validate(prepared) != nil {
+			return rejected("start_authorization_required")
+		}
+	} else if material == nil || authorization.ValidateMaterial(prepared, *material) != nil {
 		return rejected("workload_secret_unavailable")
 	}
-	return a.submit(ctx, prepared, &authorization, &material)
+	return a.submit(ctx, prepared, authorization, material)
 }
 
 // Recheck the small immutable control files and the observed container policy

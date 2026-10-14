@@ -54,7 +54,7 @@ type stagingRequest struct {
 type stagingPlan struct {
 	request stagingRequest
 	marker  []byte
-	objects []domain.ObjectMetadata // Same order as Files[1:]; never sent to SDK.
+	objects []domain.ObjectMetadata // Same order as Files[1:]; never sent to the provider.
 }
 
 // The opaque name is derived entirely from the prewritten attempt identity and

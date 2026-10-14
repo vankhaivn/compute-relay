@@ -23,9 +23,7 @@ func TestArtifactActualHTTPResponsesMatchEmbeddedContract(t *testing.T) {
 	compiler.UseLoader(artifactNoExternalSchemas{})
 	for _, name := range []string{"common.v1alpha1.schema.json", "artifact.v1alpha1.schema.json"} {
 		raw, err := schemas.Files.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		var value any
 		if json.Unmarshal(raw, &value) != nil {
 			t.Fatal("invalid embedded schema")
@@ -40,9 +38,7 @@ func TestArtifactActualHTTPResponsesMatchEmbeddedContract(t *testing.T) {
 		{"/art_output?attempt_id=att_one", "metadata"},
 	} {
 		schema, err := compiler.Compile("https://artifact.invalid/artifact.v1alpha1.schema.json#/$defs/" + tc.definition)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		resp, raw := f.request(t, "GET", "/v1/workspaces/a/jobs/job_one/artifacts"+tc.suffix, "read", nil, nil)
 		var value map[string]any
 		if resp.StatusCode != 200 || json.Unmarshal(raw, &value) != nil || schema.Validate(value) != nil {

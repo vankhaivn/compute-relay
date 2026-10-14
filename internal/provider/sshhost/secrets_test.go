@@ -35,13 +35,13 @@ func TestWorkloadSecretSSHUsesOnlyFixedStdinAndPrivateTmpfs(t *testing.T) {
 	if h.host.starts != 0 || h.host.commands("exec") != 0 || !slices.Contains(container.args, secretTmpfsPath+":"+secretTmpfsOptions) {
 		t.Fatal("preparation delivered material or omitted private tmpfs")
 	}
-	if out := h.adapter.Start(context.Background(), prepared, start); out.Status != provider.SubmissionRejected || h.host.starts != 0 {
+	if out := h.adapter.Start(context.Background(), prepared, &start, nil); out.Status != provider.SubmissionRejected || h.host.starts != 0 {
 		t.Fatal("ordinary Start accepted material-free secret job")
 	}
-	if _, err := h.adapter.ReconcilePreparation(context.Background(), plan, testOperation); err != nil {
+	if _, err := h.adapter.ReconcilePrepare(context.Background(), plan, testOperation); err != nil {
 		t.Fatal(err)
 	}
-	out := h.adapter.StartWithSecrets(context.Background(), prepared, start, material)
+	out := h.adapter.Start(context.Background(), prepared, &start, &material)
 	if out.Status != provider.SubmissionAccepted || h.host.starts != 1 || len(h.host.secretPackets) != 1 {
 		t.Fatal("secret start failed", out.Status, out.Problem)
 	}
@@ -64,7 +64,7 @@ func TestWorkloadSecretSSHUsesOnlyFixedStdinAndPrivateTmpfs(t *testing.T) {
 			t.Fatal("secret reached persistent staging", name)
 		}
 	}
-	if again := h.adapter.StartWithSecrets(context.Background(), prepared, start, material); again.Status != provider.SubmissionUnknown || h.host.starts != 1 || len(h.host.secretPackets) != 1 {
+	if again := h.adapter.Start(context.Background(), prepared, &start, &material); again.Status != provider.SubmissionUnknown || h.host.starts != 1 || len(h.host.secretPackets) != 1 {
 		t.Fatal("repeated start reinjected material")
 	}
 }
@@ -93,7 +93,7 @@ func TestWorkloadSecretSSHUncertainDeliveryNeverReinjects(t *testing.T) {
 			case "changed_tmpfs":
 				c.args[slices.Index(c.args, "--tmpfs")+1] = "/relay/secrets:rw,size=131072,mode=0777"
 			}
-			out := h.adapter.StartWithSecrets(context.Background(), prepared, start, material)
+			out := h.adapter.Start(context.Background(), prepared, &start, &material)
 			if strings.HasPrefix(kind, "lost_") {
 				if out.Status != provider.SubmissionUnknown {
 					t.Fatal("uncertainty became rejection", out.Status)
@@ -101,7 +101,7 @@ func TestWorkloadSecretSSHUncertainDeliveryNeverReinjects(t *testing.T) {
 				delivered := len(h.host.secretPackets)
 				h.host.fail = nil
 				h.host.secretAckLost = false
-				if again := h.adapter.StartWithSecrets(context.Background(), prepared, start, material); again.Status != provider.SubmissionUnknown || h.host.starts != 1 || len(h.host.secretPackets) != delivered {
+				if again := h.adapter.Start(context.Background(), prepared, &start, &material); again.Status != provider.SubmissionUnknown || h.host.starts != 1 || len(h.host.secretPackets) != delivered {
 					t.Fatal("uncertain delivery repeated")
 				}
 			} else if out.Status != provider.SubmissionRejected || h.host.starts != 0 || len(h.host.secretPackets) != 0 {

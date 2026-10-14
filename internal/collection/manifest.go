@@ -4,91 +4,29 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/vankhaivn/compute-relay/api/schemas"
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
 )
 
-type manifest struct {
-	Phase    string          `json:"phase"`
-	Started  time.Time       `json:"started_at"`
-	Finished time.Time       `json:"finished_at"`
-	TimedOut bool            `json:"timed_out"`
-	Error    json.RawMessage `json:"error"`
-	Resource struct {
-		Required bool `json:"gpu_required"`
-		Verified bool `json:"gpu_verified"`
-	} `json:"resource_check"`
-	Artifacts []struct {
-		Path      string              `json:"path"`
-		Bytes     int64               `json:"bytes"`
-		SHA256    domain.SHA256Digest `json:"sha256"`
-		MediaType string              `json:"media_type"`
-	} `json:"artifacts"`
-}
-
-var schemaOnce sync.Once
-var resultSchema *jsonschema.Schema
-var schemaErr error
-
-type closedLoader struct{}
-
-func (closedLoader) Load(string) (any, error) { return nil, ErrInvalid }
-func compileManifestSchema() {
-	c := jsonschema.NewCompiler()
-	c.DefaultDraft(jsonschema.Draft2020)
-	c.AssertFormat()
-	c.UseLoader(closedLoader{})
-	for _, name := range []string{"common.v1alpha1.schema.json", "result-manifest.v1alpha1.schema.json"} {
-		raw, err := schemas.Files.ReadFile(name)
-		if err != nil {
-			schemaErr = ErrUnavailable
-			return
-		}
-		var v any
-		if json.Unmarshal(raw, &v) != nil {
-			schemaErr = ErrUnavailable
-			return
-		}
-		if c.AddResource("https://contracts.compute-relay.invalid/"+name, v) != nil {
-			schemaErr = ErrUnavailable
-			return
-		}
-	}
-	resultSchema, schemaErr = c.Compile("https://contracts.compute-relay.invalid/result-manifest.v1alpha1.schema.json")
-}
-func parseManifest(w Work, raw []byte) (manifest, admission.Spec, error) {
-	var m manifest
+func parseManifest(w Work, raw []byte) (runnerplan.Result, admission.Spec, error) {
 	var spec admission.Spec
 	if !w.Valid() {
-		return m, spec, ErrInvalid
+		return runnerplan.Result{}, spec, ErrInvalid
 	}
-	value, err := strictValue(raw)
+	m, err := runnerplan.ParseResult(w.Plan.Job.Identity, raw)
 	if err != nil {
+		if problem, ok := err.(domain.Problem); ok && problem.Code == domain.CodeRemoteIdentityMismatch {
+			return m, spec, failure(domain.CodeRemoteIdentityMismatch, true)
+		}
 		return m, spec, failure(domain.CodeArtifactCollectionFailed, true)
 	}
-	schemaOnce.Do(compileManifestSchema)
-	if schemaErr != nil {
-		return m, spec, ErrUnavailable
-	}
-	if resultSchema.Validate(value) != nil {
-		return m, spec, failure(domain.CodeArtifactCollectionFailed, true)
-	}
-	if provider.ValidateManifestIdentity(w.Plan.Job.Identity, raw) != nil {
-		return m, spec, failure(domain.CodeRemoteIdentityMismatch, true)
-	}
-	if json.Unmarshal(raw, &m) != nil || json.Unmarshal(w.Plan.Job.Specification, &spec) != nil {
+	if json.Unmarshal(w.Plan.Job.Specification, &spec) != nil {
 		return m, spec, ErrInvalid
 	}
-	if m.Finished.Before(m.Started) || m.TimedOut != (m.Phase == "timed_out") ||
-		m.Resource.Required != (spec.Resources.Accelerator == "gpu") ||
-		m.Phase == "completed" && m.Resource.Required && !m.Resource.Verified ||
-		m.Phase != "completed" && (len(m.Error) == 0 || string(m.Error) == "null") {
+	if m.Resource.Required != (spec.Resources.Accelerator == "gpu") {
 		return m, spec, failure(domain.CodeArtifactCollectionFailed, true)
 	}
 	return m, spec, nil

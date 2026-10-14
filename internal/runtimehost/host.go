@@ -37,7 +37,7 @@ type Status struct {
 	DispatchEnabled bool   `json:"dispatch_enabled"`
 }
 
-// Host owns every local store lock. Close only after all users/HTTP handlers stop.
+// Host owns the shared root lock. Close only after all users/HTTP handlers stop.
 // Administrative commands require exclusive host access, not a token granting
 // an application an HTTP administration route.
 type Host struct {
@@ -105,15 +105,30 @@ func open(ctx context.Context, path string, create bool) (_ *Host, err error) {
 			}
 		}
 	}
-	h.store, err = sqlite.Open(ctx, filepath.Join(h.root.Path, "state"), sqlite.DefaultOptions())
+	stateRoot, err := h.root.Child("state")
 	if err != nil {
 		return nil, ErrState
 	}
-	h.inputs, err = blobfs.New(filepath.Join(h.root.Path, "inputs"), blobfs.Limits{MaxObjectBytes: 2 << 30, MaxTotalBytes: 8 << 30})
+	defer stateRoot.Close()
+	h.store, err = sqlite.OpenRoot(ctx, stateRoot, sqlite.DefaultOptions(), h.identity.InstallationID)
 	if err != nil {
 		return nil, ErrState
 	}
-	h.results, err = blobfs.New(filepath.Join(h.root.Path, "results"), blobfs.Limits{MaxObjectBytes: 4 << 30, MaxTotalBytes: 8 << 30})
+	inputRoot, err := h.root.Child("inputs")
+	if err != nil {
+		return nil, ErrState
+	}
+	defer inputRoot.Close()
+	h.inputs, err = blobfs.NewRoot(inputRoot, blobfs.Limits{MaxObjectBytes: 2 << 30, MaxTotalBytes: 8 << 30})
+	if err != nil {
+		return nil, ErrState
+	}
+	resultRoot, err := h.root.Child("results")
+	if err != nil {
+		return nil, ErrState
+	}
+	defer resultRoot.Close()
+	h.results, err = blobfs.NewRoot(resultRoot, blobfs.Limits{MaxObjectBytes: 4 << 30, MaxTotalBytes: 8 << 30})
 	if err != nil {
 		return nil, ErrState
 	}
@@ -134,9 +149,14 @@ func open(ctx context.Context, path string, create bool) (_ *Host, err error) {
 		return nil, ErrState
 	}
 	h.identity = actual
-	h.access, err = auth.New(h.store, h.store, nil)
+	h.access, err = auth.New(h.store, h.store)
 	if err != nil {
 		return nil, ErrState
+	}
+	if !create {
+		if err := h.store.RemoveLegacyInstallation(ctx, h.identity.InstallationID); err != nil {
+			return nil, ErrState
+		}
 	}
 	return h, nil
 }

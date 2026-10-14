@@ -3,7 +3,6 @@ package kaggle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"sync"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // RuntimeLoader reloads the original durable plan/preparation for one attempt.
@@ -18,21 +18,19 @@ import (
 type RuntimeLoader func(context.Context, provider.Identity) (provider.Plan, provider.Prepared, error)
 
 // RuntimeAdapter composes the reviewed Kaggle components for normal durable
-// orchestration. Mutation authorization is finite and process-local; M3 remains
-// the durable authority for whether Prepare or Submit may be called at all.
+// orchestration. The repository owns durable authorization and one-shot intents
+// for every preparation and submission; this adapter keeps no process budget.
 type RuntimeAdapter struct {
 	config        Config
 	binding       provider.BindingSnapshot
 	policy        ExecutionPolicy
 	allow         bool
-	maxAttempts   int
 	load          RuntimeLoader
 	clock         ports.Clock
 	preflight     *Preflight
 	stager        *Stager
 	monitor       *Monitor
 	mu            sync.Mutex
-	authorized    map[provider.Identity]bool
 	components    map[provider.Identity]*runtimeComponents
 	makeExecutor  func(*Stager, ExecutionPolicy, provider.Plan, provider.Prepared, bool) (*Executor, error)
 	makeArtifacts func(*Executor, ArtifactPolicy) (*ArtifactReader, error)
@@ -47,22 +45,13 @@ type runtimeComponents struct {
 }
 
 var (
-	_ provider.Provider               = (*RuntimeAdapter)(nil)
-	_ provider.ArtifactProgressReader = (*RuntimeAdapter)(nil)
-	_ provider.BindingVerifier        = (*RuntimeAdapter)(nil)
-	_ provider.PreparationObserver    = (*RuntimeAdapter)(nil)
-	_ provider.QuotaReader            = (*RuntimeAdapter)(nil)
-	_ provider.LogReader              = (*RuntimeAdapter)(nil)
-	_ provider.Canceller              = (*RuntimeAdapter)(nil)
+	_ provider.Provider = (*RuntimeAdapter)(nil)
 
 	ErrRuntimeBinding = errors.New("runtime provider binding does not match the configured immutable profile")
-	ErrRuntimeBudget  = errors.New("runtime provider mutation budget exhausted; restart only with explicit authorization after resolving uncertain attempts")
-	ErrRuntimeCleanup = fmt.Errorf("runtime remote cleanup apply is unavailable; preserve owned resources and recovery evidence: %w", provider.ErrCleanupUnsupported)
 )
 
-// NewRuntimeAdapter creates one immutable Kaggle provider revision. maxAttempts
-// bounds how many distinct attempt identities this process may newly mutate.
-// Read-only recovery does not consume this budget.
+// NewRuntimeAdapter creates one immutable Kaggle provider revision.
+// Read-only recovery never creates a mutation permit.
 func NewRuntimeAdapter(
 	c Config,
 	binding provider.BindingSnapshot,
@@ -71,7 +60,6 @@ func NewRuntimeAdapter(
 	clock ports.Clock,
 	load RuntimeLoader,
 	policy ExecutionPolicy,
-	maxAttempts int,
 	allowMutations bool,
 ) (*RuntimeAdapter, error) {
 	if c.Validate() != nil || !binding.Valid() || resolver == nil || blobs == nil || clock == nil || load == nil || !policy.valid() {
@@ -82,13 +70,6 @@ func NewRuntimeAdapter(
 		binding.AccountScope != c.AccountName ||
 		binding.CredentialRef != string(c.CredentialRef) {
 		return nil, ErrRuntimeBinding
-	}
-	if allowMutations {
-		if maxAttempts < 1 || maxAttempts > 64 {
-			return nil, ErrRuntimeBudget
-		}
-	} else if maxAttempts != 0 {
-		return nil, ErrRuntimeBudget
 	}
 	stager, err := NewStager(c, DefaultStagingPolicy(), resolver, blobs, allowMutations)
 	if err != nil {
@@ -104,8 +85,8 @@ func NewRuntimeAdapter(
 	}
 	return &RuntimeAdapter{
 		config: c, binding: binding, policy: policy, allow: allowMutations,
-		maxAttempts: maxAttempts, load: load, clock: clock, preflight: preflight,
-		stager: stager, monitor: monitor, authorized: make(map[provider.Identity]bool),
+		load: load, clock: clock, preflight: preflight,
+		stager: stager, monitor: monitor,
 		components:   make(map[provider.Identity]*runtimeComponents),
 		makeExecutor: NewExecutor, makeArtifacts: NewArtifactReader,
 		runCleanup: runCleanup,
@@ -113,62 +94,59 @@ func NewRuntimeAdapter(
 }
 
 func (p *RuntimeAdapter) Describe() provider.Descriptor {
-	d, err := OperationalDescriptor(p.config)
-	if err != nil {
-		return provider.Descriptor{}
-	}
-	for i := range d.Capabilities {
-		c := &d.Capabilities[i]
-		switch c.Name {
-		case domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
-			domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout,
-			domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity:
-			c.Support = domain.CapabilitySupportSupported
-			c.Evidence = domain.EvidenceImplementedOffline
-			c.Reason = "normal runtime composition uses the reviewed finite-batch Kaggle components"
-			if c.Name == domain.CapabilityExecutionTimeout {
-				c.Conditions = []string{"runner and provider-request budgets are enforced locally; exact provider timeout enforcement remains unverified"}
-			}
-			if c.Name == domain.CapabilityRemoteNetworkControl {
-				c.Conditions = []string{"maps the frozen job requirement to the provider setting; the runner is not a firewall"}
-			}
-		case domain.CapabilityGPU:
-			if p.policy.MachineShape == "" {
-				c.Support = domain.CapabilitySupportUnsupported
-				c.Evidence = domain.EvidenceImplementedOffline
-				c.Reason = "this provider instance is configured without a GPU machine shape"
-			} else {
-				c.Support = domain.CapabilitySupportUnknown
-				c.Evidence = domain.EvidenceImplementedOffline
-				c.Reason = "the requested GPU is verified after execution starts; allocation is not guaranteed"
-				c.Conditions = []string{"configured machine shape: " + p.policy.MachineShape}
-			}
-		}
-	}
-	return d
+	return provider.Descriptor{Type: "kaggle", InstanceID: domain.ProviderInstanceID(p.config.InstanceID), Version: "native-api/v1",
+		Capabilities: RuntimeCapabilities(p.policy.MachineShape)}
 }
 
-func (p *RuntimeAdapter) VerifyBinding(ctx context.Context, expected provider.BindingSnapshot) error {
+// RuntimeCapabilities is shared by the runtime port and managed connection
+// descriptor so policy cannot drift between their declarations.
+func RuntimeCapabilities(shape string) provider.Capabilities {
+	c := provider.Capabilities{BatchExecution: true, Python: true, Shell: true,
+		GPU: domain.CapabilitySupportUnsupported, PrivateInputStaging: true,
+		RemoteCleanup: true, LogsWhileRunning: domain.CapabilitySupportUnknown,
+		LogsAfterCompletion: true, QuotaReporting: domain.CapabilitySupportSupported,
+		ExecutionTimeout: true, RemoteNetworkControl: true, StrongIdentity: true,
+		Accelerators: []string{"cpu"}}
+	if shape != "cpu" && shape != "" {
+		c.GPU = domain.CapabilitySupportUnknown
+		c.GPUShape = shape
+		c.Accelerators = []string{"gpu"}
+	}
+	return c
+}
+
+func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if p == nil || expected != p.binding {
 		return ErrRuntimeBinding
 	}
 	r, err := p.preflight.Check(ctx, ReadOnly)
+	if provider.IsLocalStateError(err) {
+		return err
+	}
 	if err != nil || r.Local != "ready" || r.Authentication != "verified" || r.AccountBinding != "matched" {
-		return ErrProcess
+		return ErrUnavailable
 	}
 	return nil
 }
 
-func (p *RuntimeAdapter) Check(ctx context.Context) (provider.DiagnosticReport, error) {
-	if err := p.VerifyBinding(ctx, p.binding); err != nil {
-		return provider.DiagnosticReport{}, err
+func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
+	plan, err := p.localPlan(ctx, job)
+	if err != nil {
+		return provider.Plan{}, err
 	}
-	return provider.DiagnosticReport{
-		Evidence: domain.EvidenceImplementedOffline, CheckedAt: p.clock.Now().UTC(), Ready: true,
-	}, nil
+	if p.policy.MachineShape != "" {
+		q, err := p.monitor.ReadQuota(ctx)
+		if provider.IsLocalStateError(err) {
+			return provider.Plan{}, err
+		}
+		if err != nil || q.Status != provider.QuotaKnown || q.Remaining == nil || *q.Remaining < float64(job.WallSeconds) {
+			return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch")
+		}
+	}
+	return plan, nil
 }
 
-func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
+func (p *RuntimeAdapter) localPlan(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.Plan{}, err
 	}
@@ -199,42 +177,12 @@ func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob)
 			plan.VerifyAfterStart = append(plan.VerifyAfterStart, domain.CapabilityGPU)
 		}
 	}
-	if gpu {
-		q, err := provider.ReadAvailableQuota(ctx, p)
-		if err != nil || q.Status != provider.QuotaKnown || q.Remaining == nil || *q.Remaining < float64(job.WallSeconds) {
-			return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch")
-		}
-	}
+
 	return plan, nil
 }
 
-func (p *RuntimeAdapter) authorize(id provider.Identity) error {
-	if p == nil || !p.allow || id.Validate() != nil {
-		return ErrRuntimeBudget
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.authorized[id] {
-		return nil
-	}
-	if len(p.authorized) >= p.maxAttempts {
-		return ErrRuntimeBudget
-	}
-	p.authorized[id] = true
-	return nil
-}
-
-func (p *RuntimeAdapter) BudgetExhausted() bool {
-	if p == nil || !p.allow {
-		return true
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.authorized) >= p.maxAttempts
-}
-
 func (p *RuntimeAdapter) validPlan(ctx context.Context, plan provider.Plan) error {
-	expected, err := p.Validate(ctx, plan.Job)
+	expected, err := p.localPlan(ctx, plan.Job)
 	if err != nil || expected.Digest() != plan.Digest() {
 		if err != nil {
 			return err
@@ -248,17 +196,14 @@ func (p *RuntimeAdapter) Prepare(ctx context.Context, plan provider.Plan, operat
 	if err := p.validPlan(ctx, plan); err != nil {
 		return provider.Prepared{}, err
 	}
-	if err := p.authorize(plan.Job.Identity); err != nil {
-		return provider.Prepared{}, err
-	}
 	return p.stager.Prepare(ctx, plan, operation)
 }
 
-func (p *RuntimeAdapter) ReconcilePreparation(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+func (p *RuntimeAdapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if p == nil || plan.Job.Validate() != nil || plan.Job.Binding != p.binding.Binding {
 		return provider.PreparationObservation{}, ErrRuntimeBinding
 	}
-	return p.stager.ReconcilePreparation(ctx, plan, operation)
+	return p.stager.ReconcilePrepare(ctx, plan, operation)
 }
 
 func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*runtimeComponents, error) {
@@ -266,7 +211,10 @@ func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*ru
 		return nil, ErrRuntimeBinding
 	}
 	plan, prepared, err := p.load(ctx, id)
-	if err != nil || plan.Job.Identity != id || plan.Job.Binding != p.binding.Binding || prepared.Validate(plan, prepared.PreparationID) != nil {
+	if err != nil {
+		return nil, provider.LocalStateError{Err: err}
+	}
+	if plan.Job.Identity != id || plan.Job.Binding != p.binding.Binding || prepared.Validate(plan, prepared.PreparationID) != nil {
 		return nil, ErrRuntimeBinding
 	}
 	digest := plan.Digest()
@@ -293,29 +241,26 @@ func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*ru
 	return c, nil
 }
 
-func (p *RuntimeAdapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	if p == nil {
+func (p *RuntimeAdapter) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
+	if p == nil || authorization != nil || material != nil {
 		return rejectedExecution(reasonSubmissionDisabled)
 	}
 	if prepared.Identity.Validate() != nil {
 		return rejectedExecution(reasonPreparationMismatch)
 	}
-	if p.authorize(prepared.Identity) != nil {
-		return rejectedExecution(reasonMutationBudget)
-	}
 	c, err := p.attempt(ctx, prepared.Identity)
 	if err != nil || c.prepared != prepared {
 		return unknownExecution()
 	}
-	return c.executor.Submit(ctx, prepared)
+	return c.executor.Start(ctx, prepared, nil, nil)
 }
 
-func (p *RuntimeAdapter) ReconcileSubmission(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
+func (p *RuntimeAdapter) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
 	c, err := p.attempt(ctx, id)
 	if err != nil {
 		return provider.Reconciliation{}, err
 	}
-	return c.executor.ReconcileSubmission(ctx, id)
+	return c.executor.Reconcile(ctx, id)
 }
 
 func (p *RuntimeAdapter) Observe(ctx context.Context, ref provider.RemoteReference) (provider.Observation, error) {
@@ -326,35 +271,30 @@ func (p *RuntimeAdapter) Observe(ctx context.Context, ref provider.RemoteReferen
 	return c.executor.Observe(ctx, ref)
 }
 
-func (p *RuntimeAdapter) ListArtifacts(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
+func (p *RuntimeAdapter) ListArtifacts(ctx context.Context, ref provider.RemoteReference) ([]provider.Artifact, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
-		return provider.ArtifactPage{}, err
+		return nil, err
 	}
-	return c.artifacts.ListArtifacts(ctx, ref, page)
+	return c.artifacts.ListArtifacts(ctx, ref)
 }
-
-func (p *RuntimeAdapter) FetchArtifact(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
-	c, err := p.attempt(ctx, ref.Identity)
-	if err != nil {
-		return provider.TransferResult{}, err
-	}
-	return c.artifacts.FetchArtifact(ctx, ref, file, dst, limit)
-}
-
-func (p *RuntimeAdapter) FetchArtifactWithProgress(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+func (p *RuntimeAdapter) Fetch(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
 		return provider.TransferResult{}, err
 	}
-	return c.artifacts.FetchArtifactWithProgress(ctx, ref, file, dst, limit, progress)
+	return c.artifacts.Fetch(ctx, ref, file, dst, limit, progress)
 }
-
-func (p *RuntimeAdapter) ReadQuota(ctx context.Context) (provider.QuotaObservation, error) {
-	return p.monitor.ReadQuota(ctx)
+func (p *RuntimeAdapter) Cancel(ctx context.Context, ref provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
+	if err := ctx.Err(); err != nil {
+		return provider.CancellationOutcome{}, err
+	}
+	if p == nil || ref.Validate() != nil || !operation.Valid() || ref.Identity.InstanceID != domain.ProviderInstanceID(p.config.InstanceID) {
+		return provider.CancellationOutcome{}, ErrRuntimeBinding
+	}
+	return provider.CancellationOutcome{Status: domain.CancellationManual}, nil
 }
-
-func (p *RuntimeAdapter) ReadLogs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+func (p *RuntimeAdapter) Logs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
 		return provider.LogPage{}, err
@@ -363,17 +303,5 @@ func (p *RuntimeAdapter) ReadLogs(ctx context.Context, ref provider.RemoteRefere
 	if err != nil {
 		return provider.LogPage{}, err
 	}
-	return logs.ReadLogs(ctx, ref, page)
-}
-
-func (p *RuntimeAdapter) Cancel(ctx context.Context, ref provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
-	c, err := p.attempt(ctx, ref.Identity)
-	if err != nil {
-		return provider.CancellationOutcome{}, err
-	}
-	return c.executor.Cancel(ctx, ref, operation)
-}
-
-func (p *RuntimeAdapter) Cleanup(context.Context, provider.CleanupRequest) (provider.CleanupOutcome, error) {
-	return provider.CleanupOutcome{}, ErrRuntimeCleanup
+	return logs.Logs(ctx, ref, page)
 }

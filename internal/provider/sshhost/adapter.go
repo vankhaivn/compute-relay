@@ -113,11 +113,7 @@ type Adapter struct {
 }
 
 var (
-	_ provider.Provider            = (*Adapter)(nil)
-	_ provider.BindingVerifier     = (*Adapter)(nil)
-	_ provider.PreparationObserver = (*Adapter)(nil)
-	_ provider.Canceller           = (*Adapter)(nil)
-	_ provider.LogReader           = (*Adapter)(nil)
+	_ provider.Provider = (*Adapter)(nil)
 )
 
 func NewAdapter(config Config, binding provider.BindingSnapshot, creds ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock) (*Adapter, error) {
@@ -181,62 +177,27 @@ func (a *Adapter) withDocker(ctx context.Context, use func(docker, Endpoint) err
 }
 
 func (a *Adapter) Describe() provider.Descriptor {
-	d := provider.Descriptor{Type: ProviderType, InstanceID: a.config.InstanceID, Version: Version}
-	for _, name := range []domain.CapabilityName{
-		domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell, domain.CapabilityGPU,
-		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityRemoteCleanup, domain.CapabilityLogsWhileRunning,
-		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityExecutionTimeout,
-		domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
-		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets,
-	} {
-		c := domain.CapabilityStatus{Name: name, Support: domain.CapabilitySupportSupported, Evidence: domain.EvidenceImplementedOffline,
-			ClientVersion: Version, Reason: "operator-owned Docker host reached over SSH with a pinned host key"}
-		switch name {
-		case domain.CapabilityGPU:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "this adapter runs CPU containers only"
-		case domain.CapabilityQuotaReporting:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "an operator-owned host has no provider quota"
-		case domain.CapabilityCustomContainer:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "jobs run in the Relay standard image"
-		case domain.CapabilityRetainedSessions:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "not implemented by this finite batch adapter"
-		case domain.CapabilityPrivateInputStaging:
-			c.Reason = "inputs are copied only into the attempt's own container"
-		case domain.CapabilityExecutionTimeout:
-			c.Reason = "the runner budget and a host-side timeout bound the container without Relay connectivity"
-		case domain.CapabilityEphemeralSecrets:
-			c.Reason = "one-shot attempt-scoped material delivered through stdin to private tmpfs after explicit start"
-		case domain.CapabilitySeparateStart:
-			c.Reason = "verified stopped-container preparation requires separate finite start authority"
-		case domain.CapabilityAbsoluteDeadline:
-			c.Reason = "UTC and Linux suspend-aware deadlines independently bound payload groups and finalization"
-		case domain.CapabilityRemoteNetworkControl:
-			c.Reason = "containers have no network unless the frozen policy allows internet"
-		case domain.CapabilityRemoteCancellation:
-			c.Reason = "Docker stops the container and reports its exit"
-		case domain.CapabilityRemoteCleanup:
-			c.Reason = "explicit cleanup of the original stopped container with recorded engine identity; host files, volumes and images are preserved"
-		case domain.CapabilityStrongIdentity:
-			c.Reason = "container name, ID and labels bind the exact attempt"
-		}
-		d.Capabilities = append(d.Capabilities, c)
-	}
-	return d
+	return provider.Descriptor{Type: ProviderType, InstanceID: a.config.InstanceID, Version: Version,
+		Capabilities: Capabilities()}
 }
 
-// VerifyBinding proves the frozen binding and a reachable Docker daemon on the pinned host.
-func (a *Adapter) VerifyBinding(ctx context.Context, expected provider.BindingSnapshot) error {
+// Capabilities describes the SSH Docker adapter independently of a connection.
+func Capabilities() provider.Capabilities {
+	return provider.Capabilities{BatchExecution: true, Python: true, Shell: true,
+		GPU: domain.CapabilitySupportUnsupported, PrivateInputStaging: true,
+		RemoteCancellation: true, RemoteCleanup: true,
+		LogsWhileRunning: domain.CapabilitySupportSupported, LogsAfterCompletion: true,
+		QuotaReporting: domain.CapabilitySupportUnsupported, ExecutionTimeout: true,
+		SeparateStart: true, EphemeralSecrets: true, AbsoluteDeadline: true,
+		RemoteNetworkControl: true, StrongIdentity: true, Accelerators: []string{"cpu"}}
+}
+
+// Verify proves the frozen binding and a reachable Docker daemon on the pinned host.
+func (a *Adapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if a == nil || expected != a.binding {
 		return ErrBinding
 	}
 	return a.withDocker(ctx, func(d docker, _ Endpoint) error { return d.ping(ctx) })
-}
-
-func (a *Adapter) Check(ctx context.Context) (provider.DiagnosticReport, error) {
-	if err := a.VerifyBinding(ctx, a.binding); err != nil {
-		return provider.DiagnosticReport{}, err
-	}
-	return provider.DiagnosticReport{Evidence: domain.EvidenceImplementedOffline, CheckedAt: a.clock.Now().UTC(), Ready: true}, nil
 }
 
 func (a *Adapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
@@ -578,9 +539,9 @@ func singleFile(name string, data []byte) io.Reader {
 	return &b
 }
 
-// ReconcilePreparation is read-only: only a labelled container whose completion
+// ReconcilePrepare is read-only: only a labelled container whose completion
 // marker matches is found; a container without one is not ready.
-func (a *Adapter) ReconcilePreparation(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+func (a *Adapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if err := a.validPlan(ctx, plan); err != nil {
 		return provider.PreparationObservation{}, err
 	}
@@ -635,18 +596,12 @@ func unknownSubmission() provider.SubmissionOutcome {
 	return provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: &p}
 }
 
-// Submit starts the prepared container exactly once. A failure before the start
-// command is sent is a rejection; any failure after it leaves acceptance unknown.
-func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	return a.submit(ctx, prepared, nil, nil)
-}
-
 func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
-	if a == nil || !prepared.Ready || !prepared.Private || prepared.Identity.InstanceID != a.config.InstanceID {
+	if a == nil || prepared.Identity.Validate() != nil || !prepared.PlanSHA256.Valid() || !prepared.PreparationID.Valid() || !prepared.Ready || !prepared.Private || prepared.Identity.InstanceID != a.config.InstanceID {
 		return rejected("preparation_mismatch")
 	}
 	ref, err := decodeRef(prepared.Resource, prepared.Identity)
-	if err != nil {
+	if err != nil || ref.EngineID == "" {
 		return rejected("preparation_mismatch")
 	}
 	if ctx.Err() != nil {
@@ -670,6 +625,11 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 		case info.Started():
 			// An earlier start reached Docker; only reconciliation may claim it.
 			outcome = unknownSubmission()
+			return nil
+		}
+		labels := info.Config.Labels
+		if labels[labelPrefix+"engine"] != ref.EngineID || labels[labelPrefix+"workspace"] != string(prepared.Identity.WorkspaceID) || labels[labelPrefix+"job"] != string(prepared.Identity.JobID) || labels[labelPrefix+"nonce"] != prepared.Identity.Nonce || labels[labelPrefix+"plan"] != string(prepared.PlanSHA256) {
+			outcome = rejected("preparation_mismatch")
 			return nil
 		}
 		controlled := info.Config.Labels[labelPrefix+"execution-control"] == "prepare_then_start"
@@ -743,7 +703,7 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 			Remote: &provider.RemoteReference{Identity: prepared.Identity, Resource: prepared.Resource, Version: ref.ID}}
 		return nil
 	})
-	if err != nil && sent {
+	if provider.IsLocalStateError(err) || err != nil && sent {
 		return unknownSubmission()
 	}
 	return outcome
@@ -754,8 +714,8 @@ func deadlineRejected() provider.SubmissionOutcome {
 	return provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &p}
 }
 
-// ReconcileSubmission finds the container only when Docker reports it was started.
-func (a *Adapter) ReconcileSubmission(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
+// Reconcile finds the container only when Docker reports it was started.
+func (a *Adapter) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
 	result := provider.Reconciliation{Status: provider.ReconciliationNotFound}
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
 		name := containerName(id)
@@ -848,6 +808,15 @@ func (a *Adapter) Observe(ctx context.Context, remote provider.RemoteReference) 
 // Cancel records the request inside the container, stops it and confirms termination
 // only from Docker's own state.
 func (a *Adapter) Cancel(ctx context.Context, remote provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
+	if err := ctx.Err(); err != nil {
+		return provider.CancellationOutcome{}, err
+	}
+	if !operation.Valid() {
+		return provider.CancellationOutcome{}, ErrRequest
+	}
+	if a == nil || remote.Validate() != nil || remote.Identity.InstanceID != a.config.InstanceID {
+		return provider.CancellationOutcome{}, ErrIdentity
+	}
 	var outcome provider.CancellationOutcome
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
 		info, err := inspectRemote(ctx, d, remote)
@@ -997,66 +966,61 @@ func (a *Adapter) catalog(ctx context.Context, d docker, remote provider.RemoteR
 	if err != nil {
 		return nil, err
 	}
-	var result struct {
-		Artifacts []struct {
-			Path   string              `json:"path"`
-			Bytes  int64               `json:"bytes"`
-			SHA256 domain.SHA256Digest `json:"sha256"`
-		} `json:"artifacts"`
-	}
-	// A missing or invalid manifest is reported by collection, not here.
-	if manifest != nil && json.Unmarshal(manifest, &result) == nil {
+	// Collection reports a missing or invalid manifest; never list its untrusted outputs.
+	if result, err := runnerplan.ParseResult(remote.Identity, manifest); err == nil {
 		for _, out := range result.Artifacts {
-			if provider.SafeArtifactPath(out.Path) && out.Bytes >= 0 && out.SHA256.Valid() {
-				artifacts = append(artifacts, provider.Artifact{Remote: remote, Path: "outputs/" + out.Path, Bytes: out.Bytes, SHA256: out.SHA256})
-			}
+			artifacts = append(artifacts, provider.Artifact{Remote: remote, Path: "outputs/" + out.Path, Bytes: out.Bytes, SHA256: out.SHA256})
 		}
 	}
 	slices.SortFunc(artifacts, func(x, y provider.Artifact) int { return strings.Compare(x.Path, y.Path) })
-	return slices.CompactFunc(artifacts, func(x, y provider.Artifact) bool { return x.Path == y.Path }), nil
+	var total int64
+	seen := map[string]bool{}
+	if len(artifacts) > provider.MaxArtifactFiles {
+		return nil, ErrArtifact
+	}
+	for _, artifact := range artifacts {
+		if artifact.Validate(remote) != nil || artifact.Bytes > provider.MaxArtifactBytes-total {
+			return nil, ErrArtifact
+		}
+		key := strings.ToLower(artifact.Path)
+		if seen[key] {
+			return nil, ErrArtifact
+		}
+		seen[key] = true
+		total += artifact.Bytes
+	}
+	for key := range seen {
+		parts := strings.Split(key, "/")
+		for i := 1; i < len(parts); i++ {
+			if seen[strings.Join(parts[:i], "/")] {
+				return nil, ErrArtifact
+			}
+		}
+	}
+	return artifacts, nil
 }
 
-func (a *Adapter) ListArtifacts(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
-	if page.Validate() != nil {
-		return provider.ArtifactPage{}, ErrRequest
-	}
-	offset := 0
-	if page.Cursor != "" {
-		n, err := strconv.Atoi(page.Cursor)
-		if err != nil || n < 1 || strconv.Itoa(n) != page.Cursor {
-			return provider.ArtifactPage{}, ErrRequest
-		}
-		offset = n
-	}
-	var result provider.ArtifactPage
+func (a *Adapter) ListArtifacts(ctx context.Context, remote provider.RemoteReference) ([]provider.Artifact, error) {
+	var result []provider.Artifact
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
-		artifacts, err := a.catalog(ctx, d, remote)
-		if err != nil {
-			return err
-		}
-		if offset > len(artifacts) {
-			return ErrRequest
-		}
-		end := min(offset+page.Limit, len(artifacts))
-		result.Artifacts = artifacts[offset:end]
-		if end < len(artifacts) {
-			result.NextCursor = strconv.Itoa(end)
-		}
-		return nil
+		var err error
+		result, err = a.catalog(ctx, d, remote)
+		return err
 	})
 	if err != nil {
-		return provider.ArtifactPage{}, err
+		return nil, err
 	}
 	return result, nil
 }
 
-// FetchArtifact copies one listed file out of the stopped container. Bytes reach w
+// Fetch copies one listed file out of the stopped container. Bytes reach w
 // only within the listed length; the digest is verified before success.
-func (a *Adapter) FetchArtifact(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, w io.Writer, limit int64) (provider.TransferResult, error) {
-	if artifact.Validate(remote) != nil || artifact.Bytes > limit ||
+func (a *Adapter) Fetch(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, w io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+	if w == nil || artifact.Validate(remote) != nil || artifact.Bytes > limit || artifact.Bytes > provider.MaxArtifactBytes ||
 		!strings.HasPrefix(artifact.Path, "outputs/") && !strings.HasPrefix(artifact.Path, "control/") {
 		return provider.TransferResult{}, ErrArtifact
 	}
+	w = provider.WithTransferProgress(w, progress)
 	var result provider.TransferResult
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
 		info, err := inspectRemote(ctx, d, remote)
@@ -1095,9 +1059,15 @@ type logCursor struct {
 	Line      int                 `json:"line"`
 }
 
-// ReadLogs pages the container's stdout stream, which carries the runner's mirrored
+// Logs pages the container's stdout stream, which carries the runner's mirrored
 // payload output. Standard error is collected as the control/stderr.log artifact.
-func (a *Adapter) ReadLogs(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+func (a *Adapter) Logs(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+	if err := ctx.Err(); err != nil {
+		return provider.LogPage{}, err
+	}
+	if a == nil || remote.Validate() != nil || remote.Identity.InstanceID != a.config.InstanceID {
+		return provider.LogPage{}, ErrIdentity
+	}
 	if page.Validate() != nil {
 		return provider.LogPage{}, provider.ErrLogCursorInvalid
 	}
@@ -1191,13 +1161,7 @@ func (c *lineCollector) line() {
 	c.truncated = c.truncated || clipped
 }
 
-// Cleanup deletes only the attempt's own labelled, stopped container. Repeating an
-// apply after deletion reports AlreadyAbsent.
-func (a *Adapter) Cleanup(ctx context.Context, request provider.CleanupRequest) (provider.CleanupOutcome, error) {
-	return a.cleanup(ctx, request, "")
-}
-
-func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupRequest, plan domain.SHA256Digest) (provider.CleanupOutcome, error) {
+func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 	if request.Mode != provider.CleanupDryRun && request.Mode != provider.CleanupApply || !request.LedgerID.Valid() || !request.CreationOperationID.Valid() {
 		return provider.CleanupOutcome{}, ErrRequest
 	}
@@ -1230,7 +1194,7 @@ func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupRequest, 
 		if info.ID != ref.ID || info.Name != "/"+ref.Container || !owned(info, id) || info.Config.Labels[labelPrefix+"preparation"] != string(request.CreationOperationID) {
 			return ErrIdentity
 		}
-		if plan != "" && info.Config.Labels[labelPrefix+"plan"] != string(plan) {
+		if info.Config.Labels[labelPrefix+"plan"] != string(request.PlanSHA256) {
 			return ErrIdentity
 		}
 		if ref.EngineID != "" {
@@ -1241,6 +1205,9 @@ func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupRequest, 
 		}
 		if info.State.Running || !exited(info) && info.State.Status != "created" {
 			return ErrNotDone
+		}
+		if request.RecoverOnly {
+			return provider.Problem(domain.CodeProviderStateUnknown, domain.FailureStageObservation, "the original deletion outcome remains unresolved")
 		}
 		if request.Mode == provider.CleanupDryRun {
 			outcome.WouldDelete = true

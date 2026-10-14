@@ -41,7 +41,7 @@ func TestStagingPlanPinsIdentityAndExcludesSecrets(t *testing.T) {
 		t.Fatal("invalid catalog")
 	}
 	encoded, _ := json.Marshal(one.request)
-	for _, secret := range []string{"PRIVATE_JOB_LABEL", "NEVER_STAGE_THIS_FIELD", string(c.CredentialRef), c.PythonExecutable} {
+	for _, secret := range []string{"PRIVATE_JOB_LABEL", "NEVER_STAGE_THIS_FIELD", string(c.CredentialRef)} {
 		if bytes.Contains(append(append([]byte{}, one.marker...), encoded...), []byte(secret)) {
 			t.Fatal("private configuration copied")
 		}

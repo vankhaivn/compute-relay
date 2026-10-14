@@ -1,7 +1,7 @@
 # Attempt-scoped workload secrets
 
 Managed SSH jobs can declare required workload secret slots and supply their values after
-[remote preparation](preparation-gates.md). This requires the provider capability
+[remote preparation](execution-gates.md). This requires the provider capability
 `ephemeral_workload_secrets` and `execution_control: "prepare_then_start"`. Provider login
 credentials remain separate; a job cannot resolve or reuse a saved connection credential.
 
@@ -101,6 +101,6 @@ own input, and they do not conceal values from host administrators or local proc
 when argument exposure was authorized. [Docker exec lifetime and stdin](https://docs.docker.com/reference/cli/docker/container/exec/)
 (reviewed 2026-10-12).
 
-See [execution deadlines](execution-deadlines.md) for clock and shutdown bounds. Stopping a
+See [execution deadlines](execution-gates.md#execution-deadlines) for clock and shutdown bounds. Stopping a
 payload does not revoke an external credential or complete an external session; the application
 owns those actions and must plan for its own unavailability.

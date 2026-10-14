@@ -17,13 +17,9 @@ import (
 func TestDispatchProblemWireShapeAndRedaction(t *testing.T) {
 	at := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
 	a, err := domain.NewAttempt("attempt", "job", 1, at)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p, err := domain.NewProblem(domain.CodeProviderSubmissionUnknown, "Submission may have been accepted; reconcile the recorded identity without resubmitting.", domain.FailureStageSubmission)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p = p.WithRetrySemantics(false, true).WithRecommendedAction(domain.RecommendedActionReconcile).
 		WithDetail("private", "sensitive-detail-canary").WithCause(errors.New("internal-cause-canary"))
 	record := admission.Record{
@@ -35,9 +31,7 @@ func TestDispatchProblemWireShapeAndRedaction(t *testing.T) {
 	record.Attempt.State.Execution = domain.ExecutionUnknown
 	record.Attempt.State.RemoteActivity = domain.RemoteActivityPossible
 	encoded, err := json.Marshal(jobStatus(record))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if strings.Contains(string(encoded), "canary") {
 		t.Fatal("internal details, cause or binding leaked")
 	}
@@ -57,9 +51,7 @@ func TestDispatchProblemWireShapeAndRedaction(t *testing.T) {
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.AssertFormat()
 	schema, err := compiler.Compile(filepath.Join(filepath.Dir(source), "..", "..", "api", "schemas", "job-status.v1alpha1.schema.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if err = schema.Validate(wire); err != nil {
 		t.Fatal("actual problem response failed existing schema", err)
 	}
@@ -68,9 +60,7 @@ func TestDispatchProblemWireShapeAndRedaction(t *testing.T) {
 		reasoned := p.WithDetail(domain.ReasonDetail, reason)
 		record.Problem = &reasoned
 		encoded, err := json.Marshal(jobStatus(record))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		var wire map[string]any
 		if strings.Contains(string(encoded), "canary") || json.Unmarshal(encoded, &wire) != nil || schema.Validate(wire) != nil {
 			t.Fatal("reasoned problem leaked or failed the schema", reason)
@@ -89,9 +79,7 @@ func TestDispatchProblemWireShapeAndRedaction(t *testing.T) {
 func TestPreparationProgressWireShape(t *testing.T) {
 	at := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
 	a, err := domain.NewAttempt("attempt", "job", 1, at)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	a.State.Orchestration = domain.OrchestrationPreparing
 	record := admission.Record{
 		Job:     domain.Job{ID: "job", WorkspaceID: "workspace", Name: "fixture", SpecificationVersion: "compute-connector/v1alpha1", CreatedAt: at},
@@ -100,9 +88,7 @@ func TestPreparationProgressWireShape(t *testing.T) {
 			Scope: "staged_input_bytes", Generation: 2, BytesCompleted: 512, BytesTotal: 2048, ObservedAt: at}},
 	}
 	encoded, err := json.Marshal(jobStatus(record))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var wire map[string]any
 	if err = json.Unmarshal(encoded, &wire); err != nil {
 		t.Fatal(err)
@@ -112,9 +98,7 @@ func TestPreparationProgressWireShape(t *testing.T) {
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.AssertFormat()
 	schema, err := compiler.Compile(filepath.Join(filepath.Dir(source), "..", "..", "api", "schemas", "job-status.v1alpha1.schema.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if err = schema.Validate(wire); err != nil {
 		t.Fatal("preparation progress failed the status schema", err)
 	}

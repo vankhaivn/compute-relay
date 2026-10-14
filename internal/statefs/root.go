@@ -6,22 +6,32 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
 var (
+	ErrClosed      = errors.New("state root is closed")
 	ErrLocked      = errors.New("state directory is already in use")
 	ErrUnsafe      = errors.New("state path or permissions are unsafe")
 	ErrUnavailable = errors.New("state filesystem unavailable")
 )
 
-// Root must remain open until every database handle is closed. Never unlink its lock
-// file: replacing an inode would allow two processes to acquire different locks.
+// Root pins an OS lock until its owner and all retained child roots close.
+// Never unlink the lock file: replacing its inode permits competing locks.
 type Root struct {
 	Path   string
-	file   *os.File
-	mu     sync.Mutex
-	closed bool
+	path   string
+	lock   *rootLock
+	owner  bool
+	closed bool // guarded by lock.mu
+}
+
+type rootLock struct {
+	mu      sync.Mutex
+	file    *os.File
+	refs    int
+	closing bool
 }
 
 // PrivateDir creates only the requested final directory (parents must exist), or
@@ -49,12 +59,28 @@ func PrivateDir(path string, exclusive bool) (string, error) {
 	return absolute, nil
 }
 
-func Open(path string) (*Root, error) {
-	absolute, err := PrivateDir(path, false)
+func Open(path string) (*Root, error) { return OpenNamed(path, "runtime.lock") }
+
+// OpenNamed preserves the standalone caller's historical lock filename. Hosted
+// descendants must use Child so they cannot bypass their host's lock.
+func OpenNamed(path, name string) (*Root, error) {
+	if !component(name) {
+		return nil, ErrUnsafe
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil || path == "" {
+		return nil, ErrUnsafe
+	}
+	marker := filepath.Join(filepath.Dir(absolute), ".compute-relay-runtime")
+	if _, err := os.Lstat(marker); !errors.Is(err, os.ErrNotExist) {
+		return nil, ErrUnsafe
+	}
+
+	absolute, err = PrivateDir(path, false)
 	if err != nil {
 		return nil, err
 	}
-	lockPath := filepath.Join(absolute, "runtime.lock")
+	lockPath := filepath.Join(absolute, name)
 	if err := CheckFile(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -70,17 +96,76 @@ func Open(path string) (*Root, error) {
 		f.Close()
 		return nil, err
 	}
-	return &Root{Path: absolute, file: f}, nil
+	return &Root{Path: absolute, path: absolute, lock: &rootLock{file: f, refs: 1}, owner: true}, nil
+}
+
+func component(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`)
+}
+
+// Child creates or validates one direct private child and pins the existing lock.
+func (r *Root) Child(name string) (*Root, error) {
+	if !component(name) {
+		return nil, ErrUnsafe
+	}
+	if r == nil || r.lock == nil {
+		return nil, ErrClosed
+	}
+	r.lock.mu.Lock()
+	defer r.lock.mu.Unlock()
+	if r.closed || r.lock.closing {
+		return nil, ErrClosed
+	}
+	if r.Path != r.path {
+		return nil, ErrUnsafe
+	}
+	path, err := PrivateDir(filepath.Join(r.path, name), false)
+	if err != nil {
+		return nil, err
+	}
+	r.lock.refs++
+	return &Root{Path: path, path: path, lock: r.lock}, nil
+}
+
+// Retain gives a store its own lifetime pin; closing the supplied capability cannot
+// release the lock while the store is still using it.
+func (r *Root) Retain() (*Root, error) {
+	if r == nil || r.lock == nil {
+		return nil, ErrClosed
+	}
+	r.lock.mu.Lock()
+	defer r.lock.mu.Unlock()
+	if r.closed || r.lock.closing {
+		return nil, ErrClosed
+	}
+	if r.Path != r.path {
+		return nil, ErrUnsafe
+	}
+	if err := CheckDir(r.path); err != nil {
+		return nil, err
+	}
+	r.lock.refs++
+	return &Root{Path: r.path, path: r.path, lock: r.lock}, nil
 }
 
 func (r *Root) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r == nil || r.lock == nil {
+		return nil
+	}
+	r.lock.mu.Lock()
+	defer r.lock.mu.Unlock()
 	if r.closed {
 		return nil
 	}
 	r.closed = true
-	return errors.Join(unlock(r.file), r.file.Close())
+	if r.owner {
+		r.lock.closing = true
+	}
+	r.lock.refs--
+	if r.lock.refs != 0 {
+		return nil
+	}
+	return errors.Join(unlock(r.lock.file), r.lock.file.Close())
 }
 
 func CheckDir(path string) error  { return check(path, true) }

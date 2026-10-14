@@ -16,7 +16,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/ports"
 )
 
 const admissionJSON = `{"api_version":"compute-connector/v1alpha1","name":"offline-admission","profile":"default-gpu","bundle":{"object_id":"code"},"execution":{"kind":"python","command":["python","never-executed.py"]},"inputs":[{"name":"data","source":{"kind":"object","object_id":"data"},"target":"data.txt"}],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":2,"finalization_grace_seconds":2}}`
@@ -37,69 +36,58 @@ func newAdmission(t *testing.T) admissionFixture {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "state")
 	s, err := Open(ctx, path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	for _, w := range []string{"a", "b"} {
-		if err = s.PutWorkspace(ctx, auth.Workspace{ID: domain.WorkspaceID(w), Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
-			t.Fatal(err)
-		}
+		err = s.PutWorkspace(ctx, auth.Workspace{ID: domain.WorkspaceID(w), Enabled: true, AllowedProfiles: []string{"default-gpu"}})
+		requireNoError(t, err)
 		for _, id := range []string{"code", "data"} {
-			if err = s.CommitObject(ctx, domain.ObjectMetadata{WorkspaceID: domain.WorkspaceID(w), ID: domain.ObjectID(id), Bytes: 7, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}); err != nil {
-				t.Fatal(err)
-			}
+			err = s.CommitObject(ctx, domain.ObjectMetadata{WorkspaceID: domain.WorkspaceID(w), ID: domain.ObjectID(id), Bytes: 7, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))})
+			requireNoError(t, err)
 		}
 	}
 	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "default-gpu", ProviderInstanceID: "fake_1", ConfigurationRevision: "rev_1"}, "account_1")
-	if err = s.PutProfile(ctx, profile, true); err != nil {
-		t.Fatal(err)
-	}
-	access, err := auth.New(s, s, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	profile.CredentialRef = "vault:con_admission_a"
+	err = s.PutProfile(ctx, profile, true)
+	requireNoError(t, err)
+	_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES('con_admission_a','a','fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?)`, profile.AccountScope, profile.Binding.Profile, time.Now().UTC().Format(time.RFC3339Nano))
+	requireNoError(t, err)
+	second := profile
+	second.Binding.Profile += "_b"
+	second.CredentialRef = "vault:con_admission_b"
+	err = s.PutProfile(ctx, second, true)
+	requireNoError(t, err)
+	_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES('con_admission_b','b','fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?)`, second.AccountScope, second.Binding.Profile, time.Now().UTC().Format(time.RFC3339Nano))
+	requireNoError(t, err)
+	access, err := auth.New(s, s)
+	requireNoError(t, err)
 	token, _, err := access.Issue(ctx, "a", []auth.Scope{auth.Read, auth.Write}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p, err := access.Authenticate(ctx, token.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	other, _, err := access.Issue(ctx, "b", []auth.Scope{auth.Read, auth.Write}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p2, err := access.Authenticate(ctx, other.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	svc, err := admission.New(access, s, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return admissionFixture{s, path, svc, access, p, p2, token.Reveal(), profile}
 }
 func tableCount(t *testing.T, s *Store, table string) int {
 	t.Helper()
 	switch table {
-	case "jobs", "attempts", "events", "idempotency", "job_objects":
+	case "jobs", "attempts", "events", "receipts", "job_objects":
 	default:
 		t.Fatal("unsafe test table")
 	}
 	var n int
-	if err := s.db.QueryRow("SELECT count(*) FROM " + table).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.db.QueryRow("SELECT count(*) FROM "+table).Scan(&n))
 	return n
 }
 func submit(t *testing.T, f admissionFixture, key string) admission.Receipt {
 	t.Helper()
 	r, err := f.service.Submit(context.Background(), f.p, "a", key, []byte(admissionJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return r
 }
 func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
@@ -107,9 +95,7 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 	ctx := context.Background()
 	first := submit(t, f, "lost-response-key")
 	before, err := f.service.Get(ctx, f.p, "a", first.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if first.Replay || first.Status != "queued" || before.Attempt.Number != 1 || before.Attempt.State != domain.InitialAttemptState() || len(before.AttemptNonce) != 64 || len(before.Objects) != 2 {
 		t.Fatal("bad initial admission")
 	}
@@ -117,16 +103,12 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 	revised.Binding.ProviderInstanceID = "fake_2"
 	revised.Binding.ConfigurationRevision = "rev_2"
 	revised.AccountScope = "account_2"
-	if err = f.s.PutProfile(ctx, revised, true); err != nil {
-		t.Fatal(err)
-	}
-	if err = f.s.PutProfile(ctx, revised, false); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.PutProfile(ctx, revised, true)
+	requireNoError(t, err)
+	err = f.s.PutProfile(ctx, revised, false)
+	requireNoError(t, err)
 	replay, err := f.service.Submit(ctx, f.p, "a", "lost-response-key", []byte(strings.Replace(admissionJSON, ":10", ":1e1", 1)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	expected := first
 	expected.Replay = true
 	if replay != expected {
@@ -139,25 +121,20 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 	if _, err = f.service.Submit(ctx, f.p, "a", "new-request-key", []byte(admissionJSON)); !errors.Is(err, auth.ErrForbidden) {
 		t.Fatal("disabled profile used", err)
 	}
-	if err = f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.Close()
+	requireNoError(t, err)
 	s, err := Open(ctx, f.root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
-	access, _ := auth.New(s, s, nil)
+	access, _ := auth.New(s, s)
 	p, err := access.Authenticate(ctx, f.secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	svc, _ := admission.New(access, s, admission.DefaultLimits())
 	replay, err = svc.Submit(ctx, p, "a", "lost-response-key", []byte(admissionJSON))
 	if err != nil || replay != expected {
 		t.Fatal("restart lost receipt", err)
 	}
-	if tableCount(t, s, "jobs") != 1 || tableCount(t, s, "attempts") != 1 || tableCount(t, s, "idempotency") != 1 || tableCount(t, s, "events") != 1 {
+	if tableCount(t, s, "jobs") != 1 || tableCount(t, s, "attempts") != 1 || tableCount(t, s, "receipts") != 1 || tableCount(t, s, "events") != 1 {
 		t.Fatal("replay created rows")
 	}
 	for _, suffix := range []string{"", "-wal"} {
@@ -201,7 +178,7 @@ func TestAdmissionConcurrentKeysAndConflicts(t *testing.T) {
 	if _, err := f.service.Submit(ctx, f.p, "a", "concurrent-key", []byte(strings.Replace(admissionJSON, "offline-admission", "changed", 1))); !errors.Is(err, admission.ErrConflict) {
 		t.Fatal("different request did not conflict", err)
 	}
-	second, err := f.service.Submit(ctx, f.other, "b", "concurrent-key", []byte(admissionJSON))
+	second, err := f.service.Submit(ctx, f.other, "b", "concurrent-key", []byte(strings.Replace(admissionJSON, `"profile":"default-gpu"`, `"profile":"default-gpu_b"`, 1)))
 	if err != nil || second.JobID == first.JobID || second.Replay {
 		t.Fatal("workspace key collision", err)
 	}
@@ -216,7 +193,7 @@ func TestAdmissionConcurrentKeysAndConflicts(t *testing.T) {
 	}
 }
 func TestAdmissionAtomicRollbackAtEveryInsert(t *testing.T) {
-	for _, table := range []string{"jobs", "attempts", "job_objects", "events", "idempotency"} {
+	for _, table := range []string{"jobs", "attempts", "job_objects", "events", "receipts"} {
 		t.Run(table, func(t *testing.T) {
 			f := newAdmission(t)
 			// Identifiers are the static allowlist above, never input data.
@@ -227,7 +204,7 @@ func TestAdmissionAtomicRollbackAtEveryInsert(t *testing.T) {
 			if err == nil || r.JobID != "" {
 				t.Fatal("failed transaction exposed success")
 			}
-			for _, name := range []string{"jobs", "attempts", "job_objects", "events", "idempotency"} {
+			for _, name := range []string{"jobs", "attempts", "job_objects", "events", "receipts"} {
 				if tableCount(t, f.s, name) != 0 {
 					t.Fatalf("partial %s survived", name)
 				}
@@ -245,7 +222,7 @@ func TestAdmissionPinsAndRevisionImmutability(t *testing.T) {
 	f := newAdmission(t)
 	r := submit(t, f, "pin-input-key")
 	ctx := context.Background()
-	for _, query := range []string{"DELETE FROM objects WHERE workspace_id='a' AND object_id='data'", "UPDATE objects SET bytes=8 WHERE workspace_id='a' AND object_id='data'", "UPDATE job_objects SET sha256='changed'", "UPDATE jobs SET profile_revision='rev_other'", "UPDATE attempts SET nonce='changed'", "UPDATE idempotency SET request_sha256='changed'", "UPDATE events SET type='changed'"} {
+	for _, query := range []string{"DELETE FROM objects WHERE workspace_id='a' AND object_id='data'", "UPDATE objects SET bytes=8 WHERE workspace_id='a' AND object_id='data'", "UPDATE job_objects SET sha256='changed'", "UPDATE jobs SET profile_revision='rev_other'", "UPDATE attempts SET nonce='changed'", "UPDATE receipts SET request_sha256='changed'", "UPDATE events SET type='changed'"} {
 		if _, err := f.s.db.Exec(query); err == nil {
 			t.Fatalf("immutable reference changed by %s", query)
 		}
@@ -268,9 +245,7 @@ func TestAdmissionLimitsAndNoComputeValidation(t *testing.T) {
 		t.Fatal("validation mutated admission", err)
 	}
 	r, err := svc.Submit(ctx, f.p, "a", "limit-first", []byte(admissionJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = svc.Submit(ctx, f.p, "a", "limit-second", []byte(admissionJSON)); !errors.Is(err, admission.ErrLimit) {
 		t.Fatal("limit bypassed", err)
 	}
@@ -279,34 +254,11 @@ func TestAdmissionLimitsAndNoComputeValidation(t *testing.T) {
 		t.Fatal("limit blocked replay", err)
 	}
 }
-func TestPendingHTTPSIsDurableWithoutFetching(t *testing.T) {
-	f := newAdmission(t)
-	ctx := context.Background()
-	raw := strings.Replace(admissionJSON, `"kind":"object","object_id":"data"`, `"kind":"https","url":"https://example.com/public?version=1"`, 1)
-	r, err := f.service.Submit(ctx, f.p, "a", "https-pending", []byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	record, err := f.service.Get(ctx, f.p, "a", r.JobID)
-	if err != nil || record.PendingHTTPS != 1 || len(record.Objects) != 1 || record.Attempt.State.Execution != domain.ExecutionNotSubmitted {
-		t.Fatal("pending URL made optimistic ready/compute claim", err)
-	}
-	if record.Request.Spec().Inputs[0].Source.URL != "https://example.com/public?version=1" {
-		t.Fatal("source lost")
-	}
-	again, err := f.service.Submit(ctx, f.p, "a", "https-pending", []byte(raw))
-	if err != nil || !again.Replay {
-		t.Fatal(err)
-	}
-	// There is intentionally no downloader/provider dependency in Service or Repository.
-}
 func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 	f := newAdmission(t)
 	ctx := context.Background()
 	foreign := domain.ObjectMetadata{ID: "foreign_only", WorkspaceID: "b", Bytes: 7, SHA256: domain.SHA256Digest(strings.Repeat("b", 64))}
-	if err := f.s.CommitObject(ctx, foreign); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.CommitObject(ctx, foreign))
 	for _, id := range []string{"foreign_only", "missing"} {
 		raw := strings.Replace(admissionJSON, `"object_id":"data"`, `"object_id":"`+id+`"`, 1)
 		if _, err := f.service.Submit(ctx, f.p, "a", "missing-key-"+id, []byte(raw)); !errors.Is(err, admission.ErrInputs) {
@@ -314,13 +266,10 @@ func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 		}
 	}
 	req, err := admission.Parse([]byte(admissionJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	key, _ := admission.KeyDigest("revoked-transaction")
-	if err = f.s.RevokeToken(ctx, f.p.TokenID()); err != nil {
-		t.Fatal(err)
-	}
+	err = f.s.RevokeToken(ctx, f.p.TokenID())
+	requireNoError(t, err)
 	if _, err = f.s.AdmitJob(ctx, "a", f.p.TokenID(), key, req, admission.DefaultLimits()); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("transaction trusted stale authority", err)
 	}
@@ -328,67 +277,15 @@ func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 		t.Fatal("rejected request committed")
 	}
 }
-func TestAttemptStateAndEventCommitAtomically(t *testing.T) {
-	f := newAdmission(t)
-	ctx := context.Background()
-	r := submit(t, f, "state-event-key")
-	before, err := f.s.LoadAttempt(ctx, "a", r.JobID, r.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := before.State
-	state.Orchestration = domain.OrchestrationPreparing
-	after, err := before.Transition(state, before.UpdatedAt.Add(time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	change := ports.AttemptChange{WorkspaceID: "a", Before: before, After: after, Event: domain.Event{ID: "evt_next", Sequence: 2, WorkspaceID: "a", JobID: r.JobID, AttemptID: r.AttemptID, Type: domain.EventInputsReady, OccurredAt: after.UpdatedAt}}
-	if err = f.s.CommitAttempt(ctx, change); err != nil {
-		t.Fatal(err)
-	}
-	if err = f.s.CommitAttempt(ctx, change); !errors.Is(err, ErrConflict) {
-		t.Fatal("stale revision accepted", err)
-	}
-	latest, err := f.s.LoadAttempt(ctx, "a", r.JobID, r.AttemptID)
-	if err != nil || latest != after || tableCount(t, f.s, "events") != 2 {
-		t.Fatal("state/event not paired", err)
-	}
-	state = after.State
-	state.Orchestration = domain.OrchestrationState("blocked")
-	next, err := after.Transition(state, after.UpdatedAt.Add(time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	change.Before = after
-	change.After = next
-	change.Event.Sequence = 3
-	change.Event.OccurredAt = next.UpdatedAt
-	// Reusing evt_next violates event uniqueness AFTER the state UPDATE and must roll it back.
-	if err = f.s.CommitAttempt(ctx, change); !errors.Is(err, ErrConflict) {
-		t.Fatal("event uniqueness failure accepted", err)
-	}
-	latest, err = f.s.LoadAttempt(ctx, "a", r.JobID, r.AttemptID)
-	if err != nil || latest != after || tableCount(t, f.s, "events") != 2 {
-		t.Fatal("event failure left state update", err)
-	}
-	replay := submit(t, f, "state-event-key")
-	if !replay.Replay || replay.Status != "queued" {
-		t.Fatal("original receipt rewritten with current state")
-	}
-}
 func TestDiskFullAdmissionLeavesNoPartialRows(t *testing.T) {
 	f := newAdmission(t)
 	var pages int
-	if err := f.s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.db.QueryRow("PRAGMA page_count").Scan(&pages))
 	if _, err := f.s.db.Exec("PRAGMA max_page_count=" + strconv.Itoa(pages)); err != nil {
 		t.Fatal(err)
 	}
 	var request map[string]any
-	if err := json.Unmarshal([]byte(admissionJSON), &request); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, json.Unmarshal([]byte(admissionJSON), &request))
 	environment := map[string]string{}
 	for i := 0; i < 64; i++ {
 		environment["FIELD_"+strconv.Itoa(i)] = strings.Repeat("x", 4096)
@@ -399,7 +296,7 @@ func TestDiskFullAdmissionLeavesNoPartialRows(t *testing.T) {
 	if !errors.Is(err, ErrDiskFull) || r.JobID != "" {
 		t.Fatalf("disk failure: %v", err)
 	}
-	for _, table := range []string{"jobs", "attempts", "events", "idempotency", "job_objects"} {
+	for _, table := range []string{"jobs", "attempts", "events", "receipts", "job_objects"} {
 		if tableCount(t, f.s, table) != 0 {
 			t.Fatal("disk-full left partial rows")
 		}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,13 +18,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
 )
 
 const artifactManifest = "control/execution-result.json"
 const artifactCatalogBytes = 8 << 20
-const artifactFileLimit = 10004
+const artifactFileLimit = provider.MaxArtifactFiles
 
-var ErrArtifactCursor = errors.New("invalid or expired artifact catalog cursor; restart listing")
 var ErrArtifactTransfer = errors.New("artifact verification failed; retain the original attempt and result pin")
 
 // ArtifactPolicy bounds this read-only component; it does not alter a frozen job.
@@ -53,17 +52,10 @@ type artifactDeclaration struct {
 	Required bool   `json:"required"`
 	MaxBytes int64  `json:"max_bytes"`
 }
-type artifactIdentity struct {
-	JobID     domain.JobID        `json:"job_id"`
-	AttemptID domain.AttemptID    `json:"attempt_id"`
-	Nonce     string              `json:"attempt_nonce"`
-	Bundle    domain.SHA256Digest `json:"bundle_sha256"`
-	Inputs    domain.SHA256Digest `json:"input_manifest_sha256"`
-}
 type artifactRequest struct {
 	Protocol  int                   `json:"protocol"`
 	Execution executionRequest      `json:"execution"`
-	Identity  artifactIdentity      `json:"identity"`
+	Identity  provider.Identity     `json:"identity"`
 	Outputs   []artifactDeclaration `json:"outputs"`
 	MaxFiles  int                   `json:"max_files"`
 	MaxBytes  int64                 `json:"max_bytes"`
@@ -73,17 +65,13 @@ type artifactInvocation func(context.Context, Config, string, []byte, artifactRe
 
 // ArtifactReader is one attempt's read-only output port. It never calls Submit,
 // Prepare, Cancel or Cleanup. Only M3 can pin/publish verified local artifacts.
-// One complete bounded catalog is held in memory for pagination; a fresh empty
-// cursor explicitly rediscovers it. Recovery uses M3's durable pin, not this cache.
+// Every listing returns a complete bounded catalog. Recovery uses the durable result pin.
 type ArtifactReader struct {
-	executor      *Executor
-	policy        ArtifactPolicy
-	request       artifactRequest
-	slot          chan struct{}
-	run           artifactInvocation
-	catalog       []artifactEntry
-	catalogRef    provider.RemoteReference
-	catalogDigest domain.SHA256Digest
+	executor *Executor
+	policy   ArtifactPolicy
+	request  artifactRequest
+	slot     chan struct{}
+	run      artifactInvocation
 }
 
 func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, error) {
@@ -100,8 +88,7 @@ func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, err
 	}
 	r := artifactRequest{Protocol: 1, Execution: e.request, MaxFiles: policy.MaxFiles, MaxBytes: policy.MaxBytes, Outputs: make([]artifactDeclaration, 0, len(outputs))}
 	r.Execution.Source = ""
-	id := e.plan.Job.Identity
-	r.Identity = artifactIdentity{id.JobID, id.AttemptID, id.Nonce, id.BundleSHA256, id.InputManifestSHA256}
+	r.Identity = e.plan.Job.Identity
 	for _, o := range outputs {
 		kind := o.Kind
 		if kind == "" {
@@ -115,11 +102,21 @@ func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, err
 	return &ArtifactReader{executor: e, policy: policy, request: r, slot: make(chan struct{}, 1), run: runArtifacts}, nil
 }
 func artifactSafePath(path string) bool {
-	if !provider.SafeArtifactPath(path) || len(path) > 512 || strings.ContainsAny(path, "%") {
+	if !provider.SafeArtifactPath(path) || len(path) > 512 || strings.ContainsAny(path, `%<>"|?*`) {
 		return false
 	}
 	for _, c := range path {
 		if c < 32 || c > 126 {
+			return false
+		}
+	}
+	for _, part := range strings.Split(path, "/") {
+		if len(part) > 255 || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return false
+		}
+		stem := strings.ToUpper(strings.SplitN(part, ".", 2)[0])
+		if stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+			len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '0' && stem[3] <= '9' {
 			return false
 		}
 	}
@@ -167,21 +164,10 @@ func (a *ArtifactReader) enter(parent context.Context) (context.Context, context
 	}
 }
 
-type artifactCursor struct {
-	Reference domain.SHA256Digest `json:"reference"`
-	Catalog   domain.SHA256Digest `json:"catalog"`
-	Offset    int                 `json:"offset"`
-}
-
-func artifactReferenceDigest(ref provider.RemoteReference) domain.SHA256Digest {
-	raw, _ := json.Marshal(ref)
-	return provider.Digest(raw)
-}
-
-func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
-	var none provider.ArtifactPage
-	if a == nil || page.Validate() != nil {
-		return none, ErrArtifactCursor
+func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.RemoteReference) ([]provider.Artifact, error) {
+	var none []provider.Artifact
+	if a == nil {
+		return none, ErrConfig
 	}
 	if err := a.executor.checkOperationalReference(ref); err != nil {
 		return none, err
@@ -191,91 +177,66 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 		return none, err
 	}
 	defer leave()
-	if ctx.Err() != nil {
-		return none, ctx.Err()
+	raw, err := a.call(ctx, "catalog", ref, nil, nil)
+	if err != nil {
+		return none, err
 	}
-	offset := 0
-	if page.Cursor == "" {
-		a.catalog = nil
-		a.catalogDigest = ""
-		raw, err := a.call(ctx, "catalog", ref, nil, nil)
-		if err != nil {
-			return none, err
-		}
-		files, err := decodeArtifactCatalog(raw)
-		if err != nil {
-			return none, err
-		}
-		var total int64
-		seen := map[string]bool{}
-		hasManifest := false
-		if len(files) > a.policy.MaxFiles {
+	files, err := decodeArtifactCatalog(raw)
+	if err != nil {
+		return none, err
+	}
+	var total int64
+	seen := map[string]bool{}
+	hasManifest := false
+	if len(files) > a.policy.MaxFiles {
+		return none, ErrArtifactTransfer
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	for _, f := range files {
+		if !a.allowed(f.Path) || f.Bytes < 0 || !f.SHA256.Valid() || f.Bytes > a.policy.MaxBytes-total {
 			return none, ErrArtifactTransfer
 		}
-		sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-		for _, f := range files {
-			if !a.allowed(f.Path) || f.Bytes < 0 || !f.SHA256.Valid() || f.Bytes > a.policy.MaxBytes-total {
-				return none, ErrArtifactTransfer
-			}
-			if limit, ok := artifactControlLimit(f.Path); ok && f.Bytes > limit {
-				return none, ErrArtifactTransfer
-			}
-			key := strings.ToLower(f.Path)
-			parts := strings.Split(key, "/")
-			if seen[key] {
-				return none, ErrArtifactTransfer
-			}
-			for i := 1; i < len(parts); i++ {
-				if seen[strings.Join(parts[:i], "/")] {
-					return none, ErrArtifactTransfer
-				}
-			}
-			seen[key] = true
-			total += f.Bytes
-			hasManifest = hasManifest || f.Path == artifactManifest
-		}
-		// Check prefixes independently of original mixed-case ordering.
-		for key := range seen {
-			parts := strings.Split(key, "/")
-			for i := 1; i < len(parts); i++ {
-				if seen[strings.Join(parts[:i], "/")] {
-					return none, ErrArtifactTransfer
-				}
-			}
-		}
-		if !hasManifest {
+		if limit, ok := artifactControlLimit(f.Path); ok && f.Bytes > limit {
 			return none, ErrArtifactTransfer
 		}
-		encoded, _ := json.Marshal(files)
-		a.catalog, a.catalogRef, a.catalogDigest = files, ref, provider.Digest(encoded)
-	} else {
-		raw, err := base64.RawURLEncoding.Strict().DecodeString(page.Cursor)
-		var cursor artifactCursor
-		if err != nil || base64.RawURLEncoding.EncodeToString(raw) != page.Cursor || closedObject(raw, &cursor) != nil || cursor.Reference != artifactReferenceDigest(ref) || cursor.Catalog != a.catalogDigest || !cursor.Catalog.Valid() || a.catalogRef != ref || cursor.Offset <= 0 || cursor.Offset >= len(a.catalog) {
-			return none, ErrArtifactCursor
+		key := strings.ToLower(f.Path)
+		parts := strings.Split(key, "/")
+		if seen[key] {
+			return none, ErrArtifactTransfer
 		}
-		offset = cursor.Offset
+		for i := 1; i < len(parts); i++ {
+			if seen[strings.Join(parts[:i], "/")] {
+				return none, ErrArtifactTransfer
+			}
+		}
+		seen[key] = true
+		total += f.Bytes
+		hasManifest = hasManifest || f.Path == artifactManifest
 	}
-	end := min(offset+page.Limit, len(a.catalog))
-	result := provider.ArtifactPage{Artifacts: make([]provider.Artifact, 0, end-offset)}
-	for _, f := range a.catalog[offset:end] {
-		result.Artifacts = append(result.Artifacts, provider.Artifact{Remote: ref, Path: f.Path, Bytes: f.Bytes, SHA256: f.SHA256})
+	// Check prefixes independently of original mixed-case ordering.
+	for key := range seen {
+		parts := strings.Split(key, "/")
+		for i := 1; i < len(parts); i++ {
+			if seen[strings.Join(parts[:i], "/")] {
+				return none, ErrArtifactTransfer
+			}
+		}
 	}
-	if end < len(a.catalog) {
-		raw, _ := json.Marshal(artifactCursor{artifactReferenceDigest(ref), a.catalogDigest, end})
-		result.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+	if !hasManifest {
+		return none, ErrArtifactTransfer
+	}
+
+	result := make([]provider.Artifact, 0, len(files))
+	for _, f := range files {
+		result = append(result, provider.Artifact{Remote: ref, Path: f.Path, Bytes: f.Bytes, SHA256: f.SHA256})
 	}
 	return result, nil
 }
 
 // Destination MUST be temporary/unpublished. A full payload followed by failed
-// EOF/Close, digest, final identity check or process exit is still an error. M3's
+// EOF/Close, digest or final identity check is still an error. M3's
 // transfer pipe sends successful EOF only after this entire method succeeds.
-func (a *ArtifactReader) FetchArtifact(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
-	return a.FetchArtifactWithProgress(parent, ref, file, dst, limit, nil)
-}
-
-func (a *ArtifactReader) FetchArtifactWithProgress(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+func (a *ArtifactReader) Fetch(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	var none provider.TransferResult
 	if a == nil || dst == nil || file.Validate(ref) != nil || !a.allowed(file.Path) || limit < file.Bytes || file.Bytes > a.policy.MaxBytes {
 		return none, ErrArtifactTransfer
@@ -298,13 +259,28 @@ func (a *ArtifactReader) FetchArtifactWithProgress(parent context.Context, ref p
 		observer = &artifactProgressWriter{dst: dst, progress: progress}
 		dst = observer
 	}
+	var manifest bytes.Buffer
+	if file.Path == artifactManifest {
+		dst = io.MultiWriter(dst, &manifest)
+	}
 	checked := &artifactWriter{ctx: ctx, dst: dst, limit: file.Bytes, hash: sha256.New(), cancel: cancel}
 	_, err = a.call(ctx, "fetch", ref, &artifactEntry{file.Path, file.Bytes, file.SHA256}, checked)
 	if observer != nil && observer.err != nil {
+		if provider.IsLocalStateError(err) {
+			return none, errors.Join(err, observer.err)
+		}
 		return none, observer.err
+	}
+	if provider.IsLocalStateError(err) {
+		return none, err
 	}
 	if err != nil || checked.failed || checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
 		return none, ErrArtifactTransfer
+	}
+	if file.Path == artifactManifest {
+		if _, err := runnerplan.ParseResult(ref.Identity, manifest.Bytes()); err != nil {
+			return none, ErrArtifactTransfer
+		}
 	}
 	return provider.TransferResult{Bytes: file.Bytes, SHA256: file.SHA256}, nil
 }
@@ -337,16 +313,9 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 	defer func() {
 		if recover() != nil {
 			raw = nil
-			err = ErrProcess
+			err = ErrUnavailable
 		}
 	}()
-	local, err := a.executor.stager.local(ctx, a.executor.stager.config, Local, nil)
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return nil, ErrProcess
-	}
 	request := a.request
 	request.Outputs = append([]artifactDeclaration(nil), request.Outputs...)
 	request.Target = target
@@ -377,11 +346,14 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 		raw, inner = a.run(ctx, a.executor.stager.config, mode, token, request, dst)
 		return inner
 	})
+	if provider.IsLocalStateError(err) {
+		return nil, err
+	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	if err != nil || !called || violated {
-		return nil, ErrProcess
+		return nil, ErrUnavailable
 	}
 	if mode == "fetch" && len(raw) != 0 {
 		return nil, ErrProtocol

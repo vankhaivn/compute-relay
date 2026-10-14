@@ -3,8 +3,8 @@
   "job_id": "job_example",
   "attempt_id": "att_example",
   "observed_at": "2026-10-13T00:00:00Z",
-  "eligible": false,
-  "reason": "name_based_delete_not_accepted",
+  "eligible": true,
+  "reason": "eligible",
   "resources": [
     {
       "resource_id": "res_execution_example",
@@ -17,14 +17,12 @@
         "version": "1",
         "scope": "kernel_object",
         "support": "supported",
-        "reason": "name_based_delete_requires_acceptance",
-        "bytes": null,
-        "name_based_delete": true,
-        "warning": "Kaggle deletes by owner/name. Renaming may leave the original undeleted. If someone replaces it after Relay checks it, the replacement may be deleted, including its versions and outputs."
+        "reason": "recorded_attempt_resource",
+        "bytes": null
       },
-      "eligible": false,
+      "eligible": true,
       "observation": "present",
-      "reason": "name_based_delete_not_accepted"
+      "reason": "eligible"
     }
   ]
 }

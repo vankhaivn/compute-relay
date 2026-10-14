@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -20,44 +19,13 @@ var _ admission.Repository = (*Store)(nil)
 
 const createJobOperation = "job.create"
 
-// PutProfile is a LOCAL operator operation. A revision cannot change its contents.
-// Disabling/remapping a profile affects new admissions only, not historical resolution.
-func (s *Store) PutProfile(ctx context.Context, p admission.Profile, enabled bool) error {
-	if p.Validate() != nil {
-		return ErrInvalid
-	}
-	b, err := json.Marshal(p)
-	if err != nil || len(b) > 8192 {
-		return ErrInvalid
-	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		var prior string
-		err := tx.QueryRowContext(ctx, "SELECT snapshot FROM profile_revisions WHERE profile=? AND revision=?", p.Binding.Profile, p.Binding.ConfigurationRevision).Scan(&prior)
-		switch {
-		case err == nil:
-			if prior != string(b) {
-				return ErrConflict
-			}
-		case errors.Is(err, sql.ErrNoRows):
-			if _, err = tx.ExecContext(ctx, "INSERT INTO profile_revisions VALUES(?,?,?)", p.Binding.Profile, p.Binding.ConfigurationRevision, string(b)); err != nil {
-				return dbError(err)
-			}
-		default:
-			return dbError(err)
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO profiles VALUES(?,?,?) ON CONFLICT(profile) DO UPDATE SET revision=excluded.revision,enabled=excluded.enabled`, p.Binding.Profile, p.Binding.ConfigurationRevision, enabled)
-		return dbError(err)
-	})
-}
-
 // actorInTx closes revocation/disable/scope races between HTTP auth and commit. Token IDs
 // are NOT bearer secrets; only an authenticated application service calls this store seam.
 func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID string, scope auth.Scope) ([]string, error) {
+	now := transactionTime(ctx)
+	if now.IsZero() {
+		return nil, ErrCorrupt
+	}
 	if !w.Valid() || !validID(tokenID) {
 		return nil, auth.ErrUnauthenticated
 	}
@@ -79,7 +47,7 @@ func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID st
 		if err != nil {
 			return nil, ErrCorrupt
 		}
-		if !time.Now().Before(at) {
+		if !now.Before(at) {
 			return nil, auth.ErrUnauthenticated
 		}
 	}
@@ -105,49 +73,35 @@ func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID st
 	return workspace.AllowedProfiles, nil
 }
 
-func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed []string, req admission.Request) (admission.Profile, []admission.FrozenObject, int, error) {
+func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, req admission.Request) (admission.Profile, []admission.FrozenObject, error) {
 	var profile admission.Profile
 	spec := req.Spec()
-	permitted := false
-	for _, v := range allowed {
-		if v == spec.Profile {
-			permitted = true
-		}
-	}
 	var raw string
 	var enabled bool
 	err := tx.QueryRowContext(ctx, `SELECT r.snapshot,p.enabled FROM profiles p JOIN profile_revisions r ON p.profile=r.profile AND p.revision=r.revision WHERE p.profile=?`, spec.Profile).Scan(&raw, &enabled)
 	if errors.Is(err, sql.ErrNoRows) {
-		return profile, nil, 0, auth.ErrForbidden
+		return profile, nil, auth.ErrForbidden
 	}
 	if err != nil {
-		return profile, nil, 0, dbError(err)
+		return profile, nil, dbError(err)
 	}
 	if len(raw) > 8192 || json.Unmarshal([]byte(raw), &profile) != nil || profile.Validate() != nil || profile.Binding.Profile != spec.Profile {
-		return profile, nil, 0, ErrCorrupt
+		return profile, nil, ErrCorrupt
 	}
-	if strings.HasPrefix(profile.CredentialRef, "vault:") {
-		if err = managedProfileOwned(ctx, tx, w, profile); err != nil {
-			return profile, nil, 0, err
-		}
-		var selected bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE workspace_id=? AND current_profile=? AND new_work='enabled' AND pending_operation='')`, w, spec.Profile).Scan(&selected); err != nil {
-			return profile, nil, 0, dbError(err)
-		}
-		if !selected || !enabled {
-			return profile, nil, 0, admission.ErrSelection
-		}
-	} else if !permitted || !enabled {
-		return profile, nil, 0, auth.ErrForbidden
+	if err = managedProfileOwned(ctx, tx, w, profile); err != nil {
+		return profile, nil, err
 	}
-	if spec.SeparateStart() && !strings.HasPrefix(profile.CredentialRef, "vault:") {
-		return profile, nil, 0, admission.ErrRequirements
+	var selected bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE workspace_id=? AND current_profile=? AND new_work='enabled' AND pending_operation='')`, w, spec.Profile).Scan(&selected); err != nil {
+		return profile, nil, dbError(err)
+	}
+	if !selected || !enabled {
+		return profile, nil, admission.ErrSelection
 	}
 	if err = profile.Check(spec); err != nil {
-		return profile, nil, 0, err
+		return profile, nil, err
 	}
 	refs := []admission.FrozenObject{}
-	pending := 0
 	var total int64
 	load := func(role string, id domain.ObjectID, max int64) error {
 		var m domain.ObjectMetadata
@@ -174,44 +128,32 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 		return nil
 	}
 	if err = load("bundle", spec.Bundle.ObjectID, profile.MaxBundleBytes); err != nil {
-		return profile, nil, 0, err
+		return profile, nil, err
 	}
 	for i, in := range spec.Inputs {
-		if in.Source.Kind == "https" {
-			pending++
-			continue
-		}
 		if err = load("input:"+strconv.Itoa(i), in.Source.ObjectID, 2<<30); err != nil {
-			return profile, nil, 0, err
+			return profile, nil, err
 		}
 	}
-	return profile, refs, pending, nil
+	return profile, refs, nil
 }
 
 func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID string, req admission.Request) (admission.Validation, error) {
 	if !req.Valid() {
 		return admission.Validation{}, admission.ErrSpec
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return admission.Validation{}, err
-	}
-	defer done()
 	result := admission.Validation{Valid: true, Warnings: []string{"Offline admission checks only; provider capability and bundle validation are still required before dispatch."}, Requirements: []admission.Requirement{{Name: "provider_validation", Verification: "before_dispatch"}, {Name: "bundle_integrity_and_layout", Verification: "before_dispatch"}}}
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		allowed, err := actorInTx(ctx, tx, w, tokenID, auth.Read)
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		_, err := actorInTx(ctx, tx, w, tokenID, auth.Read)
 		if err != nil {
 			return err
 		}
-		_, _, pending, err := resolveJob(ctx, tx, w, allowed, req)
+		_, _, err = resolveJob(ctx, tx, w, req)
 		if err != nil {
 			return err
 		}
-		if req.Spec().Expired(time.Now()) {
+		if req.Spec().Expired(now) {
 			return admission.ErrExpired
-		}
-		if pending > 0 {
-			result.Requirements = append(result.Requirements, admission.Requirement{Name: "https_input_snapshots", Verification: "before_dispatch", Reason: "Source records are durable; no input download occurs during admission."})
 		}
 		if req.Spec().Resources.Accelerator == "gpu" {
 			result.Requirements = append(result.Requirements, admission.Requirement{Name: "gpu_requirements", Verification: "verify_after_start"})
@@ -228,40 +170,29 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 	if !req.Valid() || !domain.SHA256Digest(keyHash).Valid() || !limits.Valid() {
 		return admission.Receipt{}, admission.ErrSpec
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return admission.Receipt{}, err
-	}
-	defer done()
 	var receipt admission.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		allowed, err := actorInTx(ctx, tx, w, tokenID, auth.Write)
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		_, err := actorInTx(ctx, tx, w, tokenID, auth.Write)
 		if err != nil {
 			return err
 		}
-		var hash, version, raw, jobID, attemptID string
-		err = tx.QueryRowContext(ctx, `SELECT request_sha256,canonical_version,receipt,job_id,attempt_id FROM idempotency WHERE workspace_id=? AND operation=? AND key_sha256=?`, string(w), createJobOperation, keyHash).Scan(&hash, &version, &raw, &jobID, &attemptID)
-		if err == nil {
-			if version != admission.CanonicalVersion {
-				return ErrSchema
-			}
-			if hash != string(req.Hash()) {
-				return admission.ErrConflict
-			}
-			if len(raw) > 4096 || json.Unmarshal([]byte(raw), &receipt) != nil || receipt.JobID != domain.JobID(jobID) || receipt.AttemptID != domain.AttemptID(attemptID) || !receipt.JobID.Valid() || !receipt.AttemptID.Valid() || receipt.Replay || receipt.Status != "queued" || receipt.CreatedAt.IsZero() || receipt.Links != admission.JobLinks(w, receipt.JobID) {
+		key := receiptKey{w, "admission", createJobOperation, keyHash, string(req.Hash()), admission.CanonicalVersion, admission.ErrConflict}
+		prior, found, err := replayOrCreate(ctx, tx, key, nil)
+		if err != nil {
+			return err
+		}
+		if found {
+			if json.Unmarshal([]byte(prior.raw), &receipt) != nil || receipt.JobID != prior.job || receipt.AttemptID != prior.attempt || !receipt.JobID.Valid() || !receipt.AttemptID.Valid() || receipt.Replay || receipt.Status != "queued" || receipt.CreatedAt.IsZero() || receipt.Links != admission.JobLinks(w, receipt.JobID) {
 				return ErrCorrupt
 			}
 			receipt.Replay = true
 			return nil
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		profile, refs, _, err := resolveJob(ctx, tx, w, allowed, req)
+		profile, refs, err := resolveJob(ctx, tx, w, req)
 		if err != nil {
 			return err
 		}
-		if req.Spec().Expired(time.Now()) {
+		if req.Spec().Expired(now) {
 			return admission.ErrExpired
 		}
 		var total, workspace int
@@ -288,7 +219,6 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err != nil {
 			return err
 		}
-		now := time.Now().UTC()
 		created := now.Format(time.RFC3339Nano)
 		a, err := domain.NewAttempt(domain.AttemptID(attempt), domain.JobID(job), 1, now)
 		if err != nil {
@@ -321,8 +251,8 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err != nil {
 			return ErrInvalid
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO idempotency VALUES(?,?,?,?,?,?,?,?)`, string(w), createJobOperation, keyHash, string(req.Hash()), admission.CanonicalVersion, job, attempt, string(encoded))
-		return dbError(err)
+		_, _, err = replayOrCreate(ctx, tx, key, &savedReceipt{job, domain.JobID(job), domain.AttemptID(attempt), string(encoded)})
+		return err
 	})
 	// Never return assigned IDs/success for a failed or uncertain transaction acknowledgement.
 	if err != nil {

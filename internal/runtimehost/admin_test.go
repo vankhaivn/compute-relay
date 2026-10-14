@@ -18,9 +18,7 @@ func TestLocalWorkspaceAndTokenAuthorityPersistAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	path := initialized(t)
 	h, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	w, err := h.CreateWorkspace(ctx, "app")
 	if err != nil || !w.Enabled || len(w.AllowedProfiles) != 0 {
 		t.Fatal(w, err)
@@ -34,9 +32,7 @@ func TestLocalWorkspaceAndTokenAuthorityPersistAcrossReopen(t *testing.T) {
 		t.Fatal(receipt, err)
 	}
 	data, err := readPrivate(tokenPath, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	token := strings.TrimSuffix(string(data), "\n")
 	if len(token) != 47 {
 		t.Fatal("invalid issued secret")
@@ -56,9 +52,7 @@ func TestLocalWorkspaceAndTokenAuthorityPersistAcrossReopen(t *testing.T) {
 	}
 	h.Close()
 	h, err = Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer h.Close()
 	w, err = h.Workspace(ctx, "app")
 	if err != nil || w.Enabled {
@@ -74,9 +68,7 @@ func TestLocalWorkspaceAndTokenAuthorityPersistAcrossReopen(t *testing.T) {
 	if err := auth.Require(principal, "app", auth.Operate); !errors.Is(err, auth.ErrForbidden) {
 		t.Fatal("scope escalation")
 	}
-	if err := h.RevokeToken(ctx, receipt.ID); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, h.RevokeToken(ctx, receipt.ID))
 	if _, err := h.access.Authenticate(ctx, token); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("revocation ignored", err)
 	}
@@ -85,9 +77,7 @@ func TestLocalWorkspaceAndTokenAuthorityPersistAcrossReopen(t *testing.T) {
 func TestLocalTokenDeliveryFailureRevokesAndClearsOwnedBuffer(t *testing.T) {
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer h.Close()
 	if _, err := h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)
@@ -119,9 +109,7 @@ func TestLocalTokenRejectsProtectedDestinationsAndInvalidAuthority(t *testing.T)
 	ctx := context.Background()
 	path := initialized(t)
 	h, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer h.Close()
 	h.CreateWorkspace(ctx, "app")
 	for _, name := range []string{"state/secret", "inputs/secret", "results/secret", "credentials/secret", "STATE/secret"} {
@@ -153,4 +141,29 @@ func privateTokenPath(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return filepath.Join(path, "token")
+}
+
+func TestTokenLifetimeUsesLogicalClockAfterLongWallRollback(t *testing.T) {
+	ctx := context.Background()
+	h, err := Open(ctx, initialized(t))
+	requireNoError(t, err)
+	defer h.Close()
+	if _, err = h.CreateWorkspace(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	wall := &fixedClock{now: time.Now().UTC().Truncate(time.Millisecond).Add(60 * 24 * time.Hour)}
+	injectHostClock(t, h, wall.Now)
+	before, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read, auth.Write}, time.Minute, privateTokenPath(t))
+	requireNoError(t, err)
+	wall.advance(-60 * 24 * time.Hour)
+	path := privateTokenPath(t)
+	after, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read, auth.Write}, time.Minute, path)
+	if err != nil || !after.ExpiresAt.Equal(before.ExpiresAt) {
+		t.Fatal("relative token policy used rolled-back wall time", before.ExpiresAt, after.ExpiresAt, err)
+	}
+	raw, err := os.ReadFile(path)
+	requireNoError(t, err)
+	if _, err = h.access.Authenticate(ctx, strings.TrimSpace(string(raw))); err != nil {
+		t.Fatal("new token was not usable at committed logical time", err)
+	}
 }

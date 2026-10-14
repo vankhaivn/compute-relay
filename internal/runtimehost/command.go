@@ -14,7 +14,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operatorcli"
-	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
 )
 
 // Command is the main executable's local composition boundary. Non-serve commands
@@ -29,9 +28,6 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if r.Command == "profile" {
-		return profileCommand(ctx, r, out)
 	}
 	if r.Command == "validate" {
 		return validateFile(ctx, r.File, out)
@@ -50,20 +46,16 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 		if !ValidListen(r.Listen) {
 			return ErrRequest
 		}
-		if r.Managed || r.ManagedPython != "" || r.ManagedCredentialStore != "" || r.ManagedMachineShape != "" || r.ManagedMaxWallSeconds != 0 || r.ManagedMaxWorkers != 0 || r.ManagedAllowInternet {
-			if r.ProviderConfig != "" || r.ProviderProfile != "" || r.ProviderMachineShape != "" || r.MaxProviderAttempts != 0 || r.AllowPrivateStaging || r.AllowGPU {
-				return ErrRequest
-			}
-			managed = &ManagedServeConfig{
-				PythonExecutable: r.ManagedPython, MachineShape: r.ManagedMachineShape,
-				CredentialStore:      r.ManagedCredentialStore,
-				MaxRemoteWallSeconds: r.ManagedMaxWallSeconds, MaxWorkers: r.ManagedMaxWorkers,
-				AllowRemoteInternet: r.ManagedAllowInternet,
-			}
-			if managed.validate() != nil {
-				return ErrRequest
-			}
+		managed = &ManagedServeConfig{
+			MachineShape:         r.ManagedMachineShape,
+			CredentialStore:      r.ManagedCredentialStore,
+			MaxRemoteWallSeconds: r.ManagedMaxWallSeconds, MaxWorkers: r.ManagedMaxWorkers,
+			AllowRemoteInternet: r.ManagedAllowInternet,
 		}
+		if managed.validate() != nil {
+			return ErrRequest
+		}
+
 	case "workspace":
 		if !domain.WorkspaceID(r.ID).Valid() || (r.Action != "create" && r.Action != "show" && r.Action != "enable" && r.Action != "disable") {
 			return ErrRequest
@@ -90,21 +82,6 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 		return encoder.Encode(result)
 	case "serve":
 		serve := ServeConfig{Address: r.Listen, Managed: managed}
-		if r.ProviderConfig != "" {
-			raw, err := readPrivate(r.ProviderConfig, 8192)
-			if err != nil {
-				return ErrRequest
-			}
-			config, err := kaggle.ParseConfig(raw)
-			clear(raw)
-			if err != nil {
-				return ErrRequest
-			}
-			serve.Kaggle = &KaggleServeConfig{
-				Config: config, Profile: r.ProviderProfile,
-				MachineShape: r.ProviderMachineShape, MaxAttempts: r.MaxProviderAttempts,
-			}
-		}
 		return h.ServeConfigured(ctx, serve, func(result Listening) error { return encoder.Encode(result) })
 	case "workspace":
 		var result WorkspaceView

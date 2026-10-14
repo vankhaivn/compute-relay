@@ -79,18 +79,18 @@ func TestRealDockerOverSSH(t *testing.T) {
 	observed := waitTerminal(ctx, t, adapter, remote)
 	files := map[string][]byte{}
 	page := provider.PageRequest{Limit: 100}
-	listed, err := adapter.ListArtifacts(ctx, remote, page)
+	listed, err := adapter.ListArtifacts(ctx, remote)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, artifact := range listed.Artifacts {
+	for _, artifact := range listed {
 		var dst bytes.Buffer
-		if _, err = adapter.FetchArtifact(ctx, remote, artifact, &dst, 32<<20); err != nil {
+		if _, err = adapter.Fetch(ctx, remote, artifact, &dst, 32<<20, nil); err != nil {
 			t.Fatalf("fetch %s: %v", artifact.Path, err)
 		}
 		files[artifact.Path] = dst.Bytes()
 	}
-	logs, err := adapter.ReadLogs(ctx, remote, page)
+	logs, err := adapter.Logs(ctx, remote, page)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func startE2E(ctx context.Context, t *testing.T, account string, raw []byte, pay
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = adapter.Check(ctx); err != nil {
+	if err = adapter.Verify(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := adapter.Validate(ctx, job)
@@ -181,11 +181,11 @@ func startE2E(ctx context.Context, t *testing.T, account string, raw []byte, pay
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: testOperation, ResultsCollected: true, Mode: provider.CleanupApply}
-		if outcome, err := adapter.Cleanup(ctx, request); err != nil || !outcome.Deleted && !outcome.AlreadyAbsent {
+		if outcome, err := adapter.CleanupResource(ctx, resourceRequest(request, plan.Digest())); err != nil || !outcome.Deleted && !outcome.AlreadyAbsent {
 			t.Errorf("cleanup = %+v, %v", outcome, err)
 		}
 	})
-	out := adapter.Submit(ctx, prepared)
+	out := adapter.Start(ctx, prepared, nil, nil)
 	if out.Status != provider.SubmissionAccepted || *out.Remote != remote {
 		t.Fatalf("submit = %+v", out.Problem)
 	}

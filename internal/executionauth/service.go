@@ -2,7 +2,6 @@ package executionauth
 
 import (
 	"context"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
@@ -17,11 +16,10 @@ type Command struct {
 	JobID       domain.JobID
 	KeyDigest   string
 	Request     Request
-	Now         time.Time
 }
 
 func (c Command) Validate() error {
-	if !c.WorkspaceID.Valid() || !domain.ObjectID(c.TokenID).Valid() || !c.JobID.Valid() || !domain.SHA256Digest(c.KeyDigest).Valid() || c.Request.Validate() != nil || c.Now.IsZero() || c.Now.Year() < 1970 || c.Now.Year() >= 9999 {
+	if !c.WorkspaceID.Valid() || !domain.ObjectID(c.TokenID).Valid() || !c.JobID.Valid() || !domain.SHA256Digest(c.KeyDigest).Valid() || c.Request.Validate() != nil {
 		return ErrRequest
 	}
 	return nil
@@ -33,7 +31,7 @@ type Repository interface {
 	PrepareExecution(context.Context, GateCommand, PrepareRequest) (GateReceipt, error)
 	StartExecution(context.Context, GateCommand, StartRequest) (GateReceipt, error)
 	ReadGateAuthorization(context.Context, domain.WorkspaceID, string, domain.JobID, domain.OperationID) (GateReceipt, error)
-	ReadReadiness(context.Context, domain.WorkspaceID, string, domain.JobID, time.Time) (Readiness, error)
+	ReadReadiness(context.Context, domain.WorkspaceID, string, domain.JobID) (Readiness, error)
 }
 type Service struct {
 	access  *auth.Service
@@ -67,7 +65,7 @@ func (s *Service) Authorize(ctx context.Context, p auth.Principal, w domain.Work
 	if err != nil {
 		return Receipt{}, err
 	}
-	return s.repo.AuthorizeExecution(ctx, Command{WorkspaceID: w, TokenID: p.TokenID(), JobID: job, KeyDigest: digest, Request: req, Now: s.clock.Now().UTC()})
+	return s.repo.AuthorizeExecution(ctx, Command{WorkspaceID: w, TokenID: p.TokenID(), JobID: job, KeyDigest: digest, Request: req})
 }
 func (s *Service) Get(ctx context.Context, p auth.Principal, w domain.WorkspaceID, job domain.JobID, id domain.OperationID) (Receipt, error) {
 	p, err := s.authorize(ctx, p, w)

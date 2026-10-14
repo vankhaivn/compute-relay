@@ -1,30 +1,13 @@
 # Compute Relay
 
-Compute Relay is a self-hosted control plane for **finite compute jobs**. Applications talk to a
-local HTTP/JSON API instead of embedding provider SDKs or credentials. The runtime gives jobs a
-durable identity, preserves attempts and recovery state, and verifies published result bytes.
-Kaggle is the first provider adapter.
+Compute Relay is a self-hosted control plane for finite remote compute jobs. Applications use a
+local HTTP/JSON API to upload inputs, admit jobs, authorize attempts and read verified results.
+Relay keeps durable receipts and the original provider identity through failures and restarts.
+The provider adapters are Kaggle and Docker hosts reached over SSH.
 
-```mermaid
-flowchart TB
-    App["Your application / CLI"]
-    Relay["Compute Relay<br/>local HTTP/JSON API"]
-    Local["Durable local runtime<br/>inputs · jobs · receipts · published results"]
-    Provider["Provider compute<br/>Kaggle today"]
-
-    App --> Relay
-    Relay --> Local
-    Local -->|"explicit provider mode"| Provider
-    Provider -->|"verified results"| Local
-```
-
-Without provider flags, `serve` stops at the durable local runtime. Provider work starts only in an
-explicitly configured mode with finite authorization. There is no public release yet; read
-[current status](docs/status.md) before depending on a capability.
-
-## Quick start
-
-Requirements: Git and the Go version pinned in [`go.mod`](go.mod).
+The control plane is a single Go executable. Its Python runner is embedded and sent to remote
+compute; Relay does not need a local Python interpreter. Docker is required on SSH execution hosts,
+not on the Relay host. Accounts and infrastructure belong to the operator.
 
 ```sh
 git clone https://github.com/vankhaivn/compute-relay.git
@@ -33,10 +16,14 @@ go build -trimpath -o compute-relay ./cmd/compute-relay
 ./compute-relay help
 ```
 
-Then follow **[Getting started](docs/getting-started.md)** for a complete local walkthrough and
-**[Kaggle runtime](docs/kaggle-runtime.md)** or **[Managed connections](docs/managed-connections.md)**
-for provider execution. All usage guides are listed in [docs](docs/README.md); contributors start
-with [CONTRIBUTING.md](CONTRIBUTING.md).
+Build with Go 1.27.1, pinned in [go.mod](go.mod). Start with
+[Getting started](docs/getting-started.md), then [Managed connections](docs/managed-connections.md).
+Serving starts the managed runtime; each attempt still needs explicit, finite authorization.
+An installation with no connections makes no provider calls.
 
-Compute Relay is licensed under [Apache-2.0](LICENSE). Provider services, uploaded data, models and
-third-party dependencies retain their own terms and licenses.
+The project is unreleased. [Compatibility](docs/compatibility.md) distinguishes implemented
+behavior from live qualification. [Documentation](docs/README.md) covers operations and design;
+[CONTRIBUTING.md](CONTRIBUTING.md) explains checks and changes.
+
+Licensed under [Apache-2.0](LICENSE). Provider services, data, models and dependencies retain their
+own terms and licenses.

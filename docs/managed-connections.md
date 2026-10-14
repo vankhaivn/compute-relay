@@ -1,40 +1,25 @@
 # Managed connections
 
-Managed mode lets a local application administer provider connections while the server is
-running. The adapters are Kaggle and [SSH hosts](ssh-hosts.md). New installations store credentials
-in a private local file; macOS Keychain remains optional.
-Ordinary `serve` and the explicit environment-configured [Kaggle mode](kaggle-runtime.md)
-remain separate modes. Managed startup does not check an account or authorize compute.
-
-## Start and discover
-
-Initialize an installation and workspace using [Local runtime](local-runtime.md). Before starting
-serve, issue separate private tokens for ordinary job operations, connection management
-(`read`, `manage`) and owner-approved execution (`execute`). Keep management and execution
-tokens outside an ordinary job-producing process. Token issuance remains local administration
-and requires the server to be stopped.
-
-For SSH-only use, `compute-relay serve --root /absolute/private/runtime --managed`
-uses the selected credential backend and needs no Python. It defaults to CPU and advertises only
-SSH. It refuses to start if non-removed Kaggle connections are saved in that installation.
-
-For Kaggle and SSH together, use an absolute Python executable containing the repository's
-locked Kaggle client:
+The managed runtime lets a local application administer Kaggle and [SSH](ssh-hosts.md)
+connections while Relay is serving. Startup neither checks an account nor authorizes compute.
+Initialize the root/workspace and issue separate job, management and execution tokens using
+[getting started](getting-started.md). Keep management/execute tokens outside the job producer.
 
 ```sh
-compute-relay serve --root /absolute/private/runtime \
-  --managed-python /absolute/provider-runtime/bin/python3
+compute-relay serve --root /absolute/private/runtime
 ```
+
+The single Go executable includes both adapters and the remote runner; no local Python is needed.
 
 Optional policy flags are `--managed-machine-shape cpu|NvidiaTeslaT4|NvidiaTeslaP100`,
 `--managed-max-wall-seconds 1..86400`, `--managed-max-workers 1..16`, and
-`--managed-allow-internet`. Defaults are T4, 1800 seconds, two workers and internet disabled.
+`--managed-allow-internet`. Defaults are CPU, 1800 seconds, two workers and internet disabled.
 They configure future profiles; each verified connection revision freezes its own policy.
 Use `--managed-machine-shape cpu` for CPU-only execution. It sends GPU disabled and no GPU
 machine shape to Kaggle. This is an explicit configuration, never a fallback from an unavailable
 GPU. Changing the service flag does not rewrite saved connections or jobs; explicitly check a
 connection to publish a new selection under that configuration.
-Managed flags cannot be mixed with standalone Kaggle flags. No flag grants an attempt permit.
+No flag grants an attempt permit.
 The machine shape applies only to Kaggle. SSH host connections are always CPU, and the wall and
 internet flags apply to both types.
 
@@ -54,7 +39,7 @@ An explicit different backend is rejected: this flag is not a credential migrati
 
 The file backend stores provider credentials and the request-fingerprint key in
 `credentials/secrets.env` under the runtime root. Relay creates the directory with private Unix
-permissions (`0700`), files with `0600`, or private inherited Windows ACLs. Values are base64 encoded
+permissions (`0700`) and files with `0600`. Values are base64 encoded
 to preserve private keys and arbitrary bytes; **they are not encrypted**. Only filesystem access
 protects this store. The local operator and processes running as that user remain trusted.
 
@@ -64,16 +49,16 @@ data and updates it atomically. Passwords are never returned by the API or writt
 The file backend does not depend on an executable's name or macOS identity: stop the old process,
 install the new binary and restart against the same root.
 
-With Keychain selected, SSH-only mode uses the native macOS API; the Python mode uses its existing
-bridge. Both use the same item names and bytes, disable interactive prompts while serving, and
-never broaden access lists or recreate inaccessible credentials. See Apple’s
+Keychain uses the native macOS API with the same existing item names and bytes. Serving disables
+interactive prompts and never broadens access lists or recreates inaccessible entries. Replacing
+the executable can require explicit macOS access permission for the existing items. A local
+original-binary continuity check confirmed native access after owner approval without token
+re-entry; this does not establish silent access for every binary or item ACL. See Apple's
 [per-app Keychain access instructions](https://support.apple.com/en-gb/guide/mac-help/kychn002/26/mac/26).
 
-Keychain keeps its existing per-application access controls; replacing the executable or its
-Python interpreter can require a new access grant. Neither backend falls back, exports credentials
-to the other store, or recreates a missing fingerprint key after initialization. Preserve a damaged
-installation and restore its original files or Keychain items. Automatic backend migration is not
-implemented.
+Neither backend falls back, copies credentials to the other store or recreates a missing
+fingerprint key after initialization. Preserve damaged state and restore the original vault.
+An automatic backend migration is not provided.
 
 For a file-backed backup, stop Relay and preserve `credentials/` and `state/credential-store`
 alongside the installation identity, database and both blob stores. A database-only backup does
@@ -136,7 +121,7 @@ Read `capabilities.concurrency` in the provider descriptor before offering a set
 `scope=resource`. Omission means support is unknown. The range describes Relay's local policy,
 not the number of sessions the provider will allocate. Set `configuration.max_active_attempts`
 through the same create/configure actions, then use the returned immutable selection for new jobs.
-Explicit Kaggle mode remains one worker and one active attempt per account.
+
 
 Connection `concurrency` reports:
 
@@ -200,13 +185,12 @@ cached quota after existing reservations. Unknown or stale GPU quota requires an
 connection check. Explicit CPU work does not require or reserve GPU seconds. Its unquantified
 CPU allowance remains unknown and produces a scheduling warning; known CPU exhaustion still
 blocks execution. All resources share the same account concurrency limit and finite consent.
-Unresolved HTTPS inputs are not enabled here; there is no account fallback or rotation.
+Inputs must already be uploaded immutable objects; there is no account fallback or rotation.
 
 The permit is consumed durably before provider mutations. Restarting or changing startup flags
 cannot create another permit. Recovery and collection use the original binding. An explicit
 retry creates a new attempt that needs its own authorization. Current authority, capacity and
 one-shot intent guards still apply after a permit is granted.
 
-See the [wire and recovery contract](development/managed-connections.md) and
-[OpenAPI](../api/openapi.json) for exact schemas, revisions and error semantics, and
-[current status](status.md) for live evidence.
+See [API contracts](../api/README.md) for exact schemas, revisions and errors,
+[design](design.md) for durable boundaries and [compatibility](compatibility.md) for qualification.

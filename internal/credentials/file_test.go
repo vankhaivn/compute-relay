@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -173,17 +172,11 @@ func TestFileVaultRejectsCorruptionAndUnsafeFiles(t *testing.T) {
 			switch kind {
 			case "symlink":
 				err = os.Symlink(target, path)
-				if err != nil && runtime.GOOS == "windows" {
-					t.Skip("Windows symlink privilege unavailable")
-				}
 			case "hardlink":
 				err = os.Link(target, path)
 			case "directory":
 				err = os.Mkdir(path, 0700)
 			case "permissions":
-				if runtime.GOOS == "windows" {
-					t.Skip("Windows uses DACLs, covered by statefs")
-				}
 				err = os.WriteFile(path, f.header(), 0644)
 			}
 			if err != nil {

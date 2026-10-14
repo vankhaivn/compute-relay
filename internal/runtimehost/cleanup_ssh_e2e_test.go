@@ -24,6 +24,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/testsupport/sshtest"
@@ -53,13 +54,9 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	save := func(name string, value any) {
 		t.Helper()
 		raw, err := json.MarshalIndent(value, "", "  ")
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		file, err := os.OpenFile(filepath.Join(root, name+".json"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		if _, err = file.Write(raw); err != nil {
 			t.Fatal(err)
 		}
@@ -81,13 +78,9 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 		t.Helper()
 		var stream bytes.Buffer
 		writer := tar.NewWriter(&stream)
-		if err := writer.WriteHeader(&tar.Header{Name: "sentinel", Mode: 0o644, Size: int64(len(content))}); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, writer.WriteHeader(&tar.Header{Name: "sentinel", Mode: 0o644, Size: int64(len(content))}))
 		_, _ = writer.Write([]byte(content))
-		if err := writer.Close(); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, writer.Close())
 		docker(stream.Bytes(), "cp", "-", id+":"+destination)
 	}
 	info := docker(nil, "info", "--format", "{{json .}}")
@@ -141,33 +134,23 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, err := Open(ctx, state)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer func() { _ = h.Close() }()
 	if _, err = h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)
 	}
 	secret, _, err := h.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Write, auth.Manage, auth.Execute, auth.Operate}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	actor, err := h.access.Authenticate(ctx, secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	config := ManagedServeConfig{MaxRemoteWallSeconds: 120, MaxWorkers: 1}
 	vault := &managedTestVault{entries: map[string][]byte{}}
 	services, err := h.composeManaged(ctx, config, vault, newManagedSSHAdapter(config))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	request, _ := json.Marshal(map[string]any{"provider_type": "ssh", "label": "Disposable cleanup engine", "credentials": map[string]string{
 		"host": host, "port": fmt.Sprint(port), "username": server.User, "password": server.Password}})
 	op, err := services.connections.Submit(ctx, actor, "app", "", "cleanup-e2e-connection", request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := services.connections.RunOnce(ctx); err != nil || !worked {
 		t.Fatal("connection verification", err)
 	}
@@ -177,9 +160,7 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	}
 	install, err := services.connections.Submit(ctx, actor, "app", connection.ID, "cleanup-e2e-image",
 		[]byte(fmt.Sprintf(`{"action":"install_image","expected_revision":%d}`, connection.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = services.connections.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -213,35 +194,23 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	opened, err := packaging.OpenProject(project, packaging.DefaultLimits(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer opened.Close()
 	selection, err := opened.Prepare(ctx, []string{"main.py"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var bundle bytes.Buffer
 	if _, err = selection.Write(ctx, &bundle); err != nil {
 		t.Fatal(err)
 	}
 	objectService, err := objects.New(h.access, h.inputs, h.store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	uploaded, err := objectService.Upload(ctx, actor, "app", int64(bundle.Len()), provider.Digest(bundle.Bytes()), bytes.NewReader(bundle.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	jobs, err := admission.New(h.access, h.store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	spec := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"cleanup recovery","profile":%q,"bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","main.py"]},"inputs":[],"outputs":[{"path":"answer.txt","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":120,"setup_seconds":30,"finalization_grace_seconds":10}}`, connection.Selection.Profile, uploaded.ID)
 	job, err := jobs.Submit(ctx, actor, "app", "cleanup-e2e-job", []byte(spec))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	save("job", job)
 	grant := fmt.Sprintf(`{"attempt_id":%q,"max_remote_wall_seconds":120,"authorize_private_staging":true,"authorize_compute":true}`, job.AttemptID)
 	if _, err = services.authorizations.Authorize(ctx, actor, "app", job.JobID, "cleanup-e2e-grant", []byte(grant)); err != nil {
@@ -273,12 +242,12 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	}
 	name := strings.TrimPrefix(string(docker(nil, "inspect", "--format", "{{.Name}}", target)), "/")
 	clock := cleanupE2EClock{}
-	service, err := cleanup.NewService(h.access, h.store, clock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service = service.WithPreviewResolver(services.resolver)
-	preview, err := service.Preview(ctx, actor, "app", job.JobID, job.AttemptID, false, false)
+	service, err := operations.New(h.access, h.store, nil, admission.DefaultLimits())
+	requireNoError(t, err)
+	previewService, err := cleanup.NewService(h.access, h.store, clock)
+	requireNoError(t, err)
+	previewService = previewService.WithPreviewResolver(services.resolver)
+	preview, err := previewService.Preview(ctx, actor, "app", job.JobID, job.AttemptID, false)
 	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
 		t.Fatal("cleanup preview", preview, err)
 	}
@@ -290,14 +259,10 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	save("preview", preview)
 	localBefore := cleanupE2EFiles(t, state)
 	raw := []byte(fmt.Sprintf(`{"attempt_id":%q}`, job.AttemptID))
-	receipt, err := service.Submit(ctx, actor, "app", job.JobID, "cleanup-e2e-original", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	worker, err := cleanup.New(managedCleanupRepository{h.store}, services.resolver, clock, cleanup.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	receipt, err := service.Submit(ctx, actor, "app", job.JobID, domain.OperationCleanup, "cleanup-e2e-original", raw)
+	requireNoError(t, err)
+	worker, err := cleanup.New(h.store, services.resolver, cleanup.DefaultConfig())
+	requireNoError(t, err)
 	faultCtx, faultCancel := context.WithCancel(ctx)
 	defer faultCancel()
 	mu.Lock()
@@ -307,7 +272,7 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 		t.Fatal("fault must interrupt outcome commit after real deletion", worked, err)
 	}
 	before, err := service.Get(ctx, actor, "app", receipt.Operation.ID)
-	if err != nil || before.Operation.Status != domain.OperationRunning || before.Resources[0].State != cleanup.ResourceRunning {
+	if err != nil || before.Operation.Status != domain.OperationRunning || before.Resources[0].State != operations.ResourceRunning {
 		t.Fatal("missing durable deletion intent", before, err)
 	}
 	save("interrupted", before)
@@ -324,33 +289,28 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal("reopen original root", err)
 	}
-	services, err = h.composeManaged(ctx, config, vault, newManagedSSHAdapter(config))
-	if err != nil {
-		t.Fatal(err)
-	}
 	clock.offset = 6 * time.Minute // Expire the original lease without changing its persisted intent.
-	worker, err = cleanup.New(managedCleanupRepository{h.store}, services.resolver, clock, cleanup.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	injectHostClock(t, h, clock.Now)
+	services, err = h.composeManaged(ctx, config, vault, newManagedSSHAdapter(config))
+	requireNoError(t, err)
+	worker, err = cleanup.New(h.store, services.resolver, cleanup.DefaultConfig())
+	requireNoError(t, err)
 	if worked, err := worker.RunOnce(ctx); err != nil || !worked {
 		t.Fatal("original-target restart recovery", worked, err)
 	}
-	service, err = cleanup.NewService(h.access, h.store, clock)
-	if err != nil {
-		t.Fatal(err)
-	}
+	service, err = operations.New(h.access, h.store, nil, admission.DefaultLimits())
+	requireNoError(t, err)
 	after, err := service.Get(ctx, actor, "app", receipt.Operation.ID)
-	if err != nil || after.Operation.Status != domain.OperationSucceeded || after.Effect != cleanup.AlreadyAbsent || len(after.Resources) != 2 {
+	if err != nil || after.Operation.Status != domain.OperationSucceeded || after.Effect != operations.AlreadyAbsent || len(after.Resources) != 2 {
 		t.Fatal("recovery did not prove original absence", after, err)
 	}
 	for i, resource := range after.Resources {
-		if resource.State != cleanup.ResourceAbsent || resource.ResourceID != before.Resources[i].ResourceID || resource.Fingerprint != before.Resources[i].Fingerprint {
+		if resource.State != operations.ResourceAbsent || resource.ResourceID != before.Resources[i].ResourceID || resource.Fingerprint != before.Resources[i].Fingerprint {
 			t.Fatal("recovery changed the target or lost the resource outcome", before, after)
 		}
 	}
 	save("recovered", after)
-	replayed, err := service.Submit(ctx, actor, "app", job.JobID, "cleanup-e2e-original", raw)
+	replayed, err := service.Submit(ctx, actor, "app", job.JobID, domain.OperationCleanup, "cleanup-e2e-original", raw)
 	if err != nil || !replayed.Replay || replayed.Operation.ID != receipt.Operation.ID {
 		t.Fatal("repeat request changed original operation", replayed, err)
 	}
@@ -389,9 +349,7 @@ func cleanupE2ETarDigest(t *testing.T, raw []byte) string {
 		t.Fatal("invalid witness archive", err)
 	}
 	content, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = reader.Next(); !errors.Is(err, io.EOF) {
 		t.Fatal("unexpected additional witness entry", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,29 +32,12 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 			fake := newFakeHost(t)
 			var mu sync.Mutex
 			var remote bytes.Buffer
-			server := newTestServer(t)
-			server.Password, server.ClientKey = password, public
-			server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
-				input, _ := io.ReadAll(stdin)
+			server := fakeHostOverSSH(t, fake, password, public, func(command string, input []byte) {
 				mu.Lock()
 				remote.WriteString(command)
 				remote.Write(input)
 				mu.Unlock()
-				if strings.HasSuffix(command, "'version' '--format' '{{.Server.Os}}/{{.Server.Arch}}'") {
-					_, _ = io.WriteString(stdout, "linux/amd64\n")
-					return 0
-				}
-				var in io.Reader
-				if len(input) > 0 {
-					in = bytes.NewReader(input)
-				}
-				result, err := fake.Run(ctx, nil, commandArgs(t, command), in, stdout)
-				if err != nil {
-					return 255
-				}
-				_, _ = stderr.Write(result.Stderr)
-				return result.ExitCode
-			}
+			})
 			target := server.target()
 			fields := map[string]string{FieldHost: target.Host, FieldPort: strconv.Itoa(target.Port), FieldUsername: target.User}
 			for k, v := range login {
@@ -87,35 +69,35 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 					returned = append(returned, v)
 				}
 			}
-			check, err := adapter.Check(ctx)
-			record(check, err)
+			err = adapter.Verify(ctx, binding)
+			record(err)
 			plan, err := adapter.Validate(ctx, job)
 			record(plan, err)
 			prepared, err := adapter.Prepare(ctx, plan, testOperation)
 			if err != nil {
 				t.Fatal(err)
 			}
-			out := adapter.Submit(ctx, prepared)
+			out := adapter.Start(ctx, prepared, nil, nil)
 			if out.Status != provider.SubmissionAccepted {
 				t.Fatalf("submit = %+v", out)
 			}
 			ref := *out.Remote
 			record(prepared, out)
 			fake.finish(0, map[string]string{"control/stdout.log": "out\n", "control/stderr.log": "", "control/environment.json": "{}",
-				"control/execution-result.json": resultManifest(map[string]string{"answer.txt": "42"}), "outputs/answer.txt": "42"})
+				"control/execution-result.json": resultManifest(job.Identity, map[string]string{"answer.txt": "42"}), "outputs/answer.txt": "42"})
 			observation, err := adapter.Observe(ctx, ref)
 			record(observation, err)
-			logs, err := adapter.ReadLogs(ctx, ref, provider.PageRequest{Limit: 10})
+			logs, err := adapter.Logs(ctx, ref, provider.PageRequest{Limit: 10})
 			record(logs, err)
-			listed, err := adapter.ListArtifacts(ctx, ref, provider.PageRequest{Limit: 10})
+			listed, err := adapter.ListArtifacts(ctx, ref)
 			record(listed, err)
-			for _, artifact := range listed.Artifacts {
+			for _, artifact := range listed {
 				var data bytes.Buffer
-				receipt, err := adapter.FetchArtifact(ctx, ref, artifact, &data, 1<<20)
+				receipt, err := adapter.Fetch(ctx, ref, artifact, &data, 1<<20, nil)
 				record(receipt, err, data.String())
 			}
-			cleaned, err := adapter.Cleanup(ctx, provider.CleanupRequest{Remote: ref, LedgerID: "ledger_fixture", CreationOperationID: testOperation,
-				ResultsCollected: true, Mode: provider.CleanupApply})
+			cleaned, err := adapter.CleanupResource(ctx, resourceRequest(provider.CleanupRequest{Remote: ref, LedgerID: "ledger_fixture", CreationOperationID: testOperation,
+				ResultsCollected: true, Mode: provider.CleanupApply}, plan.Digest()))
 			record(cleaned, err)
 			if !cleaned.Deleted {
 				t.Fatalf("cleanup = %+v, %v", cleaned, err)

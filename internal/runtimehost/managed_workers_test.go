@@ -5,35 +5,58 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
+	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/provider/fake"
+	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
 type managedTestVault struct {
-	mu      sync.Mutex
-	entries map[string][]byte
-	calls   int
+	mu           sync.Mutex
+	entries      map[string][]byte
+	calls        int
+	failCreate   error
+	failDeleteAt int
+	deletes      int
+	createHook   func(string, bool) error
 }
 
-func (v *managedTestVault) Create(_ context.Context, key string, value []byte) error {
+func (v *managedTestVault) Create(ctx context.Context, key string, value []byte) error {
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	v.calls++
+	hook, fail := v.createHook, v.failCreate
+	v.mu.Unlock()
+	if key != "request_fingerprint_v1" && hook != nil {
+		if err := hook(key, false); err != nil {
+			return err
+		}
+	}
+	if fail != nil {
+		return fail
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	v.mu.Lock()
 	if old, exists := v.entries[key]; exists && !bytes.Equal(old, value) {
+		v.mu.Unlock()
 		return credentials.ErrConflict
 	}
 	v.entries[key] = append([]byte(nil), value...)
+	v.mu.Unlock()
+	if key != "request_fingerprint_v1" && hook != nil {
+		return hook(key, true)
+	}
 	return nil
 }
 func (v *managedTestVault) WithSecret(_ context.Context, key string, use func([]byte) error) error {
@@ -48,10 +71,17 @@ func (v *managedTestVault) WithSecret(_ context.Context, key string, use func([]
 	}
 	return use(copy)
 }
-func (v *managedTestVault) Delete(_ context.Context, key string) error {
+func (v *managedTestVault) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.calls++
+	v.deletes++
+	if v.failDeleteAt > 0 && v.deletes == v.failDeleteAt {
+		return credentials.ErrUnavailable
+	}
 	clear(v.entries[key])
 	delete(v.entries, key)
 	return nil
@@ -60,11 +90,26 @@ func (v *managedTestVault) Delete(_ context.Context, key string) error {
 type managedTestAdapter struct {
 	*managedKaggleAdapter
 	checks         int
+	mu             sync.Mutex
+	verifyHook     func(context.Context, []byte) (connections.Verification, error)
+	verifyError    error
+	descriptorHook func(connections.Descriptor) connections.Descriptor
+	profileHook    func(admission.Profile) admission.Profile
 	quotaRemaining *float64
+	clock          ports.Clock
 }
 
-func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connections.Verification, error) {
+func (a *managedTestAdapter) Verify(ctx context.Context, token []byte) (connections.Verification, error) {
+	a.mu.Lock()
 	a.checks++
+	hook, fail := a.verifyHook, a.verifyError
+	a.mu.Unlock()
+	if fail != nil {
+		return connections.Verification{}, fail
+	}
+	if hook != nil {
+		return hook(ctx, token)
+	}
 	account := "fixture_user"
 	switch string(token) {
 	case "SYNTHETIC_FIRST", "SYNTHETIC_SAME_ACCOUNT", "SYNTHETIC_REPLACEMENT":
@@ -78,82 +123,95 @@ func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connection
 		remaining = *a.quotaRemaining
 		used = limit - remaining
 	}
+	now := time.Now().UTC()
+	if a.clock != nil {
+		now = a.clock.Now()
+	}
 	return connections.Verification{CanonicalAccount: account, Quota: provider.QuotaObservation{
 		Status: provider.QuotaKnown, Resource: "gpu", Unit: "seconds", Limit: &limit, Used: &used, Remaining: &remaining,
-		ObservedAt: time.Now().UTC(), Source: "offline-fixture", Precision: "lower_bound",
+		ObservedAt: now, Source: "offline-fixture", Precision: "lower_bound",
 	}}, nil
 }
 
+func (a *managedTestAdapter) checkCount() int { a.mu.Lock(); defer a.mu.Unlock(); return a.checks }
+func (a *managedTestAdapter) Descriptor() connections.Descriptor {
+	d := a.managedKaggleAdapter.Descriptor()
+	if a.descriptorHook != nil {
+		return a.descriptorHook(d)
+	}
+	return d
+}
+
+func (a *managedTestAdapter) Profile(binding domain.ProviderBinding, account string) admission.Profile {
+	profile := a.managedKaggleAdapter.Profile(binding, account)
+	if a.profileHook != nil {
+		return a.profileHook(profile)
+	}
+	return profile
+}
+
 type managedTestFixture struct {
-	host     *Host
-	services *managedServices
-	adapter  *managedTestAdapter
-	vault    *managedTestVault
-	actor    auth.Principal
-	config   ManagedServeConfig
+	host         *Host
+	services     *managedServices
+	adapter      *managedTestAdapter
+	vault        *managedTestVault
+	actor        auth.Principal
+	config       ManagedServeConfig
+	token        string
+	clock        ports.Clock
+	extra        []connections.Adapter
+	backend      *fake.Backend
+	wrapDispatch func(*sqlite.Store) dispatch.Repository
+	wrapProvider func(provider.Provider) provider.Provider
+	http         *systemHTTP
 }
 
 func newManagedTestFixture(t *testing.T, withVault bool, extra ...connections.Adapter) *managedTestFixture {
 	t.Helper()
+	return newManagedTestFixtureAt(t, withVault, nil, extra...)
+}
+
+func newManagedTestFixtureAt(t *testing.T, withVault bool, testClock ports.Clock, extra ...connections.Adapter) *managedTestFixture {
+	t.Helper()
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
-	if err != nil {
-		t.Fatal(err)
+	requireNoError(t, err)
+	f := &managedTestFixture{host: h, clock: testClock, extra: extra}
+	t.Cleanup(func() {
+		f.stopHTTP(t)
+		if err := f.host.Close(); err != nil {
+			t.Error("close fixture host", err)
+		}
+	})
+	if testClock != nil {
+		injectHostClock(t, h, testClock.Now)
 	}
-	t.Cleanup(func() { _ = h.Close() })
 	if _, err := h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)
 	}
-	secret, _, err := h.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Write, auth.Manage, auth.Execute}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	secret, _, err := h.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Write, auth.Manage, auth.Execute, auth.Operate}, time.Time{})
+	requireNoError(t, err)
 	actor, err := h.access.Authenticate(ctx, secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
-	python, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := ManagedServeConfig{PythonExecutable: python, MachineShape: "NvidiaTeslaT4", MaxRemoteWallSeconds: 300, MaxWorkers: 2}
-	adapter := &managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: config}}
-	f := &managedTestFixture{host: h, adapter: adapter, actor: actor, config: config}
-	var vault credentials.Vault
+	requireNoError(t, err)
+	config := ManagedServeConfig{MachineShape: "NvidiaTeslaT4", MaxRemoteWallSeconds: 300, MaxWorkers: 2}
+	adapter := &managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: config}, clock: testClock}
+	f.adapter, f.actor, f.config, f.token = adapter, actor, config, secret.Reveal()
 	if withVault {
 		f.vault = &managedTestVault{entries: map[string][]byte{}}
-		vault = f.vault
 	}
-	f.services, err = h.composeManaged(ctx, config, vault, append([]connections.Adapter{adapter}, extra...)...)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.compose(t)
 	return f
 }
 
 func (f *managedTestFixture) connection(t *testing.T, key, token string) connections.Connection {
 	t.Helper()
-	op, err := f.services.connections.Submit(context.Background(), f.actor, "app", "", key,
-		[]byte(fmt.Sprintf(`{"provider_type":"kaggle","label":"Fixture","credentials":{"api_token":%q}}`, token)))
-	if err != nil {
-		t.Fatal("accept connection", err)
-	}
-	if worked, err := f.services.connections.RunOnce(context.Background()); err != nil || !worked {
-		t.Fatal("verify connection", worked, err)
-	}
-	connection, err := f.services.connections.Get(context.Background(), f.actor, "app", op.ConnectionID)
-	if err != nil || connection.Selection == nil || connection.Authentication != "verified" {
-		t.Fatal("verified connection unavailable", err)
-	}
-	return connection
+	return f.connectionFor(t, f.actor, "app", key, token)
 }
 
 func (f *managedTestFixture) binding(t *testing.T, c connections.Connection) provider.BindingSnapshot {
 	t.Helper()
 	profile, _, err := f.host.store.ReadProfile(context.Background(), c.Selection.Profile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 }
 
@@ -196,40 +254,6 @@ func TestManagedWorkerPoolsStayAvailableWhileIdle(t *testing.T) {
 	}
 }
 
-func TestManagedClaimsRetryStaleClockWithoutWeakeningStoreGuard(t *testing.T) {
-	f := newManagedTestFixture(t, true)
-	ctx := context.Background()
-	now := time.Now().UTC()
-	stale := now.Add(-time.Second)
-	if _, err := f.host.store.ClaimNextManaged(ctx, "fixture_worker", now); err != nil {
-		t.Fatal(err)
-	}
-	dispatchRepo := managedDispatchRepository{f.host.store}
-	collectionRepo := managedCollectionRepository{f.host.store}
-	if result, err := dispatchRepo.ClaimNext(ctx, "fixture_worker", stale); err != nil || result.Claim != nil {
-		t.Fatal("stale dispatch clock admitted work or stopped polling", err)
-	}
-	if result, err := dispatchRepo.ClaimRecovery(ctx, "fixture_worker", stale); err != nil || result != nil {
-		t.Fatal("stale recovery clock admitted work or stopped polling", err)
-	}
-	if result, err := collectionRepo.ClaimCollection(ctx, stale, time.Minute, 2); err != nil || result != nil {
-		t.Fatal("stale collection clock admitted work or stopped polling", err)
-	}
-	// The wrappers cannot move persisted time backwards or bypass its protection.
-	for _, claim := range []func() error{
-		func() error { _, err := f.host.store.ClaimNextManaged(ctx, "fixture_worker", stale); return err },
-		func() error { _, err := f.host.store.ClaimRecoveryManaged(ctx, "fixture_worker", stale); return err },
-		func() error { _, err := f.host.store.ClaimCollectionManaged(ctx, stale, time.Minute, 2); return err },
-	} {
-		if err := claim(); !errors.Is(err, scheduler.ErrClock) {
-			t.Fatal("persisted monotonic guard changed", err)
-		}
-	}
-	if _, err := f.host.store.ClaimNextManaged(ctx, "fixture_worker", now.Add(time.Second)); err != nil {
-		t.Fatal("claims cannot resume once time catches up", err)
-	}
-}
-
 func TestManagedUnsupportedVaultKeepsHTTPServicesAndDisablesWorkers(t *testing.T) {
 	f := newManagedTestFixture(t, false)
 	if f.services.connections == nil || f.services.authorizations == nil || f.services.dispatcher != nil || f.services.collector != nil {
@@ -259,9 +283,7 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 	f.adapter.config.MachineShape = "NvidiaTeslaP100"
 	_, err := f.services.connections.Submit(context.Background(), f.actor, "app", one.ID, "replace-account-key",
 		[]byte(fmt.Sprintf(`{"action":"replace_credential","expected_revision":%d,"credentials":{"api_token":"SYNTHETIC_REPLACEMENT"}}`, one.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(context.Background()); err != nil || !worked {
 		t.Fatal("replacement failed", err)
 	}
@@ -290,18 +312,13 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 		if expected == current {
 			shape = "NvidiaTeslaP100"
 		}
-		found := false
-		for _, capability := range p.Describe().Capabilities {
-			if capability.Name == domain.CapabilityGPU {
-				found = strings.Contains(strings.Join(capability.Conditions, " "), shape)
-			}
-		}
-		if !found {
-			t.Fatal("restart reinterpreted frozen machine shape")
+		capabilities := p.Describe().Capabilities
+		if capabilities.GPUShape != shape || capabilities.GPU != domain.CapabilitySupportUnknown {
+			t.Fatalf("restart reinterpreted frozen machine shape: got %q (%s), want %q with unknown support", capabilities.GPUShape, capabilities.GPU, shape)
 		}
 		wrong := expected
 		wrong.AccountScope = "wrong_account"
-		if err := wrapped.VerifyBinding(context.Background(), wrong); err == nil {
+		if err := wrapped.Verify(context.Background(), wrong); err == nil {
 			t.Fatal("wrong outer snapshot reached canonical account")
 		}
 	}
@@ -319,9 +336,7 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 	// Disable changes admission only, not recovery of any saved binding.
 	_, err = f.services.connections.Submit(context.Background(), f.actor, "app", one.ID, "disable-account-key",
 		[]byte(fmt.Sprintf(`{"action":"disable","expected_revision":%d}`, updated.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(context.Background()); err != nil || !worked {
 		t.Fatal("disable failed", err)
 	}
@@ -335,9 +350,7 @@ func TestManagedResolverRejectsSubstitutedSnapshotsAndUnfrozenPolicy(t *testing.
 	one := f.connection(t, "binding-policy-key", "SYNTHETIC_FIRST")
 	expected := f.binding(t, one)
 	binding, err := f.host.store.ReadManagedBinding(context.Background(), expected)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, raw := range [][]byte{nil, []byte(`{}`), []byte(`{"schema_version":1,"machine_shape":"paid-gpu"}`)} {
 		bad := binding
 		bad.RuntimeConfig = raw
@@ -350,7 +363,7 @@ func TestManagedResolverRejectsSubstitutedSnapshotsAndUnfrozenPolicy(t *testing.
 		binding.Profile.Binding.ConfigurationRevision = "changed"
 		return binding, nil
 	}, make: func(connections.RuntimeBinding) (provider.Provider, error) { made = true; return nil, nil }}
-	if _, err := resolver.Resolve(expected); err != ErrState || made {
+	if _, err := resolver.Resolve(expected); !errors.Is(err, ErrState) || made {
 		t.Fatal("resolver substituted a current alias", err)
 	}
 }

@@ -53,12 +53,12 @@ func TestFrozenRegistryRetainsRevisionAndRejectsBindingMismatch(t *testing.T) {
 	if _, err = r.Resolve(two); err == nil {
 		t.Fatal("mutable alias fallback")
 	}
-	if err = p.VerifyBinding(context.Background(), two); err == nil {
+	if err = p.Verify(context.Background(), two); err == nil {
 		t.Fatal("account/config mismatch accepted")
 	}
 	other := one
 	other.AccountScope = "other"
-	if err = p.VerifyBinding(context.Background(), other); err == nil {
+	if err = p.Verify(context.Background(), other); err == nil {
 		t.Fatal("account rotation silently accepted")
 	}
 	got, err := r.Resolve(one)
@@ -75,7 +75,7 @@ func TestPreparationLookupDoesNotCreateResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen, err := p.ReconcilePreparation(context.Background(), plan, "prep")
+	seen, err := p.ReconcilePrepare(context.Background(), plan, "prep")
 	if err != nil || seen.Status != provider.ReconciliationNotFound || b.Stats().PrepareCalls != 0 {
 		t.Fatal("lookup mutated provider")
 	}
@@ -83,7 +83,7 @@ func TestPreparationLookupDoesNotCreateResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen, err = p.ReconcilePreparation(context.Background(), plan, "prep")
+	seen, err = p.ReconcilePrepare(context.Background(), plan, "prep")
 	if err != nil || seen.Prepared == nil || *seen.Prepared != prepared || b.Stats().PrepareCalls != 1 {
 		t.Fatal("staging recovery repeated creation")
 	}

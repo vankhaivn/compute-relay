@@ -34,7 +34,7 @@ func managedReserved(row scheduler.Candidate) bool {
 // It never refreshes the provider or treats stale/rounded observations as capacity.
 func managedCapacity(ctx context.Context, tx *sql.Tx, account string, now time.Time) (managedCapacityView, error) {
 	result := managedCapacityView{Status: "unknown"}
-	settings, _, err := schedulerControl(ctx, tx, now)
+	settings, _, err := schedulerControl(ctx, tx)
 	if err != nil {
 		return result, err
 	}
@@ -110,8 +110,8 @@ func managedCapacity(ctx context.Context, tx *sql.Tx, account string, now time.T
 }
 
 // reserveManagedQuota applies the same reservation accounting at the dispatch
-// gate, excluding the candidate's own already-reserved budget. Other modes remain
-// compatible while managed work requires a conservative positive observation.
+// gate, excluding the candidate's own already-reserved budget.
+// GPU work requires a conservative positive observation.
 func reserveManagedQuota(rows []scheduler.Candidate, now time.Time) {
 	totals := map[string]int64{}
 	for _, row := range rows {
@@ -121,7 +121,7 @@ func reserveManagedQuota(rows []scheduler.Candidate, now time.Time) {
 	}
 	for i := range rows {
 		row := &rows[i]
-		if !row.Managed || row.Resource != "gpu" || row.Quota.Observation == nil {
+		if row.Resource != "gpu" || row.Quota.Observation == nil {
 			continue
 		}
 		q := *row.Quota.Observation

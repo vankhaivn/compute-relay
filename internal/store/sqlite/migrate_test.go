@@ -15,32 +15,18 @@ import (
 func TestUpgradeFromFirstMigrationPreservesIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state")
 	root, err := statefs.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := initializeRoot(root.Path); err != nil {
-		t.Fatal(err)
-	}
-	if err := statefs.WriteNew(filepath.Join(path, databaseName), nil); err != nil {
-		t.Fatal(err)
-	}
-	db, err := connect(filepath.Join(path, databaseName), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate(testctx, db, migrations[:1]); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
+	requireNoError(t, initializeRoot(root.Path))
+	requireNoError(t, statefs.WriteNew(filepath.Join(path, databaseName), nil))
+	db, err := connect(filepath.Join(path, databaseName))
+	requireNoError(t, err)
+	requireNoError(t, migrate(testctx, db, migrations[:1]))
 	var before string
-	if err := db.QueryRow("SELECT installation_id FROM runtime_installation").Scan(&before); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, db.QueryRow("SELECT installation_id FROM runtime_installation").Scan(&before))
 	db.Close()
 	root.Close()
 	s, err := Open(testctx, path, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer s.Close()
 	info, _ := s.Info(testctx)
 	if info.InstallationID != before || info.SchemaVersion != len(migrations) {
@@ -103,9 +89,7 @@ func TestFailedMigrationIsAtomic(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
 		t.Fatal("failed migration advanced version")
 	}
-	if err := s.Ready(testctx); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, s.Ready(testctx))
 }
 func TestRejectNewerTamperedAndForeignDatabases(t *testing.T) {
 	for name, sql := range map[string]string{"newer": "PRAGMA user_version=999", "checksum": "UPDATE schema_migrations SET sha256='" + strings.Repeat("0", 64) + "' WHERE version=1", "gap": "DELETE FROM schema_migrations WHERE version=1", "foreign": "PRAGMA application_id=7", "missing-identity": "DELETE FROM runtime_installation"} {
@@ -125,25 +109,17 @@ func TestRejectNewerTamperedAndForeignDatabases(t *testing.T) {
 		})
 	}
 }
-func TestMissingDatabaseAndInterruptedRestoreDoNotCreateFreshIdentity(t *testing.T) {
-	for _, name := range []string{"missing", "empty", "restoring"} {
+func TestMissingDatabaseDoesNotCreateFreshIdentity(t *testing.T) {
+	for _, name := range []string{"missing", "empty"} {
 		t.Run(name, func(t *testing.T) {
 			s, path := newStore(t)
 			s.Close()
 			db := filepath.Join(path, databaseName)
 			switch name {
 			case "missing":
-				if err := os.Remove(db); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, os.Remove(db))
 			case "empty":
-				if err := os.Truncate(db, 0); err != nil {
-					t.Fatal(err)
-				}
-			case "restoring":
-				if err := statefs.WriteNew(db+".restore", []byte("unfinished")); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, os.Truncate(db, 0))
 			}
 			other, err := Open(testctx, path, DefaultOptions())
 			if other != nil {
@@ -157,13 +133,9 @@ func TestMissingDatabaseAndInterruptedRestoreDoNotCreateFreshIdentity(t *testing
 }
 func TestUnrelatedDirectoryIsNotClaimed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state")
-	if err := os.Mkdir(path, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.Mkdir(path, 0o700))
 	sentinel := filepath.Join(path, "keep.txt")
-	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.WriteFile(sentinel, []byte("keep"), 0o600))
 	s, err := Open(testctx, path, DefaultOptions())
 	if s != nil {
 		s.Close()

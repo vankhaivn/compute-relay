@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -30,7 +29,7 @@ func (executionUnreadBlobs) Open(context.Context, domain.WorkspaceID, domain.Obj
 func newExecutionFixture(t *testing.T) *Executor {
 	t.Helper()
 	c, plan, prepared := executionFixture(t)
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +37,6 @@ func newExecutionFixture(t *testing.T) *Executor {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stager.local = func(context.Context, Config, Mode, []byte) (Report, error) { return baseline(Local), nil }
 	stager.run = func(_ context.Context, _ Config, mode string, _ []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
 		if mode != "observe" {
 			t.Fatal("execution recreated staging")
@@ -70,7 +68,7 @@ func TestExecutorConcurrentSubmitHasOneInvocationAndNoAutomaticRetry(t *testing.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out := e.Submit(context.Background(), e.prepared)
+			out := e.Start(context.Background(), e.prepared, nil, nil)
 			if err := out.Validate(e.plan.Job.Identity); err != nil {
 				t.Error(err)
 			}
@@ -92,11 +90,15 @@ func TestExecutorAmbiguityReconcilesWithoutAnotherSubmit(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			e := newExecutionFixture(t)
 			calls := 0
+			recovery := "found"
 			e.run = func(_ context.Context, _ Config, mode string, _ []byte, r executionRequest) (executionResponse, error) {
 				calls++
 				if mode != "submit" {
 					if r.Source != "" {
 						t.Fatal("read retransmitted private source")
+					}
+					if recovery != "found" {
+						return executionResponse{Protocol: 1, Status: recovery}, nil
 					}
 					return executionFound(r, "RUNNING"), nil
 				}
@@ -111,16 +113,19 @@ func TestExecutorAmbiguityReconcilesWithoutAnotherSubmit(t *testing.T) {
 					return executionResponse{Protocol: 1, Status: "unknown"}, nil
 				}
 			}
-			out := e.Submit(context.Background(), e.prepared)
+			out := e.Start(context.Background(), e.prepared, nil, nil)
 			if out.Validate(e.plan.Job.Identity) != nil || out.Status != provider.SubmissionUnknown || strings.Contains(out.Problem.Message, "SYNTHETIC_TOKEN") {
 				t.Fatal("ambiguous result escaped", out)
 			}
-			if e.Submit(context.Background(), e.prepared).Status != provider.SubmissionUnknown || calls != 1 {
+			if e.Start(context.Background(), e.prepared, nil, nil).Status != provider.SubmissionUnknown || calls != 1 {
 				t.Fatal("blind resubmission")
 			}
-			recovered, err := e.ReconcileSubmission(context.Background(), e.plan.Job.Identity)
-			if err != nil || recovered.Status != provider.ReconciliationFound || calls != 2 {
-				t.Fatal("failed same-identity recovery", err)
+			for i, status := range []provider.ReconciliationStatus{provider.ReconciliationUnknown, provider.ReconciliationNotFound, provider.ReconciliationFound} {
+				recovery = string(status)
+				recovered, err := e.Reconcile(context.Background(), e.plan.Job.Identity)
+				if err != nil || recovered.Status != status || calls != i+2 {
+					t.Fatal("failed same-identity recovery", status, err)
+				}
 			}
 		})
 	}
@@ -131,8 +136,8 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 		"disabled": reasonSubmissionDisabled, "changed-prepared": reasonPreparationMismatch,
 		"staging-error": reasonStagingRecheck, "cancelled": reasonStagingRecheck,
 		"staging-unknown": reasonStagingUnconfirmed, "staging-replaced": reasonStagingUnconfirmed,
-		"local-mismatch": reasonLocalRuntime, "credential": reasonCredential,
-		"timeout": reasonCallTimeout, "stopping": reasonRuntimeStopped,
+		"credential": reasonCredential,
+		"timeout":    reasonCallTimeout, "stopping": reasonRuntimeStopped,
 	} {
 		t.Run(fault, func(t *testing.T) {
 			e := newExecutionFixture(t)
@@ -158,10 +163,10 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 				prepared.Resource = "other"
 			case "staging-error":
 				e.stager.run = func(context.Context, Config, string, []byte, stagingPlan, StagingBlobs) (stagingResponse, error) {
-					return stagingResponse{}, ErrProcess
+					return stagingResponse{}, ErrUnavailable
 				}
 			case "credential":
-				missing, err := credentials.NewEnvironment([]ports.CredentialRef{e.stager.config.CredentialRef}, func(string) (string, bool) { return "", false })
+				missing, err := fixtureCredentials([]ports.CredentialRef{e.stager.config.CredentialRef}, func(string) (string, bool) { return "", false })
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -169,17 +174,17 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 			case "timeout":
 				e.policy.Timeout = 10 * time.Millisecond
 				afterStaging(func() {
-					e.stager.local = func(ctx context.Context, _ Config, _ Mode, _ []byte) (Report, error) {
+					e.stager.credentials = stagingCredentialFunc(func(ctx context.Context, _ ports.CredentialRef, _ func([]byte) error) error {
 						<-ctx.Done()
-						return Report{}, ctx.Err()
-					}
+						return ctx.Err()
+					})
 				})
 			case "stopping":
 				afterStaging(func() {
-					e.stager.local = func(ctx context.Context, _ Config, _ Mode, _ []byte) (Report, error) {
+					e.stager.credentials = stagingCredentialFunc(func(ctx context.Context, _ ports.CredentialRef, _ func([]byte) error) error {
 						cancel()
-						return Report{}, ctx.Err()
-					}
+						return ctx.Err()
+					})
 				})
 			case "staging-unknown", "staging-replaced":
 				e.stager.run = func(_ context.Context, _ Config, _ string, _ []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
@@ -190,14 +195,10 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 					r.DatasetID = "999"
 					return r, nil
 				}
-			case "local-mismatch":
-				afterStaging(func() {
-					e.stager.local = func(context.Context, Config, Mode, []byte) (Report, error) { return Report{}, ErrConfig }
-				})
 			case "cancelled":
 				cancel()
 			}
-			out := e.Submit(ctx, prepared)
+			out := e.Start(ctx, prepared, nil, nil)
 			if out.Validate(e.plan.Job.Identity) != nil || out.Status != provider.SubmissionRejected || out.Problem.ComputeMayHaveStarted || out.Problem.Details[domain.ReasonDetail] != want {
 				t.Fatal("unattempted request was not rejected safely with its reason", out.Problem)
 			}
@@ -212,7 +213,7 @@ func TestExecutorCarriesOnlyClosedHelperRefusals(t *testing.T) {
 		e.run = func(context.Context, Config, string, []byte, executionRequest) (executionResponse, error) {
 			return executionResponse{Protocol: 1, Status: "rejected", Reason: reason}, nil
 		}
-		out := e.Submit(context.Background(), e.prepared)
+		out := e.Start(context.Background(), e.prepared, nil, nil)
 		if out.Validate(e.plan.Job.Identity) != nil || out.Status != want || want == provider.SubmissionRejected && out.Problem.Details[domain.ReasonDetail] != reason {
 			t.Fatal("helper refusal was misclassified", reason, out)
 		}
@@ -280,7 +281,7 @@ func TestExecutionSourceContainsValidatedOriginalRunnerManifest(t *testing.T) {
 	if json.Unmarshal(raw, &payload) != nil || len(payload.Modules) != 7 {
 		t.Fatal("invalid runner package")
 	}
-	for _, secret := range []string{e.stager.config.PythonExecutable, string(e.stager.config.CredentialRef), "SYNTHETIC_TOKEN", "private name"} {
+	for _, secret := range []string{string(e.stager.config.CredentialRef), "SYNTHETIC_TOKEN", "private name"} {
 		if bytes.Contains(raw, []byte(secret)) {
 			t.Fatal("private host metadata in decoded source")
 		}
@@ -291,7 +292,11 @@ func TestExecutionSourceContainsValidatedOriginalRunnerManifest(t *testing.T) {
 	}
 	// Validate the actual generated manifest with the original Python contract.
 	// No runner execute/main/payload entry point is called by this test.
-	cmd := exec.Command(pythonForTest(t), "-I", "-c", "import sys;sys.path.insert(0,sys.argv[1]);from relay_runner.contract import load;load(sys.stdin.buffer.read());print('validated-not-executed')", root)
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("Python unavailable for remote runner contract check")
+	}
+	cmd := exec.Command(python, "-I", "-c", "import sys;sys.path.insert(0,sys.argv[1]);from relay_runner.contract import load;load(sys.stdin.buffer.read());print('validated-not-executed')", root)
 	cmd.Stdin = bytes.NewReader(payload.Manifest)
 	output, err := cmd.CombinedOutput()
 	if err != nil || strings.TrimSpace(string(output)) != "validated-not-executed" {
@@ -319,7 +324,7 @@ func TestExecutorStagesUnderPreparationBudgetBeforeBoundedSubmissionCall(t *test
 		calls++
 		return executionFound(r, "QUEUED"), nil
 	}
-	if result := e.Submit(context.Background(), e.prepared); result.Status != provider.SubmissionAccepted || calls != 1 {
+	if result := e.Start(context.Background(), e.prepared, nil, nil); result.Status != provider.SubmissionAccepted || calls != 1 {
 		t.Fatal("verified staging did not reach exactly one submission")
 	}
 }

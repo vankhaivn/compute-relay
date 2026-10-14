@@ -8,19 +8,13 @@ import (
 	"errors"
 	"hash"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
-// The worker sees only observational/transfer methods after exact binding resolution.
-type source interface {
-	provider.BindingVerifier
-	ListArtifacts(context.Context, provider.RemoteReference, provider.PageRequest) (provider.ArtifactPage, error)
-	FetchArtifact(context.Context, provider.RemoteReference, provider.Artifact, io.Writer, int64) (provider.TransferResult, error)
-}
 type Engine struct {
 	repo     Repository
 	resolver Resolver
@@ -42,14 +36,14 @@ func New(repo Repository, resolver Resolver, blobs BlobStore, clock Clock, cfg C
 
 // RunOnce is finite. An uncertain SQL acknowledgement is never turned into a second
 // mutation or a failed job. The durable lease expires; recovery reloads the same pin.
-func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
+func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	select {
 	case e.slots <- struct{}{}:
 		defer func() { <-e.slots }()
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	w, err := e.repo.ClaimCollection(ctx, e.clock.Now().UTC(), e.config.Timeout+30*time.Second, e.config.Workers)
+	w, err := e.repo.ClaimCollection(ctx, worker.LeaseDuration, e.config.Workers)
 	if err != nil || w == nil {
 		return false, err
 	}
@@ -58,46 +52,71 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, e.config.Timeout)
 	defer cancel()
-	src, err := e.resolve(ctx, *w)
+	renewWork := *w
+	call, stop := worker.Heartbeat(ctx, w.Lease.Until, e.clock.Now, func(c context.Context) (time.Time, error) {
+		return e.repo.RenewCollection(c, renewWork, worker.LeaseDuration)
+	})
+	defer func() {
+		resultErr = worker.HeartbeatError(resultErr, stop())
+	}()
+	recordFailure := func(err error) error {
+		var progressErr progressWriteError
+		if provider.IsLocalStateError(err) || errors.As(err, &progressErr) {
+			return err
+		}
+		if renewalErr := stop(); renewalErr != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return worker.HeartbeatError(err, renewalErr)
+			}
+			// Provider failures normally become collection evidence, not fatal store errors.
+			return worker.HeartbeatError(collectionFailure(err), renewalErr)
+		}
+		return e.recordFailure(ctx, *w, err)
+	}
+	src, err := e.resolve(call, *w)
 	if err != nil {
-		return true, e.recordFailure(ctx, *w, err)
+		return true, recordFailure(err)
 	}
 	if w.Snapshot == nil {
-		snapshot, err := e.discover(ctx, src, *w)
+		snapshot, err := e.discover(call, src, *w)
 		if err != nil {
-			return true, e.recordFailure(ctx, *w, err)
+			return true, recordFailure(err)
 		}
-		if err = e.repo.PinCollection(ctx, *w, snapshot, e.clock.Now().UTC()); err != nil {
+		if err = e.repo.PinCollection(call, *w, snapshot); err != nil {
 			return true, err
 		}
 		w.Snapshot = &snapshot
 	}
-	proof, err := e.verifyFiles(ctx, src, *w)
+	proof, err := e.verifyFiles(call, src, *w)
 	if err != nil {
-		var progressErr progressWriteError
-		if errors.As(err, &progressErr) {
-			return true, progressErr.error
-		}
-		return true, e.recordFailure(ctx, *w, err)
+		return true, recordFailure(err)
+	}
+	if err := stop(); err != nil {
+		return true, err
 	}
 	// No failure write follows a possibly committed publication acknowledgement.
-	return true, e.repo.CompleteCollection(ctx, *w, proof, e.clock.Now().UTC())
+	return true, e.repo.CompleteCollection(ctx, *w, proof)
 }
 func (e *Engine) recordFailure(ctx context.Context, w Work, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	} // Restart/cancellation recovers the existing accepted ticket.
-	f := Failure{Code: domain.CodeArtifactCollectionFailed}
-	var known Failure
-	if errors.As(err, &known) {
-		f = known
-	}
-	if commitErr := e.repo.FailCollection(ctx, w, f, e.clock.Now().UTC()); commitErr != nil {
+	f := collectionFailure(err)
+	if commitErr := e.repo.FailCollection(ctx, w, f); commitErr != nil {
 		return commitErr
 	}
 	return f
 }
-func (e *Engine) resolve(ctx context.Context, w Work) (src source, err error) {
+
+func collectionFailure(err error) Failure {
+	f := Failure{Code: domain.CodeArtifactCollectionFailed}
+	var known Failure
+	if errors.As(err, &known) {
+		return known
+	}
+	return f
+}
+func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, err error) {
 	defer func() {
 		if recover() != nil {
 			src = nil
@@ -106,44 +125,55 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src source, err error) {
 	}()
 	p, err := e.resolver.Resolve(w.Binding)
 	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, ErrUnavailable
 	}
-	src, ok := p.(source)
-	if !ok || src.VerifyBinding(ctx, w.Binding) != nil {
+	src = p
+	if src == nil {
+		return nil, ErrUnavailable
+	}
+	if err := src.Verify(ctx, w.Binding); err != nil {
+		if provider.IsLocalStateError(err) {
+			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, failure(domain.CodeRemoteIdentityMismatch, true)
 	}
 	return src, nil
 }
-func (e *Engine) discover(ctx context.Context, src source, w Work) (snapshot Snapshot, err error) {
+func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (snapshot Snapshot, err error) {
 	defer func() {
 		if recover() != nil {
 			snapshot = Snapshot{}
 			err = ErrUnavailable
 		}
 	}()
-	cursor := ""
-	seen := map[string]bool{}
-	catalog := []provider.Artifact{}
-	for pages := 0; ; pages++ {
-		if ctx.Err() != nil {
-			return Snapshot{}, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return Snapshot{}, err
+	}
+	catalog, err := src.ListArtifacts(ctx, w.Observation.Remote)
+	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return Snapshot{}, err
 		}
-		if pages >= MaxFiles || seen[cursor] {
+		return Snapshot{}, ErrUnavailable
+	}
+	if len(catalog) > e.config.MaxFiles {
+		return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
+	}
+	var total int64
+	for _, artifact := range catalog {
+		if artifact.Bytes < 0 || artifact.Bytes > provider.MaxArtifactBytes-total {
 			return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
 		}
-		seen[cursor] = true
-		page, err := src.ListArtifacts(ctx, w.Observation.Remote, provider.PageRequest{Cursor: cursor, Limit: 100})
-		if err != nil {
-			return Snapshot{}, ErrUnavailable
-		}
-		if len(page.Artifacts) > 100 || len(page.NextCursor) > 512 || len(catalog)+len(page.Artifacts) > e.config.MaxFiles {
-			return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
-		}
-		catalog = append(catalog, page.Artifacts...)
-		if page.NextCursor == "" {
-			break
-		}
-		cursor = page.NextCursor
+		total += artifact.Bytes
 	}
 	// Check all identities and collisions before the first byte request.
 	paths := make([]string, 0, len(catalog))
@@ -169,8 +199,11 @@ func (e *Engine) discover(ctx context.Context, src source, w Work) (snapshot Sna
 	}
 	var raw bytes.Buffer
 	writer := newCheckedWriter(ctx, &raw, manifestFile.Bytes)
-	result, err := src.FetchArtifact(ctx, w.Observation.Remote, *manifestFile, writer, manifestFile.Bytes)
+	result, err := src.Fetch(ctx, w.Observation.Remote, *manifestFile, writer, manifestFile.Bytes, nil)
 	if err != nil {
+		if provider.IsLocalStateError(err) {
+			return Snapshot{}, err
+		}
 		return Snapshot{}, ErrUnavailable
 	}
 	if !writer.matches(*manifestFile, result) {
@@ -178,7 +211,7 @@ func (e *Engine) discover(ctx context.Context, src source, w Work) (snapshot Sna
 	}
 	return BuildSnapshot(w, raw.Bytes(), catalog, e.config)
 }
-func (e *Engine) verifyFiles(ctx context.Context, src source, w Work) (proof Verified, err error) {
+func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work) (proof Verified, err error) {
 	defer func() {
 		if recover() != nil {
 			proof = Verified{}
@@ -199,12 +232,16 @@ func (e *Engine) verifyFiles(ctx context.Context, src source, w Work) (proof Ver
 		}
 		total += file.Object.Bytes
 	}
-	progress := newProgressTracker(e, w, src)
+	progress := newProgressTracker(e, w)
 	defer func() {
 		var progressErr progressWriteError
 		if err != nil && ctx.Err() == nil && !errors.As(err, &progressErr) {
 			if sampleErr := progress.checkpoint(ctx, "transferring", true); sampleErr != nil {
-				err = sampleErr
+				if provider.IsLocalStateError(err) {
+					err = errors.Join(err, sampleErr)
+				} else {
+					err = sampleErr
+				}
 			}
 		}
 	}()
@@ -234,14 +271,14 @@ func (e *Engine) verifyFiles(ctx context.Context, src source, w Work) (proof Ver
 				return proof, ErrUnavailable
 			}
 		} else {
-			var callback []func(int64) error
-			if file.Role == "output" && progress.observable {
-				callback = []func(int64) error{progress.stream(ctx, file.Object.Bytes)}
+			var callback func(int64) error
+			if file.Role == "output" {
+				callback = progress.stream(ctx, file.Object.Bytes)
 			}
-			if err = e.transfer(ctx, src, w.Observation.Remote, file, callback...); err != nil {
+			if err = e.transfer(ctx, src, w.Observation.Remote, file, callback); err != nil {
 				return proof, err
 			}
-			if len(callback) == 1 && progress.current != file.Object.Bytes {
+			if callback != nil && progress.current != file.Object.Bytes {
 				return proof, ErrInvalid
 			}
 		}
@@ -288,7 +325,7 @@ func (e *Engine) existing(ctx context.Context, m domain.ObjectMetadata) (bool, e
 	}
 	return true, nil
 }
-func (e *Engine) transfer(ctx context.Context, src source, remote provider.RemoteReference, file File, progress ...func(int64) error) (err error) {
+func (e *Engine) transfer(ctx context.Context, src provider.Provider, remote provider.RemoteReference, file File, progress func(int64) error) (err error) {
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
 	artifact := provider.Artifact{Remote: remote, Path: file.Path, Bytes: file.Object.Bytes, SHA256: file.Object.SHA256}
@@ -302,18 +339,12 @@ func (e *Engine) transfer(ctx context.Context, src source, remote provider.Remot
 			done <- final
 		}()
 		checked := newCheckedWriter(ctx, writer, artifact.Bytes)
-		var result provider.TransferResult
-		var err error
-		if observed, ok := src.(provider.ArtifactProgressReader); ok && len(progress) == 1 {
-			result, err = observed.FetchArtifactWithProgress(ctx, remote, artifact, checked, artifact.Bytes, progress[0])
-		} else {
-			result, err = src.FetchArtifact(ctx, remote, artifact, checked, artifact.Bytes)
-		}
+		result, err := src.Fetch(ctx, remote, artifact, checked, artifact.Bytes, progress)
 		if err != nil {
 			var progressErr progressWriteError
 			final = ErrUnavailable
-			if errors.As(err, &progressErr) {
-				final = progressErr
+			if provider.IsLocalStateError(err) || errors.As(err, &progressErr) {
+				final = err
 			}
 			return
 		}
@@ -401,40 +432,16 @@ func (w *checkedWriter) matches(a provider.Artifact, r provider.TransferResult) 
 // Run supplies an explicitly composed, fixed-size transfer pool. It is never
 // started by admission, GET, migration or a production CLI fallback.
 func (e *Engine) Run(ctx context.Context) error {
-	run, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
-	errs := make(chan error, e.config.Workers)
-	for i := 0; i < e.config.Workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				_, err := e.RunOnce(run)
-				var failedAttempt Failure
-				if err != nil && !errors.As(err, &failedAttempt) {
-					select {
-					case errs <- err:
-					default:
-					}
-					cancel()
-					return
-				}
-				timer := time.NewTimer(e.config.PollDelay)
-				select {
-				case <-run.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	select {
-	case err := <-errs:
-		return err
-	default:
-		return ctx.Err()
-	}
+	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay}, func(ctx context.Context, _ int) (bool, error) {
+		return e.RunOnce(ctx)
+	}, func(err error) worker.Decision {
+		if provider.IsLocalStateError(err) {
+			return worker.Classify(err)
+		}
+		var failedAttempt Failure
+		if errors.As(err, &failedAttempt) || errors.Is(err, ErrLeaseLost) {
+			return worker.Continue
+		}
+		return worker.Classify(err)
+	})
 }

@@ -11,12 +11,9 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
-
-var _ scheduler.Repository = (*Store)(nil)
 
 // schedulerSnapshot reads ALL outstanding attempts plus live worker reservations,
 // not just a prefix of eligible jobs. No provider, credential resolver or file is read.
@@ -30,9 +27,9 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id
  JOIN workspaces w ON w.workspace_id=q.workspace_id
  JOIN profile_revisions r ON r.profile=j.profile AND r.revision=j.profile_revision
- LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
- LEFT JOIN execution_authorizations e ON e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
- LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
+ LEFT JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
+ LEFT JOIN attempt_grants e ON e.kind='execution' AND e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
+ LEFT JOIN attempt_grants g ON g.kind='prepare' AND g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
  LEFT JOIN scheduler_resource_reservations rr ON rr.queue_seq=q.queue_seq
  WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out') OR (l.held=1 AND l.until_ms>?)
  ORDER BY q.queue_seq LIMIT ?`, now.UnixMilli(), scheduler.ScanLimit+1)
@@ -63,8 +60,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 			return nil, ErrCorrupt
 		}
 		frozenLimits[c.Sequence] = p.MaxActiveAttempts
-		c.Managed = executionauth.Managed(p)
-		if c.Managed && p.MaxActiveAttempts == 0 {
+		if p.MaxActiveAttempts == 0 {
 			frozenLimits[c.Sequence] = 1
 		}
 		frozenResources[c.Sequence] = p.ResourceScope
@@ -107,11 +103,8 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 		if frozen := frozenLimits[c.Sequence]; frozen > 0 {
 			c.Policy.MaxActive = min(c.Policy.MaxActive, frozen)
 		}
-		if c.Managed {
-			// Explicit CPU work retains unknown-quota warnings and known
-			// exhaustion checks; only GPU work requires a positive allowance.
-			c.Policy.StrictQuota = c.Resource != "cpu"
-		}
+		// CPU work retains unknown-quota warnings and exhaustion checks.
+		c.Policy.StrictQuota = c.Resource != "cpu"
 		key := c.AccountScope + "/" + c.Resource // validated opaque account IDs cannot contain '/'.
 		if q, ok := quotas[key]; ok {
 			c.Quota = q
@@ -140,63 +133,20 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 	return result, nil
 }
 
-func (s *Store) InspectScheduler(ctx context.Context, now time.Time) (scheduler.View, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return scheduler.View{}, err
-	}
-	defer done()
-	var view scheduler.View
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		settings, last, err := schedulerControl(ctx, tx, now)
-		if err != nil {
-			return err
-		}
-		rows, err := schedulerSnapshot(ctx, tx, settings, now)
-		if err != nil {
-			return err
-		}
-		_, view, err = scheduler.Select(rows, domain.WorkspaceID(last), settings, now)
-		return err
-	})
-	if err != nil {
-		return scheduler.View{}, err
-	}
-	return view, nil
-}
-
-// ClaimNext reserves a bounded local worker/account slot and advances fairness in the
-// SAME transaction as the claim and preparing event. It never changes attempt identity
-// or rewrites dispatching/unknown attempts back to queued.
-func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
-	return s.claimNext(ctx, owner, now, false)
-}
-
-// ClaimNextManaged uses durable attempt permits, independent of standalone budgets.
-func (s *Store) ClaimNextManaged(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
-	return s.claimNext(ctx, owner, now, true)
-}
-func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, managed bool) (scheduler.Result, error) {
+// ClaimNext requires the attempt's durable execution or preparation permit.
+func (s *Store) ClaimNext(ctx context.Context, owner string) (scheduler.Result, error) {
 	if !domain.ObjectID(owner).Valid() {
 		return scheduler.Result{}, scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return scheduler.Result{}, err
-	}
-	defer done()
 	var result scheduler.Result
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		settings, last, err := schedulerControl(ctx, tx, now)
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		settings, last, err := schedulerControl(ctx, tx)
 		if err != nil {
 			return err
 		}
 		rows, err := schedulerSnapshot(ctx, tx, settings, now)
 		if err != nil {
 			return err
-		}
-		for i := range rows {
-			rows[i].DispatchModeExcluded = rows[i].Managed != managed
 		}
 		index, view, err := scheduler.Select(rows, domain.WorkspaceID(last), settings, now)
 		if err != nil {
@@ -204,7 +154,7 @@ func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, mana
 		}
 		result.View = view
 		if index < 0 {
-			return advanceSchedulerClock(ctx, tx, now)
+			return nil
 		}
 		row := rows[index]
 		if row.ResourceScope != "" {
@@ -218,28 +168,11 @@ func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, mana
 			return err
 		}
 		if now.Before(a.UpdatedAt) {
-			return scheduler.ErrClock
+			return ErrCorrupt
 		}
-		var generation int64
-		err = tx.QueryRowContext(ctx, "SELECT generation FROM scheduler_leases WHERE queue_seq=?", row.Sequence).Scan(&generation)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		if generation == math.MaxInt64 {
-			return ErrConflict
-		}
-		fence, err := randomID("", 32)
+		lease, err := claimWorkLease(ctx, tx, workLease{kind: dispatchWork, key: workKey(row.Sequence), owner: owner}, now, settings.LeaseDuration)
 		if err != nil {
 			return err
-		}
-		expires := time.UnixMilli(now.Add(settings.LeaseDuration).UnixMilli()).UTC()
-		if !scheduler.ValidTime(expires) {
-			return scheduler.ErrInvalid
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO scheduler_leases VALUES(?,?,?,?,?,1)
- ON CONFLICT(queue_seq) DO UPDATE SET generation=excluded.generation,owner=excluded.owner,fence=excluded.fence,until_ms=excluded.until_ms,held=1`, row.Sequence, generation+1, owner, fence, expires.UnixMilli())
-		if err != nil {
-			return dbError(err)
 		}
 		next := a.State
 		next.Orchestration = domain.OrchestrationPreparing
@@ -247,11 +180,11 @@ func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, mana
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE scheduler_control SET last_workspace=?,clock_ms=? WHERE singleton=1", string(row.WorkspaceID), now.UnixMilli())
+		_, err = tx.ExecContext(ctx, "UPDATE scheduler_control SET last_workspace=? WHERE singleton=1", string(row.WorkspaceID))
 		if err != nil {
 			return dbError(err)
 		}
-		claim := scheduler.Claim{Identity: row.Identity, Sequence: row.Sequence, Owner: owner, Generation: generation + 1, Fence: fence, ExpiresAt: expires, AttemptRevision: updated.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
+		claim := scheduler.Claim{Identity: row.Identity, Sequence: row.Sequence, Owner: owner, Generation: lease.generation, Fence: lease.fence, ExpiresAt: lease.until, AttemptRevision: updated.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
 		for _, head := range view.Heads {
 			if head.Sequence == row.Sequence {
 				claim.QuotaWarning = head.Warning

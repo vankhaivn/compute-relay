@@ -2,11 +2,9 @@ package dispatch
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"sort"
 	"strconv"
@@ -14,21 +12,13 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/httpsinput"
 	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/safefs"
 )
 
 type BlobStore interface {
-	Put(context.Context, domain.ObjectMetadata, io.Reader) (domain.ObjectMetadata, error)
 	Open(context.Context, domain.WorkspaceID, domain.ObjectID) (io.ReadCloser, error)
-}
-
-// Production must use the existing SSRF-protected httpsinput.Client. A nil fetcher
-// disables direct URL preparation; it never weakens the public-address policy.
-type HTTPSFetcher interface {
-	Fetch(context.Context, httpsinput.Request, func(context.Context, int64, io.Reader) error) error
 }
 
 func (e *Engine) freeze(ctx context.Context, s *session) (provider.InputSnapshot, error) {
@@ -40,7 +30,7 @@ func (e *Engine) freeze(ctx context.Context, s *session) (provider.InputSnapshot
 		refs[ref.Role] = ref.Object
 	}
 	var total int64
-	for i, in := range spec.Inputs {
+	for i := range spec.Inputs {
 		role := "input:" + strconv.Itoa(i)
 		if m, ok := refs[role]; ok {
 			if m.Bytes > work.Job.Profile.MaxInputBytes-total {
@@ -49,49 +39,9 @@ func (e *Engine) freeze(ctx context.Context, s *session) (provider.InputSnapshot
 			total += m.Bytes
 			continue
 		}
-		if in.Source.Kind != "https" {
-			return provider.InputSnapshot{}, problem(domain.CodeInputNotFound, false)
-		}
-		if e.fetcher == nil {
-			return provider.InputSnapshot{}, problem(domain.CodeConfigurationInvalid, false)
-		}
-		var random [16]byte
-		if _, err := rand.Read(random[:]); err != nil {
-			return provider.InputSnapshot{}, ErrInvalid
-		}
-		meta := domain.ObjectMetadata{ID: domain.ObjectID("obj_" + hex.EncodeToString(random[:])), WorkspaceID: workspace, Bytes: -1, SHA256: in.Source.ExpectedSHA256}
-		called := false
-		remaining := work.Job.Profile.MaxInputBytes - total
-		err := e.fetcher.Fetch(ctx, httpsinput.Request{URL: in.Source.URL, SHA256: string(in.Source.ExpectedSHA256)}, func(inner context.Context, length int64, r io.Reader) error {
-			if called || length < -1 {
-				return ErrInvalid
-			}
-			called = true
-			if length > min(int64(2<<30), remaining) {
-				return problem(domain.CodeInputTooLarge, false)
-			}
-			meta.Bytes = length
-			// A limit reader that reports an error instead of manufacturing successful EOF.
-			bounded := &limitedInput{r: r, left: min(int64(2<<30), remaining)}
-			result, err := e.blobs.Put(inner, meta, bounded)
-			if err != nil {
-				return err
-			}
-			if !result.Valid() || result.ID != meta.ID || result.WorkspaceID != workspace || result.Bytes > remaining || result.Bytes > 2<<30 || length >= 0 && result.Bytes != length || meta.SHA256 != "" && meta.SHA256 != result.SHA256 {
-				return ErrInvalid
-			}
-			meta = result
-			return s.freeze(i, result)
-		})
-		if err != nil || !called {
-			if err == nil {
-				err = ErrInvalid
-			}
-			return provider.InputSnapshot{}, inputProblem(err)
-		}
-		refs[role] = meta
-		total += meta.Bytes
+		return provider.InputSnapshot{}, problem(domain.CodeInputNotFound, false)
 	}
+
 	snapshot, err := Snapshot(work.Job, refs)
 	if err != nil {
 		return snapshot, err
@@ -324,38 +274,6 @@ func runnerCompatible(spec admission.Spec, m packaging.Manifest) error {
 		}
 	}
 	return nil
-}
-func inputProblem(err error) error {
-	var p *domain.Problem
-	if errors.As(err, &p) && p != nil {
-		return p
-	}
-	return problem(domain.CodeInputFetchFailed, false)
-}
-
-type limitedInput struct {
-	r    io.Reader
-	left int64
-}
-
-func (r *limitedInput) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if r.left == 0 {
-		var b [1]byte
-		n, err := r.r.Read(b[:])
-		if n > 0 {
-			return 0, problem(domain.CodeInputTooLarge, false)
-		}
-		return 0, err
-	}
-	if int64(len(p)) > r.left {
-		p = p[:r.left]
-	}
-	n, err := r.r.Read(p)
-	r.left -= int64(n)
-	return n, err
 }
 
 type contextInput struct {

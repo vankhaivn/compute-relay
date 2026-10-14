@@ -73,7 +73,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	if s.vault == nil {
 		return false, ErrVault
 	}
-	record, found, err := s.repo.NextConnectionOperation(ctx, s.now().UTC())
+	record, found, err := s.repo.NextConnectionOperation(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -95,18 +95,15 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		defer s.secretMu.Unlock()
 		err = s.vault.WithSecret(ctx, record.CredentialKey, func([]byte) error { return nil })
 		if err == nil {
-			err = s.repo.ReadyConnection(ctx, op.Workspace, record.ActorTokenID, op.ID)
+			return true, s.repo.ReadyConnection(ctx, op.Workspace, record.ActorTokenID, op.ID)
 		}
-		if err != nil {
-			if ctx.Err() != nil {
-				return true, ctx.Err()
-			}
-			// Absence after a crash is not a failed user request. Keep the original
-			// reservation writable by exact replay, and defer its next inspection so it
-			// cannot starve ready operations or pending exact secret cleanup.
-			return true, s.repo.DeferConnectionSecret(ctx, op.ID, s.now().UTC())
+		if ctx.Err() != nil {
+			return true, ctx.Err()
 		}
-		return true, nil
+		// Absence after a crash is not a failed user request. Keep the original
+		// reservation writable by exact replay, and defer its next inspection so it
+		// cannot starve ready operations or pending exact secret cleanup.
+		return true, s.repo.DeferConnectionSecret(ctx, op.ID)
 	}
 	if op.Action == "remove" {
 		s.secretMu.Lock()
@@ -120,17 +117,17 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 				if ctx.Err() != nil {
 					return true, ctx.Err()
 				}
-				return true, s.repo.FailConnection(ctx, op.ID, "credential_store_unavailable", s.now().UTC())
+				return true, s.repo.FailConnection(ctx, op.ID, "credential_store_unavailable")
 			}
 		}
-		return true, s.repo.FinishConnection(ctx, record, Completion{Now: s.now().UTC()})
+		return true, s.repo.FinishConnection(ctx, record, Completion{})
 	}
 	if op.Action == "disable" {
-		return true, s.repo.FinishConnection(ctx, record, Completion{Now: s.now().UTC()})
+		return true, s.repo.FinishConnection(ctx, record, Completion{})
 	}
 	adapter := s.adapters[record.ProviderType]
 	if adapter == nil {
-		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider")
 	}
 	var verified Verification
 	timeout := 60 * time.Second
@@ -139,6 +136,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	}
 	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	var installErr error
 	err = s.vault.WithSecret(verifyCtx, record.CredentialKey, func(secret []byte) error {
 		var err error
 		if op.Action == "install_image" {
@@ -148,8 +146,9 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 			}
 			recoverOnly := record.Stage == "installing"
 			if !recoverOnly {
-				started, beginErr := s.repo.BeginConnectionInstall(verifyCtx, op.ID, s.now().UTC())
+				started, beginErr := s.repo.BeginConnectionInstall(verifyCtx, op.ID)
 				if beginErr != nil {
+					installErr = beginErr
 					return beginErr
 				}
 				recoverOnly = !started
@@ -162,6 +161,9 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		}
 		return err
 	})
+	if installErr != nil {
+		return true, installErr
+	}
 	if ctx.Err() != nil {
 		return true, ctx.Err()
 	}
@@ -179,23 +181,23 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		if errors.Is(err, credentials.ErrUnavailable) || errors.Is(err, credentials.ErrUnconfigured) {
 			problem = "credential_store_unavailable"
 		}
-		return true, s.repo.FailConnection(ctx, op.ID, problem, s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, problem)
 	}
 	if !domain.ObjectID(verified.CanonicalAccount).Valid() || verified.Quota.Validate() != nil {
-		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable")
 	}
 	if record.CanonicalAccount != "" && record.CanonicalAccount != verified.CanonicalAccount {
-		return true, s.repo.FailConnection(ctx, op.ID, "account_changed", s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, "account_changed")
 	}
 	if verified.Resource != nil && verified.Resource.Validate() != nil {
-		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable")
 	}
 	if capability := adapter.Descriptor().Capabilities.Concurrency; capability != nil &&
 		(capability.Scope == "resource") != (verified.Resource != nil) {
-		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable")
 	}
 	if record.Resource != nil && (verified.Resource == nil || *record.Resource != *verified.Resource) {
-		return true, s.repo.FailConnection(ctx, op.ID, "resource_changed", s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, "resource_changed")
 	}
 	profile := adapter.Profile(ProfileBinding(op.ConnectionID, op.ConnectionRevision), AccountScope(record.ProviderType, verified.CanonicalAccount))
 	profile.CredentialRef = "vault:" + op.ConnectionID
@@ -212,7 +214,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		}
 	}
 	if profile.Validate() != nil {
-		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())
+		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider")
 	}
 	runtimeConfig := verified.RuntimeConfig
 	if len(runtimeConfig) == 0 {
@@ -222,9 +224,9 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	}
 	if len(runtimeConfig) > 0 {
 		if _, err := jsonwire.Object(runtimeConfig, 8192); err != nil {
-			return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", s.now().UTC())
+			return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider")
 		}
 		runtimeConfig = append([]byte(nil), runtimeConfig...)
 	}
-	return true, s.repo.FinishConnection(ctx, record, Completion{Verification: verified, Profile: profile, RuntimeConfig: runtimeConfig, Now: s.now().UTC()})
+	return true, s.repo.FinishConnection(ctx, record, Completion{Verification: verified, Profile: profile, RuntimeConfig: runtimeConfig})
 }

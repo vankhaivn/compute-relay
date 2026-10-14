@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,14 +23,6 @@ type Request struct {
 	Output                 string
 	File                   string
 	Listen                 string
-	ProviderConfig         string
-	ProviderProfile        string
-	ProviderMachineShape   string
-	MaxProviderAttempts    int
-	AllowPrivateStaging    bool
-	AllowGPU               bool
-	Managed                bool
-	ManagedPython          string
 	ManagedCredentialStore string
 	ManagedMachineShape    string
 	ManagedMaxWallSeconds  int64
@@ -44,13 +35,8 @@ type Request struct {
 const Usage = `Local runtime commands:
   compute-relay init --root DIR
   compute-relay state --root DIR
-  compute-relay serve --root DIR [--listen 127.0.0.1:7331]
-  compute-relay serve --root DIR --provider-config PRIVATE_JSON --provider-profile PROFILE \
-    --provider-machine-shape NvidiaTeslaT4 --max-provider-attempts N --allow-private-staging --allow-gpu
-  compute-relay serve --root DIR --managed-python ABS \
-    [--managed-machine-shape NvidiaTeslaT4] [--managed-max-wall-seconds 1800] \
-    [--managed-max-workers 2] [--managed-allow-internet] [--managed-credential-store file|keychain]
-  compute-relay serve --root DIR --managed [--managed-max-wall-seconds 1800] \
+  compute-relay serve --root DIR [--listen 127.0.0.1:7331] \
+    [--managed-machine-shape cpu] [--managed-max-wall-seconds 1800] \
     [--managed-max-workers 2] [--managed-allow-internet] [--managed-credential-store file|keychain]
   compute-relay workspace create|show|enable|disable --root DIR --id ID
   compute-relay token issue --root DIR --workspace ID --scope read [--scope write] --ttl 24h --output NEW_PRIVATE_FILE
@@ -58,17 +44,16 @@ const Usage = `Local runtime commands:
   compute-relay validate --file JOB_JSON
 
 Stop serve before local administration. Secrets are never printed; token output
-requires a new file in an existing private directory. Plain serve keeps provider
-workers disabled. Standalone provider mode requires every explicit provider flag
-and a finite per-process attempt budget. --managed enables SSH-only mode without Python. --managed-python ABS also enables Kaggle and requires
-an absolute interpreter path; each attempt needs separate API execution authorization. Its
-policy flags grant no compute consent and cannot be mixed with standalone flags.
-New managed installations store credentials in private, unencrypted secrets.env;
+requires a new file in an existing private directory. Serve manages connections;
+each attempt needs separate API execution authorization. Policy flags grant no
+compute consent. Kaggle and SSH adapters are built in.
+New installations store credentials in private, unencrypted secrets.env;
 existing Keychain installations keep Keychain. The selected store is retained on restart.
-Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100; wall limit: 1-86400 seconds;
-workers: 1-16; internet defaults to disabled. Local shutdown is not remote
-cancellation. Validation is local schema validation, not admission.
-` + "\n" + ProfileUsage
+Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100.
+Wall limit: 1-86400 seconds; workers: 1-16; internet defaults to disabled.
+Local shutdown is not remote cancellation. Validation is local schema validation,
+not admission.
+`
 
 type Action func(context.Context, Request, io.Writer) error
 
@@ -102,9 +87,6 @@ func Parse(args []string) (Request, error) {
 		if len(v) > 4096 || strings.ContainsRune(v, 0) {
 			return r, ErrArguments
 		}
-	}
-	if args[0] == "profile" {
-		return parseProfile(args)
 	}
 	r.Command = args[0]
 	rest := args[1:]
@@ -148,10 +130,6 @@ func Parse(args []string) (Request, error) {
 	add("output", &r.Output)
 	add("file", &r.File)
 	add("listen", &r.Listen)
-	add("provider-config", &r.ProviderConfig)
-	add("provider-profile", &r.ProviderProfile)
-	add("provider-machine-shape", &r.ProviderMachineShape)
-	add("managed-python", &r.ManagedPython)
 	add("managed-credential-store", &r.ManagedCredentialStore)
 	add("managed-machine-shape", &r.ManagedMachineShape)
 	addBool := func(name string, dst *bool) {
@@ -168,9 +146,6 @@ func Parse(args []string) (Request, error) {
 			return nil
 		})
 	}
-	addBool("allow-private-staging", &r.AllowPrivateStaging)
-	addBool("allow-gpu", &r.AllowGPU)
-	addBool("managed", &r.Managed)
 	addBool("managed-allow-internet", &r.ManagedAllowInternet)
 	addNumber := func(name string, maximum int64, set func(int64)) {
 		fs.Func(name, "", func(value string) error {
@@ -186,7 +161,6 @@ func Parse(args []string) (Request, error) {
 			return nil
 		})
 	}
-	addNumber("max-provider-attempts", 64, func(n int64) { r.MaxProviderAttempts = int(n) })
 	addNumber("managed-max-wall-seconds", 86400, func(n int64) { r.ManagedMaxWallSeconds = n })
 	addNumber("managed-max-workers", 16, func(n int64) { r.ManagedMaxWorkers = int(n) })
 	fs.Func("ttl", "", func(value string) error {
@@ -221,7 +195,7 @@ func Parse(args []string) (Request, error) {
 	allowed := map[string]bool{"root": true}
 	switch r.Command {
 	case "serve":
-		for _, k := range []string{"listen", "provider-config", "provider-profile", "provider-machine-shape", "max-provider-attempts", "allow-private-staging", "allow-gpu", "managed", "managed-python", "managed-credential-store", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
+		for _, k := range []string{"listen", "managed-credential-store", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
 			allowed[k] = true
 		}
 	case "workspace":
@@ -250,40 +224,19 @@ func Parse(args []string) (Request, error) {
 		return r, ErrArguments
 	}
 	if r.Command == "serve" {
-		providerFlags := seen["provider-config"] || seen["provider-profile"] || seen["provider-machine-shape"] ||
-			seen["max-provider-attempts"] || seen["allow-private-staging"] || seen["allow-gpu"]
-		managedFlags := seen["managed"] || seen["managed-python"] || seen["managed-credential-store"] || seen["managed-machine-shape"] || seen["managed-max-wall-seconds"] ||
-			seen["managed-max-workers"] || seen["managed-allow-internet"]
-		if managedFlags {
-			if seen["managed-credential-store"] && r.ManagedCredentialStore != "file" && r.ManagedCredentialStore != "keychain" {
-				return r, ErrArguments
-			}
-			if providerFlags || seen["managed"] && !r.Managed || !r.Managed && !seen["managed-python"] ||
-				seen["managed-python"] && (!filepath.IsAbs(r.ManagedPython) || strings.ContainsAny(r.ManagedPython, "\r\n\ufffd")) {
-				return r, ErrArguments
-			}
-			if !seen["managed-machine-shape"] {
-				r.ManagedMachineShape = "NvidiaTeslaT4"
-				if r.ManagedPython == "" {
-					r.ManagedMachineShape = "cpu"
-				}
-			}
-			if !seen["managed-max-wall-seconds"] {
-				r.ManagedMaxWallSeconds = 1800
-			}
-			if !seen["managed-max-workers"] {
-				r.ManagedMaxWorkers = 2
-			}
-			if r.ManagedMachineShape != "cpu" && r.ManagedMachineShape != "NvidiaTeslaT4" && r.ManagedMachineShape != "NvidiaTeslaP100" {
-				return r, ErrArguments
-			}
-			if r.ManagedPython == "" && r.ManagedMachineShape != "cpu" {
-				return r, ErrArguments
-			}
+		if seen["managed-credential-store"] && r.ManagedCredentialStore != "file" && r.ManagedCredentialStore != "keychain" {
+			return r, ErrArguments
 		}
-		if providerFlags && (r.ProviderConfig == "" || r.ProviderProfile == "" ||
-			(r.ProviderMachineShape != "NvidiaTeslaT4" && r.ProviderMachineShape != "NvidiaTeslaP100") ||
-			r.MaxProviderAttempts < 1 || !r.AllowPrivateStaging || !r.AllowGPU) {
+		if !seen["managed-machine-shape"] {
+			r.ManagedMachineShape = "cpu"
+		}
+		if !seen["managed-max-wall-seconds"] {
+			r.ManagedMaxWallSeconds = 1800
+		}
+		if !seen["managed-max-workers"] {
+			r.ManagedMaxWorkers = 2
+		}
+		if r.ManagedMachineShape != "cpu" && r.ManagedMachineShape != "NvidiaTeslaT4" && r.ManagedMachineShape != "NvidiaTeslaP100" {
 			return r, ErrArguments
 		}
 	}
@@ -302,11 +255,6 @@ func Parse(args []string) (Request, error) {
 				return r, ErrArguments
 			}
 			used[s] = true
-		}
-	}
-	for _, v := range []string{r.Root, r.Output, r.File, r.ID, r.Workspace, r.Listen, r.ProviderConfig, r.ProviderProfile, r.ProviderMachineShape, r.ManagedPython, r.ManagedMachineShape} {
-		if strings.ContainsRune(v, 0) {
-			return r, ErrArguments
 		}
 	}
 	return r, nil

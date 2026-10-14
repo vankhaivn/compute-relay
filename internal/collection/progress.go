@@ -5,24 +5,23 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 // A progress acknowledgement failure preserves the accepted ticket, just like a
 // pin/publication acknowledgement failure. It must not become a failed operation.
 type progressWriteError struct{ error }
 
+func (e progressWriteError) Unwrap() error { return e.error }
+
 type progressTracker struct {
 	engine                              *Engine
 	work                                Work
 	completed, current, received, total int64
-	observable                          bool
 	last                                time.Time
 }
 
-func newProgressTracker(e *Engine, w Work, src source) *progressTracker {
+func newProgressTracker(e *Engine, w Work) *progressTracker {
 	p := &progressTracker{engine: e, work: w}
-	_, p.observable = src.(provider.ArtifactProgressReader)
 	for _, file := range w.Snapshot.Files {
 		if file.Role == "output" {
 			p.total += file.Object.Bytes
@@ -38,10 +37,8 @@ func (p *progressTracker) checkpoint(ctx context.Context, stage string, force bo
 	}
 	sample := domain.CollectionProgress{Scope: "selected_output_bytes", Generation: p.work.Lease.Generation,
 		BytesCompleted: p.completed + p.current, BytesTotal: &p.total, ObservedAt: now}
-	if p.observable {
-		sample.BytesReceived = &p.received
-	}
-	if err := p.engine.repo.RecordCollectionProgress(ctx, p.work, stage, sample, now); err != nil {
+	sample.BytesReceived = &p.received
+	if err := p.engine.repo.RecordCollectionProgress(ctx, p.work, stage, sample); err != nil {
 		return progressWriteError{err}
 	}
 	p.last = now

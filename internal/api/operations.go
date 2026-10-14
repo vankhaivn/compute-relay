@@ -10,44 +10,24 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
 // Mutation routes only admit durable local records. Cleanup GET may perform a
 // bounded provider dry run, never apply. All existing middleware runs first.
-func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, segments []string) {
+func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Operations == nil {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "durable controls are not configured")
 		return
 	}
-	if segments[3] == "operations" && len(segments) == 5 {
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", "GET")
-			respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "operation records are read-only")
-			return
-		}
-		record, err := h.config.Operations.Get(r.Context(), p, workspace, domain.OperationID(segments[4]))
-		if errors.Is(err, operations.ErrNotFound) && h.config.Cleanup != nil {
-			// Cleanup receipts share the operation identifier namespace.
-			cleaned, cleanupErr := h.config.Cleanup.Get(r.Context(), p, workspace, domain.OperationID(segments[4]))
-			if cleanupErr != nil {
-				controlError(w, r, cleanupErr)
-				return
-			}
-			if cleaned.Validate() != nil || cleaned.Operation.WorkspaceID != workspace || string(cleaned.Operation.ID) != segments[4] {
-				controlError(w, r, errors.New("invalid operation record"))
-				return
-			}
-			respond(w, http.StatusOK, cleanupView(cleaned))
-			return
-		}
+	if r.PathValue("operation") != "" {
+		record, err := h.config.Operations.Get(r.Context(), p, workspace, domain.OperationID(r.PathValue("operation")))
 		if err != nil {
 			controlError(w, r, err)
 			return
 		}
-		if record.Validate() != nil || record.Operation.WorkspaceID != workspace || string(record.Operation.ID) != segments[4] {
+		if record.Validate() != nil || record.Operation.WorkspaceID != workspace || string(record.Operation.ID) != r.PathValue("operation") {
 			controlError(w, r, errors.New("invalid operation record"))
 			return
 		}
@@ -55,43 +35,27 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 		return
 	}
 	kind := domain.OperationKind("")
-	if segments[3] == "jobs" && len(segments) == 6 {
-		switch segments[5] {
-		case "cancel":
-			kind = domain.OperationCancel
-		case "retry":
-			kind = domain.OperationRetryCompute
-		case "reconcile":
-			kind = domain.OperationReconcile
-		case "collect":
-			kind = domain.OperationCollect
-		case "cleanup":
-			if h.config.Cleanup != nil {
-				kind = domain.OperationCleanup
-			}
-		}
-	}
-	if kind != domain.OperationCleanup && !operations.Supported(kind) {
-		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "control route not implemented")
-		return
+	switch {
+	case strings.HasSuffix(r.Pattern, "/cancel"):
+		kind = domain.OperationCancel
+	case strings.HasSuffix(r.Pattern, "/retry"):
+		kind = domain.OperationRetryCompute
+	case strings.HasSuffix(r.Pattern, "/reconcile"):
+		kind = domain.OperationReconcile
+	case strings.HasSuffix(r.Pattern, "/collect"):
+		kind = domain.OperationCollect
+	case strings.HasSuffix(r.Pattern, "/cleanup"):
+		kind = domain.OperationCleanup
 	}
 	if kind == domain.OperationCleanup && r.Method == http.MethodGet {
-		h.cleanupPreview(w, r, p, workspace, domain.JobID(segments[4]))
-		return
-	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		if kind == domain.OperationCleanup && h.config.Cleanup.PreviewAvailable() {
-			w.Header().Set("Allow", "GET, POST")
-		}
-		respondError(w, r, 405, domain.CodeInvalidRequest, domain.FailureStageValidation, "controls require an explicit POST")
+		h.cleanupPreview(w, r, p, workspace, domain.JobID(r.PathValue("job")))
 		return
 	}
 	if err := auth.Require(p, workspace, auth.Operate); err != nil {
 		controlError(w, r, err)
 		return
 	}
-	job := domain.JobID(segments[4])
+	job := domain.JobID(r.PathValue("job"))
 	if !job.Valid() {
 		controlError(w, r, operations.ErrRequest)
 		return
@@ -114,23 +78,9 @@ func (h *handler) controls(w http.ResponseWriter, r *http.Request, p auth.Princi
 		controlError(w, r, operations.ErrRequest)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, operations.MaxRequestBytes))
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		mapError(w, r, err) // No operation was admitted before the body was read.
-		return
-	}
-	if kind == domain.OperationCleanup {
-		cleaned, err := h.config.Cleanup.Submit(r.Context(), p, workspace, job, keys[0], body)
-		if err != nil {
-			controlError(w, r, err)
-			return
-		}
-		if cleaned.Validate() != nil || cleaned.Operation.WorkspaceID != workspace || cleaned.Operation.JobID != job {
-			controlError(w, r, errors.New("invalid operation receipt"))
-			return
-		}
-		w.Header().Set("Location", operationLocation(cleaned.Operation))
-		respond(w, http.StatusAccepted, cleanupView(cleaned))
 		return
 	}
 	record, err := h.config.Operations.Submit(r.Context(), p, workspace, job, kind, keys[0], body)
@@ -166,23 +116,10 @@ func controlView(r operations.Record) map[string]any {
 	if r.NewAttemptID != "" {
 		view["new_attempt_id"] = r.NewAttemptID
 	}
-	view["problem"] = publicOperationProblem(op.Failure)
-	return view
-}
-
-// cleanupView exposes typed resource outcomes, never the request reason, full ownership
-// identity or opaque provider reference.
-func cleanupView(r cleanup.Record) map[string]any {
-	op := r.Operation
-	view := map[string]any{
-		"operation_id": op.ID, "workspace_id": op.WorkspaceID, "job_id": op.JobID, "attempt_id": op.AttemptID,
-		"kind": op.Kind, "status": op.Status, "revision": op.Revision, "created_at": op.CreatedAt, "updated_at": op.UpdatedAt,
-		"effect": r.Effect, "remote_termination_confirmed": false, "replay": r.Replay, "problem": publicOperationProblem(op.Failure),
-		"links": map[string]string{"self": operationLocation(op), "job": "/v1/workspaces/" + url.PathEscape(string(op.WorkspaceID)) + "/jobs/" + url.PathEscape(string(op.JobID))},
-	}
 	if len(r.Resources) > 0 {
 		view["resources"] = r.Resources
 	}
+	view["problem"] = publicOperationProblem(op.Failure)
 	return view
 }
 
@@ -209,7 +146,7 @@ func controlError(w http.ResponseWriter, r *http.Request, err error) {
 		jobError(w, r, err)
 	case errors.Is(err, operations.ErrUnresolved):
 		controlProblem(w, r, 409, domain.CodeRemoteExecutionUnresolved, domain.RecommendedActionReconcile, "Remote execution is unresolved; reconcile the existing attempt without submitting another execution.")
-	case errors.Is(err, cleanup.ErrUncollected):
+	case errors.Is(err, operations.ErrUncollected):
 		controlProblem(w, r, 409, domain.CodeIllegalStateTransition, domain.RecommendedActionCollect, "Results for this attempt were never collected; collect them first, or repeat the cleanup with discard_uncollected set to true.")
 	case errors.Is(err, operations.ErrCollect):
 		controlProblem(w, r, 409, domain.CodeIllegalStateTransition, domain.RecommendedActionCollect, "Execution succeeded; recover this attempt's results with collect, not compute retry.")

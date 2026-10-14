@@ -23,7 +23,6 @@ type Monitor struct {
 	credentials ports.CredentialResolver
 	clock       ports.Clock
 	slot        chan struct{}
-	local       invocation
 	run         monitorInvocation
 }
 type monitorInvocation func(context.Context, Config, string, []byte, monitorRequest) (monitorResponse, error)
@@ -54,7 +53,7 @@ func NewMonitor(c Config, resolver ports.CredentialResolver, clock ports.Clock) 
 	if c.Validate() != nil || resolver == nil || clock == nil {
 		return nil, ErrConfig
 	}
-	return &Monitor{config: c, credentials: resolver, clock: clock, slot: make(chan struct{}, 1), local: runPython, run: runMonitor}, nil
+	return &Monitor{config: c, credentials: resolver, clock: clock, slot: make(chan struct{}, 1), run: runMonitor}, nil
 }
 
 func quotaNanos(text string) (int64, error) {
@@ -125,7 +124,7 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 	defer func() {
 		if recover() != nil {
 			result = monitorResponse{}
-			err = ErrProcess
+			err = ErrUnavailable
 		}
 	}()
 	if m == nil || mode != "quota" && mode != "logs" || (mode == "quota") != (target == nil) {
@@ -145,13 +144,6 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 	}
 	if err := ctx.Err(); err != nil {
 		return result, err
-	}
-	local, err := m.local(ctx, m.config, Local, nil)
-	if ctx.Err() != nil {
-		return result, ctx.Err()
-	}
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return result, ErrProcess
 	}
 	called, violated := false, false
 	err = m.credentials.WithCredential(ctx, m.config.CredentialRef, func(token []byte) error {
@@ -175,12 +167,15 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 		result, err = m.run(ctx, m.config, mode, token, request)
 		return err
 	})
+	if provider.IsLocalStateError(err) {
+		return monitorResponse{}, err
+	}
 	if ctx.Err() != nil {
 		return monitorResponse{}, ctx.Err()
 	}
 	if err != nil || !called || violated {
-		return monitorResponse{}, ErrProcess
-	} // never wrap a resolver/SDK secret
+		return monitorResponse{}, ErrUnavailable
+	} // Never wrap a resolver or API error that may contain a secret.
 	if !result.valid(mode) {
 		return monitorResponse{}, ErrProtocol
 	}

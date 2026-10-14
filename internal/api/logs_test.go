@@ -28,9 +28,7 @@ func TestJobLogsRouteQueryAuthenticationAndUnavailable(t *testing.T) {
 	f := setupHTTP(t, nil, nil)
 	repo := &unavailableLogRepo{}
 	reader, err := joblogs.NewReader(f.access, repo, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.server.Handler.(*handler).config.Logs = reader
 	base := "/v1/workspaces/a/jobs/job/logs"
 	for _, tc := range []struct {
@@ -120,8 +118,8 @@ type cursorLogProvider struct {
 func (p cursorLogProvider) Describe() provider.Descriptor {
 	return provider.Descriptor{InstanceID: "fixture"}
 }
-func (p cursorLogProvider) VerifyBinding(context.Context, provider.BindingSnapshot) error { return nil }
-func (p cursorLogProvider) ReadLogs(context.Context, provider.RemoteReference, provider.PageRequest) (provider.LogPage, error) {
+func (p cursorLogProvider) Verify(context.Context, provider.BindingSnapshot) error { return nil }
+func (p cursorLogProvider) Logs(context.Context, provider.RemoteReference, provider.PageRequest) (provider.LogPage, error) {
 	return provider.LogPage{}, p.err
 }
 func TestJobLogsCursorErrorsAreStableAndSanitized(t *testing.T) {
@@ -145,9 +143,7 @@ func TestJobLogsCursorErrorsAreStableAndSanitized(t *testing.T) {
 			job.Identity.AttemptID = "attempt"
 			target := joblogs.Attempt{Binding: provider.BindingSnapshot{Binding: job.Binding, AccountScope: "fixture_account", CredentialRef: "fixture_credential"}, Remote: &provider.RemoteReference{Identity: job.Identity, Resource: "original-resource", Version: "1"}}
 			reader, err := joblogs.NewReader(f.access, cursorLogRepo{target}, cursorLogResolver{cursorLogProvider{err: tc.err}})
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			f.server.Handler.(*handler).config.Logs = reader
 			response, raw := f.request(t, "GET", "/v1/workspaces/a/jobs/job/logs?attempt_id=attempt&cursor=opaque", "read", nil, nil)
 			var envelope ErrorEnvelope

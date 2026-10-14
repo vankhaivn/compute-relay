@@ -36,7 +36,7 @@ func TestExecutionPlanBindsSourceWithoutRenamingAnExistingIntent(t *testing.T) {
 	if err != nil || one != two || one.SourceSHA256 != provider.Digest([]byte(one.Source)) || !strings.HasPrefix(one.Slug, "cre-") {
 		t.Fatal("unstable source identity", err)
 	}
-	for _, text := range []string{c.PythonExecutable, string(c.CredentialRef), "private name"} {
+	for _, text := range []string{string(c.CredentialRef), "private name"} {
 		if strings.Contains(one.Source, text) {
 			t.Fatal("local/private metadata entered kernel source")
 		}

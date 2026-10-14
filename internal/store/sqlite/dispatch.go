@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"strconv"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -43,26 +42,26 @@ func loadJournal(ctx context.Context, tx *sql.Tx, sequence int64) (dispatch.Jour
 // latest attempt revision. Unlike the local scheduler seam it permits observation
 // behind the dispatch barrier; new side effects have additional one-shot policy gates.
 func ownedDispatchClaim(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.Time) (domain.Attempt, bool, error) {
-	if !c.Valid() || !scheduler.ValidTime(now) {
+	if !c.Valid() {
 		return domain.Attempt{}, false, scheduler.ErrInvalid
 	}
-	var owner, fence, profile string
-	var generation, until int64
-	var held, barrier bool
-	err := tx.QueryRowContext(ctx, `SELECT l.owner,l.fence,l.generation,l.until_ms,l.held,q.dispatch_barrier,r.snapshot
- FROM scheduler_leases l JOIN scheduler_queue q ON q.queue_seq=l.queue_seq
+	if _, err := checkWorkLease(ctx, tx, dispatchLease(c), now); err != nil {
+		return domain.Attempt{}, false, err
+	}
+	var profile string
+	var barrier bool
+	err := tx.QueryRowContext(ctx, `SELECT q.dispatch_barrier,r.snapshot
+ FROM scheduler_queue q
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id AND j.active_attempt_id=q.attempt_id
  JOIN profile_revisions r ON r.profile=j.profile AND r.revision=j.profile_revision
- WHERE q.queue_seq=? AND q.workspace_id=? AND q.job_id=? AND q.attempt_id=?`, c.Sequence, string(c.WorkspaceID), string(c.JobID), string(c.AttemptID)).Scan(&owner, &fence, &generation, &until, &held, &barrier, &profile)
+ WHERE q.queue_seq=? AND q.workspace_id=? AND q.job_id=? AND q.attempt_id=?`, c.Sequence, string(c.WorkspaceID), string(c.JobID), string(c.AttemptID)).Scan(&barrier, &profile)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Attempt{}, false, scheduler.ErrLeaseLost
 	}
 	if err != nil {
 		return domain.Attempt{}, false, dbError(err)
 	}
-	if !held || owner != c.Owner || fence != c.Fence || generation != c.Generation || until <= now.UnixMilli() || until != c.ExpiresAt.UnixMilli() {
-		return domain.Attempt{}, false, scheduler.ErrLeaseLost
-	}
+
 	// readJobRecord independently validates this snapshot; check ownership binding here
 	// without resolving a mutable profile alias or requiring the submitting token again.
 	var p struct {
@@ -83,13 +82,13 @@ func ownedDispatchClaim(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now 
 		return domain.Attempt{}, false, scheduler.ErrLeaseLost
 	}
 	if now.Before(a.UpdatedAt) {
-		return domain.Attempt{}, false, scheduler.ErrClock
+		return domain.Attempt{}, false, ErrCorrupt
 	}
 	return a, barrier, nil
 }
 func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.Time) (dispatch.Work, error) {
 	var work dispatch.Work
-	if _, _, err := schedulerControl(ctx, tx, now); err != nil {
+	if _, _, err := schedulerControl(ctx, tx); err != nil {
 		return work, err
 	}
 	a, barrier, err := ownedDispatchClaim(ctx, tx, c, now)
@@ -137,11 +136,9 @@ func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.T
 				return dispatch.Work{}, ErrCorrupt
 			}
 		}
-		if executionauth.Managed(record.Profile) {
-			status, err := dispatchAuthorization(ctx, tx, work, now)
-			if err != nil || status != executionauth.Consumed {
-				return dispatch.Work{}, ErrCorrupt
-			}
+		status, err := dispatchAuthorization(ctx, tx, work, now)
+		if err != nil || status != executionauth.Consumed {
+			return dispatch.Work{}, ErrCorrupt
 		}
 		if err = matchesFrozenPlan(work, *j.Plan, j.PreparationID); err != nil {
 			return dispatch.Work{}, ErrCorrupt
@@ -187,14 +184,13 @@ func matchesFrozenPlan(work dispatch.Work, plan provider.Plan, operation domain.
 	}
 	return nil
 }
-func (s *Store) LoadDispatch(ctx context.Context, c scheduler.Claim, now time.Time) (dispatch.Work, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Work{}, err
-	}
-	defer done()
+func (s *Store) LoadDispatch(ctx context.Context, c scheduler.Claim) (dispatch.Work, error) {
 	var work dispatch.Work
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error { var err error; work, err = loadDispatch(ctx, tx, c, now); return err })
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		var err error
+		work, err = loadDispatch(ctx, tx, c, now)
+		return err
+	})
 	if err != nil {
 		return dispatch.Work{}, err
 	}
@@ -207,77 +203,11 @@ func checkHandle(work dispatch.Work, h dispatch.Handle) error {
 	return nil
 }
 
-// FreezeInput commits a verified local blob and the previously unresolved role together.
-// The role is immutable. An uncertain acknowledgement preserves the blob and is resolved
-// from job_objects on the next load, never by fetching a newer URL over existing history.
-func (s *Store) FreezeInput(ctx context.Context, h dispatch.Handle, index int, m domain.ObjectMetadata, now time.Time) error {
-	if !m.Valid() || m.WorkspaceID != h.Claim.WorkspaceID || m.Bytes > 2<<30 {
-		return dispatch.ErrInvalid
-	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		work, err := loadDispatch(ctx, tx, h.Claim, now)
-		if err != nil {
-			return err
-		}
-		if err = checkHandle(work, h); err != nil {
-			return err
-		}
-		if work.Journal.Phase != dispatch.Local || work.Journal.Plan != nil || !scheduler.LocalOnly(work.Job.Attempt.State) {
-			return dispatch.ErrConflict
-		}
-		inputs := work.Job.Request.Spec().Inputs
-		if index < 0 || index >= len(inputs) || inputs[index].Source.Kind != "https" || inputs[index].Source.ExpectedSHA256 != "" && inputs[index].Source.ExpectedSHA256 != m.SHA256 {
-			return dispatch.ErrInvalid
-		}
-		role := "input:" + strconv.Itoa(index)
-		var total int64
-		for _, ref := range work.Job.Objects {
-			if ref.Role == role {
-				if ref.Object == m {
-					return nil
-				}
-				return dispatch.ErrConflict
-			}
-			if ref.Role != "bundle" {
-				if ref.Object.Bytes > work.Job.Profile.MaxInputBytes-total {
-					return ErrCorrupt
-				}
-				total += ref.Object.Bytes
-			}
-		}
-		if m.Bytes > work.Job.Profile.MaxInputBytes-total {
-			return dispatch.ErrInvalid
-		}
-		// This object identity is generated by the worker, not supplied by an HTTP request.
-		// Existing metadata must match exactly; never overwrite another object's ownership.
-		var existing domain.ObjectMetadata
-		err = tx.QueryRowContext(ctx, "SELECT workspace_id,object_id,bytes,sha256 FROM objects WHERE workspace_id=? AND object_id=?", string(m.WorkspaceID), string(m.ID)).Scan(&existing.WorkspaceID, &existing.ID, &existing.Bytes, &existing.SHA256)
-		if errors.Is(err, sql.ErrNoRows) {
-			_, err = tx.ExecContext(ctx, "INSERT INTO objects(workspace_id,object_id,bytes,sha256) VALUES(?,?,?,?)", string(m.WorkspaceID), string(m.ID), m.Bytes, string(m.SHA256))
-		} else if err == nil && existing != m {
-			return dispatch.ErrConflict
-		}
-		if err != nil {
-			return dbError(err)
-		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO job_objects VALUES(?,?,?,?,?,?)", string(m.WorkspaceID), string(h.Claim.JobID), role, string(m.ID), m.Bytes, string(m.SHA256))
-		if err != nil {
-			return dbError(err)
-		}
-		return advanceSchedulerClock(ctx, tx, now)
-	})
-}
-
 func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now time.Time) error {
 	if work.Job.Request.Spec().Expired(now) || work.Gate != nil && work.Gate.Expired(now) {
 		return admission.ErrExpired
 	}
-	settings, last, err := schedulerControl(ctx, tx, now)
+	settings, last, err := schedulerControl(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -308,19 +238,14 @@ func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now 
 	return dispatch.ErrConflict
 }
 
-func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action, now time.Time) (dispatch.Work, error) {
+func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action) (dispatch.Work, error) {
 	// HTTP controls use their authenticated operation transaction; an ordinary worker
 	// cannot bypass its operation identity/event journal through the dispatch port.
 	if action.Kind == dispatch.PreventDispatch || action.Kind == dispatch.RequestReconciliation {
 		return dispatch.Work{}, dispatch.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Work{}, err
-	}
-	defer done()
 	var result dispatch.Work
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -347,7 +272,7 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 			if err != nil {
 				return err
 			}
-			if executionauth.Managed(work.Job.Profile) && status != executionauth.Consumed {
+			if status != executionauth.Consumed {
 				return dispatch.ErrPolicy
 			}
 			if err = newMutationPolicy(ctx, tx, work, now); err != nil {
@@ -409,9 +334,6 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 		}
 		if err != nil {
 			return dbError(err)
-		}
-		if err = advanceSchedulerClock(ctx, tx, now); err != nil {
-			return err
 		}
 		work.Job.Attempt = updated
 		work.Journal = next

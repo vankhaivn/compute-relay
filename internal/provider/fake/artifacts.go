@@ -57,43 +57,34 @@ func (p *Basic) makeFiles(r *record) []File {
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files
 }
-func (p *Basic) ListArtifacts(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
+func (p *Basic) ListArtifacts(ctx context.Context, remote provider.RemoteReference) ([]provider.Artifact, error) {
 	if err := ctx.Err(); err != nil {
-		return provider.ArtifactPage{}, err
-	}
-	if err := page.Validate(); err != nil {
-		return provider.ArtifactPage{}, err
+		return nil, err
 	}
 	p.backend.mu.Lock()
 	defer p.backend.mu.Unlock()
 	r, err := p.lookup(remote)
 	if err != nil {
-		return provider.ArtifactPage{}, err
+		return nil, err
 	}
 	if !p.state(r).Terminal() {
-		return provider.ArtifactPage{}, provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "artifacts are not collectible before terminal evidence")
+		return nil, provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "artifacts are not collectible before terminal evidence")
 	}
 	if r.files == nil {
 		r.files = p.makeFiles(r)
 	}
-	start, err := pageOffset(remote, page.Cursor, len(r.files))
-	if err != nil {
-		return provider.ArtifactPage{}, err
+	artifacts := make([]provider.Artifact, 0, len(r.files))
+	var total int64
+	for _, f := range r.files {
+		if len(artifacts) >= provider.MaxArtifactFiles || int64(len(f.Content)) > provider.MaxArtifactBytes-total {
+			return nil, errors.New("artifact catalog exceeds bounds")
+		}
+		total += int64(len(f.Content))
+		artifacts = append(artifacts, provider.Artifact{Remote: remote, Path: f.Path, Bytes: int64(len(f.Content)), SHA256: provider.Digest(f.Content)})
 	}
-	end := start + page.Limit
-	if end > len(r.files) {
-		end = len(r.files)
-	}
-	result := provider.ArtifactPage{Artifacts: make([]provider.Artifact, 0, end-start)}
-	for _, f := range r.files[start:end] {
-		result.Artifacts = append(result.Artifacts, provider.Artifact{Remote: remote, Path: f.Path, Bytes: int64(len(f.Content)), SHA256: provider.Digest(f.Content)})
-	}
-	if end < len(r.files) {
-		result.NextCursor = cursor(remote, end)
-	}
-	return result, nil
+	return artifacts, nil
 }
-func (p *Basic) FetchArtifact(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, dst io.Writer, maxBytes int64) (provider.TransferResult, error) {
+func (p *Basic) Fetch(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, dst io.Writer, maxBytes int64, progress func(int64) error) (provider.TransferResult, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.TransferResult{}, err
 	}
@@ -127,39 +118,7 @@ func (p *Basic) FetchArtifact(ctx context.Context, remote provider.RemoteReferen
 	if !found {
 		return provider.TransferResult{}, provider.Problem(domain.CodeArtifactMissing, domain.FailureStageResults, "fixture artifact is missing")
 	}
-	return provider.CopyVerified(ctx, bytes.NewReader(content), dst, artifact, maxBytes)
-}
-func (p *Basic) Cleanup(ctx context.Context, request provider.CleanupRequest) (provider.CleanupOutcome, error) {
-	if err := ctx.Err(); err != nil {
-		return provider.CleanupOutcome{}, err
-	}
-	if err := request.Remote.Validate(); err != nil {
-		return provider.CleanupOutcome{}, err
-	}
-	if !request.LedgerID.Valid() || !request.CreationOperationID.Valid() || !request.ResultsCollected {
-		return provider.CleanupOutcome{}, errors.New("cleanup requires recorded ownership and collected results")
-	}
-	if request.Mode != provider.CleanupDryRun && request.Mode != provider.CleanupApply {
-		return provider.CleanupOutcome{}, errors.New("cleanup mode must be explicit")
-	}
-	p.backend.mu.Lock()
-	defer p.backend.mu.Unlock()
-	r, ok := p.backend.records[attemptKey(request.Remote.Identity)]
-	if !ok || r.remote != request.Remote || request.Remote.Identity.InstanceID != p.instance || request.CreationOperationID != r.prepared.PreparationID {
-		return provider.CleanupOutcome{}, identityError()
-	}
-	if !r.submitted || !p.state(r).Terminal() {
-		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "cleanup cannot cancel active or unresolved compute")
-	}
-	p.backend.stats.CleanupCalls++
-	if r.deleted {
-		return provider.CleanupOutcome{AlreadyAbsent: true}, nil
-	}
-	if request.Mode == provider.CleanupDryRun {
-		return provider.CleanupOutcome{WouldDelete: true}, nil
-	}
-	r.deleted = true
-	return provider.CleanupOutcome{Deleted: true}, nil
+	return provider.CopyVerified(ctx, bytes.NewReader(content), provider.WithTransferProgress(dst, progress), artifact, maxBytes)
 }
 func cursor(remote provider.RemoteReference, offset int) string {
 	data, _ := json.Marshal(remote)

@@ -29,7 +29,7 @@ High-priority areas include:
 - cross-workspace authorization bypass;
 - arbitrary host-file access or path traversal;
 - command injection on the runtime host;
-- archive extraction and URL-ingestion vulnerabilities;
+- archive extraction and provider-download vulnerabilities;
 - SSRF into local, private, link-local, or metadata endpoints;
 - artifact identity confusion across jobs or attempts;
 - unsafe duplicate compute submission after ambiguous outcomes;

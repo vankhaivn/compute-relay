@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -32,7 +33,6 @@ type Engine struct {
 	repo      Repository
 	providers Resolver
 	blobs     BlobStore
-	fetcher   HTTPSFetcher
 	clock     Clock
 	config    Config
 	slots     chan struct{}
@@ -41,14 +41,14 @@ type Engine struct {
 
 func (e *Engine) WithSecrets(pool *workloadsecret.Pool) *Engine { e.secrets = pool; return e }
 
-func New(repo Repository, providers Resolver, blobs BlobStore, fetcher HTTPSFetcher, clock Clock, cfg Config) (*Engine, error) {
+func New(repo Repository, providers Resolver, blobs BlobStore, clock Clock, cfg Config) (*Engine, error) {
 	if repo == nil || providers == nil || blobs == nil || !cfg.Valid() {
 		return nil, ErrInvalid
 	}
 	if clock == nil {
 		clock = systemClock{}
 	}
-	return &Engine{repo: repo, providers: providers, blobs: blobs, fetcher: fetcher, clock: clock, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
+	return &Engine{repo: repo, providers: providers, blobs: blobs, clock: clock, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
 }
 
 // RunOnce advances at most one durable phase. Recovery has priority, but never creates
@@ -60,12 +60,12 @@ func (e *Engine) RunOnce(ctx context.Context, owner string) (bool, error) {
 		return false, ctx.Err()
 	}
 	defer func() { <-e.slots }()
-	claim, err := e.repo.ClaimRecovery(ctx, owner, e.clock.Now())
+	claim, err := e.repo.ClaimRecovery(ctx, owner)
 	if err != nil {
 		return false, err
 	}
 	if claim == nil {
-		r, err := e.repo.ClaimNext(ctx, owner, e.clock.Now())
+		r, err := e.repo.ClaimNext(ctx, owner)
 		if err != nil {
 			return false, err
 		}
@@ -81,40 +81,18 @@ func (e *Engine) RunOnce(ctx context.Context, owner string) (bool, error) {
 // Cancel/Cleanup. It waits for callbacks to return rather than replacing stuck workers
 // or claiming shutdown completed while they may still perform a side effect.
 func (e *Engine) Run(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
-	failures := make(chan error, e.config.Workers)
-	for i := 0; i < e.config.Workers; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			for {
-				_, err := e.RunOnce(ctx, fmt.Sprintf("dispatch_%d", index))
-				if err != nil && ctx.Err() == nil {
-					var p *domain.Problem
-					if !errors.As(err, &p) && !errors.Is(err, ErrPolicy) && !errors.Is(err, scheduler.ErrLeaseLost) && !controlContention(err) {
-						failures <- err
-						cancel()
-						return
-					}
-				}
-				timer := time.NewTimer(e.config.PollDelay)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-		}(i)
-	}
-	wg.Wait()
-	close(failures)
-	for err := range failures {
-		return err
-	}
-	return ctx.Err()
+	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay}, func(ctx context.Context, index int) (bool, error) {
+		return e.RunOnce(ctx, fmt.Sprintf("dispatch_%d", index))
+	}, func(err error) worker.Decision {
+		if provider.IsLocalStateError(err) {
+			return worker.Classify(err)
+		}
+		var p *domain.Problem
+		if errors.As(err, &p) || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
+			return worker.Continue
+		}
+		return worker.Classify(err)
+	})
 }
 
 // A submitted remote run is observed at most every 15 seconds; control requests still wake it
@@ -141,20 +119,31 @@ func nextPassDelay(poll time.Duration, j Journal) time.Duration {
 }
 
 func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultErr error) {
-	work, err := e.repo.LoadDispatch(parent, claim, e.clock.Now())
+	work, err := e.repo.LoadDispatch(parent, claim)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(parent, e.config.PreparationTimeout)
-	s := &session{e: e, current: work, ctx: ctx, cancel: cancel}
-	done := make(chan struct{})
-	go s.heartbeat(done)
+	s := &session{e: e, current: work}
+	ctx, stop := worker.Heartbeat(ctx, work.Handle.Claim.ExpiresAt, e.clock.Now, func(c context.Context) (time.Time, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		updated, err := e.repo.RenewDispatch(c, s.current.Handle)
+		if err == nil {
+			s.current.Handle = updated
+		}
+		return updated.Claim.ExpiresAt, err
+	})
+	s.ctx = ctx
 	defer func() {
+		resultErr = worker.HeartbeatError(resultErr, stop())
 		cancel()
-		<-done
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
-		w := s.work()
+		s.mu.Lock()
+		w, progressErr := s.current, s.progressErr
+		s.mu.Unlock()
+		resultErr = errors.Join(resultErr, progressErr)
 		delay := nextPassDelay(e.config.PollDelay, w.Journal)
 		if errors.Is(resultErr, ErrPolicy) {
 			delay = 5 * time.Minute
@@ -163,9 +152,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if len(w.Handle.Claim.Fence) > 0 {
 			delay += time.Duration(w.Handle.Claim.Fence[0]%4) * delay / 10
 		}
-		if yieldErr := e.repo.YieldDispatch(cleanup, w.Handle, e.clock.Now(), delay); yieldErr != nil && resultErr == nil {
-			resultErr = yieldErr
-		}
+		resultErr = errors.Join(resultErr, e.repo.YieldDispatch(cleanup, w.Handle, delay))
 	}()
 	// Expiry prohibits a future start; it cannot establish that possible execution
 	// stopped. Submitting and submitted attempts retain observation-only recovery.
@@ -180,15 +167,11 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	binding := provider.BindingSnapshot{Binding: work.Job.Profile.Binding, AccountScope: work.Job.Profile.AccountScope, CredentialRef: work.Job.Profile.CredentialRef}
 	p, err := e.providers.Resolve(binding)
 	if err != nil {
-		return s.fail(domain.CodeConfigurationInvalid)
+		return s.providerFailure(err, domain.CodeConfigurationInvalid)
 	}
-	checker, ok := p.(provider.BindingVerifier)
-	if !ok {
-		return s.fail(domain.CodeConfigurationInvalid)
-	}
-	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, checker.VerifyBinding(c, binding) })
+	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, p.Verify(c, binding) })
 	if err != nil || p.Describe().InstanceID != binding.Binding.ProviderInstanceID {
-		return s.fail(domain.CodeProviderAuthFailed)
+		return s.providerFailure(err, domain.CodeProviderAuthFailed)
 	}
 	// Explicit durable job cancellation is separate from Run's shutdown context.
 	// It shares this lease, the frozen binding and the one-shot mutation discipline.
@@ -208,7 +191,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		plan, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Plan, error) { return p.Validate(c, job.Clone()) })
 		if err != nil {
-			return s.fail(errorCode(err, domain.CodeUnsupportedCapability))
+			return s.providerFailure(err, errorCode(err, domain.CodeUnsupportedCapability))
 		}
 		if err = ValidatedPlan(job, plan, p.Describe()); err != nil {
 			return s.fail(domain.CodeUnsupportedCapability)
@@ -234,6 +217,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		prepared, err := control(observed, preparationLimit, func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
 		if err != nil {
+			if provider.IsLocalStateError(err) {
+				return err
+			}
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
@@ -241,15 +227,14 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		return s.prepared(prepared)
 	case Staging:
-		observer, ok := p.(provider.PreparationObserver)
-		if !ok {
-			return s.fail(domain.CodeConfigurationInvalid)
-		}
 		journal := work.Journal
 		seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
-			return observer.ReconcilePreparation(c, journal.Plan.Clone(), journal.PreparationID)
+			return p.ReconcilePrepare(c, journal.Plan.Clone(), journal.PreparationID)
 		})
 		if err != nil {
+			if provider.IsLocalStateError(err) {
+				return err
+			}
 			if expired && work.Gate != nil {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
@@ -272,27 +257,17 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			if work.Gate.Start == nil {
 				return nil
 			}
-			if _, ok := p.(provider.ControlledStarter); !ok {
-				return s.fail(domain.CodeUnsupportedCapability)
-			}
 			if secret := work.Gate.Start.Secrets; secret != nil {
-				if _, ok := p.(provider.SecretStarter); !ok {
-					return s.fail(domain.CodeUnsupportedCapability)
-				}
 				key := workloadsecret.Key{WorkspaceID: work.Job.Job.WorkspaceID, JobID: work.Job.Job.ID, AttemptID: work.Job.Attempt.ID}
 				if !e.secrets.Available(key, secret.AuthorizationID, e.clock.Now()) {
 					return nil
 				}
 			}
-			observer, ok := p.(provider.PreparationObserver)
-			if !ok {
-				return s.fail(domain.CodeConfigurationInvalid)
-			}
 			seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
-				return observer.ReconcilePreparation(c, work.Journal.Plan.Clone(), work.Journal.PreparationID)
+				return p.ReconcilePrepare(c, work.Journal.Plan.Clone(), work.Journal.PreparationID)
 			})
 			if err != nil {
-				return s.fail(errorCode(err, domain.CodeStagingNotReady))
+				return s.providerFailure(err, errorCode(err, domain.CodeStagingNotReady))
 			}
 			if seen.Validate(*work.Journal.Plan, work.Journal.PreparationID) != nil || seen.Status != provider.ReconciliationFound || seen.Prepared == nil || seen.Prepared.ReadinessRevision() != work.Gate.ReadyRevision {
 				return s.fail(domain.CodeRemoteIdentityMismatch)
@@ -315,13 +290,16 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		prepared := *s.work().Journal.Prepared
 		outcome, callErr := control(ctx, preparationLimit, func(c context.Context) (provider.SubmissionOutcome, error) {
+			var authorization *provider.StartAuthorization
+			var secrets *workloadsecret.Material
 			if start := s.work().Journal.StartAuthorization; start != nil {
+				copy := start.Clone()
+				authorization = &copy
 				if start.Secrets != nil {
-					return p.(provider.SecretStarter).StartWithSecrets(c, prepared, start.Clone(), material), nil
+					secrets = &material
 				}
-				return p.(provider.ControlledStarter).Start(c, prepared, start.Clone()), nil
 			}
-			return p.Submit(c, prepared), nil
+			return p.Start(c, prepared, authorization, secrets), nil
 		})
 		if callErr != nil || outcome.Validate(prepared.Identity) != nil {
 			outcome = provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: problem(domain.CodeProviderSubmissionUnknown, true)}
@@ -329,9 +307,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.commit(Action{Kind: SubmissionSeen, Submission: &outcome})
 	case Submitting:
 		identity := work.Journal.Plan.Job.Identity
-		seen, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Reconciliation, error) { return p.ReconcileSubmission(c, identity) })
+		seen, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Reconciliation, error) { return p.Reconcile(c, identity) })
 		if err != nil {
-			return s.fail(domain.CodeProviderSubmissionUnknown)
+			return s.providerFailure(err, domain.CodeProviderSubmissionUnknown)
 		}
 		if seen.Validate(identity) != nil {
 			return s.fail(domain.CodeRemoteIdentityMismatch)
@@ -345,7 +323,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		remote := *work.Journal.Remote
 		obs, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Observation, error) { return p.Observe(c, remote) })
 		if err != nil {
-			return s.fail(domain.CodeProviderUnreachable)
+			return s.providerFailure(err, domain.CodeProviderUnreachable)
 		}
 		if obs.Validate(remote) != nil {
 			return s.fail(domain.CodeRemoteIdentityMismatch)
@@ -388,12 +366,12 @@ func errorCode(err error, fallback domain.ErrorCode) domain.ErrorCode {
 }
 
 type session struct {
-	mu      sync.Mutex
-	e       *Engine
-	current Work
-	ctx     context.Context
-	cancel  context.CancelFunc
-	sampled time.Time
+	mu          sync.Mutex
+	e           *Engine
+	current     Work
+	ctx         context.Context
+	sampled     time.Time
+	progressErr error
 }
 
 func (s *session) work() Work { s.mu.Lock(); defer s.mu.Unlock(); return s.current }
@@ -406,7 +384,7 @@ func (s *session) commit(action Action) error {
 	}
 	ctx, stop := context.WithTimeout(base, 5*time.Second)
 	defer stop()
-	work, err := s.e.repo.CommitDispatch(ctx, s.current.Handle, action, s.e.clock.Now())
+	work, err := s.e.repo.CommitDispatch(ctx, s.current.Handle, action)
 	if err == nil {
 		s.current = work
 	}
@@ -415,16 +393,11 @@ func (s *session) commit(action Action) error {
 func (s *session) consumeAuthorization() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	work, err := s.e.repo.ConsumeAuthorization(s.ctx, s.current.Handle, s.e.clock.Now())
+	work, err := s.e.repo.ConsumeAuthorization(s.ctx, s.current.Handle)
 	if err == nil {
 		s.current = work
 	}
 	return err
-}
-func (s *session) freeze(index int, m domain.ObjectMetadata) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.e.repo.FreezeInput(s.ctx, s.current.Handle, index, m, s.e.clock.Now())
 }
 func (s *session) prepared(p provider.Prepared) error {
 	w := s.work()
@@ -434,14 +407,24 @@ func (s *session) prepared(p provider.Prepared) error {
 	return s.commit(Action{Kind: PreparationSeen, Prepared: &p})
 }
 func (s *session) fail(code domain.ErrorCode) error {
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
 	if err := s.commit(Action{Kind: Fault, Code: code}); err != nil {
 		return err
 	}
 	return s.work().Journal.Problem
 }
 
-// progress records at most one staging sample per second plus the final one. It is best
-// effort: a rejected or failed write never changes the preparation outcome.
+func (s *session) providerFailure(err error, code domain.ErrorCode) error {
+	if provider.IsLocalStateError(err) {
+		return err
+	}
+	return s.fail(code)
+}
+
+// progress records at most one staging sample per second plus the final one. Transient
+// or stale samples are best effort; fatal failures surface after preparation joins.
 func (s *session) progress(completed, total int64) {
 	now := s.e.clock.Now().UTC()
 	s.mu.Lock()
@@ -455,35 +438,12 @@ func (s *session) progress(completed, total int64) {
 		BytesCompleted: completed, BytesTotal: total, ObservedAt: now}
 	ctx, stop := context.WithTimeout(s.ctx, 5*time.Second)
 	defer stop()
-	_ = s.e.repo.RecordPreparationProgress(ctx, h, sample, now)
-}
-func (s *session) heartbeat(done chan struct{}) {
-	defer close(done)
-	for {
-		w := s.work()
-		interval := w.Handle.Claim.ExpiresAt.Sub(s.e.clock.Now()) / 3
-		if interval < 10*time.Millisecond {
-			interval = 10 * time.Millisecond
-		}
-		if interval > 5*time.Second {
-			interval = 5 * time.Second
-		}
-		timer := time.NewTimer(interval)
-		select {
-		case <-s.ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-		s.mu.Lock()
-		updated, err := s.e.repo.RenewDispatch(s.ctx, s.current.Handle, s.e.clock.Now())
-		if err == nil {
-			s.current.Handle = updated
-		}
-		s.mu.Unlock()
-		if err != nil {
-			s.cancel()
-			return
-		}
+	err := s.e.repo.RecordPreparationProgress(ctx, h, sample)
+	switch err {
+	case nil, context.Canceled, scheduler.ErrLeaseLost, ErrInvalid, ErrConflict, ErrStaleObservation:
+		return
+	}
+	if worker.Classify(err) == worker.Stop {
+		s.progressErr = errors.Join(s.progressErr, err)
 	}
 }

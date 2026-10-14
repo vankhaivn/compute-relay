@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
 type stubRepo struct {
@@ -21,7 +23,7 @@ type stubRepo struct {
 	outcomes []Outcome
 }
 
-func (r *stubRepo) ClaimCleanup(context.Context, time.Time, time.Duration) (*Work, error) {
+func (r *stubRepo) ClaimCleanup(context.Context, time.Duration) (*Work, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.claims++
@@ -29,7 +31,11 @@ func (r *stubRepo) ClaimCleanup(context.Context, time.Time, time.Duration) (*Wor
 	r.work = nil
 	return w, r.claimErr
 }
-func (r *stubRepo) CompleteCleanup(_ context.Context, _ Work, o Outcome, _ time.Time) error {
+func (r *stubRepo) RenewCleanup(context.Context, Work, time.Duration) (time.Time, error) {
+	return time.Now().Add(time.Minute), nil
+}
+
+func (r *stubRepo) CompleteCleanup(_ context.Context, _ Work, o Outcome) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.outcomes = append(r.outcomes, o)
@@ -47,8 +53,8 @@ type stubTarget struct {
 	applied int
 }
 
-func (s *stubTarget) VerifyBinding(context.Context, provider.BindingSnapshot) error { return s.verify }
-func (s *stubTarget) Cleanup(ctx context.Context, r provider.CleanupRequest) (provider.CleanupOutcome, error) {
+func (s *stubTarget) Verify(context.Context, provider.BindingSnapshot) error { return s.verify }
+func (s *stubTarget) CleanupResource(ctx context.Context, r provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 	s.applied++
 	if s.panics {
 		panic("provider-secret-canary")
@@ -58,6 +64,16 @@ func (s *stubTarget) Cleanup(ctx context.Context, r provider.CleanupRequest) (pr
 		return provider.CleanupOutcome{}, ctx.Err()
 	}
 	return s.result, s.err
+}
+
+func (s *stubTarget) DescribeCleanup(provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
+	return provider.CleanupDescription{Kind: "fake_resource", ID: "resource", Name: "resource", Version: "1", Scope: "fake_attempt", Support: domain.CapabilitySupportSupported, Reason: "offline_fixture"}, nil
+}
+func (r *stubRepo) BeginCleanupResource(context.Context, Work, ResourceWork) error {
+	return nil
+}
+func (r *stubRepo) CompleteCleanupResource(context.Context, Work, operations.ResourceResult) error {
+	return nil
 }
 
 type stubResolver struct {
@@ -82,10 +98,12 @@ func stubWork(t *testing.T) *Work {
 		ResourceKey: "key", Nonce: strings.Repeat("n", 64), BundleSHA256: domain.SHA256Digest(strings.Repeat("a", 64)), InputManifestSHA256: domain.SHA256Digest(strings.Repeat("b", 64))}
 	w := &Work{
 		Lease:   Lease{WorkspaceID: "a", OperationID: "op_1", Generation: 1, Fence: strings.Repeat("f", 64), Until: now.Add(time.Minute)},
-		Record:  Record{Operation: op, Effect: Pending},
+		Record:  operations.Record{Operation: op, Effect: operations.Pending},
 		Binding: binding,
 		Request: provider.CleanupRequest{Remote: provider.RemoteReference{Identity: identity, Resource: "resource", Version: "1"}, LedgerID: "res_staging_int_1", CreationOperationID: "op_prepare", ResultsCollected: true, Mode: provider.CleanupApply},
 	}
+	resource := Resource{Request: provider.CleanupResourceRequest{CleanupRequest: w.Request, Purpose: "staging", OwnershipOperationID: w.Request.CreationOperationID, PlanSHA256: provider.Digest([]byte("plan"))}}
+	w.Resources = []ResourceWork{{Resource: resource, Result: operations.ResourceResult{ResourceID: w.Request.LedgerID, Purpose: "staging", Fingerprint: resource.Fingerprint(), State: operations.ResourcePending, Reason: "cleanup_requested"}}}
 	if !w.Valid() {
 		t.Fatal("invalid stub work")
 	}
@@ -97,25 +115,25 @@ func TestEngineMapsEveryOutcome(t *testing.T) {
 		name     string
 		target   *stubTarget
 		resolver error
-		effect   Effect
+		effect   operations.Effect
 		code     domain.ErrorCode
 		applied  int
 	}{
-		{"deleted", &stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil, RemoteDeleted, "", 1},
-		{"already absent", &stubTarget{result: provider.CleanupOutcome{AlreadyAbsent: true}}, nil, AlreadyAbsent, "", 1},
-		{"contradictory", &stubTarget{result: provider.CleanupOutcome{Deleted: true, AlreadyAbsent: true}}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"dry-run evidence only", &stubTarget{result: provider.CleanupOutcome{WouldDelete: true}}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"unsupported", &stubTarget{err: errors.Join(errors.New("adapter-canary"), provider.ErrCleanupUnsupported)}, nil, Failed, domain.CodeUnsupportedCapability, 1},
-		{"identity", &stubTarget{err: provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "adapter-canary")}, nil, Failed, domain.CodeRemoteIdentityMismatch, 1},
-		{"unresolved", &stubTarget{err: provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "adapter-canary")}, nil, Failed, domain.CodeRemoteExecutionUnresolved, 1},
-		{"unknown", &stubTarget{err: errors.New("adapter-canary")}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"panic", &stubTarget{panics: true}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"binding", &stubTarget{verify: errors.New("adapter-canary")}, nil, Failed, domain.CodeRemoteIdentityMismatch, 0},
-		{"unconfigured", &stubTarget{}, errors.New("adapter-canary"), Failed, domain.CodeConfigurationInvalid, 0},
+		{"deleted", &stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil, operations.RemoteDeleted, "", 1},
+		{"already absent", &stubTarget{result: provider.CleanupOutcome{AlreadyAbsent: true}}, nil, operations.AlreadyAbsent, "", 1},
+		{"contradictory", &stubTarget{result: provider.CleanupOutcome{Deleted: true, AlreadyAbsent: true}}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"dry-run evidence only", &stubTarget{result: provider.CleanupOutcome{WouldDelete: true}}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"unsupported", &stubTarget{err: errors.Join(errors.New("adapter-canary"), provider.ErrCleanupUnsupported)}, nil, operations.Failed, domain.CodeUnsupportedCapability, 1},
+		{"identity", &stubTarget{err: provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "adapter-canary")}, nil, operations.Failed, domain.CodeRemoteIdentityMismatch, 1},
+		{"unresolved", &stubTarget{err: provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "adapter-canary")}, nil, operations.Failed, domain.CodeRemoteExecutionUnresolved, 1},
+		{"unknown", &stubTarget{err: errors.New("adapter-canary")}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"panic", &stubTarget{panics: true}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"binding", &stubTarget{verify: errors.New("adapter-canary")}, nil, operations.Failed, domain.CodeRemoteIdentityMismatch, 0},
+		{"unconfigured", &stubTarget{}, errors.New("adapter-canary"), operations.Failed, domain.CodeConfigurationInvalid, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			repo := &stubRepo{work: stubWork(t)}
-			engine, err := New(repo, stubResolver{c.target, c.resolver}, nil, DefaultConfig())
+			engine, err := New(repo, stubResolver{c.target, c.resolver}, DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +155,7 @@ func TestEngineMapsEveryOutcome(t *testing.T) {
 func TestEngineShutdownLeavesClaimForRecovery(t *testing.T) {
 	repo := &stubRepo{work: stubWork(t)}
 	target := &stubTarget{block: true}
-	engine, err := New(repo, stubResolver{target, nil}, nil, DefaultConfig())
+	engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +171,7 @@ func TestEngineRejectsInvalidWorkAndConfig(t *testing.T) {
 	w.Request.Mode = provider.CleanupDryRun
 	repo := &stubRepo{work: w}
 	target := &stubTarget{}
-	engine, err := New(repo, stubResolver{target, nil}, nil, DefaultConfig())
+	engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,11 +179,11 @@ func TestEngineRejectsInvalidWorkAndConfig(t *testing.T) {
 		t.Fatal("invalid work reached the provider", worked, err)
 	}
 	for _, cfg := range []Config{{}, {Workers: 1, Timeout: time.Hour, PollDelay: time.Second}, {Workers: 1, Timeout: time.Minute}} {
-		if _, err := New(repo, stubResolver{target, nil}, nil, cfg); !errors.Is(err, ErrInvalid) {
+		if _, err := New(repo, stubResolver{target, nil}, cfg); !errors.Is(err, ErrInvalid) {
 			t.Fatal("invalid config accepted", cfg)
 		}
 	}
-	if _, err := New(nil, stubResolver{target, nil}, nil, DefaultConfig()); !errors.Is(err, ErrInvalid) {
+	if _, err := New(nil, stubResolver{target, nil}, DefaultConfig()); !errors.Is(err, ErrInvalid) {
 		t.Fatal("missing repository accepted")
 	}
 }
@@ -174,7 +192,7 @@ func TestRunSurvivesLostFenceAndStopsOnStoreErrors(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.PollDelay = time.Millisecond
 	repo := &stubRepo{work: stubWork(t), complete: ErrLeaseLost}
-	engine, err := New(repo, stubResolver{&stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil}, nil, cfg)
+	engine, err := New(repo, stubResolver{&stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,10 +203,98 @@ func TestRunSurvivesLostFenceAndStopsOnStoreErrors(t *testing.T) {
 	}
 	broken := errors.New("store unavailable")
 	repo = &stubRepo{claimErr: broken}
-	if engine, err = New(repo, stubResolver{&stubTarget{}, nil}, nil, cfg); err != nil {
+	if engine, err = New(repo, stubResolver{&stubTarget{}, nil}, cfg); err != nil {
 		t.Fatal(err)
 	}
 	if err = engine.Run(context.Background()); !errors.Is(err, broken) {
 		t.Fatal("store error was hidden", err)
+	}
+}
+
+func TestEngineEmptyInventorySettlesWithoutProviderCall(t *testing.T) {
+	w := stubWork(t)
+	w.Resources = nil
+	repo := &stubRepo{work: w}
+	target := &stubTarget{panics: true}
+	engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := engine.RunOnce(context.Background())
+	if !worked || err != nil || target.applied != 0 || len(repo.outcomes) != 1 || repo.outcomes[0].Effect != operations.AlreadyAbsent {
+		t.Fatalf("empty inventory did not settle locally: %v %v %+v", worked, err, repo.outcomes)
+	}
+}
+
+type intentFailureRepo struct {
+	*stubRepo
+	failure error
+	results []operations.ResourceResult
+}
+
+func (r *intentFailureRepo) BeginCleanupResource(context.Context, Work, ResourceWork) error {
+	return r.failure
+}
+func (r *intentFailureRepo) CompleteCleanupResource(_ context.Context, _ Work, result operations.ResourceResult) error {
+	r.results = append(r.results, result)
+	return nil
+}
+
+type temporaryStoreFailure struct{}
+
+func (temporaryStoreFailure) Error() string   { return "synthetic store contention" }
+func (temporaryStoreFailure) Temporary() bool { return true }
+
+func TestCleanupIntentStoreFailuresPreserveRecoveryAndWorkerPolicy(t *testing.T) {
+	fatal := errors.New("synthetic integrity failure")
+	for _, state := range []operations.ResourceState{operations.ResourcePending, operations.ResourceRunning} {
+		for _, tc := range []struct {
+			name    string
+			failure error
+			policy  worker.Decision
+		}{
+			{"busy", temporaryStoreFailure{}, worker.Retry},
+			{"timeout", context.DeadlineExceeded, worker.Retry},
+			{"integrity", fatal, worker.Stop},
+			{"joined eligibility and integrity", errors.Join(operations.ErrChanged, fatal), worker.Stop},
+		} {
+			t.Run(string(state)+"/"+tc.name, func(t *testing.T) {
+				work := stubWork(t)
+				work.Lease.Until = time.Now().Add(time.Minute)
+				work.Resources[0].Result.State = state
+				repo := &intentFailureRepo{stubRepo: &stubRepo{work: work}, failure: tc.failure}
+				target := &stubTarget{result: provider.CleanupOutcome{Deleted: true}}
+				engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
+				if err != nil {
+					t.Fatal(err)
+				}
+				worked, err := engine.RunOnce(t.Context())
+				if !worked || !errors.Is(err, tc.failure) || worker.Classify(err) != tc.policy {
+					t.Fatal("intent error did not reach worker policy", worked, err)
+				}
+				if target.applied != 0 || len(repo.results) != 0 || len(repo.outcomes) != 0 || work.Resources[0].Result.State != state {
+					t.Fatal("store failure mutated the provider or settled uncertain evidence")
+				}
+			})
+		}
+	}
+}
+
+func TestCleanupIntentEligibilityRefusalsStillRetainResources(t *testing.T) {
+	for _, refusal := range []error{operations.ErrChanged, operations.ErrBusy, operations.ErrState, operations.ErrUnresolved, operations.ErrUncollected} {
+		t.Run(refusal.Error(), func(t *testing.T) {
+			repo := &intentFailureRepo{stubRepo: &stubRepo{work: stubWork(t)}, failure: refusal}
+			target := &stubTarget{}
+			engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			worked, err := engine.RunOnce(t.Context())
+			if !worked || err != nil || target.applied != 0 || len(repo.results) != 1 || len(repo.outcomes) != 1 ||
+				repo.results[0].State != operations.ResourceRetained || repo.results[0].Reason != "eligibility_changed" ||
+				repo.outcomes[0].Problem == nil || repo.outcomes[0].Problem.Code != domain.CodeIllegalStateTransition {
+				t.Fatal("eligibility refusal lost its safe terminal outcome", worked, err)
+			}
+		})
 	}
 }

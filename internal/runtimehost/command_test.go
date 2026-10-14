@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -17,13 +16,9 @@ import (
 func TestLocalValidationNeedsNoStateOrProviderAndRejectsInvalidFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "job.json")
 	good := []byte(`{"api_version":"compute-connector/v1alpha1","name":"schema only","profile":"not-configured","bundle":{"object_id":"absent"},"execution":{"kind":"python","command":["python","MUST_NOT_RUN.py"]},"inputs":[],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`)
-	if err := os.WriteFile(path, good, 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.WriteFile(path, good, 0600))
 	var output bytes.Buffer
-	if err := Command(context.Background(), operatorcli.Request{Command: "validate", File: path}, &output); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, Command(context.Background(), operatorcli.Request{Command: "validate", File: path}, &output))
 	var got struct {
 		Status   string `json:"status"`
 		Admitted bool   `json:"admitted"`
@@ -34,9 +29,7 @@ func TestLocalValidationNeedsNoStateOrProviderAndRejectsInvalidFiles(t *testing.
 		t.Fatal("schema validation invented admission")
 	}
 	for _, raw := range [][]byte{nil, []byte(`{}`), append(append([]byte{}, good...), []byte(` {}`)...), bytes.Repeat([]byte{'x'}, (1<<20)+1)} {
-		if err := os.WriteFile(path, raw, 0600); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, os.WriteFile(path, raw, 0600))
 		output.Reset()
 		if err := Command(context.Background(), operatorcli.Request{Command: "validate", File: path}, &output); err == nil || output.Len() != 0 {
 			t.Fatal("invalid file qualified")
@@ -57,27 +50,13 @@ func TestInvalidListenerDoesNotOpenOrCreateState(t *testing.T) {
 }
 
 func TestInvalidManagedCommandDoesNotOpenOrCreateState(t *testing.T) {
-	python := filepath.Join(t.TempDir(), "synthetic-python3")
-	if runtime.GOOS == "windows" {
-		python += ".exe"
-	}
-	if err := os.WriteFile(python, []byte("synthetic executable fixture; must never run"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	root := filepath.Join(t.TempDir(), "absent")
-	base := operatorcli.Request{Command: "serve", Root: root, Listen: "127.0.0.1:0", ManagedPython: python,
+	base := operatorcli.Request{Command: "serve", Root: root, Listen: "127.0.0.1:0",
 		ManagedMachineShape: "NvidiaTeslaT4", ManagedMaxWallSeconds: 1800, ManagedMaxWorkers: 2}
 	for _, mutate := range []func(*operatorcli.Request){
-		func(r *operatorcli.Request) { r.ManagedPython = "relative-python" },
-		func(r *operatorcli.Request) { r.ManagedPython = "" },
 		func(r *operatorcli.Request) { r.ManagedMaxWallSeconds = 0 },
 		func(r *operatorcli.Request) { r.ManagedMaxWorkers = 17 },
 		func(r *operatorcli.Request) { r.ManagedMachineShape = "T4" },
-		func(r *operatorcli.Request) { r.ProviderConfig = "SYNTHETIC_PRIVATE_PATH" },
-		func(r *operatorcli.Request) { r.ProviderProfile = "standalone" },
-		func(r *operatorcli.Request) { r.AllowGPU = true },
-		func(r *operatorcli.Request) { r.AllowPrivateStaging = true },
-		func(r *operatorcli.Request) { r.MaxProviderAttempts = 1 },
 	} {
 		request := base
 		mutate(&request)
@@ -107,25 +86,15 @@ func TestManagedCommandComposesPolicyWithoutReadingCredentials(t *testing.T) {
 	if _, err := Initialize(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
-	// This file is intentionally not an interpreter. Empty managed startup must
-	// never execute it to discover an account, read a credential or grant compute.
-	python := filepath.Join(t.TempDir(), "synthetic-python3")
-	if runtime.GOOS == "windows" {
-		python += ".exe"
-	}
-	if err := os.WriteFile(python, []byte("synthetic executable fixture; must never run"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	request, err := operatorcli.Parse([]string{"serve", "--root", root, "--listen", "127.0.0.1:0", "--managed-python", python,
+	// Empty startup configures both adapters without credential or provider calls.
+	request, err := operatorcli.Parse([]string{"serve", "--root", root, "--listen", "127.0.0.1:0",
 		"--managed-machine-shape", "NvidiaTeslaP100", "--managed-max-wall-seconds", "120", "--managed-max-workers", "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	output := &cancelCommandAnnouncement{cancel: cancel}
 	if err := Command(ctx, request, output); err != nil {
-		t.Fatal("managed command did not compose its explicit mode", err)
+		t.Fatal("managed command did not compose its policy", err)
 	}
 	var announcement Listening
 	if json.Unmarshal(output.Bytes(), &announcement) != nil || announcement.Status != "listening" || announcement.Address == "" {
@@ -136,9 +105,7 @@ func TestManagedCommandComposesPolicyWithoutReadingCredentials(t *testing.T) {
 		t.Fatal("managed CLI policy fell back to another serve mode")
 	}
 	h, err := Open(context.Background(), root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer h.Close()
 	initialized, err := h.store.FingerprintInitialized(context.Background())
 	if err != nil || initialized {

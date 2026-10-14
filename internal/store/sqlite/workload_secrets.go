@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"crypto/hmac"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -24,7 +23,7 @@ func loadSecret(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, now tim
 	var raw, metadata string
 	var expires int64
 	var consumed, revoked, revocation sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT original_receipt,metadata,expires_at_ms,consumed_at,revoked_at,revocation_receipt FROM workload_secret_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?`, string(key.WorkspaceID), string(key.JobID), string(key.AttemptID)).Scan(&raw, &metadata, &expires, &consumed, &revoked, &revocation)
+	err := tx.QueryRowContext(ctx, `SELECT r.receipt,g.metadata,g.expires_at_ms,g.consumed_at,g.revoked_at,v.receipt FROM attempt_grants g JOIN receipts r ON r.workspace_id=g.workspace_id AND r.namespace='grant' AND r.scope=g.kind AND r.key_sha256=g.key_sha256 LEFT JOIN receipts v ON v.workspace_id=g.workspace_id AND v.namespace='revoke' AND v.scope=g.authorization_id AND v.key_sha256=g.revocation_key_sha256 WHERE g.kind='secret' AND g.workspace_id=? AND g.job_id=? AND g.attempt_id=?`, string(key.WorkspaceID), string(key.JobID), string(key.AttemptID)).Scan(&raw, &metadata, &expires, &consumed, &revoked, &revocation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return secretRecord{}, workloadsecret.ErrNotFound
 	}
@@ -46,7 +45,7 @@ func loadSecret(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, now tim
 		return record, ErrCorrupt
 	}
 	if now.Before(r.CreatedAt) {
-		return record, scheduler.ErrClock
+		return record, ErrCorrupt
 	}
 	if consumed.Valid {
 		at, err := time.Parse(time.RFC3339Nano, consumed.String)
@@ -54,7 +53,7 @@ func loadSecret(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, now tim
 			return record, ErrCorrupt
 		}
 		if now.Before(at) {
-			return record, scheduler.ErrClock
+			return record, ErrCorrupt
 		}
 		r.Status, r.ConsumedAt = "consumed", &at
 	} else if revoked.Valid {
@@ -63,7 +62,7 @@ func loadSecret(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, now tim
 			return record, ErrCorrupt
 		}
 		if now.Before(at) {
-			return record, scheduler.ErrClock
+			return record, ErrCorrupt
 		}
 		r.Status, r.RevokedAt = "revoked", &at
 		expected, _ := json.Marshal(r)
@@ -124,7 +123,7 @@ func secretUsable(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, id do
 		return false, nil
 	}
 	var blocked bool
-	err = tx.QueryRowContext(ctx, `SELECT storage_released OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind='cancel' AND status IN ('accepted','running')) FROM preparation_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?`, string(key.WorkspaceID), string(key.JobID), string(key.AttemptID), string(key.WorkspaceID), string(key.JobID), string(key.AttemptID)).Scan(&blocked)
+	err = tx.QueryRowContext(ctx, `SELECT storage_released OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind='cancel' AND status IN ('accepted','running')) FROM attempt_grants WHERE kind='prepare' AND workspace_id=? AND job_id=? AND attempt_id=?`, string(key.WorkspaceID), string(key.JobID), string(key.AttemptID), string(key.WorkspaceID), string(key.JobID), string(key.AttemptID)).Scan(&blocked)
 	return err == nil && !blocked, dbError(err)
 }
 
@@ -132,49 +131,44 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	if c.Validate() != nil || metadata.Validate() != nil || !domain.SHA256Digest(fingerprint).Valid() {
 		return workloadsecret.Receipt{}, false, workloadsecret.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return workloadsecret.Receipt{}, false, err
-	}
-	defer done()
 	var receipt workloadsecret.Receipt
 	usable := false
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
-		var priorHash, priorJob, priorAttempt string
-		err := tx.QueryRowContext(ctx, `SELECT request_hmac,job_id,attempt_id FROM workload_secret_authorizations WHERE workspace_id=? AND key_sha256=?`, string(c.WorkspaceID), c.KeyDigest).Scan(&priorHash, &priorJob, &priorAttempt)
-		if err == nil {
-			if !hmac.Equal([]byte(priorHash), []byte(fingerprint)) || priorJob != string(c.JobID) || priorAttempt != string(metadata.AttemptID) {
+		receiptKey := receiptKey{c.WorkspaceID, "grant", "secret", c.KeyDigest, fingerprint, "", workloadsecret.ErrConflict}
+		prior, found, err := replayOrCreate(ctx, tx, receiptKey, nil)
+		if err != nil {
+			return err
+		}
+		if found {
+			if prior.job != c.JobID || prior.attempt != metadata.AttemptID {
 				return workloadsecret.ErrConflict
 			}
 			key := workloadsecret.Key{WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: metadata.AttemptID}
-			prior, err := loadSecret(ctx, tx, key, c.Now)
+			original, err := loadSecret(ctx, tx, key, now)
 			if err != nil {
 				return err
 			}
-			receipt = prior.original
+			receipt = original.original
 			receipt.Replay = true
-			usable, err = secretUsable(ctx, tx, key, receipt.AuthorizationID, c.Now)
+			usable, err = secretUsable(ctx, tx, key, receipt.AuthorizationID, now)
 			return err
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		gateCommand := executionauth.GateCommand{WorkspaceID: c.WorkspaceID, TokenID: c.TokenID, JobID: c.JobID, KeyDigest: c.KeyDigest, Now: c.Now}
-		r, err := gateRecord(ctx, tx, gateCommand, metadata.AttemptID)
+		gateCommand := executionauth.GateCommand{WorkspaceID: c.WorkspaceID, TokenID: c.TokenID, JobID: c.JobID, KeyDigest: c.KeyDigest}
+		r, err := gateRecord(ctx, tx, now, gateCommand, metadata.AttemptID)
 		if err != nil {
 			return err
 		}
 		if !matchSecretSlots(r.Request.Spec().WorkloadSecrets, metadata) {
 			return workloadsecret.ErrRequest
 		}
-		g, err := loadExecutionGate(ctx, tx, r, c.Now)
+		g, err := loadExecutionGate(ctx, tx, r, now)
 		if err != nil {
 			return err
 		}
-		if g == nil || g.ReadyAt == nil || g.ReadyRevision != metadata.ReadinessRevision || g.Expired(c.Now) {
+		if g == nil || g.ReadyAt == nil || g.ReadyRevision != metadata.ReadinessRevision || g.Expired(now) {
 			return workloadsecret.ErrState
 		}
 		work, err := controlWork(ctx, tx, r)
@@ -185,11 +179,11 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 			return workloadsecret.ErrState
 		}
 		until, _ := workloadsecret.CanonicalTime(metadata.ExpiresAt)
-		if !c.Now.Before(until) || until.After(c.Now.Add(workloadsecret.MaxLifetime)) {
+		if !now.Before(until) || until.After(now.Add(workloadsecret.MaxLifetime)) {
 			return workloadsecret.ErrRequest
 		}
 		var exists bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workload_secret_authorizations WHERE workspace_id=? AND job_id=? AND attempt_id=?)`, string(c.WorkspaceID), string(c.JobID), string(metadata.AttemptID)).Scan(&exists); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attempt_grants WHERE kind='secret' AND workspace_id=? AND job_id=? AND attempt_id=?)`, string(c.WorkspaceID), string(c.JobID), string(metadata.AttemptID)).Scan(&exists); err != nil {
 			return dbError(err)
 		}
 		if exists {
@@ -199,12 +193,16 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 		if err != nil {
 			return err
 		}
-		receipt = workloadsecret.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, Metadata: metadata, Status: "granted", CreatedAt: c.Now.UTC()}
+		receipt = workloadsecret.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, Metadata: metadata, Status: "granted", CreatedAt: now.UTC()}
 		encoded, _ := json.Marshal(receipt)
 		meta, _ := json.Marshal(metadata)
-		_, err = tx.ExecContext(ctx, `INSERT INTO workload_secret_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_hmac,metadata,original_receipt,expires_at_ms) VALUES(?,?,?,?,?,?,?,?,?)`, string(c.WorkspaceID), id, string(c.JobID), string(metadata.AttemptID), c.KeyDigest, fingerprint, string(meta), string(encoded), until.UnixMilli())
+		_, err = tx.ExecContext(ctx, `INSERT INTO attempt_grants(workspace_id,kind,authorization_id,job_id,attempt_id,key_sha256,status,metadata,expires_at_ms) VALUES(?,'secret',?,?,?,?,'granted',?,?)`, string(c.WorkspaceID), id, string(c.JobID), string(metadata.AttemptID), c.KeyDigest, string(meta), until.UnixMilli())
+		if err != nil {
+			return dbError(err)
+		}
+		_, _, err = replayOrCreate(ctx, tx, receiptKey, &savedReceipt{id, c.JobID, metadata.AttemptID, string(encoded)})
 		usable = err == nil
-		return dbError(err)
+		return err
 	})
 	if err != nil {
 		return workloadsecret.Receipt{}, false, err
@@ -216,17 +214,12 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	if c.Validate() != nil || !attempt.Valid() || !id.Valid() {
 		return workloadsecret.Receipt{}, workloadsecret.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return workloadsecret.Receipt{}, err
-	}
-	defer done()
 	var receipt workloadsecret.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
-		record, err := loadSecret(ctx, tx, workloadsecret.Key{WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: attempt}, c.Now)
+		record, err := loadSecret(ctx, tx, workloadsecret.Key{WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: attempt}, now)
 		if err != nil {
 			return err
 		}
@@ -234,23 +227,31 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 			return workloadsecret.ErrNotFound
 		}
 		receipt = record.current
-		if receipt.Status == "revoked" {
-			var key string
-			if err = tx.QueryRowContext(ctx, `SELECT revocation_key_sha256 FROM workload_secret_authorizations WHERE workspace_id=? AND authorization_id=?`, string(c.WorkspaceID), string(id)).Scan(&key); err != nil {
-				return dbError(err)
-			}
-			if key != c.KeyDigest {
-				return workloadsecret.ErrConflict
+		var supplyKey string
+		if err = tx.QueryRowContext(ctx, `SELECT key_sha256 FROM attempt_grants WHERE kind='secret' AND workspace_id=? AND authorization_id=?`, c.WorkspaceID, id).Scan(&supplyKey); err != nil {
+			return dbError(err)
+		}
+		key := receiptKey{c.WorkspaceID, "revoke", string(id), c.KeyDigest, supplyKey, "", workloadsecret.ErrConflict}
+		prior, found, err := replayOrCreate(ctx, tx, key, nil)
+		if err != nil {
+			return err
+		}
+		if found {
+			if receipt.Status != "revoked" || json.Unmarshal([]byte(prior.raw), &receipt) != nil || receipt.Validate() != nil {
+				return ErrCorrupt
 			}
 			receipt.Replay = true
 			return nil
 		}
+		if receipt.Status == "revoked" {
+			return workloadsecret.ErrConflict
+		}
 		if receipt.Status == "consumed" {
 			return workloadsecret.ErrState
 		}
-		receipt.Status, receipt.RevokedAt = "revoked", &c.Now
+		receipt.Status, receipt.RevokedAt = "revoked", &now
 		raw, _ := json.Marshal(receipt)
-		result, err := tx.ExecContext(ctx, `UPDATE workload_secret_authorizations SET revoked_at=?,revocation_key_sha256=?,revocation_receipt=? WHERE workspace_id=? AND authorization_id=? AND consumed_at IS NULL AND revoked_at IS NULL`, c.Now.UTC().Format(time.RFC3339Nano), c.KeyDigest, string(raw), string(c.WorkspaceID), string(id))
+		result, err := tx.ExecContext(ctx, `UPDATE attempt_grants SET status='revoked',revoked_at=?,revocation_key_sha256=? WHERE kind='secret' AND workspace_id=? AND authorization_id=? AND consumed_at IS NULL AND revoked_at IS NULL`, now.UTC().Format(time.RFC3339Nano), c.KeyDigest, string(c.WorkspaceID), string(id))
 		if err != nil {
 			return dbError(err)
 		}
@@ -261,7 +262,8 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 		if count != 1 {
 			return workloadsecret.ErrState
 		}
-		return nil
+		_, _, err = replayOrCreate(ctx, tx, key, &savedReceipt{string(id), c.JobID, attempt, string(raw)})
+		return err
 	})
 	if err != nil {
 		return workloadsecret.Receipt{}, err
@@ -269,22 +271,17 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	return receipt, nil
 }
 
-func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.WorkspaceID, token string, job domain.JobID, id domain.OperationID, now time.Time) (workloadsecret.Receipt, error) {
-	if !workspace.Valid() || !job.Valid() || !id.Valid() || !scheduler.ValidTime(now) {
+func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.WorkspaceID, token string, job domain.JobID, id domain.OperationID) (workloadsecret.Receipt, error) {
+	if !workspace.Valid() || !job.Valid() || !id.Valid() {
 		return workloadsecret.Receipt{}, workloadsecret.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return workloadsecret.Receipt{}, err
-	}
-	defer done()
 	var receipt workloadsecret.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, workspace, token, auth.Execute); err != nil {
 			return err
 		}
 		var attempt string
-		err := tx.QueryRowContext(ctx, `SELECT attempt_id FROM workload_secret_authorizations WHERE workspace_id=? AND job_id=? AND authorization_id=?`, string(workspace), string(job), string(id)).Scan(&attempt)
+		err := tx.QueryRowContext(ctx, `SELECT attempt_id FROM attempt_grants WHERE kind='secret' AND workspace_id=? AND job_id=? AND authorization_id=?`, string(workspace), string(job), string(id)).Scan(&attempt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return workloadsecret.ErrNotFound
 		}
@@ -298,29 +295,25 @@ func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.Worksp
 	return receipt, err
 }
 
-func (s *Store) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Key, id domain.OperationID, now time.Time) (bool, error) {
-	if !key.Valid() || !id.Valid() || !scheduler.ValidTime(now) {
+func (s *Store) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Key, id domain.OperationID) (bool, error) {
+	if !key.Valid() || !id.Valid() {
 		return false, workloadsecret.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return false, err
-	}
-	defer done()
 	var usable bool
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error { var err error; usable, err = secretUsable(ctx, tx, key, id, now); return err })
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		var err error
+		usable, err = secretUsable(ctx, tx, key, id, now)
+		return err
+	})
 	return usable, err
 }
 
 func (s *Store) HasWorkloadSecretAuthorizations(ctx context.Context) (bool, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return false, err
-	}
-	defer done()
-	var exists bool
-	err = s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workload_secret_authorizations)`).Scan(&exists)
-	return exists, dbError(err)
+	return read(ctx, s, func(ctx context.Context) (bool, error) {
+		var exists bool
+		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM attempt_grants WHERE kind='secret') OR EXISTS(SELECT 1 FROM receipts WHERE (namespace='grant' AND scope='secret') OR namespace='revoke')`).Scan(&exists)
+		return exists, dbError(err)
+	})
 }
 
 func secretForStart(ctx context.Context, tx *sql.Tx, r admission.Record, id domain.OperationID, revision domain.SHA256Digest, deadline string, now time.Time) (*workloadsecret.Receipt, error) {

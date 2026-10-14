@@ -141,7 +141,6 @@ type Record struct {
 	Request      Request
 	Profile      Profile
 	Objects      []FrozenObject
-	PendingHTTPS int
 	// Problem is a sanitized cached orchestration condition, never an upstream dump.
 	Problem     *domain.Problem
 	Collection  *domain.CollectionStatus
@@ -200,6 +199,9 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	if err != nil {
 		return Receipt{}, err
 	}
+	if err := req.Spec().CheckInputs(); err != nil {
+		return Receipt{}, err
+	}
 	return s.repo.AdmitJob(ctx, w, p.TokenID(), k, req, s.limits)
 }
 func (s *Service) Validate(ctx context.Context, p auth.Principal, w domain.WorkspaceID, raw []byte) (Validation, error) {
@@ -209,6 +211,9 @@ func (s *Service) Validate(ctx context.Context, p auth.Principal, w domain.Works
 	}
 	req, err := Parse(raw)
 	if err != nil {
+		return Validation{}, err
+	}
+	if err := req.Spec().CheckInputs(); err != nil {
 		return Validation{}, err
 	}
 	return s.repo.ValidateJob(ctx, w, p.TokenID(), req)

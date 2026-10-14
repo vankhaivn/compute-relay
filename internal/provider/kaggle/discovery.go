@@ -19,10 +19,9 @@ var (
 // Discovery performs explicit read-only verification of supplied credentials.
 // Construction, result access and quota aging never perform provider calls.
 type Discovery struct {
-	python string
-	clock  ports.Clock
-	slot   chan struct{}
-	run    func(context.Context, string, []byte) (discoveryResponse, error)
+	clock ports.Clock
+	slot  chan struct{}
+	run   func(context.Context, []byte) (discoveryResponse, error)
 }
 
 // DiscoveryResult is private binding evidence, not a public connection response.
@@ -43,21 +42,21 @@ func (r DiscoveryResult) Quota() provider.QuotaObservation {
 func (DiscoveryResult) String() string   { return "Kaggle discovery result (private)" }
 func (DiscoveryResult) GoString() string { return "Kaggle discovery result (private)" }
 
-func NewDiscovery(pythonExecutable string, clock ports.Clock) (*Discovery, error) {
-	if !validPythonExecutable(pythonExecutable) || clock == nil {
+func NewDiscovery(clock ports.Clock) (*Discovery, error) {
+	if clock == nil {
 		return nil, ErrConfig
 	}
-	return &Discovery{python: pythonExecutable, clock: clock, slot: make(chan struct{}, 1), run: runDiscovery}, nil
+	return &Discovery{clock: clock, slot: make(chan struct{}, 1), run: runDiscovery}, nil
 }
 
 // Discover makes at most one authentication and one quota request, with a minute
-// including the serialized wait. Token bytes go only through anonymous stdin;
-// the caller owns and clears them. Successful identity with unknown/unavailable
+// including the serialized wait. The native client erases its credential copy;
+// the caller owns and clears the original. Successful identity with unknown/unavailable
 // quota is still verified, but cannot establish known GPU capacity.
 func (d *Discovery) Discover(parent context.Context, token []byte) (result DiscoveryResult, err error) {
 	defer func() {
 		if recover() != nil {
-			result, err = DiscoveryResult{}, ErrProcess
+			result, err = DiscoveryResult{}, ErrUnavailable
 		}
 	}()
 	if d == nil {
@@ -86,16 +85,16 @@ func (d *Discovery) Discover(parent context.Context, token []byte) (result Disco
 	if at.IsZero() {
 		return result, ErrConfig
 	}
-	r, runErr := d.run(ctx, d.python, token)
+	r, runErr := d.run(ctx, token)
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}
 	if runErr != nil {
-		// Never reflect arbitrary subprocess or adapter errors containing secrets.
+		// Never reflect arbitrary client or adapter errors containing secrets.
 		if runErr == ErrProtocol {
 			return result, ErrProtocol
 		}
-		return result, ErrProcess
+		return result, ErrUnavailable
 	}
 	if !r.valid() || d.clock.Now().Before(at) {
 		return result, ErrProtocol

@@ -26,13 +26,13 @@ func TestArtifactProgressObservesExactStreamAndPreservesLateFailure(t *testing.T
 				return nil, err
 			}
 			if late {
-				return nil, ErrProcess
+				return nil, ErrUnavailable
 			}
 			return nil, nil
 		}
 		var samples []int64
 		var dst bytes.Buffer
-		r, err := a.FetchArtifactWithProgress(context.Background(), ref, file, &dst, file.Bytes, func(n int64) error { samples = append(samples, n); return nil })
+		r, err := a.Fetch(context.Background(), ref, file, &dst, file.Bytes, func(n int64) error { samples = append(samples, n); return nil })
 		if !reflect.DeepEqual(samples, []int64{1, 3}) || dst.String() != "yes" || (err == nil) == late {
 			t.Fatal(samples, r, err)
 		}
@@ -50,10 +50,10 @@ func TestArtifactProgressCallbackFailureStopsAndSurvivesBridgeError(t *testing.T
 		if _, err := dst.Write([]byte("y")); !errors.Is(err, stop) {
 			t.Fatal(err)
 		}
-		return nil, ErrProcess
+		return nil, ErrUnavailable
 	}
 	var dst bytes.Buffer
-	if _, err := a.FetchArtifactWithProgress(context.Background(), ref, file, &dst, file.Bytes, func(int64) error { return stop }); !errors.Is(err, stop) || dst.String() != "y" {
+	if _, err := a.Fetch(context.Background(), ref, file, &dst, file.Bytes, func(int64) error { return stop }); !errors.Is(err, stop) || dst.String() != "y" {
 		t.Fatal("callback failure became success or lost its identity", err, dst.String())
 	}
 }

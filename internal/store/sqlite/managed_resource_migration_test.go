@@ -47,22 +47,16 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	ctx := context.Background()
 	legacy := preResourceSSHAdapter{legacySSHStateAdapter{f.discovery}}
 	var err error
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{legacy}, f.clock.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{legacy})
+	requireNoError(t, err)
 	settings := scheduler.DefaultSettings()
 	settings.MaxWorkers, settings.MaxActivePerAccount = 4, 64
-	if err := f.s.ConfigureScheduler(ctx, settings); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.ConfigureScheduler(ctx, settings))
 	create := func(w domain.WorkspaceID, key, secret string) connections.Connection {
 		t.Helper()
 		body := strings.Replace(string(managedCreateBody(secret)), `"fixture"`, `"ssh"`, 1)
 		op, err := f.service.Submit(ctx, f.principals[w], w, "", key, []byte(body))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f.run(t)
 		return f.get(t, w, op.ConnectionID)
 	}
@@ -71,31 +65,23 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	admit := func(c connections.Connection, key string) (scheduler.Identity, admission.Record) {
 		t.Helper()
 		jobs, err := admission.New(f.access, f.s, admission.DefaultLimits())
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		raw := strings.Replace(dispatchJSON, `"profile":"fixture"`, `"profile":"`+c.Selection.Profile+`"`, 1)
 		r, err := jobs.Submit(ctx, f.principals[c.Workspace], c.Workspace, key, []byte(raw))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		permits, err := executionauth.New(f.access, f.s, f.clock)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		if _, err := permits.Authorize(ctx, f.principals[c.Workspace], c.Workspace, r.JobID, key+"-grant", authorizationRequest(r.AttemptID, 10)); err != nil {
 			t.Fatal(err)
 		}
 		record, err := jobs.Get(ctx, f.principals[c.Workspace], c.Workspace, r.JobID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		return scheduler.Identity{WorkspaceID: c.Workspace, JobID: r.JobID, AttemptID: r.AttemptID}, record
 	}
 	first, original := admit(lan, "legacy-first-job")
 	second, _ := admit(vpn, "legacy-second-job")
 	for _, id := range []scheduler.Identity{first, second} {
-		result, err := f.s.ClaimNextManaged(ctx, "legacy-worker", f.clock.Now())
+		result, err := f.s.ClaimNext(ctx, "legacy-worker")
 		if err != nil || result.Claim == nil || result.Claim.Identity != id {
 			t.Fatal("legacy fixture did not reserve the expected attempt", result, err)
 		}
@@ -105,9 +91,7 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	}
 	queued, queuedOriginal := admit(lan, "legacy-queued-job")
 	oldPath := copyFixtureAtSchema(t, f.s, version)
-	if err := f.s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.s.Close())
 	f.s, err = Open(ctx, oldPath, DefaultOptions())
 	if err != nil {
 		t.Fatal("upgrade", err)
@@ -115,10 +99,8 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	f.root = oldPath
 	f.bind(t)
 	upgraded := upgradedResourceSSHAdapter{legacy}
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{upgraded}, f.clock.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{upgraded})
+	requireNoError(t, err)
 	for _, c := range []connections.Connection{lan, vpn} {
 		current := f.get(t, c.Workspace, c.ID)
 		if current.Selection != nil || !current.CredentialPresent || current.Concurrency == nil || current.Concurrency.EffectiveLimit != nil || current.Concurrency.WaitReason == nil || *current.Concurrency.WaitReason != string(scheduler.ResourceUnverified) {
@@ -129,7 +111,7 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 		configureResourceLimit(t, f, f.get(t, c.Workspace, c.ID), 2)
 	}
 	f.clock.advance(time.Minute)
-	result, err := f.s.ClaimNextManaged(ctx, "after-upgrade", f.clock.Now())
+	result, err := f.s.ClaimNext(ctx, "after-upgrade")
 	if err != nil || result.Claim != nil || len(result.View.Heads) != 1 || result.View.Heads[0].Reason != scheduler.ResourceUnresolved {
 		t.Fatal("current metadata relocated historical unknown execution", result, err)
 	}
@@ -147,7 +129,7 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 		state.Orchestration, state.Execution, state.RemoteActivity, state.Result = domain.OrchestrationCollecting, domain.ExecutionSucceeded, domain.RemoteActivityInactive, domain.ResultCollecting
 		schedulerSetState(t, f.s, id, state)
 	}
-	result, err = f.s.ClaimNextManaged(ctx, "legacy-queued-after-proof", f.clock.Now())
+	result, err = f.s.ClaimNext(ctx, "legacy-queued-after-proof")
 	if err != nil || result.Claim == nil || result.Claim.Identity != queued {
 		t.Fatal("confirmed release did not unblock preserved queued work", result, err)
 	}
@@ -155,7 +137,11 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	if err != nil || retained.Profile != queuedOriginal.Profile || retained.Job != queuedOriginal.Job {
 		t.Fatal("queued admission was rewritten", err)
 	}
-	view, err := f.s.InspectScheduler(ctx, f.clock.Now())
+	snapshot, err := f.s.ClaimNext(ctx, "inspect-upgraded-reservation")
+	if err != nil || snapshot.Claim != nil {
+		t.Fatal("claimed attempt became schedulable again", snapshot, err)
+	}
+	view := snapshot.View
 	if err != nil || view.UnresolvedResources["machine"] || view.ResourceReservations["resource_"+strings.Repeat("a", 64)] != 1 {
 		t.Fatal("post-upgrade claim lost its durable verified association", view, err)
 	}

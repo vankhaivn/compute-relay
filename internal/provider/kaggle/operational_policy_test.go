@@ -1,93 +1,25 @@
 package kaggle
 
 import (
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-func TestOperationalCapabilitiesAreIndependentAndNotLiveEvidence(t *testing.T) {
-	c := testConfig(t)
-	first, err := OperationalDescriptor(c)
-	if err != nil || len(first.Capabilities) != 16 {
-		t.Fatal("missing capability inventory", err)
+func TestRuntimeCapabilitiesPreserveUnknownAndUnsupported(t *testing.T) {
+	cpu := RuntimeCapabilities("cpu")
+	gpu := RuntimeCapabilities("NvidiaTeslaT4")
+	if !cpu.Valid() || !gpu.Valid() || cpu.GPU != domain.CapabilitySupportUnsupported ||
+		gpu.GPU != domain.CapabilitySupportUnknown || gpu.GPUShape != "NvidiaTeslaT4" ||
+		gpu.LogsWhileRunning != domain.CapabilitySupportUnknown ||
+		gpu.Support(domain.CapabilityRemoteCancellation) != domain.CapabilitySupportUnsupported ||
+		gpu.Support(domain.CapabilityRemoteCleanup) != domain.CapabilitySupportSupported {
+		t.Fatal("runtime capabilities lost uncertainty or support")
 	}
-	seen := map[domain.CapabilityName]bool{}
-	for _, cap := range first.Capabilities {
-		if cap.Validate() != nil || seen[cap.Name] || cap.AccountChecked || cap.Evidence == domain.EvidencePassedLive || !cap.CheckedAt.IsZero() {
-			t.Fatal("invalid or inflated evidence", cap)
-		}
-		seen[cap.Name] = true
-	}
-	if first.Support(domain.CapabilityRemoteCancellation) != domain.CapabilitySupportUnsupported || first.Support(domain.CapabilityLogsWhileRunning) != domain.CapabilitySupportUnknown || first.Support(domain.CapabilityExecutionTimeout) != domain.CapabilitySupportUnknown || first.Support(domain.CapabilityBatchExecution) != domain.CapabilitySupportUnknown {
-		t.Fatal("unverified capability became available")
-	}
-	if first.Support(domain.CapabilityEphemeralSecrets) != domain.CapabilitySupportUnsupported {
-		t.Fatal("unsupported workload secret delivery advertised")
-	}
-	if first.Support(domain.CapabilityRemoteCleanup) != domain.CapabilitySupportSupported {
-		t.Fatal("explicit name-based cleanup was not advertised")
-	}
-	for _, cap := range first.Capabilities {
-		if cap.Name == domain.CapabilityRemoteCleanup && (len(cap.Conditions) != 2 || cap.Conditions[0] != nameBasedDeleteWarning) {
-			t.Fatal("cleanup capability omitted replacement warning", cap)
-		}
-	}
-	for i := range first.Capabilities {
-		first.Capabilities[i].Reason = "changed"
-		if len(first.Capabilities[i].Conditions) > 0 {
-			first.Capabilities[i].Conditions[0] = "changed"
-		}
-	}
-	second, _ := OperationalDescriptor(c)
-	for _, cap := range second.Capabilities {
-		if cap.Reason == "changed" || len(cap.Conditions) > 0 && cap.Conditions[0] == "changed" {
-			t.Fatal("caller mutated future descriptors")
-		}
-	}
-	if _, err := OperationalDescriptor(Config{}); !errors.Is(err, ErrConfig) {
-		t.Fatal("invalid config accepted")
-	}
-}
-
-func TestOperationalCancellationIsManualWithoutAnyProviderIO(t *testing.T) {
-	e := newExecutionFixture(t)
-	ref, err := e.remote(executionFound(e.request, "RUNNING"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.stager.local = func(context.Context, Config, Mode, []byte) (Report, error) {
-		t.Fatal("manual cancel probed provider")
-		return Report{}, nil
-	}
-	e.run = func(context.Context, Config, string, []byte, executionRequest) (executionResponse, error) {
-		t.Fatal("manual cancel invoked execution")
-		return executionResponse{}, nil
-	}
-	for i := 0; i < 3; i++ {
-		out, err := e.Cancel(context.Background(), ref, "cancel_op")
-		if err != nil || out.Validate() != nil || out.Status != domain.CancellationManual || out.TerminationConfirmed {
-			t.Fatal("false remote termination", out, err)
-		}
-	}
-	foreign := ref
-	foreign.Identity.WorkspaceID = "foreign"
-	if _, err := e.Cancel(context.Background(), foreign, "cancel_op"); !errors.Is(err, ErrExecutionIdentity) {
-		t.Fatal("foreign reference accepted")
-	}
-	if _, err := e.Cancel(context.Background(), ref, ""); !errors.Is(err, ErrConfig) {
-		t.Fatal("missing operation accepted")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := e.Cancel(ctx, ref, "cancel_op"); !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
-	}
-	if e.used.Load() {
-		t.Fatal("cancel changed submission gate")
+	gpu.Accelerators[0] = "changed"
+	if RuntimeCapabilities("NvidiaTeslaT4").Accelerators[0] != "gpu" {
+		t.Fatal("caller mutated future capability declaration")
 	}
 }
 
@@ -108,5 +40,3 @@ func TestOperationalTimeoutsPreserveFrozenBudgetsAndUncertainty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-var _ provider.Canceller = (*Executor)(nil)

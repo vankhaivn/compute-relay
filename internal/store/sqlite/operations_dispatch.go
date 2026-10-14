@@ -10,7 +10,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 var _ dispatch.CancellationRepository = (*Store)(nil)
@@ -24,24 +23,19 @@ func pendingCancellation(ctx context.Context, tx *sql.Tx, work dispatch.Work) (*
 	if err != nil {
 		return nil, dbError(err)
 	}
-	r, err := loadControl(ctx, tx, work.Job.Job.WorkspaceID, id)
+	r, err := loadOperation(ctx, tx, work.Job.Job.WorkspaceID, id)
 	if err != nil {
 		return nil, err
 	}
 	return &dispatch.CancellationControl{Operation: r.Operation, Started: r.Started}, nil
 }
 
-func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id domain.OperationID, action dispatch.CancellationAction, now time.Time) (dispatch.Work, error) {
-	if !id.Valid() || !scheduler.ValidTime(now) || (action.Begin && (action.Outcome != nil || action.Code != "")) || (!action.Begin && (action.Outcome == nil) == (action.Code == "")) {
+func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id domain.OperationID, action dispatch.CancellationAction) (dispatch.Work, error) {
+	if !id.Valid() || (action.Begin && (action.Outcome != nil || action.Code != "")) || (!action.Begin && (action.Outcome == nil) == (action.Code == "")) {
 		return dispatch.Work{}, dispatch.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Work{}, err
-	}
-	defer done()
 	var result dispatch.Work
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -52,7 +46,7 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 		if work.Cancellation == nil || work.Cancellation.Operation.ID != id || work.Journal.Phase != dispatch.Submitted || work.Journal.Remote == nil {
 			return dispatch.ErrConflict
 		}
-		r, err := loadControl(ctx, tx, work.Job.Job.WorkspaceID, id)
+		r, err := loadOperation(ctx, tx, work.Job.Job.WorkspaceID, id)
 		if err != nil {
 			return err
 		}
@@ -70,7 +64,7 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 			}
 			next.Started = true
 			next.Effect = operations.CancellationRequested
-			if err = saveControl(ctx, tx, r, next); err != nil {
+			if err = saveOperation(ctx, tx, r, next); err != nil {
 				return err
 			}
 			state.Cancellation = domain.CancellationRequesting
@@ -141,9 +135,6 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 		if err != nil {
 			return err
 		}
-		if err = advanceSchedulerClock(ctx, tx, now); err != nil {
-			return err
-		}
 		result = work
 		return nil
 	})
@@ -175,7 +166,7 @@ func finishObservedOperations(ctx context.Context, tx *sql.Tx, work *dispatch.Wo
 		return dbError(err)
 	}
 	for _, id := range ids {
-		r, err := loadControl(ctx, tx, work.Job.Job.WorkspaceID, id)
+		r, err := loadOperation(ctx, tx, work.Job.Job.WorkspaceID, id)
 		if err != nil {
 			return err
 		}

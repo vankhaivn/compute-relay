@@ -37,6 +37,9 @@ func (p *Basic) CleanupResource(ctx context.Context, request provider.CleanupRes
 	if r.deleted {
 		return provider.CleanupOutcome{AlreadyAbsent: true}, nil
 	}
+	if request.RecoverOnly {
+		return provider.CleanupOutcome{}, provider.Problem(domain.CodeProviderStateUnknown, domain.FailureStageObservation, "the original deletion outcome remains unresolved")
+	}
 	if request.Mode == provider.CleanupDryRun {
 		return provider.CleanupOutcome{WouldDelete: true}, nil
 	}
