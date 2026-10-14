@@ -281,11 +281,19 @@ func TestCleanupResourceIntentRejectsChangedPlan(t *testing.T) {
 	}
 }
 
-func TestRevokedCleanupPreviewDoesNotCreateOperationRows(t *testing.T) {
+func TestCleanupPreviewDoesNotCreateOperationRows(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)
 	_, actor := cleanupService(t, f, "a", auth.Read, auth.Operate)
 	probe := &cleanupProbe{probeProvider: f.adapter}
+	service := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
+	preview, err := service.Preview(ctx, actor, "a", id.JobID, id.AttemptID, false)
+	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
+		t.Fatal("successful preview lost the original targets", preview, err)
+	}
+	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='cleanup'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM cleanup_resources") != 0 {
+		t.Fatal("successful preview created cleanup rows")
+	}
 	revoked := false
 	probe.resourceHook = func(ctx context.Context, q provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 		if !revoked {
@@ -296,7 +304,7 @@ func TestRevokedCleanupPreviewDoesNotCreateOperationRows(t *testing.T) {
 		}
 		return probe.probeProvider.CleanupResource(ctx, q)
 	}
-	if _, err := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe}).Preview(ctx, actor, "a", id.JobID, id.AttemptID, false); err == nil || !revoked {
+	if _, err := service.Preview(ctx, actor, "a", id.JobID, id.AttemptID, false); err == nil || !revoked {
 		t.Fatal("preview did not revalidate revoked authority", err)
 	}
 	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='cleanup'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM cleanup_resources") != 0 {
