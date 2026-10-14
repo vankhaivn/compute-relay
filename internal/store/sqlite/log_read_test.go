@@ -48,7 +48,7 @@ func TestLogReadAuthorizesExactAttemptWithoutDispatchEffects(t *testing.T) {
 		t.Fatal("revoked read accepted", err)
 	}
 }
-func TestHistoricalLogsAndProviderPlanRemainExactAfterRetry(t *testing.T) {
+func TestHistoricalProviderReadsKeepDurableRowsUnchanged(t *testing.T) {
 	scenario := fake.DefaultScenario()
 	scenario.States = []domain.ExecutionState{domain.ExecutionQueued, domain.ExecutionRunning, domain.ExecutionFailed}
 	f, id, adapter, blobs := collectionScenarioFixture(t, scenario)

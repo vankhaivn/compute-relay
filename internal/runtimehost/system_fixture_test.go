@@ -17,6 +17,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/api"
+	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/connections"
@@ -63,12 +64,54 @@ func (f *managedTestFixture) advance(t *testing.T, duration time.Duration) {
 
 func (f *managedTestFixture) jobSpec(t *testing.T, connection connections.Connection) admission.Spec {
 	t.Helper()
+	return f.jobSpecFor(t, f.actor, "app", connection)
+}
+
+func (f *managedTestFixture) principal(t *testing.T, workspace domain.WorkspaceID, scopes ...auth.Scope) (auth.Principal, string) {
+	t.Helper()
+	if _, err := f.host.store.LookupWorkspace(t.Context(), workspace); errors.Is(err, auth.ErrNotFound) {
+		if _, err := f.host.CreateWorkspace(t.Context(), workspace); err != nil {
+			t.Fatal(err)
+		}
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := f.host.access.Issue(t.Context(), workspace, scopes, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := f.host.access.Authenticate(t.Context(), secret.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return actor, secret.Reveal()
+}
+
+func (f *managedTestFixture) connectionFor(t *testing.T, actor auth.Principal, workspace domain.WorkspaceID, key, token string) connections.Connection {
+	t.Helper()
+	op, err := f.services.connections.Submit(t.Context(), actor, workspace, "", key,
+		[]byte(fmt.Sprintf(`{"provider_type":"kaggle","label":"Fixture","credentials":{"api_token":%q}}`, token)))
+	if err != nil {
+		t.Fatal("accept connection", err)
+	}
+	if worked, err := f.services.connections.RunOnce(t.Context()); err != nil || !worked {
+		t.Fatal("verify connection", worked, err)
+	}
+	connection, err := f.services.connections.Get(t.Context(), actor, workspace, op.ConnectionID)
+	if err != nil || connection.Selection == nil || connection.Authentication != "verified" {
+		t.Fatal("verified connection unavailable", err)
+	}
+	return connection
+}
+
+func (f *managedTestFixture) jobSpecFor(t *testing.T, actor auth.Principal, workspace domain.WorkspaceID, connection connections.Connection) admission.Spec {
+	t.Helper()
 	inputs, err := objects.New(f.host.access, f.host.inputs, f.host.store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bundle := systemBundle(t)
-	object, err := inputs.Upload(t.Context(), f.actor, "app", int64(len(bundle)), provider.Digest(bundle), bytes.NewReader(bundle))
+	object, err := inputs.Upload(t.Context(), actor, workspace, int64(len(bundle)), provider.Digest(bundle), bytes.NewReader(bundle))
 	if err != nil {
 		t.Fatal(err)
 	}

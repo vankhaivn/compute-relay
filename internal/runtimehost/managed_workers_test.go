@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
@@ -21,19 +22,41 @@ import (
 )
 
 type managedTestVault struct {
-	mu      sync.Mutex
-	entries map[string][]byte
-	calls   int
+	mu           sync.Mutex
+	entries      map[string][]byte
+	calls        int
+	failCreate   error
+	failDeleteAt int
+	deletes      int
+	createHook   func(string, bool) error
 }
 
-func (v *managedTestVault) Create(_ context.Context, key string, value []byte) error {
+func (v *managedTestVault) Create(ctx context.Context, key string, value []byte) error {
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	v.calls++
+	hook, fail := v.createHook, v.failCreate
+	v.mu.Unlock()
+	if key != "request_fingerprint_v1" && hook != nil {
+		if err := hook(key, false); err != nil {
+			return err
+		}
+	}
+	if fail != nil {
+		return fail
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	v.mu.Lock()
 	if old, exists := v.entries[key]; exists && !bytes.Equal(old, value) {
+		v.mu.Unlock()
 		return credentials.ErrConflict
 	}
 	v.entries[key] = append([]byte(nil), value...)
+	v.mu.Unlock()
+	if key != "request_fingerprint_v1" && hook != nil {
+		return hook(key, true)
+	}
 	return nil
 }
 func (v *managedTestVault) WithSecret(_ context.Context, key string, use func([]byte) error) error {
@@ -48,10 +71,17 @@ func (v *managedTestVault) WithSecret(_ context.Context, key string, use func([]
 	}
 	return use(copy)
 }
-func (v *managedTestVault) Delete(_ context.Context, key string) error {
+func (v *managedTestVault) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.calls++
+	v.deletes++
+	if v.failDeleteAt > 0 && v.deletes == v.failDeleteAt {
+		return credentials.ErrUnavailable
+	}
 	clear(v.entries[key])
 	delete(v.entries, key)
 	return nil
@@ -60,12 +90,26 @@ func (v *managedTestVault) Delete(_ context.Context, key string) error {
 type managedTestAdapter struct {
 	*managedKaggleAdapter
 	checks         int
+	mu             sync.Mutex
+	verifyHook     func(context.Context, []byte) (connections.Verification, error)
+	verifyError    error
+	descriptorHook func(connections.Descriptor) connections.Descriptor
+	profileHook    func(admission.Profile) admission.Profile
 	quotaRemaining *float64
 	clock          ports.Clock
 }
 
-func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connections.Verification, error) {
+func (a *managedTestAdapter) Verify(ctx context.Context, token []byte) (connections.Verification, error) {
+	a.mu.Lock()
 	a.checks++
+	hook, fail := a.verifyHook, a.verifyError
+	a.mu.Unlock()
+	if fail != nil {
+		return connections.Verification{}, fail
+	}
+	if hook != nil {
+		return hook(ctx, token)
+	}
 	account := "fixture_user"
 	switch string(token) {
 	case "SYNTHETIC_FIRST", "SYNTHETIC_SAME_ACCOUNT", "SYNTHETIC_REPLACEMENT":
@@ -87,6 +131,23 @@ func (a *managedTestAdapter) Verify(_ context.Context, token []byte) (connection
 		Status: provider.QuotaKnown, Resource: "gpu", Unit: "seconds", Limit: &limit, Used: &used, Remaining: &remaining,
 		ObservedAt: now, Source: "offline-fixture", Precision: "lower_bound",
 	}}, nil
+}
+
+func (a *managedTestAdapter) checkCount() int { a.mu.Lock(); defer a.mu.Unlock(); return a.checks }
+func (a *managedTestAdapter) Descriptor() connections.Descriptor {
+	d := a.managedKaggleAdapter.Descriptor()
+	if a.descriptorHook != nil {
+		return a.descriptorHook(d)
+	}
+	return d
+}
+
+func (a *managedTestAdapter) Profile(binding domain.ProviderBinding, account string) admission.Profile {
+	profile := a.managedKaggleAdapter.Profile(binding, account)
+	if a.profileHook != nil {
+		return a.profileHook(profile)
+	}
+	return profile
 }
 
 type managedTestFixture struct {
@@ -150,19 +211,7 @@ func newManagedTestFixtureAt(t *testing.T, withVault bool, testClock ports.Clock
 
 func (f *managedTestFixture) connection(t *testing.T, key, token string) connections.Connection {
 	t.Helper()
-	op, err := f.services.connections.Submit(context.Background(), f.actor, "app", "", key,
-		[]byte(fmt.Sprintf(`{"provider_type":"kaggle","label":"Fixture","credentials":{"api_token":%q}}`, token)))
-	if err != nil {
-		t.Fatal("accept connection", err)
-	}
-	if worked, err := f.services.connections.RunOnce(context.Background()); err != nil || !worked {
-		t.Fatal("verify connection", worked, err)
-	}
-	connection, err := f.services.connections.Get(context.Background(), f.actor, "app", op.ConnectionID)
-	if err != nil || connection.Selection == nil || connection.Authentication != "verified" {
-		t.Fatal("verified connection unavailable", err)
-	}
-	return connection
+	return f.connectionFor(t, f.actor, "app", key, token)
 }
 
 func (f *managedTestFixture) binding(t *testing.T, c connections.Connection) provider.BindingSnapshot {
@@ -328,7 +377,7 @@ func TestManagedResolverRejectsSubstitutedSnapshotsAndUnfrozenPolicy(t *testing.
 		binding.Profile.Binding.ConfigurationRevision = "changed"
 		return binding, nil
 	}, make: func(connections.RuntimeBinding) (provider.Provider, error) { made = true; return nil, nil }}
-	if _, err := resolver.Resolve(expected); err != ErrState || made {
+	if _, err := resolver.Resolve(expected); !errors.Is(err, ErrState) || made {
 		t.Fatal("resolver substituted a current alias", err)
 	}
 }

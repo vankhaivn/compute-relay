@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +17,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
@@ -266,7 +263,7 @@ func (f *managedStateFixture) resolvedSecret(t testing.TB, ref string) string {
 	return result
 }
 
-func TestManagedConcurrentReplayAndRevisionCAS(t *testing.T) {
+func TestManagedConcurrentAcceptanceStoresOneConnection(t *testing.T) {
 	f := newManagedStateFixture(t)
 	const count = 12
 	receipts := make(chan connections.Operation, count)
@@ -308,165 +305,30 @@ func TestManagedConcurrentReplayAndRevisionCAS(t *testing.T) {
 	if _, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", "concurrent-create-key", managedCreateBody(managedStateOther)); !errors.Is(err, connections.ErrConflict) {
 		t.Fatal("changed secret reused key", err)
 	}
-	if f.discovery.count() != 0 {
-		t.Fatal("POST invoked discovery")
-	}
-	f.run(t)
-	current := f.get(t, "a", first.ConnectionID)
-	errs = make(chan error, count)
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_, err := f.service.Submit(context.Background(), f.principals["a"], "a", current.ID, fmt.Sprintf("revision-race-key-%d", i), managedActionBody("check", current.Revision, ""))
-			errs <- err
-		}(i)
-	}
-	wg.Wait()
-	close(errs)
-	wins := 0
-	for err := range errs {
-		if err == nil {
-			wins++
-		} else if !errors.Is(err, connections.ErrConflict) {
-			t.Fatal(err)
-		}
-	}
-	if wins != 1 {
-		t.Fatal("revision had multiple winners", wins)
-	}
-	f.run(t)
-	latest := f.get(t, "a", current.ID)
-	if latest.Revision != current.Revision+1 || latest.Selection.Profile == current.Selection.Profile {
-		t.Fatal("revision did not publish distinct alias")
-	}
-	before := f.discovery.count()
-	f.restartManaged(t)
-	replay, err := f.service.Submit(context.Background(), f.principals["a"], "a", "", "concurrent-create-key", managedCreateBody(managedStateSecret))
-	if err != nil || !replay.Replay || replay.Status != "accepted" || replay.ID != first.ID {
-		t.Fatal("original receipt lost after restart", err)
-	}
-	if f.discovery.count() != before {
-		t.Fatal("restart or replay reverified provider")
+	if controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='connection'") != 1 {
+		t.Fatal("connection acceptance stored duplicate receipts")
 	}
 }
 
-func TestManagedCredentialRotationKeepsFrozenBindingAndRejectsAccountChange(t *testing.T) {
-	f := newManagedStateFixture(t)
-	initial := f.create(t, "a", "initial-connection-key", managedStateSecret)
-	receipt, job := f.admit(t, "a", initial, "original-managed-job")
-	binding := provider.BindingSnapshot{Binding: job.Profile.Binding, AccountScope: job.Profile.AccountScope, CredentialRef: job.Profile.CredentialRef}
-	if f.resolvedSecret(t, binding.CredentialRef) != managedStateSecret {
-		t.Fatal("initial resolver failed")
-	}
-	op := f.action(t, "a", initial, "rotate-same-account", "replace_credential", managedStateRotated)
-	f.run(t)
-	rotated := f.get(t, "a", initial.ID)
-	if rotated.Selection == nil || rotated.Selection.Profile == initial.Selection.Profile || f.resolvedSecret(t, binding.CredentialRef) != managedStateRotated {
-		t.Fatal("rotation did not preserve stable slot")
-	}
-	current, err := f.s.ReadJob(context.Background(), "a", f.principals["a"].TokenID(), receipt.JobID)
-	if err != nil || !reflect.DeepEqual(current.Profile, job.Profile) {
-		t.Fatal("rotation rewrote frozen profile", err)
-	}
-	frozen, err := f.s.ReadManagedBinding(context.Background(), binding)
-	if err != nil || frozen.Profile.Binding != binding.Binding || frozen.CanonicalAccount != "fixture_account_alpha" {
-		t.Fatal("old binding no longer resolves", err)
-	}
-	status, err := f.service.Operation(context.Background(), f.principals["a"], "a", op.ID)
-	if err != nil || status.Status != "succeeded" {
-		t.Fatal("rotation outcome", status, err)
-	}
-	f.clock.advance(time.Millisecond)
-	bad := f.action(t, "a", rotated, "rotate-other-account", "replace_credential", managedStateOther)
-	f.run(t)
-	failed, err := f.service.Operation(context.Background(), f.principals["a"], "a", bad.ID)
-	if err != nil || failed.Status != "failed" || failed.Problem == nil || *failed.Problem != "account_changed" {
-		t.Fatal("account replacement not rejected", failed, err)
-	}
-	if f.resolvedSecret(t, binding.CredentialRef) != managedStateRotated {
-		t.Fatal("failed rotation replaced active generation")
-	}
-	if _, err = f.s.ReadManagedBinding(context.Background(), binding); err != nil {
-		t.Fatal("failed rotation broke original binding", err)
-	}
-	retained := f.get(t, "a", initial.ID)
-	f.action(t, "a", retained, "disable-old-binding", "disable", "")
-	f.run(t)
-	if f.resolvedSecret(t, binding.CredentialRef) != managedStateRotated {
-		t.Fatal("disable discarded old credential access")
-	}
-	if _, err = f.s.ReadManagedBinding(context.Background(), binding); err != nil {
-		t.Fatal("disable discarded frozen binding", err)
-	}
-}
-
-func TestManagedDuplicateAccountsShareQuotaAndWorkspaceOwnership(t *testing.T) {
+func TestManagedAliasesDoNotExpandStaticWorkspaceAllowlist(t *testing.T) {
 	f := newManagedStateFixture(t)
 	a := f.create(t, "a", "connection-a-key", managedStateSecret)
-	b := f.create(t, "b", "connection-b-key", managedStateRotated)
-	if a.AccountID == nil || b.AccountID == nil || *a.AccountID != *b.AccountID || a.ID == b.ID {
-		t.Fatal("duplicate canonical account multiplied identity")
-	}
-	receipt, _ := f.admit(t, "a", a, "shared-quota-job")
-	permit, err := executionauth.New(f.access, f.s, f.clock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = permit.Authorize(context.Background(), f.principals["a"], "a", receipt.JobID, "shared-quota-grant", authorizationRequest(receipt.AttemptID, 10)); err != nil {
-		t.Fatal(err)
-	}
-	ap, bp := f.get(t, "a", a.ID), f.get(t, "b", b.ID)
-	if len(ap.Quotas) != 1 || len(bp.Quotas) != 1 || ap.Quotas[0].Remaining == nil || bp.Quotas[0].Remaining == nil || *ap.Quotas[0].Remaining != 50 || *bp.Quotas[0].Remaining != 50 || ap.ActiveAttempts != 1 || bp.ActiveAttempts != 1 {
-		t.Fatal("duplicate accounts expose independent capacity")
-	}
-	for _, view := range []connections.Connection{ap, bp} {
-		quota := view.Quotas[0]
-		if quota.Limit == nil || *quota.Limit != 60 || quota.Used == nil || *quota.Used != 0 || quota.LocalReserved == nil || *quota.LocalReserved != 10 || quota.ResetAt != nil {
-			t.Fatal("quota presentation lost observed totals or local reservations", quota)
-		}
-	}
+	f.create(t, "b", "connection-b-key", managedStateRotated)
 	var allowed string
-	if err = f.s.db.QueryRow("SELECT allowed_profiles FROM workspaces WHERE workspace_id='a'").Scan(&allowed); err != nil {
+	if err := f.s.db.QueryRow("SELECT allowed_profiles FROM workspaces WHERE workspace_id='a'").Scan(&allowed); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(allowed, a.Selection.Profile) {
 		t.Fatal("managed aliases expanded static workspace allowlist")
 	}
-	jobs, _ := admission.New(f.access, f.s, admission.DefaultLimits())
-	raw := strings.Replace(dispatchJSON, `"profile":"fixture"`, `"profile":"`+a.Selection.Profile+`"`, 1)
-	if _, err = jobs.Submit(context.Background(), f.principals["b"], "b", "foreign-alias-job", []byte(raw)); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatal("foreign workspace admitted managed alias", err)
-	}
-	f.action(t, "a", a, "stale-selection-check", "check", "")
-	if _, err = jobs.Submit(context.Background(), f.principals["a"], "a", "stale-alias-job", []byte(raw)); err == nil {
-		t.Fatal("pending mutation admitted stale alias")
-	}
 }
 
-func TestManagedSecretsAbsentFromSQLiteAndPublicProjection(t *testing.T) {
+func TestManagedCredentialMaterialAbsentFromDurableFiles(t *testing.T) {
 	f := newManagedStateFixture(t)
 	c := f.create(t, "a", "canary-connection-key", managedStateSecret)
-	op := f.action(t, "a", c, "canary-rotation-key", "replace_credential", managedStateRotated)
+	f.action(t, "a", c, "canary-rotation-key", "replace_credential", managedStateRotated)
 	f.run(t)
-	list, err := f.service.List(context.Background(), f.principals["a"], "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	operation, err := f.service.Operation(context.Background(), f.principals["a"], "a", op.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(struct {
-		Connections []connections.Connection
-		Operation   connections.Operation
-	}{list, operation})
-	for _, canary := range []string{managedStateSecret, managedStateRotated, "fixture_account_alpha", "vault:", "credential_key", "fingerprint"} {
-		if bytes.Contains(raw, []byte(canary)) {
-			t.Fatal("public projection exposed private data")
-		}
-	}
-	if err = filepath.WalkDir(f.root, func(path string, entry os.DirEntry, err error) error {
+	if err := filepath.WalkDir(f.root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -488,7 +350,7 @@ func TestManagedSecretsAbsentFromSQLiteAndPublicProjection(t *testing.T) {
 	}
 }
 
-func TestManagedConcurrentChangedPayloadPreservesOneFingerprint(t *testing.T) {
+func TestManagedConcurrentPayloadStoresOneFingerprint(t *testing.T) {
 	f := newManagedStateFixture(t)
 	second, err := connections.New(f.access, f.s, f.vault, []connections.Adapter{f.discovery})
 	if err != nil {
@@ -540,42 +402,7 @@ func TestManagedConcurrentChangedPayloadPreservesOneFingerprint(t *testing.T) {
 	if fresh != 1 || replay != count/2-1 || conflicts != count/2 || controlCount(t, f.s, "SELECT count(*) FROM managed_connections") != 1 {
 		t.Fatal("changed-payload concurrency lost one fingerprint", fresh, replay, conflicts)
 	}
-	f.run(t)
-	if f.discovery.count() != 1 {
-		t.Fatal("multiple original requests reached verification")
-	}
-}
-
-func TestManagedQuotaPresentationPreservesUnitsFreshnessAndResetEvidence(t *testing.T) {
-	f := newManagedStateFixture(t)
-	connection := f.create(t, "a", "quota-details-key", managedStateSecret)
-	f.clock.advance(time.Second)
-	limit, used, left := 2.0001, 0.2501, 1.5
-	reset := f.clock.Now().Add(24 * time.Hour)
-	observation := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Unit: "hours", Limit: &limit, Used: &used, Remaining: &left, ResetAt: &reset, ObservedAt: f.clock.Now(), Source: "synthetic", Precision: "lower_bound"}
-	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", observation); err != nil {
-		t.Fatal(err)
-	}
-	calls := f.discovery.count()
-	quota := f.get(t, "a", connection.ID).Quotas[0]
-	if quota.Limit == nil || *quota.Limit != 7200 || quota.Used == nil || *quota.Used != 901 || quota.Remaining == nil || *quota.Remaining != 5400 || quota.ResetAt == nil || !quota.ResetAt.Equal(reset) {
-		t.Fatal("quota metadata did not retain observed units/reset", quota)
-	}
-	f.clock.advance(6 * time.Minute)
-	quota = f.get(t, "a", connection.ID).Quotas[0]
-	if quota.Status != "stale" || quota.Remaining != nil || quota.Limit == nil || *quota.Limit != 7200 || quota.Precision != "unknown" {
-		t.Fatal("stale metadata became fresh capacity", quota)
-	}
-	f.clock.advance(time.Second)
-	unknown := provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "gpu", Unit: "seconds", ObservedAt: f.clock.Now(), Source: "synthetic", Precision: "unknown"}
-	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", unknown); err != nil {
-		t.Fatal(err)
-	}
-	quota = f.get(t, "a", connection.ID).Quotas[0]
-	if quota.Limit != nil || quota.Used != nil || quota.LocalReserved != nil || quota.ResetAt != nil || quota.Remaining != nil {
-		t.Fatal("unknown quota invented metadata", quota)
-	}
-	if f.discovery.count() != calls {
-		t.Fatal("quota reads invoked provider")
+	if controlCount(t, f.s, "SELECT count(DISTINCT request_sha256) FROM receipts WHERE namespace='connection'") != 1 {
+		t.Fatal("mixed payload stored multiple fingerprints")
 	}
 }

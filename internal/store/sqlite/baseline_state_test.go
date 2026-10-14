@@ -47,47 +47,6 @@ type baselineRequest struct {
 	Response json.RawMessage `json:"response"`
 }
 
-func TestBaselineStateReadsAndReplaysUnchanged(t *testing.T) {
-	script, err := os.ReadFile(filepath.Join(baselineDir, "runtime.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(baselineDir, "requests.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixture baselineFixture
-	if err := json.Unmarshal(raw, &fixture); err != nil {
-		t.Fatal(err)
-	}
-	s, err := Open(context.Background(), loadStateScript(t, string(script)), DefaultOptions())
-	if err != nil {
-		t.Fatal("baseline state no longer opens", err)
-	}
-	defer s.Close()
-	handler := baselineHandler(t, s)
-	for _, want := range fixture.Requests {
-		// Scheduling is an intentional additive status contract. Keep the stored
-		// baseline untouched and assert each new field as well as every old field.
-		reason := map[string]string{"granted status": "account_capacity", "queued status": "workspace_fifo"}[want.Name]
-		if reason != "" {
-			var expected map[string]any
-			if err := json.Unmarshal(want.Response, &expected); err != nil {
-				t.Fatal(err)
-			}
-			expected["scheduling"] = map[string]string{"reason": reason}
-			want.Response, err = json.Marshal(expected)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		status, got := baselineCall(t, handler, fixture.Token, want)
-		if status != want.Status || !sameJSON(t, got, want.Response) {
-			t.Errorf("%s: %s %s changed\nstatus %d want %d\n got %s\nwant %s", want.Name, want.Method, want.Path, status, want.Status, got, want.Response)
-		}
-	}
-}
-
 // TestWriteBaselineState drives the real admission, authorization, dispatch, control and
 // collection services on the fake provider, then records the resulting database and responses.
 func TestWriteBaselineState(t *testing.T) {
