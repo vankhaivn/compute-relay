@@ -47,9 +47,30 @@ func TestRuntimeAdapterReadOnlyNeverAuthorizesMutation(t *testing.T) {
 	}
 }
 
-func TestRuntimeCleanupIsExplicitlyUnsupported(t *testing.T) {
-	_, err := (&RuntimeAdapter{}).Cleanup(context.Background(), provider.CleanupRequest{Mode: provider.CleanupApply})
-	if !errors.Is(err, ErrRuntimeCleanup) || !errors.Is(err, provider.ErrCleanupUnsupported) {
-		t.Fatal("runtime cleanup must report an unsupported adapter", err)
+func TestRuntimePreparePlanCheckDoesNotRepeatGPUQuotaRead(t *testing.T) {
+	c, plan, _ := executionFixture(t)
+	plan.Job.Specification = []byte(strings.Replace(executionSpec, `"accelerator":"cpu"`, `"accelerator":"gpu","minimum_gpu_count":1`, 1))
+	plan.Job.SpecificationSHA256 = provider.Digest(plan.Job.Specification)
+	plan.Job.Required = append(plan.Job.Required, domain.CapabilityGPU)
+	plan.VerifyAfterStart = []domain.CapabilityName{domain.CapabilityGPU}
+	policy := DefaultExecutionPolicy()
+	policy.MachineShape = "NvidiaTeslaT4"
+	p := &RuntimeAdapter{config: c, binding: provider.BindingSnapshot{Binding: plan.Job.Binding}, policy: policy}
+	// No monitor is configured: a quota read would fail the validated plan check.
+	if err := p.validPlan(context.Background(), plan); err != nil {
+		t.Fatal("plan check repeated provider validation", err)
+	}
+	changed := plan.Clone()
+	changed.VerifyAfterStart = nil
+	if err := p.validPlan(context.Background(), changed); !errors.Is(err, ErrRuntimeBinding) {
+		t.Fatal("changed plan accepted", err)
+	}
+	changed = plan.Clone()
+	changed.Job.Binding.ConfigurationRevision = "other"
+	if err := p.validPlan(context.Background(), changed); !errors.Is(err, ErrRuntimeBinding) {
+		t.Fatal("changed binding accepted", err)
+	}
+	if _, ok := any(p).(provider.Canceller); ok {
+		t.Fatal("Kaggle exposes a manual-only cancellation port")
 	}
 }

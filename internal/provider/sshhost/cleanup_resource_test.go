@@ -139,3 +139,35 @@ func TestResourceCleanupDescriptionReportsUnknownSize(t *testing.T) {
 		t.Fatal(description, err)
 	}
 }
+
+func resourceRequest(request provider.CleanupRequest, digest domain.SHA256Digest) provider.CleanupResourceRequest {
+	purpose, owner := "execution", domain.OperationID(request.Remote.Identity.IntentID)
+	if request.Remote.Version == "prepared" {
+		purpose, owner = "staging", request.CreationOperationID
+	}
+	return provider.CleanupResourceRequest{CleanupRequest: request, Purpose: purpose, OwnershipOperationID: owner, PlanSHA256: digest}
+}
+func mustPlan(t *testing.T, h *harness) provider.Plan {
+	t.Helper()
+	plan, err := h.adapter.Validate(context.Background(), h.job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+func problemCode(err error, code domain.ErrorCode) bool {
+	var value domain.Problem
+	return errors.As(err, &value) && value.Code == code
+}
+func TestResourceCleanupRecoveryOnlyObservesOriginalContainer(t *testing.T) {
+	h := newHarness(t)
+	request := resourceCleanupRequest(t, h)
+	request.RecoverOnly = true
+	if out, err := h.adapter.CleanupResource(context.Background(), request); !problemCode(err, domain.CodeProviderStateUnknown) || out.Deleted || h.host.commands("rm") != 0 {
+		t.Fatalf("recovered delete repeated mutation: %+v %v", out, err)
+	}
+	delete(h.host.containers, h.host.container(t).name)
+	if out, err := h.adapter.CleanupResource(context.Background(), request); err != nil || !out.AlreadyAbsent || h.host.commands("rm") != 0 {
+		t.Fatalf("absence recovery: %+v %v", out, err)
+	}
+}

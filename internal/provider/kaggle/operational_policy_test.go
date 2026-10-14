@@ -1,12 +1,10 @@
 package kaggle
 
 import (
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 func TestOperationalCapabilitiesAreIndependentAndNotLiveEvidence(t *testing.T) {
@@ -53,44 +51,6 @@ func TestOperationalCapabilitiesAreIndependentAndNotLiveEvidence(t *testing.T) {
 	}
 }
 
-func TestOperationalCancellationIsManualWithoutAnyProviderIO(t *testing.T) {
-	e := newExecutionFixture(t)
-	ref, err := e.remote(executionFound(e.request, "RUNNING"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.stager.local = func(context.Context, Config, Mode, []byte) (Report, error) {
-		t.Fatal("manual cancel probed provider")
-		return Report{}, nil
-	}
-	e.run = func(context.Context, Config, string, []byte, executionRequest) (executionResponse, error) {
-		t.Fatal("manual cancel invoked execution")
-		return executionResponse{}, nil
-	}
-	for i := 0; i < 3; i++ {
-		out, err := e.Cancel(context.Background(), ref, "cancel_op")
-		if err != nil || out.Validate() != nil || out.Status != domain.CancellationManual || out.TerminationConfirmed {
-			t.Fatal("false remote termination", out, err)
-		}
-	}
-	foreign := ref
-	foreign.Identity.WorkspaceID = "foreign"
-	if _, err := e.Cancel(context.Background(), foreign, "cancel_op"); !errors.Is(err, ErrExecutionIdentity) {
-		t.Fatal("foreign reference accepted")
-	}
-	if _, err := e.Cancel(context.Background(), ref, ""); !errors.Is(err, ErrConfig) {
-		t.Fatal("missing operation accepted")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := e.Cancel(ctx, ref, "cancel_op"); !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
-	}
-	if e.used.Load() {
-		t.Fatal("cancel changed submission gate")
-	}
-}
-
 func TestOperationalTimeoutsPreserveFrozenBudgetsAndUncertainty(t *testing.T) {
 	e := newExecutionFixture(t)
 	budgets, err := e.TimeoutBudgets()
@@ -108,5 +68,3 @@ func TestOperationalTimeoutsPreserveFrozenBudgetsAndUncertainty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-var _ provider.Canceller = (*Executor)(nil)

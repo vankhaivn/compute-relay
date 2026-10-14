@@ -3,7 +3,6 @@ package kaggle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"sync"
 
@@ -53,11 +52,9 @@ var (
 	_ provider.PreparationObserver    = (*RuntimeAdapter)(nil)
 	_ provider.QuotaReader            = (*RuntimeAdapter)(nil)
 	_ provider.LogReader              = (*RuntimeAdapter)(nil)
-	_ provider.Canceller              = (*RuntimeAdapter)(nil)
 
 	ErrRuntimeBinding = errors.New("runtime provider binding does not match the configured immutable profile")
 	ErrRuntimeBudget  = errors.New("runtime provider mutation budget exhausted; restart only with explicit authorization after resolving uncertain attempts")
-	ErrRuntimeCleanup = fmt.Errorf("runtime remote cleanup apply is unavailable; preserve owned resources and recovery evidence: %w", provider.ErrCleanupUnsupported)
 )
 
 // NewRuntimeAdapter creates one immutable Kaggle provider revision. maxAttempts
@@ -169,6 +166,20 @@ func (p *RuntimeAdapter) Check(ctx context.Context) (provider.DiagnosticReport, 
 }
 
 func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
+	plan, err := p.localPlan(ctx, job)
+	if err != nil {
+		return provider.Plan{}, err
+	}
+	if p.policy.MachineShape != "" {
+		q, err := provider.ReadAvailableQuota(ctx, p)
+		if err != nil || q.Status != provider.QuotaKnown || q.Remaining == nil || *q.Remaining < float64(job.WallSeconds) {
+			return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch")
+		}
+	}
+	return plan, nil
+}
+
+func (p *RuntimeAdapter) localPlan(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.Plan{}, err
 	}
@@ -199,12 +210,7 @@ func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob)
 			plan.VerifyAfterStart = append(plan.VerifyAfterStart, domain.CapabilityGPU)
 		}
 	}
-	if gpu {
-		q, err := provider.ReadAvailableQuota(ctx, p)
-		if err != nil || q.Status != provider.QuotaKnown || q.Remaining == nil || *q.Remaining < float64(job.WallSeconds) {
-			return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch")
-		}
-	}
+
 	return plan, nil
 }
 
@@ -234,7 +240,7 @@ func (p *RuntimeAdapter) BudgetExhausted() bool {
 }
 
 func (p *RuntimeAdapter) validPlan(ctx context.Context, plan provider.Plan) error {
-	expected, err := p.Validate(ctx, plan.Job)
+	expected, err := p.localPlan(ctx, plan.Job)
 	if err != nil || expected.Digest() != plan.Digest() {
 		if err != nil {
 			return err
@@ -364,16 +370,4 @@ func (p *RuntimeAdapter) ReadLogs(ctx context.Context, ref provider.RemoteRefere
 		return provider.LogPage{}, err
 	}
 	return logs.ReadLogs(ctx, ref, page)
-}
-
-func (p *RuntimeAdapter) Cancel(ctx context.Context, ref provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
-	c, err := p.attempt(ctx, ref.Identity)
-	if err != nil {
-		return provider.CancellationOutcome{}, err
-	}
-	return c.executor.Cancel(ctx, ref, operation)
-}
-
-func (p *RuntimeAdapter) Cleanup(context.Context, provider.CleanupRequest) (provider.CleanupOutcome, error) {
-	return provider.CleanupOutcome{}, ErrRuntimeCleanup
 }

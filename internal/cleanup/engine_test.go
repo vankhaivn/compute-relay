@@ -48,7 +48,7 @@ type stubTarget struct {
 }
 
 func (s *stubTarget) VerifyBinding(context.Context, provider.BindingSnapshot) error { return s.verify }
-func (s *stubTarget) Cleanup(ctx context.Context, r provider.CleanupRequest) (provider.CleanupOutcome, error) {
+func (s *stubTarget) CleanupResource(ctx context.Context, r provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 	s.applied++
 	if s.panics {
 		panic("provider-secret-canary")
@@ -58,6 +58,16 @@ func (s *stubTarget) Cleanup(ctx context.Context, r provider.CleanupRequest) (pr
 		return provider.CleanupOutcome{}, ctx.Err()
 	}
 	return s.result, s.err
+}
+
+func (s *stubTarget) DescribeCleanup(provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
+	return provider.CleanupDescription{Kind: "fake_resource", ID: "resource", Name: "resource", Version: "1", Scope: "fake_attempt", Support: domain.CapabilitySupportSupported, Reason: "offline_fixture"}, nil
+}
+func (r *stubRepo) BeginCleanupResource(context.Context, Work, ResourceWork, time.Time) error {
+	return nil
+}
+func (r *stubRepo) CompleteCleanupResource(context.Context, Work, ResourceResult, time.Time) error {
+	return nil
 }
 
 type stubResolver struct {
@@ -86,6 +96,8 @@ func stubWork(t *testing.T) *Work {
 		Binding: binding,
 		Request: provider.CleanupRequest{Remote: provider.RemoteReference{Identity: identity, Resource: "resource", Version: "1"}, LedgerID: "res_staging_int_1", CreationOperationID: "op_prepare", ResultsCollected: true, Mode: provider.CleanupApply},
 	}
+	resource := Resource{Request: provider.CleanupResourceRequest{CleanupRequest: w.Request, Purpose: "staging", OwnershipOperationID: w.Request.CreationOperationID, PlanSHA256: provider.Digest([]byte("plan"))}}
+	w.Resources = []ResourceWork{{Resource: resource, Result: ResourceResult{ResourceID: w.Request.LedgerID, Purpose: "staging", Fingerprint: resource.Fingerprint(), State: ResourcePending, Reason: "cleanup_requested"}}}
 	if !w.Valid() {
 		t.Fatal("invalid stub work")
 	}
@@ -190,5 +202,20 @@ func TestRunSurvivesLostFenceAndStopsOnStoreErrors(t *testing.T) {
 	}
 	if err = engine.Run(context.Background()); !errors.Is(err, broken) {
 		t.Fatal("store error was hidden", err)
+	}
+}
+
+func TestEngineEmptyInventorySettlesWithoutProviderCall(t *testing.T) {
+	w := stubWork(t)
+	w.Resources = nil
+	repo := &stubRepo{work: w}
+	target := &stubTarget{panics: true}
+	engine, err := New(repo, stubResolver{target, nil}, nil, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := engine.RunOnce(context.Background())
+	if !worked || err != nil || target.applied != 0 || len(repo.outcomes) != 1 || repo.outcomes[0].Effect != AlreadyAbsent {
+		t.Fatalf("empty inventory did not settle locally: %v %v %+v", worked, err, repo.outcomes)
 	}
 }

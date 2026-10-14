@@ -274,14 +274,14 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 	}
 
 	request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: testOperation, ResultsCollected: true, Mode: provider.CleanupDryRun}
-	if dry, err := h.adapter.Cleanup(ctx, request); err != nil || !dry.WouldDelete || dry.Deleted || h.host.commands("rm") != 0 {
+	if dry, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); err != nil || !dry.WouldDelete || dry.Deleted || h.host.commands("rm") != 0 {
 		t.Fatalf("dry run = %+v, %v", dry, err)
 	}
 	request.Mode = provider.CleanupApply
-	if applied, err := h.adapter.Cleanup(ctx, request); err != nil || !applied.Deleted {
+	if applied, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); err != nil || !applied.Deleted {
 		t.Fatalf("apply = %+v, %v", applied, err)
 	}
-	if repeat, err := h.adapter.Cleanup(ctx, request); err != nil || !repeat.AlreadyAbsent {
+	if repeat, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); err != nil || !repeat.AlreadyAbsent {
 		t.Fatalf("repeat = %+v, %v", repeat, err)
 	}
 	if h.host.starts != 1 || h.host.created != 1 || h.host.closed != h.dials {
@@ -526,17 +526,17 @@ func TestCleanupDeletesOnlyTheStoppedOwnedContainer(t *testing.T) {
 	h := newHarness(t)
 	remote := h.submit(t)
 	request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: testOperation, ResultsCollected: true, Mode: provider.CleanupApply}
-	if _, err := h.adapter.Cleanup(ctx, request); !errors.Is(err, ErrNotDone) {
+	if _, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); !problemCode(err, domain.CodeRemoteExecutionUnresolved) {
 		t.Fatalf("running cleanup: %v", err)
 	}
 	h.host.finish(1, nil)
 	foreign := request
 	foreign.CreationOperationID = "prep_other"
-	if _, err := h.adapter.Cleanup(ctx, foreign); !errors.Is(err, ErrIdentity) {
+	if _, err := h.adapter.CleanupResource(ctx, resourceRequest(foreign, mustPlan(t, h).Digest())); !problemCode(err, domain.CodeRemoteIdentityMismatch) {
 		t.Fatalf("foreign creation: %v", err)
 	}
 	h.host.container(t).labels[labelPrefix+"attempt"] = "attempt_other"
-	if _, err := h.adapter.Cleanup(ctx, request); !errors.Is(err, ErrIdentity) || h.host.commands("rm") != 0 {
+	if _, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); !problemCode(err, domain.CodeRemoteIdentityMismatch) || h.host.commands("rm") != 0 {
 		t.Fatalf("relabelled container: %v", err)
 	}
 }

@@ -170,7 +170,7 @@ func TestRequiredGPUIsNeverSilentlyDowngraded(t *testing.T) {
 }
 func TestReferenceCursorAndCleanupIsolation(t *testing.T) {
 	p, _ := basic(t, fake.DefaultScenario())
-	_, remote := start(t, p, fake.ExampleJob("fixture"))
+	prepared, remote := start(t, p, fake.ExampleJob("fixture"))
 	bad := remote
 	bad.Version = "another-run"
 	if _, err := p.Observe(context.Background(), bad); err == nil {
@@ -194,14 +194,14 @@ func TestReferenceCursorAndCleanupIsolation(t *testing.T) {
 	if _, err := p.ListArtifacts(context.Background(), second, provider.PageRequest{Cursor: page.NextCursor, Limit: 1}); err == nil {
 		t.Fatal("cursor crossed attempts")
 	}
-	request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "wrong_prepare", ResultsCollected: true, Mode: provider.CleanupApply}
-	if _, err := p.Cleanup(context.Background(), request); err == nil {
+	request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "wrong_prepare", ResultsCollected: true, Mode: provider.CleanupApply}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: prepared.PlanSHA256}
+	if _, err := p.CleanupResource(context.Background(), request); err == nil {
 		t.Fatal("forged ownership accepted")
 	}
 	request.CreationOperationID = "prepare_fixture"
-	request.ResultsCollected = false
-	if _, err := p.Cleanup(context.Background(), request); err == nil {
-		t.Fatal("uncollected outputs deleted")
+	request.PlanSHA256 = provider.Digest([]byte("forged-plan"))
+	if _, err := p.CleanupResource(context.Background(), request); err == nil {
+		t.Fatal("changed plan deleted")
 	}
 }
 func TestOptionalCancellationRequiresTerminalObservation(t *testing.T) {
@@ -412,5 +412,29 @@ func TestCancellationCompletionRace(t *testing.T) {
 	must(t, err)
 	if cancel.Status != domain.CancellationTooLate || obs.Execution != domain.ExecutionSucceeded {
 		t.Fatal("late cancellation rewrote completed execution")
+	}
+}
+
+func TestResourceCleanupRecoveryOnlyConfirmsAbsence(t *testing.T) {
+	p, backend := basic(t, fake.DefaultScenario())
+	prepared, remote := start(t, p, fake.ExampleJob("fixture"))
+	must(t, p.Advance(remote))
+	must(t, p.Advance(remote))
+	request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: prepared.PreparationID, Mode: provider.CleanupApply}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: prepared.PlanSHA256, RecoverOnly: true}
+	out, err := p.CleanupResource(context.Background(), request)
+	if err == nil || out.Deleted || backend.Stats().Executions != 1 {
+		t.Fatalf("recovered mutation returned deletion evidence: %+v %v", out, err)
+	}
+	request.RecoverOnly = false
+	out, err = p.CleanupResource(context.Background(), request)
+	must(t, err)
+	if !out.Deleted {
+		t.Fatal("original resource was deleted by recovery", out)
+	}
+	request.RecoverOnly = true
+	out, err = p.CleanupResource(context.Background(), request)
+	must(t, err)
+	if !out.AlreadyAbsent {
+		t.Fatal("absence not confirmed", out)
 	}
 }

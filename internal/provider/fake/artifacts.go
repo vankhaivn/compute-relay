@@ -129,38 +129,6 @@ func (p *Basic) FetchArtifact(ctx context.Context, remote provider.RemoteReferen
 	}
 	return provider.CopyVerified(ctx, bytes.NewReader(content), dst, artifact, maxBytes)
 }
-func (p *Basic) Cleanup(ctx context.Context, request provider.CleanupRequest) (provider.CleanupOutcome, error) {
-	if err := ctx.Err(); err != nil {
-		return provider.CleanupOutcome{}, err
-	}
-	if err := request.Remote.Validate(); err != nil {
-		return provider.CleanupOutcome{}, err
-	}
-	if !request.LedgerID.Valid() || !request.CreationOperationID.Valid() || !request.ResultsCollected {
-		return provider.CleanupOutcome{}, errors.New("cleanup requires recorded ownership and collected results")
-	}
-	if request.Mode != provider.CleanupDryRun && request.Mode != provider.CleanupApply {
-		return provider.CleanupOutcome{}, errors.New("cleanup mode must be explicit")
-	}
-	p.backend.mu.Lock()
-	defer p.backend.mu.Unlock()
-	r, ok := p.backend.records[attemptKey(request.Remote.Identity)]
-	if !ok || r.remote != request.Remote || request.Remote.Identity.InstanceID != p.instance || request.CreationOperationID != r.prepared.PreparationID {
-		return provider.CleanupOutcome{}, identityError()
-	}
-	if !r.submitted || !p.state(r).Terminal() {
-		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "cleanup cannot cancel active or unresolved compute")
-	}
-	p.backend.stats.CleanupCalls++
-	if r.deleted {
-		return provider.CleanupOutcome{AlreadyAbsent: true}, nil
-	}
-	if request.Mode == provider.CleanupDryRun {
-		return provider.CleanupOutcome{WouldDelete: true}, nil
-	}
-	r.deleted = true
-	return provider.CleanupOutcome{Deleted: true}, nil
-}
 func cursor(remote provider.RemoteReference, offset int) string {
 	data, _ := json.Marshal(remote)
 	return fmt.Sprintf("%s.%d", provider.Digest(data), offset)

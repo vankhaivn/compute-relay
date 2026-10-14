@@ -156,7 +156,7 @@ func (p *operationalJournalAdapter) Describe() provider.Descriptor {
 }
 func (p *operationalJournalAdapter) Cancel(ctx context.Context, ref provider.RemoteReference, op domain.OperationID) (provider.CancellationOutcome, error) {
 	p.cancelCalls++
-	return p.executor.Cancel(ctx, ref, op)
+	panic("unsupported Kaggle cancellation must not invoke provider")
 }
 
 func operationalService(t *testing.T, f *stagingJournalFixture) (*operations.Service, auth.Principal) {

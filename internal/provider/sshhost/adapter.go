@@ -1191,13 +1191,7 @@ func (c *lineCollector) line() {
 	c.truncated = c.truncated || clipped
 }
 
-// Cleanup deletes only the attempt's own labelled, stopped container. Repeating an
-// apply after deletion reports AlreadyAbsent.
-func (a *Adapter) Cleanup(ctx context.Context, request provider.CleanupRequest) (provider.CleanupOutcome, error) {
-	return a.cleanup(ctx, request, "")
-}
-
-func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupRequest, plan domain.SHA256Digest) (provider.CleanupOutcome, error) {
+func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 	if request.Mode != provider.CleanupDryRun && request.Mode != provider.CleanupApply || !request.LedgerID.Valid() || !request.CreationOperationID.Valid() {
 		return provider.CleanupOutcome{}, ErrRequest
 	}
@@ -1230,7 +1224,7 @@ func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupRequest, 
 		if info.ID != ref.ID || info.Name != "/"+ref.Container || !owned(info, id) || info.Config.Labels[labelPrefix+"preparation"] != string(request.CreationOperationID) {
 			return ErrIdentity
 		}
-		if plan != "" && info.Config.Labels[labelPrefix+"plan"] != string(plan) {
+		if info.Config.Labels[labelPrefix+"plan"] != string(request.PlanSHA256) {
 			return ErrIdentity
 		}
 		if ref.EngineID != "" {
@@ -1241,6 +1235,9 @@ func (a *Adapter) cleanup(ctx context.Context, request provider.CleanupRequest, 
 		}
 		if info.State.Running || !exited(info) && info.State.Status != "created" {
 			return ErrNotDone
+		}
+		if request.RecoverOnly {
+			return provider.Problem(domain.CodeProviderStateUnknown, domain.FailureStageObservation, "the original deletion outcome remains unresolved")
 		}
 		if request.Mode == provider.CleanupDryRun {
 			outcome.WouldDelete = true

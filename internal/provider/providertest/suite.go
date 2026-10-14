@@ -95,8 +95,11 @@ func Run(t *testing.T, factory Factory) {
 		if !manifestFound || len(seen) < 2 {
 			t.Fatal("manifest and multi-file result required")
 		}
-		request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "prepare_fixture", ResultsCollected: true, Mode: provider.CleanupDryRun}
-		dry, err := h.Provider.Cleanup(ctx, request)
+		plan, err := h.Provider.Validate(ctx, h.Job)
+		must(t, err)
+		cleaner := h.Provider.(provider.ResourceCleaner)
+		request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "prepare_fixture", ResultsCollected: true, Mode: provider.CleanupDryRun}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: plan.Digest()}
+		dry, err := cleaner.CleanupResource(ctx, request)
 		must(t, err)
 		if !dry.WouldDelete || dry.Deleted {
 			t.Fatal("dry-run mutated provider")
@@ -104,12 +107,12 @@ func Run(t *testing.T, factory Factory) {
 		_, err = h.Provider.Observe(ctx, remote)
 		must(t, err)
 		request.Mode = provider.CleanupApply
-		applied, err := h.Provider.Cleanup(ctx, request)
+		applied, err := cleaner.CleanupResource(ctx, request)
 		must(t, err)
 		if !applied.Deleted {
 			t.Fatal("apply did not delete owned fixture")
 		}
-		repeat, err := h.Provider.Cleanup(ctx, request)
+		repeat, err := cleaner.CleanupResource(ctx, request)
 		must(t, err)
 		if !repeat.AlreadyAbsent {
 			t.Fatal("cleanup is not idempotent")
@@ -195,8 +198,11 @@ func Run(t *testing.T, factory Factory) {
 		if quota.Status != provider.QuotaUnknown || quota.Remaining != nil || quota.Limit != nil || quota.ResetAt != nil {
 			t.Fatal("unknown quota became a fabricated number")
 		}
-		request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "prepare_fixture", ResultsCollected: true, Mode: provider.CleanupApply}
-		if _, err := h.Provider.Cleanup(ctx, request); err == nil {
+		plan, err := h.Provider.Validate(ctx, h.Job)
+		must(t, err)
+		cleaner := h.Provider.(provider.ResourceCleaner)
+		request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "prepare_fixture", ResultsCollected: true, Mode: provider.CleanupApply}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: plan.Digest()}
+		if _, err := cleaner.CleanupResource(ctx, request); err == nil {
 			t.Fatal("cleanup cancelled active execution")
 		}
 		if h.Executions() != 1 {

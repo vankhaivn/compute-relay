@@ -114,8 +114,8 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 				receipt, err := adapter.FetchArtifact(ctx, ref, artifact, &data, 1<<20)
 				record(receipt, err, data.String())
 			}
-			cleaned, err := adapter.Cleanup(ctx, provider.CleanupRequest{Remote: ref, LedgerID: "ledger_fixture", CreationOperationID: testOperation,
-				ResultsCollected: true, Mode: provider.CleanupApply})
+			cleaned, err := adapter.CleanupResource(ctx, resourceRequest(provider.CleanupRequest{Remote: ref, LedgerID: "ledger_fixture", CreationOperationID: testOperation,
+				ResultsCollected: true, Mode: provider.CleanupApply}, plan.Digest()))
 			record(cleaned, err)
 			if !cleaned.Deleted {
 				t.Fatalf("cleanup = %+v, %v", cleaned, err)

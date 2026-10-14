@@ -181,7 +181,7 @@ func startE2E(ctx context.Context, t *testing.T, account string, raw []byte, pay
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		request := provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: testOperation, ResultsCollected: true, Mode: provider.CleanupApply}
-		if outcome, err := adapter.Cleanup(ctx, request); err != nil || !outcome.Deleted && !outcome.AlreadyAbsent {
+		if outcome, err := adapter.CleanupResource(ctx, resourceRequest(request, plan.Digest())); err != nil || !outcome.Deleted && !outcome.AlreadyAbsent {
 			t.Errorf("cleanup = %+v, %v", outcome, err)
 		}
 	})

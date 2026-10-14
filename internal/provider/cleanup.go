@@ -42,9 +42,8 @@ func (d CleanupDescription) Valid() bool {
 		cleanupReason.MatchString(d.Reason) && (d.Bytes == nil || *d.Bytes >= 0)
 }
 
-// ResourceCleaner opts into one-ledger-resource calls. The original Cleanup port
-// remains attempt-wide for existing adapters. Name-based deletion requires an
-// explicit warning and acceptance; adapters still verify the original ledger identity.
+// ResourceCleaner cleans one recorded ledger resource. Name-based deletion requires
+// explicit warning and acceptance; adapters verify the original ledger identity.
 type ResourceCleaner interface {
 	DescribeCleanup(CleanupResourceRequest) (CleanupDescription, error)
 	CleanupResource(context.Context, CleanupResourceRequest) (CleanupOutcome, error)

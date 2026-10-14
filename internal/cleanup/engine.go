@@ -102,12 +102,6 @@ func (c Config) Valid() bool {
 		c.PollDelay >= time.Millisecond && c.PollDelay <= time.Minute
 }
 
-// The worker may only verify the frozen binding and apply cleanup.
-type target interface {
-	provider.BindingVerifier
-	Cleanup(context.Context, provider.CleanupRequest) (provider.CleanupOutcome, error)
-}
-
 type Engine struct {
 	repo     WorkRepository
 	resolver Resolver
@@ -152,58 +146,13 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 			return true, err
 		}
 	} else {
-		outcome = e.apply(call, *w)
+		outcome = Outcome{Effect: AlreadyAbsent}
 	}
 	if ctx.Err() != nil {
 		// Shutdown leaves the running claim for lease-expiry recovery.
 		return true, ctx.Err()
 	}
 	return true, e.repo.CompleteCleanup(ctx, *w, outcome, e.clock.Now().UTC())
-}
-
-func (e *Engine) apply(ctx context.Context, w Work) (outcome Outcome) {
-	defer func() {
-		if recover() != nil {
-			outcome = failure(domain.CodeProviderStateUnknown, "remote cleanup did not report a result; owned resources may remain, inspect the provider before requesting cleanup again", domain.RecommendedActionInspectProvider)
-		}
-	}()
-	p, err := e.resolver.Resolve(w.Binding)
-	if err != nil || p == nil {
-		return failure(domain.CodeConfigurationInvalid, "the attempt's frozen provider binding is not configured in this runtime; nothing was deleted", domain.RecommendedActionConfigure)
-	}
-	t, ok := p.(target)
-	if !ok || t.VerifyBinding(ctx, w.Binding) != nil {
-		return failure(domain.CodeRemoteIdentityMismatch, "the provider binding could not be verified for this attempt; nothing was deleted", domain.RecommendedActionInspectProvider)
-	}
-	result, err := t.Cleanup(ctx, w.Request)
-	switch {
-	case err == nil && result.Deleted && !result.AlreadyAbsent && !result.WouldDelete:
-		return Outcome{Effect: RemoteDeleted}
-	case err == nil && result.AlreadyAbsent && !result.Deleted && !result.WouldDelete:
-		return Outcome{Effect: AlreadyAbsent}
-	case err == nil:
-		return failure(domain.CodeProviderStateUnknown, "remote cleanup returned no deletion evidence; owned resources may remain", domain.RecommendedActionInspectProvider)
-	case errors.Is(err, provider.ErrCleanupUnsupported):
-		return failure(domain.CodeUnsupportedCapability, "remote cleanup is not supported for this attempt's provider binding; owned resources were preserved", domain.RecommendedActionInspectProvider)
-	}
-	var value domain.Problem
-	var pointer *domain.Problem
-	code := domain.CodeProviderStateUnknown
-	if errors.As(err, &value) {
-		code = value.Code
-	} else if errors.As(err, &pointer) && pointer != nil {
-		code = pointer.Code
-	}
-	switch code {
-	case domain.CodeRemoteIdentityMismatch:
-		return failure(code, "the remote resource did not match the recorded attempt identity; nothing was deleted", domain.RecommendedActionInspectProvider)
-	case domain.CodeRemoteExecutionUnresolved:
-		return failure(code, "the provider reported active or unresolved compute; nothing was deleted", domain.RecommendedActionReconcile)
-	case domain.CodeProviderAuthFailed, domain.CodeProviderAccessDenied:
-		return failure(code, "the provider refused cleanup for this binding; owned resources were preserved", domain.RecommendedActionConfigure)
-	}
-	// Provider text is never copied into a public receipt.
-	return failure(domain.CodeProviderStateUnknown, "remote cleanup did not complete; owned resources may remain, inspect the provider before requesting cleanup again", domain.RecommendedActionInspectProvider)
 }
 
 func failure(code domain.ErrorCode, message string, action domain.RecommendedAction) Outcome {

@@ -39,25 +39,6 @@ func (p *cleanupProbe) VerifyBinding(ctx context.Context, b provider.BindingSnap
 	}
 	return p.probeProvider.VerifyBinding(ctx, b)
 }
-func (p *cleanupProbe) Cleanup(ctx context.Context, r provider.CleanupRequest) (provider.CleanupOutcome, error) {
-	var running int
-	if err := p.store.db.QueryRowContext(ctx, `SELECT count(*) FROM cleanup_operations c JOIN cleanup_leases l
- ON l.workspace_id=c.workspace_id AND l.operation_id=c.operation_id WHERE c.status='running'`).Scan(&running); err != nil || running != 1 {
-		panic("cleanup called without a committed running claim")
-	}
-	p.mu.Lock()
-	p.requests = append(p.requests, r)
-	p.mu.Unlock()
-	if p.result != nil || p.err != nil {
-		var result provider.CleanupOutcome
-		if p.result != nil {
-			result = *p.result
-		}
-		return result, p.err
-	}
-	return p.probeProvider.Cleanup(ctx, r)
-}
-
 func (p *cleanupProbe) CleanupResource(ctx context.Context, request provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 	if request.Mode == provider.CleanupDryRun {
 		if p.resourceHook != nil {
@@ -156,10 +137,19 @@ func TestCleanupWorkerDeletesOnceAndKeepsReceipts(t *testing.T) {
 func TestCleanupWorkerReportsAlreadyAbsent(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)
-	j := f.journal(t, id)
-	// Deleted out of band before the request; the adapter proves absence, not deletion.
-	if out, err := f.adapter.Cleanup(ctx, provider.CleanupRequest{Remote: *j.Remote, LedgerID: stagingLedger(t, f, id), CreationOperationID: j.PreparationID, ResultsCollected: true, Mode: provider.CleanupApply}); err != nil || !out.Deleted {
-		t.Fatal(out, err)
+	_, actor, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+	plan, err := f.s.PlanCleanup(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID, false, f.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fake provider models out-of-band deletion of the original inventory.
+	for _, resource := range plan.Resources {
+		request := resource.Request
+		request.Mode = provider.CleanupApply
+		out, err := f.adapter.CleanupResource(ctx, request)
+		if err != nil || !out.Deleted && !out.AlreadyAbsent {
+			t.Fatal(out, err)
+		}
 	}
 	service, p, r := admitCleanup(t, f, id, "cleanup-absent", false)
 	engine, _ := cleanupWorker(t, f)

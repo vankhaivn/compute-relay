@@ -1,7 +1,6 @@
 package kaggle
 
 import (
-	"context"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -70,24 +69,6 @@ func (e *Executor) checkOperationalReference(ref provider.RemoteReference) error
 		return ErrExecutionIdentity
 	}
 	return nil
-}
-
-var _ provider.Canceller = (*Executor)(nil)
-
-// Cancel never guesses a session ID from a kernel ID, creates an interactive
-// session, deletes resources or invokes a provider. M3 persists the manual-required
-// operation and retains possible activity; this result is not termination evidence.
-func (e *Executor) Cancel(ctx context.Context, ref provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
-	if err := ctx.Err(); err != nil {
-		return provider.CancellationOutcome{}, err
-	}
-	if err := e.checkOperationalReference(ref); err != nil {
-		return provider.CancellationOutcome{}, err
-	}
-	if !operation.Valid() {
-		return provider.CancellationOutcome{}, ErrConfig
-	}
-	return provider.CancellationOutcome{Status: domain.CancellationManual}, nil
 }
 
 // TimeoutBudgets exposes frozen layers without inventing a remote clock or timer.

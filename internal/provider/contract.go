@@ -27,7 +27,6 @@ type Provider interface {
 	ListArtifacts(context.Context, RemoteReference, PageRequest) (ArtifactPage, error)
 	// Destination must be temporary/unpublished. On any error discard its bytes.
 	FetchArtifact(context.Context, RemoteReference, Artifact, io.Writer, int64) (TransferResult, error)
-	Cleanup(context.Context, CleanupRequest) (CleanupOutcome, error)
 }
 
 // Optional behavior is segregated: absence must not masquerade as successful work.

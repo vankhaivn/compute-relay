@@ -353,8 +353,32 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 			worker, _ := cleanupWorker(t, f)
 			runCleanup(t, worker)
 			after, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
-			if err != nil || after.Operation.Status != domain.OperationSucceeded || len(after.Resources) != 2 {
-				t.Fatal("older request did not acquire resource outcomes", after, err)
+			if err != nil || len(after.Resources) != 2 {
+				t.Fatal("older request lost resource outcomes", after, err)
+			}
+			if running {
+				if after.Operation.Status != domain.OperationFailed || after.Operation.Failure == nil || after.Operation.Failure.Code != domain.CodeProviderStateUnknown {
+					t.Fatal("old running deletion lost uncertainty", after)
+				}
+				for _, resource := range after.Resources {
+					if resource.State != cleanup.ResourceUnknown {
+						t.Fatal("old running deletion acquired invented proof", resource)
+					}
+				}
+				plan, err := f.s.PlanCleanup(ctx, "a", principal.TokenID(), id.JobID, id.AttemptID, false, f.clock.Now())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, resource := range plan.Resources {
+					request := resource.Request
+					request.Mode = provider.CleanupDryRun
+					out, err := f.adapter.CleanupResource(ctx, request)
+					if err != nil || !out.WouldDelete {
+						t.Fatal("recovery deleted retained resource", out, err)
+					}
+				}
+			} else if after.Operation.Status != domain.OperationSucceeded {
+				t.Fatal("old accepted deletion did not finish", after)
 			}
 			for i := range after.Resources {
 				if after.Resources[i].Fingerprint != before.Resources[i].Fingerprint || after.Resources[i].ResourceID != before.Resources[i].ResourceID {
