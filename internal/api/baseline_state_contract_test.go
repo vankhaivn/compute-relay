@@ -52,14 +52,10 @@ func baselineContractState(t *testing.T, script []byte) string {
 		t.Fatal(err)
 	}
 	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer db.Close()
 	conn, err := db.Conn(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer conn.Close()
 	if _, err = conn.ExecContext(t.Context(), "PRAGMA foreign_keys=OFF"); err != nil {
 		t.Fatal(err)
@@ -72,35 +68,21 @@ func baselineContractState(t *testing.T, script []byte) string {
 func baselineContractHandler(t *testing.T, store *sqlite.Store) http.Handler {
 	t.Helper()
 	access, err := auth.New(store, store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	blobs, err := blobfs.New(filepath.Join(t.TempDir(), "blobs"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = blobs.Close() })
 	inputs, err := objects.New(access, blobs, store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg := api.DefaultConfig()
 	cfg.Jobs, err = admission.New(access, store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Operations, err = operations.New(access, store, blobs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Authorizations, err = executionauth.New(access, store, baselineContractClock{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	server, err := api.NewServer(cfg, access, inputs, store.Ready)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return server.Handler
 }
 
@@ -110,13 +92,9 @@ func (baselineContractClock) Now() time.Time { return time.Now().UTC() }
 func TestBaselineStateReadsAndReplaysUnchanged(t *testing.T) {
 	directory := filepath.Join("..", "store", "sqlite", "testdata", "baseline-9591372")
 	script, err := os.ReadFile(filepath.Join(directory, "runtime.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	raw, err := os.ReadFile(filepath.Join(directory, "requests.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var fixture struct {
 		Token    string                    `json:"token"`
 		Requests []baselineContractRequest `json:"requests"`
@@ -139,9 +117,7 @@ func TestBaselineStateReadsAndReplaysUnchanged(t *testing.T) {
 			}
 			expected["scheduling"] = map[string]string{"reason": reason}
 			want.Response, err = json.Marshal(expected)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 		}
 		var body io.Reader
 		if len(want.Body) > 0 {

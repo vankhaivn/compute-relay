@@ -3,7 +3,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"strings"
@@ -39,9 +38,7 @@ func cleanupRecord(t *testing.T, status domain.OperationStatus, effect operation
 	t.Helper()
 	now := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
 	op, err := domain.NewOperation("op_cleanup", "a", "job_fixture", "att_fixture", domain.OperationCleanup, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if status == domain.OperationRunning || status == domain.OperationSucceeded {
 		if op, err = op.Transition(domain.OperationRunning, nil, now); err != nil {
 			t.Fatal(err)
@@ -51,9 +48,7 @@ func cleanupRecord(t *testing.T, status domain.OperationStatus, effect operation
 		var failure *domain.Problem
 		if status == domain.OperationFailed {
 			p, err := domain.NewProblem(domain.CodeUnsupportedCapability, "remote cleanup is not supported for this attempt's provider binding; owned resources were preserved", domain.FailureStageValidation)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			p = p.WithRecommendedAction(domain.RecommendedActionInspectProvider)
 			p.Details = map[string]string{"internal": "private-provider-canary"}
 			failure = &p
@@ -87,10 +82,7 @@ func TestCleanupHTTPReceiptsSatisfyPublishedContract(t *testing.T) {
 			headers, raw := f.call(t, "POST", "/v1/workspaces/a/jobs/job_fixture/cleanup", "a", "cleanup-contract", body, 202)
 			_, read := f.call(t, "GET", headers.Get("Location"), "read", "", "", 200)
 			for _, b := range [][]byte{raw, read} {
-				var value any
-				if err := json.Unmarshal(b, &value); err != nil {
-					t.Fatal(err)
-				}
+				value := decodeHTTPJSON[any](t, b)
 				if err := schema.Validate(value); err != nil {
 					t.Fatal("cleanup receipt violates the published contract", err, string(b))
 				}
@@ -109,7 +101,6 @@ func TestCleanupHTTPReceiptsSatisfyPublishedContract(t *testing.T) {
 }
 
 func TestCleanupHTTPRefusalsUseStableProblems(t *testing.T) {
-	errorSchema := transportControlSchema(t, "schemas/error.v1alpha1.schema.json", "")
 	for _, c := range []struct {
 		err    error
 		status int
@@ -127,17 +118,7 @@ func TestCleanupHTTPRefusalsUseStableProblems(t *testing.T) {
 		t.Run(c.code+c.action, func(t *testing.T) {
 			f, _ := setupControlsHTTP(t, nil, cleanupRepository{err: c.err})
 			_, b := f.call(t, "POST", "/v1/workspaces/a/jobs/job_fixture/cleanup", "a", "cleanup-refusal", `{"attempt_id":"att_fixture"}`, c.status)
-			var value any
-			if err := json.Unmarshal(b, &value); err != nil {
-				t.Fatal(err)
-			}
-			if err := errorSchema.Validate(value); err != nil {
-				t.Fatal("cleanup refusal violates the error contract", err)
-			}
-			var envelope api.ErrorEnvelope
-			if err := json.Unmarshal(b, &envelope); err != nil {
-				t.Fatal(err)
-			}
+			envelope := decodeHTTPJSON[api.ErrorEnvelope](t, b)
 			if string(envelope.Error.Code) != c.code || c.action != "" && string(envelope.Error.RecommendedAction) != c.action || bytes.Contains(b, []byte("private-storage-canary")) {
 				t.Fatal("cleanup refusal lost its stable problem", string(b))
 			}

@@ -1,9 +1,7 @@
 package api_test
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -30,11 +28,11 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
-	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
+	"github.com/vankhaivn/compute-relay/internal/testsupport"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -274,63 +272,39 @@ func newStudioHTTP(t *testing.T, override func(*sqlite.Store) admission.Reposito
 	t.Helper()
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state"), sqlite.DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	access, err := auth.New(s, s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if err = s.PutWorkspace(ctx, auth.Workspace{ID: "studio", Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
 		t.Fatal(err)
 	}
 	sec, _, err := access.Issue(ctx, "studio", []auth.Scope{auth.Read, auth.Write, auth.Operate, auth.Manage, auth.Execute}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	blobs, err := blobfs.New(filepath.Join(t.TempDir(), "blobs"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 8 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = blobs.Close() })
 	obj, err := objects.New(access, blobs, s)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var repo admission.Repository = s
 	if override != nil {
 		repo = override(s)
 	}
 	jobs, err := admission.New(access, repo, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	service, err := connections.New(access, s, &managedVault{values: map[string][]byte{}}, []connections.Adapter{&managedAdapter{}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	permits, err := executionauth.New(access, s, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	controls, err := operations.New(access, s, blobs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	registry := provider.NewSnapshotRegistry()
 	logs, err := joblogs.NewReader(access, s, registry)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	results, err := collection.NewReader(access, s, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg := api.DefaultConfig()
 	cfg.Listen = ln.Addr().String()
 	cfg.Jobs = jobs
@@ -354,9 +328,7 @@ func newStudioHTTP(t *testing.T, override func(*sqlite.Store) admission.Reposito
 func (f *studioHTTP) request(t *testing.T, method, path, key string, body []byte, contentType string, want int) (*http.Response, []byte) {
 	t.Helper()
 	r, err := http.NewRequest(method, f.url+path, bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	r.Header.Set("Authorization", "Bearer "+f.token)
 	if contentType != "" {
 		r.Header.Set("Content-Type", contentType)
@@ -368,14 +340,10 @@ func (f *studioHTTP) request(t *testing.T, method, path, key string, body []byte
 		r.Header.Set("X-Content-SHA256", string(provider.Digest(body)))
 	}
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if resp.StatusCode != want {
 		t.Fatalf("%s %s: status %d want %d: %s", method, path, resp.StatusCode, want, raw)
 	}
@@ -393,9 +361,7 @@ func (f *studioHTTP) json(t *testing.T, method, path, key string, body any, want
 	if body != nil {
 		var err error
 		raw, err = json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 	}
 	resp, b := f.request(t, method, path, key, raw, "application/json", want)
 	if resp.Header.Get("Content-Type") != "application/json" {
@@ -409,32 +375,9 @@ func (f *studioHTTP) json(t *testing.T, method, path, key string, body any, want
 }
 func studioBundle(t *testing.T) []byte {
 	t.Helper()
-	data := []byte("raise SystemExit('offline fixture must never execute')\n")
-	m, err := json.Marshal(packaging.Manifest{Version: packaging.Version, Files: []packaging.File{{Path: "never-executed.py", Bytes: int64(len(data)), SHA256: string(provider.Digest(data))}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	for _, entry := range []struct {
-		name string
-		data []byte
-	}{{packaging.ManifestPath, m}, {"code/never-executed.py", data}} {
-		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: 0644, Size: int64(len(entry.data)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write(entry.data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
+	return testsupport.Bundle(t, map[string][]byte{
+		"never-executed.py": []byte("raise SystemExit('offline fixture must never execute')\n"),
+	})
 }
 
 func TestStudioHTTPContract(t *testing.T) {
@@ -545,13 +488,9 @@ func TestStudioHTTPContract(t *testing.T) {
 	}
 	binding := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 	backend, err := fake.NewBackend(fake.DefaultScenario())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	complete, err := fake.NewComplete(backend, studioClock{}, profile.Binding.ProviderInstanceID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p := &studioProvider{Complete: complete, binding: binding}
 	if err = f.registry.Register(binding, p); err != nil {
 		t.Fatal(err)
@@ -562,13 +501,9 @@ func TestStudioHTTPContract(t *testing.T) {
 	dispatchConfig := dispatch.DefaultConfig()
 	dispatchConfig.PollDelay = time.Millisecond
 	engine, err := dispatch.New(f.store, f.registry, f.blobs, studioClock{}, dispatchConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	collector, err := collection.New(f.store, f.registry, f.blobs, studioClock{}, collection.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	spec := map[string]any{"api_version": "compute-connector/v1alpha1", "name": "Studio contract", "profile": selection["profile"], "result_collection": "manual", "bundle": map[string]any{"object_id": object["object_id"]}, "execution": map[string]any{"kind": "python", "command": []string{"python", "never-executed.py"}}, "inputs": []any{}, "outputs": []any{map[string]any{"path": "result.json", "required": true}}, "resources": map[string]any{"accelerator": "cpu"}, "network": map[string]any{"remote_internet": "disabled"}, "timeouts": map[string]any{"remote_wall_seconds": 120, "setup_seconds": 30, "finalization_grace_seconds": 15}}
 	job := f.json(t, "POST", base+"/jobs", "studio-admit", spec, 202)
 	studioFields(t, job, map[string]string{"job_id": "id", "attempt_id": "id", "status": "queued", "idempotency_replay": "bool"})

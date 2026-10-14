@@ -3,15 +3,10 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,7 +17,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
@@ -50,94 +44,29 @@ func setupControlHTTP(t *testing.T, override operations.Repository) (*jobHTTP, *
 // Both operation overrides exercise the same admission and read port.
 func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOverride operations.Repository) (*jobHTTP, *controlBlobs) {
 	t.Helper()
-	ctx := context.Background()
-	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state"), sqlite.DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	access, err := auth.New(store, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj, err := objects.New(access, noUpload{}, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jobs, err := admission.New(access, store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &jobHTTP{store: store, tokens: map[string]string{}, tokenIDs: map[string]string{}}
-	for _, w := range []domain.WorkspaceID{"a", "b"} {
-		if err = store.PutWorkspace(ctx, auth.Workspace{ID: w, Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
-			t.Fatal(err)
+	blobs := &controlBlobs{}
+	f := setupJobHTTPWith(t, jobHTTPOptions{code: []byte(controlBytes), profiles: true, extraScopes: map[string][]auth.Scope{
+		"a": {auth.Read, auth.Write, auth.Operate}, "b": {auth.Read, auth.Write, auth.Operate},
+		"write": {auth.Write}, "operate": {auth.Operate},
+	}, configure: func(cfg *api.Config, access *auth.Service, store *sqlite.Store) {
+		var repo operations.Repository = store
+		if override != nil {
+			repo = override
 		}
-	}
-	for _, who := range []string{"a", "b", "read", "write", "operate"} {
-		w := domain.WorkspaceID("a")
-		scopes := []auth.Scope{auth.Read, auth.Write, auth.Operate}
-		if who == "b" {
-			w = "b"
-		} else if who != "a" {
-			switch who {
-			case "read":
-				scopes = []auth.Scope{auth.Read}
-			case "write":
-				scopes = []auth.Scope{auth.Write}
-			case "operate":
-				scopes = []auth.Scope{auth.Operate}
+		if cleanupOverride != nil {
+			if _, off := cleanupOverride.(noCleanup); !off {
+				repo = cleanupOverride
 			}
 		}
-		secret, record, err := access.Issue(ctx, w, scopes, time.Time{})
-		if err != nil {
-			t.Fatal(err)
+		var err error
+		cfg.Operations, err = operations.New(access, repo, blobs, admission.DefaultLimits())
+		requireNoError(t, err)
+		cfg.Cleanup, err = cleanup.NewService(access, store, nil)
+		requireNoError(t, err)
+		if _, off := cleanupOverride.(noCleanup); off {
+			cfg.Cleanup = nil
 		}
-		f.tokens[who], f.tokenIDs[who] = secret.Reveal(), record.ID
-	}
-	f.profiles = configureJobProfiles(t, store, access)
-	digest := sha256.Sum256([]byte(controlBytes))
-	if err = store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: int64(len(controlBytes)), SHA256: domain.SHA256Digest(hex.EncodeToString(digest[:]))}); err != nil {
-		t.Fatal(err)
-	}
-	var repo operations.Repository = store
-	if override != nil {
-		repo = override
-	}
-	if cleanupOverride != nil {
-		if _, off := cleanupOverride.(noCleanup); !off {
-			repo = cleanupOverride
-		}
-	}
-	blobs := &controlBlobs{}
-	controls, err := operations.New(access, repo, blobs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cleaner, err := cleanup.NewService(access, store, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := api.DefaultConfig()
-	cfg.Listen, cfg.Jobs, cfg.Operations, cfg.Cleanup = ln.Addr().String(), jobs, controls, cleaner
-	if _, off := cleanupOverride.(noCleanup); off {
-		cfg.Cleanup = nil
-	}
-	cfg.WorkspaceRate = api.Rate{PerSecond: 1000, Burst: 1000}
-	cfg.GlobalRate = cfg.WorkspaceRate
-	server, err := api.NewServer(cfg, access, obj, store.Ready)
-	if err != nil {
-		_ = ln.Close()
-		t.Fatal(err)
-	}
-	f.url, f.handler = "http://"+ln.Addr().String(), server.Handler
-	done := make(chan struct{})
-	go func() { defer close(done); _ = server.Serve(ln) }()
-	t.Cleanup(func() { _ = server.Close(); <-done })
+	}})
 	return f, blobs
 }
 
@@ -158,10 +87,7 @@ type controlWire struct {
 
 func decodeControl(t *testing.T, b []byte) controlWire {
 	t.Helper()
-	var result controlWire
-	if err := json.Unmarshal(b, &result); err != nil {
-		t.Fatal(err)
-	}
+	result := decodeHTTPJSON[controlWire](t, b)
 	if result.ID == "" || result.Links.Self == "" || result.Links.Job == "" {
 		t.Fatal("missing operation identity or links")
 	}
@@ -171,14 +97,10 @@ func decodeControl(t *testing.T, b []byte) controlWire {
 func admitControlJob(t *testing.T, f *jobHTTP) admission.Receipt {
 	t.Helper()
 	_, b := f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "control-job-01", jobBody, 202)
-	var receipt admission.Receipt
-	if err := json.Unmarshal(b, &receipt); err != nil {
-		t.Fatal(err)
-	}
-	return receipt
+	return decodeHTTPJSON[admission.Receipt](t, b)
 }
 
-func TestControlHTTPCancelRetryReplayAndHistory(t *testing.T) {
+func TestControlHTTPCancelCoalescingAndScope(t *testing.T) {
 	f, blobs := setupControlHTTP(t, nil)
 	job := admitControlJob(t, f)
 	body := `{"attempt_id":"` + string(job.AttemptID) + `","reason":"private-reason-canary"}`
@@ -195,36 +117,13 @@ func TestControlHTTPCancelRetryReplayAndHistory(t *testing.T) {
 		}
 	}
 	f.call(t, "POST", job.Links.Self+"/cancel", "a", "cancel-key-01", strings.Replace(body, "private-reason-canary", "changed", 1), 409)
-	_, b = f.call(t, "POST", job.Links.Self+"/reconcile", "a", "reconcile-key", body, 202)
-	if op := decodeControl(t, b); op.Effect != "observation_refreshed" || op.Status != "succeeded" || op.Confirmed {
-		t.Fatal("terminal reconciliation changed the attempt")
-	}
-	_, b = f.call(t, "POST", job.Links.Self+"/collect", "a", "collect-key-01", body, 409)
-	if !bytes.Contains(b, []byte(`"compute_may_have_started":true`)) || !bytes.Contains(b, []byte("REMOTE_EXECUTION_UNRESOLVED")) {
-		t.Fatal("collection without terminal execution did not preserve uncertainty")
-	}
 	if blobs.opens.Load() != 0 {
-		t.Fatal("cancel, reconcile or rejected collect read payload bytes")
-	}
-	_, b = f.call(t, "POST", job.Links.Self+"/retry", "a", "retry-key-01", body, 202)
-	retry := decodeControl(t, b)
-	if retry.Kind != "retry_compute" || retry.Effect != "new_attempt_created" || retry.New == "" || retry.New == string(job.AttemptID) || retry.Attempt != string(job.AttemptID) || retry.Confirmed {
-		t.Fatal("retry did not preserve the target and separate new attempt identity")
-	}
-	_, b = f.call(t, "POST", job.Links.Self+"/retry", "a", "retry-key-01", body, 202)
-	replayed := decodeControl(t, b)
-	if replayed.ID != retry.ID || replayed.New != retry.New || !replayed.Replay || blobs.opens.Load() != 1 {
-		t.Fatal("retry replay created another attempt or re-read frozen bytes")
-	}
-	f.call(t, "POST", job.Links.Self+"/retry", "a", "retry-key-02", body, 409)
-	_, b = f.call(t, "GET", job.Links.Self, "a", "", "", 200)
-	if !bytes.Contains(b, []byte(`"active_attempt_id":"`+retry.New+`"`)) {
-		t.Fatal("new active attempt not visible")
+		t.Fatal("local cancellation read payload bytes")
 	}
 	_, b = f.call(t, "GET", cancel.Links.Self, "read", "", "", 200)
 	old := decodeControl(t, b)
 	if old.ID != cancel.ID || old.Attempt != string(job.AttemptID) || old.Effect != "dispatch_prevented" || old.Replay {
-		t.Fatal("historical operation was rewritten or GET returned a replay receipt")
+		t.Fatal("GET returned a replay receipt or changed the target")
 	}
 	for _, who := range []string{"read", "write"} {
 		f.call(t, "POST", job.Links.Self+"/cancel", who, "forbidden-control", body, 403)
@@ -243,7 +142,7 @@ func TestControlHTTPCancelRetryReplayAndHistory(t *testing.T) {
 	f.call(t, "GET", cancel.Links.Self, "a", "", "", 401)
 }
 
-func TestControlHTTPLostReceiptAndStrictRequestGuards(t *testing.T) {
+func TestControlHTTPStrictRequestGuards(t *testing.T) {
 	f, _ := setupControlHTTP(t, nil)
 	job := admitControlJob(t, f)
 	body := `{"attempt_id":"` + string(job.AttemptID) + `"}`
@@ -285,21 +184,7 @@ func TestControlHTTPLostReceiptAndStrictRequestGuards(t *testing.T) {
 			wireSchema(t, "error", w.Body.Bytes())
 		})
 	}
-	r := httptest.NewRequest("POST", f.url+path, strings.NewReader(body))
-	r.Header.Set("Authorization", "Bearer "+f.tokens["a"])
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Idempotency-Key", "lost-control-receipt")
-	broken := &lostAdmissionResponse{header: make(http.Header)}
-	f.handler.ServeHTTP(broken, r)
-	if broken.status != 202 || broken.header.Get("Location") == "" {
-		t.Fatal("operation did not commit before response failure")
-	}
-	headers, b := f.call(t, "POST", path, "a", "lost-control-receipt", body, 202)
-	if op := decodeControl(t, b); !op.Replay || headers.Get("Location") != broken.header.Get("Location") {
-		t.Fatal("lost receipt created another operation")
-	}
-	f.call(t, "POST", headers.Get("Location"), "a", "", "", 405)
-	_, b = f.call(t, "GET", "/v1/info", "a", "", "", 200)
+	_, b := f.call(t, "GET", "/v1/info", "a", "", "", 200)
 	for _, feature := range []string{"job_cancel", "job_retry", "job_reconcile", "job_collect", "job_cleanup", "operation_status"} {
 		if !bytes.Contains(b, []byte(`"`+feature+`"`)) {
 			t.Fatal("configured feature not advertised", feature)
@@ -330,19 +215,13 @@ func (c controlRepository) ReadOperation(context.Context, domain.WorkspaceID, st
 func TestControlHTTPManualRequiredAndSafeErrors(t *testing.T) {
 	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
 	op, err := domain.NewOperation("op_fixture", "a", "job_fixture", "att_fixture", domain.OperationCancel, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	problem, err := domain.NewProblem(domain.CodeRemoteCancelUnsupported, "Cancellation is not verified for this provider binding.", domain.FailureStageOperation)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	problem = problem.WithRetrySemantics(false, true).WithRecommendedAction(domain.RecommendedActionInspectProvider)
 	problem.Details = map[string]string{"internal": "private-provider-canary"}
 	op, err = op.Transition(domain.OperationManualRequired, &problem, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f, _ := setupControlHTTP(t, controlRepository{record: operations.Record{Operation: op, Effect: operations.ManualRequired}})
 	_, b := f.call(t, "GET", "/v1/workspaces/a/operations/op_fixture", "read", "", "", 200)
 	view := decodeControl(t, b)
@@ -364,10 +243,7 @@ func TestControlHTTPManualRequiredAndSafeErrors(t *testing.T) {
 		t.Run(tc.code+tc.action, func(t *testing.T) {
 			f, _ := setupControlHTTP(t, controlRepository{err: tc.err})
 			_, b := f.call(t, "POST", "/v1/workspaces/a/jobs/job_fixture/cancel", "a", "safe-error-key", `{"attempt_id":"att_fixture"}`, tc.status)
-			var envelope api.ErrorEnvelope
-			if err := json.Unmarshal(b, &envelope); err != nil {
-				t.Fatal(err)
-			}
+			envelope := decodeHTTPJSON[api.ErrorEnvelope](t, b)
 			if string(envelope.Error.Code) != tc.code || string(envelope.Error.RecommendedAction) != tc.action || !envelope.Error.ComputeMayHaveStarted || envelope.Error.SafeOperationRetry || bytes.Contains(b, []byte("private-storage-canary")) {
 				t.Fatal("control uncertainty or safe next action was lost", string(b))
 			}

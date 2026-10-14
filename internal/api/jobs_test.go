@@ -3,6 +3,8 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -43,54 +45,78 @@ type jobHTTP struct {
 	tokenIDs map[string]string
 }
 
+func decodeHTTPJSON[T any](t *testing.T, raw []byte) T {
+	t.Helper()
+	var value T
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal("invalid HTTP JSON", err)
+	}
+	return value
+}
+
 func setupJobHTTP(t *testing.T) *jobHTTP {
+	return setupJobHTTPWith(t, jobHTTPOptions{profiles: true})
+}
+
+type jobHTTPOptions struct {
+	code        []byte
+	extraScopes map[string][]auth.Scope
+	profiles    bool
+	configure   func(*api.Config, *auth.Service, *sqlite.Store)
+}
+
+func setupJobHTTPWith(t *testing.T, options jobHTTPOptions) *jobHTTP {
 	t.Helper()
 	ctx := context.Background()
 	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state"), sqlite.DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	access, err := auth.New(store, store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	obj, err := objects.New(access, noUpload{}, store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	svc, err := admission.New(access, store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f := &jobHTTP{store: store, tokens: map[string]string{}, tokenIDs: map[string]string{}}
-	for _, name := range []string{"a", "b", "read"} {
-		w := domain.WorkspaceID(name)
-		scopes := []auth.Scope{auth.Read, auth.Write}
-		if name == "read" {
-			w = "a"
-			scopes = []auth.Scope{auth.Read}
-		}
-		if err = store.PutWorkspace(ctx, auth.Workspace{ID: w, Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
+	for _, workspace := range []domain.WorkspaceID{"a", "b"} {
+		if err = store.PutWorkspace(ctx, auth.Workspace{ID: workspace, Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
 			t.Fatal(err)
+		}
+	}
+	actors := map[string][]auth.Scope{
+		"a": {auth.Read, auth.Write}, "b": {auth.Read, auth.Write}, "read": {auth.Read},
+	}
+	for name, scopes := range options.extraScopes {
+		actors[name] = scopes
+	}
+	for name, scopes := range actors {
+		w := domain.WorkspaceID("a")
+		if name == "b" {
+			w = "b"
 		}
 		sec, record, err := access.Issue(ctx, w, scopes, time.Time{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f.tokens[name], f.tokenIDs[name] = sec.Reveal(), record.ID
 	}
-	f.profiles = configureJobProfiles(t, store, access)
-	if err = store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: 0, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}); err != nil {
+	if options.profiles {
+		f.profiles = configureJobProfiles(t, store, access)
+	}
+	digest := domain.SHA256Digest(strings.Repeat("a", 64))
+	if options.code != nil {
+		hash := sha256.Sum256(options.code)
+		digest = domain.SHA256Digest(hex.EncodeToString(hash[:]))
+	}
+	if err = store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: int64(len(options.code)), SHA256: digest}); err != nil {
 		t.Fatal(err)
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg := api.DefaultConfig()
 	cfg.Listen = ln.Addr().String()
 	cfg.Jobs = svc
+	if options.configure != nil {
+		options.configure(&cfg, access, store)
+	}
 	cfg.WorkspaceRate = api.Rate{PerSecond: 1000, Burst: 1000}
 	cfg.GlobalRate = cfg.WorkspaceRate
 	server, err := api.NewServer(cfg, access, obj, store.Ready)
@@ -111,23 +137,15 @@ func configureJobProfiles(t *testing.T, store *sqlite.Store, access *auth.Servic
 	t.Helper()
 	ctx := context.Background()
 	service, err := connections.New(access, store, &managedVault{values: map[string][]byte{}}, []connections.Adapter{&managedAdapter{}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	profiles := map[string]string{}
 	for _, workspace := range []domain.WorkspaceID{"a", "b"} {
 		secret, token, err := access.Issue(ctx, workspace, []auth.Scope{auth.Read, auth.Manage}, time.Time{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		principal, err := access.Authenticate(ctx, secret.Reveal())
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		op, err := service.Submit(ctx, principal, workspace, "", "job-fixture-connection", []byte(managedBody))
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		if worked, err := service.RunOnce(ctx); err != nil || !worked {
 			t.Fatal("managed fixture verification", worked, err)
 		}
@@ -159,9 +177,7 @@ func (f *jobHTTP) call(t *testing.T, method, path, who, key, body string, want i
 		body = f.job(parts[3], body)
 	}
 	r, err := http.NewRequest(method, f.url+path, strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if who != "" {
 		r.Header.Set("Authorization", "Bearer "+f.tokens[who])
 	}
@@ -170,14 +186,10 @@ func (f *jobHTTP) call(t *testing.T, method, path, who, key, body string, want i
 		r.Header.Set("Idempotency-Key", key)
 	}
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if resp.StatusCode != want {
 		t.Fatalf("%s %s status=%d want=%d: %s", method, path, resp.StatusCode, want, data)
 	}
@@ -201,9 +213,7 @@ func wireSchema(t *testing.T, name string, data []byte) {
 	c.AssertFormat()
 	for _, file := range []string{"common", "workload-secrets", name} {
 		b, err := schemas.Files.ReadFile(file + ".v1alpha1.schema.json")
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		var value any
 		if err = json.Unmarshal(b, &value); err != nil {
 			t.Fatal(err)
@@ -213,9 +223,7 @@ func wireSchema(t *testing.T, name string, data []byte) {
 		}
 	}
 	schema, err := c.Compile("https://schema.example/" + name + ".v1alpha1.schema.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var value any
 	if err = json.Unmarshal(data, &value); err != nil {
 		t.Fatal(err)
@@ -231,17 +239,13 @@ func TestDurableAdmissionHTTPContractAndAuthorization(t *testing.T) {
 	wireSchema(t, "job-validation", v)
 	headers, b := f.call(t, "POST", path, "a", "request-0001", jobBody, 202)
 	wireSchema(t, "job-admission", b)
-	var first admission.Receipt
-	if err := json.Unmarshal(b, &first); err != nil {
-		t.Fatal(err)
-	}
+	first := decodeHTTPJSON[admission.Receipt](t, b)
 	if first.Replay || headers.Get("Location") != first.Links.Self {
 		t.Fatal("invalid new receipt")
 	}
 	_, b = f.call(t, "POST", path, "a", "request-0001", jobBody, 202)
 	wireSchema(t, "job-admission", b) // A replay still reports status queued.
-	var replay admission.Receipt
-	_ = json.Unmarshal(b, &replay)
+	replay := decodeHTTPJSON[admission.Receipt](t, b)
 	if !replay.Replay || replay.JobID != first.JobID || replay.AttemptID != first.AttemptID {
 		t.Fatal("duplicate admission")
 	}
@@ -287,8 +291,7 @@ func TestLostHTTPReceiptReplaysCommittedIDs(t *testing.T) {
 		t.Fatalf("did not commit before response failure: %d", broken.status)
 	}
 	headers, b := f.call(t, "POST", path, "a", "lost-http-receipt", jobBody, 202)
-	var receipt admission.Receipt
-	_ = json.Unmarshal(b, &receipt)
+	receipt := decodeHTTPJSON[admission.Receipt](t, b)
 	if !receipt.Replay || headers.Get("Location") != broken.header.Get("Location") {
 		t.Fatal("response failure created a second job")
 	}
@@ -325,5 +328,12 @@ func TestRemovedInputRoutesAreUnavailable(t *testing.T) {
 	f := setupJobHTTP(t)
 	for _, route := range []string{"import", "ingest"} {
 		f.call(t, "POST", "/v1/workspaces/a/objects/"+route, "a", "", `{}`, 405)
+	}
+}
+
+func requireNoError(t testing.TB, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }

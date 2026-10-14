@@ -31,9 +31,7 @@ func controlSchema(t *testing.T, name string) *jsonschema.Schema {
 	}
 	location := (&url.URL{Scheme: "file", Path: path, Fragment: fragment}).String()
 	schema, err := c.Compile(location)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return schema
 }
 
@@ -43,9 +41,7 @@ func TestControlWireSchemaMatchesRecordSemantics(t *testing.T) {
 	schema := controlSchema(t, "control-operation.v1alpha1.schema.json")
 	at := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
 	problem, err := domain.NewProblem(domain.CodeRemoteExecutionUnresolved, "Reconcile the recorded identity without resubmitting.", domain.FailureStageOperation)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	problem = problem.WithRetrySemantics(false, true).WithRecommendedAction(domain.RecommendedActionReconcile).
 		WithDetail("private", "detail-canary").WithCause(errors.New("cause-canary"))
 	kinds := []domain.OperationKind{domain.OperationCancel, domain.OperationRetryCompute, domain.OperationReconcile, domain.OperationCollect}
@@ -87,9 +83,7 @@ func TestControlWireSchemaMatchesRecordSemantics(t *testing.T) {
 func serializedControl(t *testing.T, r operations.Record) map[string]any {
 	t.Helper()
 	data, err := json.Marshal(controlView(r))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if strings.Contains(string(data), "canary") {
 		t.Fatal("internal details or cause leaked into the wire contract")
 	}

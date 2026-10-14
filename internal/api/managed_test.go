@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,7 +21,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
-	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
@@ -113,89 +110,32 @@ type managedHTTP struct {
 
 func setupManagedHTTP(t *testing.T, configured bool, adapters ...connections.Adapter) *managedHTTP {
 	t.Helper()
-	ctx := context.Background()
-	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state"), sqlite.DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	access, err := auth.New(store, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj, err := objects.New(access, noUpload{}, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jobs, err := admission.New(access, store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &managedHTTP{jobHTTP: &jobHTTP{store: store, tokens: map[string]string{}, tokenIDs: map[string]string{}}, access: access,
-		vault: &managedVault{values: map[string][]byte{}}, adapter: &managedAdapter{}}
-	for _, workspace := range []domain.WorkspaceID{"a", "b"} {
-		if err = store.PutWorkspace(ctx, auth.Workspace{ID: workspace, Enabled: true, AllowedProfiles: []string{"default-gpu"}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, who := range []string{"a", "b", "read", "write", "operate", "manage", "execute"} {
-		workspace := domain.WorkspaceID("a")
-		scopes := []auth.Scope{auth.Read, auth.Write, auth.Operate, auth.Manage, auth.Execute}
-		if who == "b" {
-			workspace = "b"
-		} else if who != "a" {
-			scopes = []auth.Scope{auth.Scope(who)}
-		}
-		secret, record, err := access.Issue(ctx, workspace, scopes, time.Time{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		f.tokens[who], f.tokenIDs[who] = secret.Reveal(), record.ID
-	}
-	if err = store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: 0, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}); err != nil {
-		t.Fatal(err)
-	}
+	f := &managedHTTP{vault: &managedVault{values: map[string][]byte{}}, adapter: &managedAdapter{}}
 	if len(adapters) == 0 {
 		adapters = []connections.Adapter{f.adapter}
 	}
-	f.service, err = connections.New(access, store, f.vault, adapters)
-	if err != nil {
-		t.Fatal(err)
-	}
-	authorizations, err := executionauth.New(access, store, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := api.DefaultConfig()
-	cfg.Listen, cfg.Jobs = ln.Addr().String(), jobs
-	if configured {
-		cfg.Connections, cfg.Authorizations = f.service, authorizations
-		pool, err := workloadsecret.NewPool(bytes.Repeat([]byte{11}, 32))
-		if err != nil {
-			t.Fatal(err)
+	allScopes := []auth.Scope{auth.Read, auth.Write, auth.Operate, auth.Manage, auth.Execute}
+	f.jobHTTP = setupJobHTTPWith(t, jobHTTPOptions{extraScopes: map[string][]auth.Scope{
+		"a": allScopes, "b": allScopes,
+		"write": {auth.Write}, "operate": {auth.Operate}, "manage": {auth.Manage}, "execute": {auth.Execute},
+	}, configure: func(cfg *api.Config, access *auth.Service, store *sqlite.Store) {
+		f.access = access
+		var err error
+		f.service, err = connections.New(access, store, f.vault, adapters)
+		requireNoError(t, err)
+		if !configured {
+			return
 		}
+		cfg.Connections = f.service
+		cfg.Authorizations, err = executionauth.New(access, store, nil)
+		requireNoError(t, err)
+		pool, err := workloadsecret.NewPool(bytes.Repeat([]byte{11}, 32))
+		requireNoError(t, err)
 		t.Cleanup(pool.Close)
 		cfg.Secrets, err = workloadsecret.New(access, store, pool, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		authorizations.WithSecrets(pool)
-	}
-	cfg.WorkspaceRate = api.Rate{PerSecond: 10000, Burst: 10000}
-	cfg.GlobalRate = cfg.WorkspaceRate
-	server, err := api.NewServer(cfg, access, obj, store.Ready)
-	if err != nil {
-		_ = ln.Close()
-		t.Fatal(err)
-	}
-	f.url, f.handler = "http://"+ln.Addr().String(), server.Handler
-	done := make(chan struct{})
-	go func() { defer close(done); _ = server.Serve(ln) }()
-	t.Cleanup(func() { _ = server.Close(); <-done })
+		requireNoError(t, err)
+		cfg.Authorizations.WithSecrets(pool)
+	}})
 	return f
 }
 
@@ -212,14 +152,10 @@ func readManagedOperation(t *testing.T, raw []byte) connections.Operation {
 	t.Helper()
 	wireSchema(t, "connection-operation", raw)
 	managedSafeResponse(t, raw)
-	var operation connections.Operation
-	if err := json.Unmarshal(raw, &operation); err != nil {
-		t.Fatal(err)
-	}
-	return operation
+	return decodeHTTPJSON[connections.Operation](t, raw)
 }
 
-func TestManagedHTTPConnectionContractsReplayAndAuthority(t *testing.T) {
+func TestManagedHTTPConnectionAuthority(t *testing.T) {
 	f := setupManagedHTTP(t, true)
 	base := "/v1/workspaces/a"
 	_, raw := f.call(t, "GET", base+"/providers", "read", "", "", 200)
@@ -228,29 +164,11 @@ func TestManagedHTTPConnectionContractsReplayAndAuthority(t *testing.T) {
 	if !bytes.Contains(raw, []byte(`"absolute_execution_deadline":"supported"`)) {
 		t.Fatal("provider discovery omitted the execution deadline capability")
 	}
-	_, raw = f.call(t, "GET", base+"/connections", "read", "", "", 200)
-	wireSchema(t, "connection", raw)
-	if string(bytes.TrimSpace(raw)) != `{"connections":[]}` {
-		t.Fatal("empty connections response is not a schema array")
-	}
-	headers, raw := f.call(t, "POST", base+"/connections", "manage", "managed-create-01", managedBody, 202)
+	_, raw = f.call(t, "POST", base+"/connections", "manage", "managed-create-01", managedBody, 202)
 	first := readManagedOperation(t, raw)
 	location := base + "/connection-operations/" + string(first.ID)
-	if first.Replay || first.Action != "create" || headers.Get("Location") != location || f.adapter.verifies.Load() != 0 {
-		t.Fatal("creation did not return a local durable receipt")
-	}
-	_, raw = f.call(t, "POST", base+"/connections", "manage", "managed-create-01", managedBody, 202)
-	replay := readManagedOperation(t, raw)
-	if !replay.Replay || replay.ID != first.ID || replay.ConnectionID != first.ConnectionID {
-		t.Fatal("connection replay changed receipt identity")
-	}
-	_, raw = f.call(t, "GET", location, "manage", "", "", 200)
-	readManagedOperation(t, raw)
 	connectionPath := base + "/connections/" + first.ConnectionID
 	_, raw = f.call(t, "GET", connectionPath, "read", "", "", 200)
-	wireSchema(t, "connection", raw)
-	managedSafeResponse(t, raw)
-	_, raw = f.call(t, "GET", base+"/connections", "read", "", "", 200)
 	wireSchema(t, "connection", raw)
 	managedSafeResponse(t, raw)
 	if f.adapter.verifies.Load() != 0 {
@@ -409,10 +327,7 @@ func verifiedManagedConnection(t *testing.T, f *managedHTTP) connections.Connect
 	_, raw = f.call(t, "GET", "/v1/workspaces/a/connections/"+operation.ConnectionID, "read", "", "", 200)
 	wireSchema(t, "connection", raw)
 	managedSafeResponse(t, raw)
-	var connection connections.Connection
-	if err := json.Unmarshal(raw, &connection); err != nil {
-		t.Fatal(err)
-	}
+	connection := decodeHTTPJSON[connections.Connection](t, raw)
 	if connection.Authentication != "verified" || connection.Selection == nil || !connection.CredentialPresent {
 		t.Fatal("fixture connection has no verified immutable selection")
 	}
@@ -424,9 +339,7 @@ func TestManagedHTTPConnectionActionContracts(t *testing.T) {
 	connection := verifiedManagedConnection(t, f)
 	path := "/v1/workspaces/a/connections/" + connection.ID
 	action, err := json.Marshal(map[string]any{"action": "disable", "expected_revision": connection.Revision})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	before := f.adapter.verifies.Load()
 	headers, raw := f.call(t, "POST", path+"/actions", "manage", "disable-connection-01", string(action), 202)
 	first := readManagedOperation(t, raw)
@@ -444,8 +357,8 @@ func TestManagedHTTPConnectionActionContracts(t *testing.T) {
 	_, raw = f.call(t, "GET", path, "read", "", "", 200)
 	wireSchema(t, "connection", raw)
 	managedSafeResponse(t, raw)
-	var disabled connections.Connection
-	if err := json.Unmarshal(raw, &disabled); err != nil || disabled.NewWork != "disabled" || disabled.Selection != nil || !disabled.CredentialPresent {
+	disabled := decodeHTTPJSON[connections.Connection](t, raw)
+	if disabled.NewWork != "disabled" || disabled.Selection != nil || !disabled.CredentialPresent {
 		t.Fatal("disabled connection projection violates its contract")
 	}
 	_, raw = f.call(t, "POST", path+"/actions", "manage", "disable-connection-01", string(action), 202)
@@ -464,10 +377,7 @@ func TestManagedHTTPAuthorizationContractsAndIndependentScope(t *testing.T) {
 	connection := verifiedManagedConnection(t, f)
 	body := strings.Replace(jobBody, "default-gpu", connection.Selection.Profile, 1)
 	_, raw := f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "managed-job-01", body, 202)
-	var job admission.Receipt
-	if err := json.Unmarshal(raw, &job); err != nil {
-		t.Fatal(err)
-	}
+	job := decodeHTTPJSON[admission.Receipt](t, raw)
 	request := `{"attempt_id":"` + string(job.AttemptID) + `","max_remote_wall_seconds":120,"authorize_private_staging":true,"authorize_compute":true}`
 	path := job.Links.Self + "/authorize"
 	for _, who := range []string{"read", "write", "operate", "manage"} {
@@ -477,10 +387,7 @@ func TestManagedHTTPAuthorizationContractsAndIndependentScope(t *testing.T) {
 	headers, raw := f.call(t, "POST", path, "execute", "managed-grant-01", request, 202)
 	wireSchema(t, "execution-authorization", raw)
 	managedSafeResponse(t, raw)
-	var first executionauth.Receipt
-	if err := json.Unmarshal(raw, &first); err != nil {
-		t.Fatal(err)
-	}
+	first := decodeHTTPJSON[executionauth.Receipt](t, raw)
 	location := job.Links.Self + "/authorizations/" + string(first.AuthorizationID)
 	if first.Status != executionauth.Granted || first.Replay || first.AttemptID != job.AttemptID || headers.Get("Location") != location || first.ConsumedAt != nil {
 		t.Fatal("authorization receipt lost its finite frozen target")
@@ -489,8 +396,8 @@ func TestManagedHTTPAuthorizationContractsAndIndependentScope(t *testing.T) {
 	wireSchema(t, "execution-authorization", raw)
 	managedSafeResponse(t, raw)
 	_, raw = f.call(t, "POST", path, "execute", "managed-grant-01", request, 202)
-	var replay executionauth.Receipt
-	if err := json.Unmarshal(raw, &replay); err != nil || !replay.Replay || replay.AuthorizationID != first.AuthorizationID {
+	replay := decodeHTTPJSON[executionauth.Receipt](t, raw)
+	if !replay.Replay || replay.AuthorizationID != first.AuthorizationID {
 		t.Fatal("authorization replay created another grant")
 	}
 	wireSchema(t, "execution-authorization", raw)

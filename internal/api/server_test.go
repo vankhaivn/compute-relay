@@ -44,21 +44,13 @@ func setupHTTP(t *testing.T, mutate func(*Config), ready func(context.Context) e
 	cfg.WorkspaceRate = Rate{10000, 10000}
 	m := testsupport.NewMemory(auth.Workspace{ID: "a", Enabled: true}, auth.Workspace{ID: "b", Enabled: true})
 	a, err := auth.New(m, m)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	b, err := blobfs.New(filepath.Join(t.TempDir(), "blobs"), blobfs.Limits{MaxObjectBytes: 1 << 20, MaxTotalBytes: 4 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	s, err := objects.New(a, b, m)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Listen = ln.Addr().String()
 	if mutate != nil {
 		mutate(&cfg)
@@ -81,9 +73,7 @@ func setupHTTP(t *testing.T, mutate func(*Config), ready func(context.Context) e
 			scopes = []auth.Scope{auth.Read}
 		}
 		sec, record, err := a.Issue(context.Background(), w, scopes, time.Time{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		f.tokens[name] = sec.Reveal()
 		f.tokenIDs[name] = record.ID
 	}
@@ -96,9 +86,7 @@ func setupHTTP(t *testing.T, mutate func(*Config), ready func(context.Context) e
 func (f *fixture) request(t *testing.T, method, path, who string, body io.Reader, change func(*http.Request)) (*http.Response, []byte) {
 	t.Helper()
 	r, err := http.NewRequest(method, f.url+path, body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if who != "" {
 		r.Header.Set("Authorization", "Bearer "+f.tokens[who])
 	}
@@ -109,14 +97,10 @@ func (f *fixture) request(t *testing.T, method, path, who string, body io.Reader
 		change(r)
 	}
 	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer response.Body.Close()
 	data, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, token := range f.tokens {
 		if bytes.Contains(data, []byte(token)) {
 			t.Fatal("token leaked into response")
@@ -175,9 +159,7 @@ func TestLoopbackUploadMetadataIsolationAndRevocation(t *testing.T) {
 	response, body = f.request(t, "GET", "/v1/workspaces/b/objects/"+string(m.ID), "b", nil, nil)
 	assertStatus(t, response, body, 404)
 	content, err := f.blobs.Open(context.Background(), "a", m.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	actual, err := io.ReadAll(content)
 	content.Close()
 	if err != nil || string(actual) != payload {
@@ -256,15 +238,11 @@ func TestHTTPDeadlineInterruptsBlockedBody(t *testing.T) {
 		server.WriteTimeout = 2 * time.Second
 	})
 	connection, err := net.DialTimeout("tcp", strings.TrimPrefix(f.url, "http://"), time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
 	_, err = fmt.Fprintf(connection, "POST /v1/workspaces/a/objects HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nContent-Type: application/octet-stream\r\nContent-Length: 10\r\n\r\nx", strings.TrimPrefix(f.url, "http://"), f.tokens["a"])
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	response, err := http.ReadResponse(bufio.NewReader(connection), nil)
 	if err != nil {
 		t.Fatal("blocked body was not interrupted with HTTP response", err)
@@ -397,15 +375,11 @@ func TestLimiterBoundsKeysWithoutResettingLiveAllowance(t *testing.T) {
 func TestConcurrentUploadCapAndDisconnectedBody(t *testing.T) {
 	f := setupHTTP(t, func(c *Config) { c.MaxUploads = 1 }, nil)
 	connection, err := net.DialTimeout("tcp", strings.TrimPrefix(f.url, "http://"), time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
 	_, err = fmt.Fprintf(connection, "POST /v1/workspaces/a/objects HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nContent-Type: application/octet-stream\r\nContent-Length: 10\r\n\r\nx", strings.TrimPrefix(f.url, "http://"), f.tokens["a"])
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	uploads := f.server.Handler.(*handler).uploads
 	deadline := time.Now().Add(3 * time.Second)
 	for len(uploads) != 1 {
@@ -420,14 +394,10 @@ func TestConcurrentUploadCapAndDisconnectedBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	response, err = http.ReadResponse(bufio.NewReader(connection), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer response.Body.Close()
 	body, err = io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	assertStatus(t, response, body, 400)
 	if f.catalog.ObjectCount() != 0 {
 		t.Fatal("disconnected or throttled upload was committed")

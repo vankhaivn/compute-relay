@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,10 +15,7 @@ func TestManagedHTTPLiveConfigurationPreservesOldAdmissionReplay(t *testing.T) {
 	path := "/v1/workspaces/a/connections/" + connection.ID
 	oldJobBody := strings.Replace(jobBody, "default-gpu", connection.Selection.Profile, 1)
 	_, raw := f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "before-configuration-job", oldJobBody, 202)
-	var original admission.Receipt
-	if json.Unmarshal(raw, &original) != nil {
-		t.Fatal("invalid original job receipt")
-	}
+	original := decodeHTTPJSON[admission.Receipt](t, raw)
 	body := fmt.Sprintf(`{"action":"configure","expected_revision":%d,"configuration":{"max_remote_wall_seconds":7200}}`, connection.Revision)
 	before := f.adapter.verifies.Load()
 	for _, who := range []string{"read", "write", "operate", "execute"} {
@@ -38,8 +34,8 @@ func TestManagedHTTPLiveConfigurationPreservesOldAdmissionReplay(t *testing.T) {
 	_, raw = f.call(t, "GET", path, "read", "", "", 200)
 	wireSchema(t, "connection", raw)
 	managedSafeResponse(t, raw)
-	var current connections.Connection
-	if json.Unmarshal(raw, &current) != nil || current.Configuration == nil || current.Configuration.MaxRemoteWallSeconds != 7200 || current.Selection == nil || current.Selection.MaxRemoteWallSeconds != 7200 || current.Selection.Profile == connection.Selection.Profile {
+	current := decodeHTTPJSON[connections.Connection](t, raw)
+	if current.Configuration == nil || current.Configuration.MaxRemoteWallSeconds != 7200 || current.Selection == nil || current.Selection.MaxRemoteWallSeconds != 7200 || current.Selection.Profile == connection.Selection.Profile {
 		t.Fatal("configuration did not expose a new immutable selection")
 	}
 	_, raw = f.call(t, "POST", path+"/actions", "manage", "configuration-save", body, 202)
@@ -49,8 +45,8 @@ func TestManagedHTTPLiveConfigurationPreservesOldAdmissionReplay(t *testing.T) {
 	f.call(t, "POST", path+"/actions", "manage", "configuration-save", strings.Replace(body, "7200", "3600", 1), 409)
 	f.call(t, "POST", path+"/actions", "manage", "configuration-stale", body, 409)
 	_, raw = f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "before-configuration-job", oldJobBody, 202)
-	var replay admission.Receipt
-	if json.Unmarshal(raw, &replay) != nil || replay.JobID != original.JobID || !replay.Replay {
+	replay := decodeHTTPJSON[admission.Receipt](t, raw)
+	if replay.JobID != original.JobID || !replay.Replay {
 		t.Fatal("old admitted job no longer replays")
 	}
 	f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "stale-selection-job", oldJobBody, 409)
@@ -61,10 +57,10 @@ func TestManagedHTTPLiveConfigurationPreservesOldAdmissionReplay(t *testing.T) {
 		t.Fatal("saving or reading configuration contacted a provider")
 	}
 	_, raw = f.call(t, "GET", "/v1/info", "read", "", "", 200)
-	var info struct {
+	info := decodeHTTPJSON[struct {
 		Features []string `json:"features"`
-	}
-	if json.Unmarshal(raw, &info) != nil || !strings.Contains(strings.Join(info.Features, ","), "connection_configuration") {
+	}](t, raw)
+	if !strings.Contains(strings.Join(info.Features, ","), "connection_configuration") {
 		t.Fatal("live configuration capability was not advertised")
 	}
 }

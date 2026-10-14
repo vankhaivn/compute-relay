@@ -109,9 +109,7 @@ func artifactHTTPFixture(t *testing.T, payload []byte) (*fixture, *artifactReadF
 	f := setupHTTP(t, nil, nil, func(server *http.Server) {
 		h := server.Handler.(*handler)
 		reader, err := collection.NewReader(h.auth, repo, repo)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		h.config.Results = reader
 		server.ErrorLog = log.New(io.Discard, "", 0)
 	})
@@ -132,9 +130,7 @@ func TestArtifactHTTPExplicitTargetsPaginationAndSafeDownload(t *testing.T) {
 		t.Fatal(last, err)
 	}
 	pin, err := testArtifactMetadata(ctx, f.url, token, target, "art_output")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var dst bytes.Buffer
 	if err := downloadTestArtifact(ctx, f.url, token, pin, &dst); err != nil || !bytes.Equal(dst.Bytes(), payload) || repo.closed.Load() != 1 {
 		t.Fatal("verified download failed", err, dst.Len())
@@ -180,9 +176,7 @@ func TestArtifactHTTPLastByteFaultsNeverReceiveSuccessAcknowledgement(t *testing
 		t.Run(mode, func(t *testing.T) {
 			f, repo, target := artifactHTTPFixture(t, bytes.Repeat([]byte("original"), 16384))
 			pin, err := testArtifactMetadata(context.Background(), f.url, []byte(f.tokens["a"]), target, "art_output")
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			repo.fault = mode
 			if mode == "expire" {
 				repo.onClose = func() { repo.expired.Store(true) }

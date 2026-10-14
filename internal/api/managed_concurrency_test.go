@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -54,8 +53,8 @@ func TestManagedHTTPMissingRequiredResourceCannotPublishIndependentCapacity(t *t
 	}
 	_, raw = f.call(t, "GET", "/v1/workspaces/a/connections/"+op.ConnectionID, "read", "", "", 200)
 	wireSchema(t, "connection", raw)
-	var c connections.Connection
-	if json.Unmarshal(raw, &c) != nil || c.Selection != nil || c.AccountID != nil || c.Concurrency == nil || c.Concurrency.EffectiveLimit != nil || c.Concurrency.ActiveAttempts != nil {
+	c := decodeHTTPJSON[connections.Connection](t, raw)
+	if c.Selection != nil || c.AccountID != nil || c.Concurrency == nil || c.Concurrency.EffectiveLimit != nil || c.Concurrency.ActiveAttempts != nil {
 		t.Fatal("unknown resource created an independent pool", c)
 	}
 }
@@ -80,8 +79,8 @@ func TestManagedHTTPConcurrencyUsesSharedSchedulerWithoutRemoteReads(t *testing.
 			}
 			_, raw := f.call(t, "GET", "/v1/workspaces/a/providers", "read", "", "", 200)
 			wireSchema(t, "provider-descriptors", raw)
-			var providers struct{ Providers []connections.Descriptor }
-			if json.Unmarshal(raw, &providers) != nil || len(providers.Providers) != 1 || providers.Providers[0].Capabilities.Concurrency == nil || *providers.Providers[0].Capabilities.Concurrency != *adapter.Descriptor().Capabilities.Concurrency || adapter.verifies.Load() != 0 {
+			providers := decodeHTTPJSON[struct{ Providers []connections.Descriptor }](t, raw)
+			if len(providers.Providers) != 1 || providers.Providers[0].Capabilities.Concurrency == nil || *providers.Providers[0].Capabilities.Concurrency != *adapter.Descriptor().Capabilities.Concurrency || adapter.verifies.Load() != 0 {
 				t.Fatal("descriptor lost supported local range or contacted provider")
 			}
 			read := func(workspace, id string) connections.Connection {
@@ -89,8 +88,8 @@ func TestManagedHTTPConcurrencyUsesSharedSchedulerWithoutRemoteReads(t *testing.
 				_, raw := f.call(t, "GET", "/v1/workspaces/"+workspace+"/connections/"+id, workspace, "", "", 200)
 				wireSchema(t, "connection", raw)
 				managedSafeResponse(t, raw)
-				var c connections.Connection
-				if json.Unmarshal(raw, &c) != nil || c.Concurrency == nil || c.Concurrency.Scope != scope {
+				c := decodeHTTPJSON[connections.Connection](t, raw)
+				if c.Concurrency == nil || c.Concurrency.Scope != scope {
 					t.Fatal("missing concurrency projection")
 				}
 				if scope == "resource" && len(c.Quotas) != 0 {
@@ -118,10 +117,7 @@ func TestManagedHTTPConcurrencyUsesSharedSchedulerWithoutRemoteReads(t *testing.
 			for i, c := range []connections.Connection{lan, vpn, vpn} {
 				body := strings.Replace(jobBody, "default-gpu", c.Selection.Profile, 1)
 				_, raw := f.call(t, "POST", "/v1/workspaces/a/jobs", "a", fmt.Sprintf("parallel-job-%d", i), body, 202)
-				var job admission.Receipt
-				if json.Unmarshal(raw, &job) != nil {
-					t.Fatal("invalid admission")
-				}
+				job := decodeHTTPJSON[admission.Receipt](t, raw)
 				grant := fmt.Sprintf(`{"attempt_id":%q,"max_remote_wall_seconds":120,"authorize_private_staging":true,"authorize_compute":true}`, job.AttemptID)
 				f.call(t, "POST", job.Links.Self+"/authorize", "execute", fmt.Sprintf("parallel-grant-%d", i), grant, 202)
 				jobs = append(jobs, job)
@@ -146,8 +142,8 @@ func TestManagedHTTPConcurrencyUsesSharedSchedulerWithoutRemoteReads(t *testing.
 			}
 			_, raw = f.call(t, "GET", jobs[2].Links.Self, "read", "", "", 200)
 			wireSchema(t, "job-status", raw)
-			var status struct{ Scheduling *admission.SchedulingStatus }
-			if json.Unmarshal(raw, &status) != nil || status.Scheduling == nil || status.Scheduling.Reason != wantReason {
+			status := decodeHTTPJSON[struct{ Scheduling *admission.SchedulingStatus }](t, raw)
+			if status.Scheduling == nil || status.Scheduling.Reason != wantReason {
 				t.Fatal("third job did not expose exact scheduler capacity reason", string(raw))
 			}
 			f.call(t, "GET", jobs[2].Links.Self, "b", "", "", 403)

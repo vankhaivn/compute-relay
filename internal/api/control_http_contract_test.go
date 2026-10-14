@@ -25,9 +25,7 @@ func transportControlSchema(t *testing.T, file, fragment string) *jsonschema.Sch
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.AssertFormat()
 	schema, err := c.Compile((&url.URL{Scheme: "file", Path: path, Fragment: fragment}).String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return schema
 }
 

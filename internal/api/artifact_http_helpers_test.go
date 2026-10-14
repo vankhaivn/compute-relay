@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"testing"
 )
 
 func artifactTestRequest(ctx context.Context, endpoint string, token []byte, target artifactTarget, suffix, cursor string, limit int) (*http.Response, error) {
@@ -78,4 +79,11 @@ func downloadTestArtifact(ctx context.Context, endpoint string, token []byte, me
 		return errors.New("artifact acknowledgement missing")
 	}
 	return nil
+}
+
+func requireNoError(t testing.TB, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
