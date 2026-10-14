@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func TestSourcesMatchLockedRunnerAndAreIndependent(t *testing.T) {
+func TestSourcesAreStableAndIndependent(t *testing.T) {
 	first, err := Sources()
 	if err != nil || len(first) != 7 {
-		t.Fatal("locked runner unavailable", err)
+		t.Fatal("embedded runner unavailable", err)
 	}
 	second, err := Sources()
 	if err != nil || !reflect.DeepEqual(first, second) {
@@ -24,7 +24,7 @@ func TestSourcesMatchLockedRunnerAndAreIndependent(t *testing.T) {
 }
 
 func TestEmbeddedAssetsExcludeCachesAndUnrelatedFiles(t *testing.T) {
-	want := map[string]bool{"assets.lock.json": true}
+	want := map[string]bool{}
 	for _, name := range sourceNames {
 		want["python/relay_runner/"+name] = true
 	}

@@ -102,7 +102,7 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 			ref := *out.Remote
 			record(prepared, out)
 			fake.finish(0, map[string]string{"control/stdout.log": "out\n", "control/stderr.log": "", "control/environment.json": "{}",
-				"control/execution-result.json": resultManifest(map[string]string{"answer.txt": "42"}), "outputs/answer.txt": "42"})
+				"control/execution-result.json": resultManifest(job.Identity, map[string]string{"answer.txt": "42"}), "outputs/answer.txt": "42"})
 			observation, err := adapter.Observe(ctx, ref)
 			record(observation, err)
 			logs, err := adapter.ReadLogs(ctx, ref, provider.PageRequest{Limit: 10})

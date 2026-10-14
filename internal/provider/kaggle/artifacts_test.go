@@ -23,7 +23,9 @@ func artifactFixture(t *testing.T) (*ArtifactReader, provider.RemoteReference, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	return a, ref, map[string][]byte{artifactManifest: []byte(`{"unit_fixture":true}`), "control/stdout.log": []byte("log\n"), "outputs/answer.txt": []byte("yes")}
+	id := ref.Identity
+	raw, _ := json.Marshal(map[string]any{"manifest_version": "1", "job_id": id.JobID, "attempt_id": id.AttemptID, "attempt_nonce": id.Nonce, "runner_version": "fixture", "bundle_sha256": id.BundleSHA256, "input_manifest_sha256": id.InputManifestSHA256, "started_at": "2026-10-14T00:00:00Z", "finished_at": "2026-10-14T00:00:01Z", "phase": "completed", "exit_code": 0, "timed_out": false, "resource_check": map[string]any{"gpu_required": false, "gpu_verified": false}, "artifacts": []any{}, "error": nil})
+	return a, ref, map[string][]byte{artifactManifest: raw, "control/stdout.log": []byte("log\n"), "outputs/answer.txt": []byte("yes")}
 }
 func artifactCatalog(data map[string][]byte) []byte {
 	files := make([]artifactEntry, 0, len(data))
@@ -231,5 +233,18 @@ func TestArtifactDestinationFailureCancelsWithoutPublishing(t *testing.T) {
 		if result, err := a.FetchArtifact(context.Background(), ref, file, brokenArtifactWriter{mode}, file.Bytes); err == nil || result != (provider.TransferResult{}) {
 			t.Fatal("failed destination reported success", mode)
 		}
+	}
+}
+
+func TestArtifactManifestFetchRejectsInvalidResultEvenWithMatchingDigest(t *testing.T) {
+	a, ref, _ := artifactFixture(t)
+	raw := []byte(`{"phase":"completed","artifacts":[]}`)
+	a.run = func(_ context.Context, _ Config, _ string, _ []byte, _ artifactRequest, dst io.Writer) ([]byte, error) {
+		_, err := dst.Write(raw)
+		return nil, err
+	}
+	var dst bytes.Buffer
+	if _, err := a.FetchArtifact(context.Background(), ref, artifactFor(ref, artifactManifest, raw), &dst, int64(len(raw))); !errors.Is(err, ErrArtifactTransfer) {
+		t.Fatalf("invalid result accepted: %v", err)
 	}
 }

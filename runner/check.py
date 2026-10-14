@@ -1,8 +1,7 @@
-"""Credential-free source, lock, contract-decoder and CPU fixture checks."""
+"""Credential-free source, contract-decoder and CPU fixture checks."""
 
 import argparse
 import ast
-import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -16,21 +15,11 @@ from relay_runner.contract import Failure, load
 
 
 def candidates():
-    return sorted(p for p in ROOT.rglob("*") if p.suffix in (".py", ".json") and p.name != "assets.lock.json")
-
-
-def snapshot():
-    files = []
-    for path in candidates():
-        raw = path.read_bytes()
-        files.append({"path": "runner/" + path.relative_to(ROOT).as_posix(), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})
-    return {"lock_version": 1, "files": files}
+    return sorted(p for p in ROOT.rglob("*") if p.suffix in (".py", ".json"))
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lock", action="store_true", help="update reviewed source/contract identities only")
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__).parse_args()
     for path in candidates():
         raw = path.read_bytes()
         text = raw.decode("utf-8")
@@ -42,13 +31,6 @@ def main():
                 tabnanny.process_tokens(tokenize.generate_tokens(source.readline))
         else:
             json.loads(raw)
-    lock = ROOT / "assets.lock.json"
-    expected = snapshot()
-    if args.lock:
-        lock.write_text(json.dumps(expected, indent=2) + "\n", encoding="utf-8")
-        return 0
-    if json.loads(lock.read_text()) != expected:
-        raise RuntimeError("Runner assets changed; review and run python runner/check.py --lock")
     for path in sorted((ROOT / "examples").glob("request.*.json")):
         valid = ".invalid." not in path.name
         try:

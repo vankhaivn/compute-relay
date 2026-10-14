@@ -997,19 +997,10 @@ func (a *Adapter) catalog(ctx context.Context, d docker, remote provider.RemoteR
 	if err != nil {
 		return nil, err
 	}
-	var result struct {
-		Artifacts []struct {
-			Path   string              `json:"path"`
-			Bytes  int64               `json:"bytes"`
-			SHA256 domain.SHA256Digest `json:"sha256"`
-		} `json:"artifacts"`
-	}
-	// A missing or invalid manifest is reported by collection, not here.
-	if manifest != nil && json.Unmarshal(manifest, &result) == nil {
+	// Collection reports a missing or invalid manifest; never list its untrusted outputs.
+	if result, err := runnerplan.ParseResult(remote.Identity, manifest); err == nil {
 		for _, out := range result.Artifacts {
-			if provider.SafeArtifactPath(out.Path) && out.Bytes >= 0 && out.SHA256.Valid() {
-				artifacts = append(artifacts, provider.Artifact{Remote: remote, Path: "outputs/" + out.Path, Bytes: out.Bytes, SHA256: out.SHA256})
-			}
+			artifacts = append(artifacts, provider.Artifact{Remote: remote, Path: "outputs/" + out.Path, Bytes: out.Bytes, SHA256: out.SHA256})
 		}
 	}
 	slices.SortFunc(artifacts, func(x, y provider.Artifact) int { return strings.Compare(x.Path, y.Path) })

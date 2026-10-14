@@ -32,12 +32,12 @@ There is no overwrite, resume or automatic retry of a payload.
 | `python/relay_runner/process.py` | Process-group supervision and bounded logs. |
 | `python/relay_runner/deadline.py` | Immutable deadline checks against UTC and Linux `CLOCK_BOOTTIME`. |
 | `python/relay_runner/main.py` | Preparation, setup, resource checks, execution and finalization. |
-| `manifest.schema.json` / `examples/` | Adapter-to-runner contract `compute-relay/runner/v1`. |
-| `assets.lock.json` / `assets.go` | Reviewed source hashes and inert Go embedding of the seven modules. |
+| `contract.py` / `examples/` | Adapter-to-runner contract `compute-relay/runner/v1`. |
+| `assets.go` | Inert Go embedding of the seven modules. |
 | `check.py` / `tests/` | Offline checks and repository-owned CPU fixtures. |
 
 The [Kaggle execution component](../docs/development/providers/kaggle-execution.md) constructs the remote
-script from the locked modules and frozen plan. Packaging those modules is not local execution.
+script from the embedded modules and frozen plan. Packaging those modules is not local execution.
 The runner receives staged relative paths, job/attempt/nonce and digests, not provider tokens,
 source URLs, account configuration or callback addresses.
 
@@ -146,11 +146,9 @@ python runner/check.py
 go test ./runner
 ```
 
-The Python check validates source/JSON syntax, the asset lock, decoder and explicit CPU
-fixtures. It can execute those repository-owned fixtures on Linux; it does not call Kaggle
-or allocate GPU. Go tests check the embedded source inventory/lock. For an intentional,
-reviewed asset change only, update hashes with `python runner/check.py --lock` and rerun checks.
-Never refresh the lock to conceal an unexpected source difference.
+The Python check validates source/JSON syntax, the decoder and explicit CPU
+fixtures. It does not contact providers or allocate GPU. Go tests check the exact
+embedded source inventory and independent copies returned to callers.
 
 The locked client/CI Python is 3.11.16. Native control-plane checks on macOS do not
 mean the remote runner supports those hosts. Keep full operator/provider run records outside this

@@ -1,4 +1,4 @@
-package collection
+package runnerplan
 
 import (
 	"bytes"
@@ -12,34 +12,34 @@ import (
 // invalid Unicode surrogate. json.Unmarshal alone silently repairs those strings.
 func strictValue(raw []byte) (any, error) {
 	if len(raw) == 0 || len(raw) > MaxManifestBytes || !utf8.Valid(raw) || !pairedEscapes(raw) {
-		return nil, ErrInvalid
+		return nil, ErrResult
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()
 	budget := 100000
 	if err := walkJSON(d, 0, &budget); err != nil {
-		return nil, ErrInvalid
+		return nil, ErrResult
 	}
 	if _, err := d.Token(); err != io.EOF {
-		return nil, ErrInvalid
+		return nil, ErrResult
 	}
 	var value any
 	if json.Unmarshal(raw, &value) != nil {
-		return nil, ErrInvalid
+		return nil, ErrResult
 	}
 	if _, ok := value.(map[string]any); !ok {
-		return nil, ErrInvalid
+		return nil, ErrResult
 	}
 	return value, nil
 }
 func walkJSON(d *json.Decoder, depth int, budget *int) error {
 	*budget--
 	if depth > 32 || *budget < 0 {
-		return ErrInvalid
+		return ErrResult
 	}
 	token, err := d.Token()
 	if err != nil {
-		return ErrInvalid
+		return ErrResult
 	}
 	delim, ok := token.(json.Delim)
 	if !ok {
@@ -52,7 +52,7 @@ func walkJSON(d *json.Decoder, depth int, budget *int) error {
 			token, err := d.Token()
 			key, ok := token.(string)
 			if err != nil || !ok || keys[key] {
-				return ErrInvalid
+				return ErrResult
 			}
 			keys[key] = true
 			if err := walkJSON(d, depth+1, budget); err != nil {
@@ -61,7 +61,7 @@ func walkJSON(d *json.Decoder, depth int, budget *int) error {
 		}
 		token, err = d.Token()
 		if err != nil || token != json.Delim('}') {
-			return ErrInvalid
+			return ErrResult
 		}
 	case '[':
 		for d.More() {
@@ -71,10 +71,10 @@ func walkJSON(d *json.Decoder, depth int, budget *int) error {
 		}
 		token, err = d.Token()
 		if err != nil || token != json.Delim(']') {
-			return ErrInvalid
+			return ErrResult
 		}
 	default:
-		return ErrInvalid
+		return ErrResult
 	}
 	return nil
 }

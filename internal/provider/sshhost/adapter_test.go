@@ -143,12 +143,12 @@ func (h *harness) submit(t *testing.T) provider.RemoteReference {
 	return *out.Remote
 }
 
-func resultManifest(outputs map[string]string) string {
+func resultManifest(id provider.Identity, outputs map[string]string) string {
 	var artifacts []map[string]any
 	for name, data := range outputs {
 		artifacts = append(artifacts, map[string]any{"path": name, "bytes": len(data), "sha256": provider.Digest([]byte(data))})
 	}
-	raw, _ := json.Marshal(map[string]any{"phase": "completed", "artifacts": artifacts})
+	raw, _ := json.Marshal(map[string]any{"manifest_version": "1", "job_id": id.JobID, "attempt_id": id.AttemptID, "attempt_nonce": id.Nonce, "runner_version": "fixture", "bundle_sha256": id.BundleSHA256, "input_manifest_sha256": id.InputManifestSHA256, "started_at": "2026-10-14T00:00:00Z", "finished_at": "2026-10-14T00:00:01Z", "phase": "completed", "exit_code": 0, "timed_out": false, "resource_check": map[string]any{"gpu_required": false, "gpu_verified": false}, "artifacts": artifacts, "error": nil})
 	return string(raw)
 }
 
@@ -229,7 +229,7 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 	}
 
 	h.host.finish(0, map[string]string{"control/stdout.log": "out\n", "control/stderr.log": "", "control/environment.json": "{}",
-		"control/bundle.tar.gz": "private", "control/execution-result.json": resultManifest(map[string]string{"answer.txt": "42"}),
+		"control/bundle.tar.gz": "private", "control/execution-result.json": resultManifest(h.job.Identity, map[string]string{"answer.txt": "42"}),
 		"outputs/answer.txt": "42", "outputs/undeclared.txt": "x"})
 	done, err := h.adapter.Observe(ctx, remote)
 	if err != nil || done.Execution != domain.ExecutionSucceeded || done.RemoteActivity != domain.RemoteActivityInactive ||
@@ -546,7 +546,7 @@ func TestReadTarRefusesLinksAndOversizedFiles(t *testing.T) {
 	h := newHarness(t)
 	remote := h.submit(t)
 	h.host.finish(0, map[string]string{"control/stdout.log": "x", "outputs/answer.txt": "42",
-		"control/execution-result.json": resultManifest(map[string]string{"answer.txt": "42"})})
+		"control/execution-result.json": resultManifest(h.job.Identity, map[string]string{"answer.txt": "42"})})
 	c := h.host.container(t)
 	c.files["relay/work/control/stderr.log"] = fakeFile{link: true}
 	if _, err := h.adapter.ListArtifacts(ctx, remote, provider.PageRequest{Limit: 10}); !errors.Is(err, ErrArtifact) {
@@ -583,5 +583,35 @@ func TestPrepareUsesFrozenProcessLimit(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("container did not use the configured PID limit")
+	}
+}
+
+func TestCatalogDoesNotTrustInvalidResultOutputs(t *testing.T) {
+	for _, name := range []string{"partial", "duplicate", "identity"} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			remote := h.submit(t)
+			raw := resultManifest(h.job.Identity, map[string]string{"answer.txt": "42"})
+			switch name {
+			case "partial":
+				raw = `{"phase":"completed","artifacts":[{"path":"answer.txt","bytes":2}]}`
+			case "duplicate":
+				raw = strings.TrimSuffix(raw, "}") + `,"phase":"failed"}`
+			case "identity":
+				id := h.job.Identity
+				id.JobID = "other"
+				raw = resultManifest(id, map[string]string{"answer.txt": "42"})
+			}
+			h.host.finish(0, map[string]string{"control/execution-result.json": raw, "outputs/answer.txt": "42"})
+			page, err := h.adapter.ListArtifacts(context.Background(), remote, provider.PageRequest{Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, artifact := range page.Artifacts {
+				if strings.HasPrefix(artifact.Path, "outputs/") {
+					t.Fatal("untrusted output listed", artifact.Path)
+				}
+			}
+		})
 	}
 }

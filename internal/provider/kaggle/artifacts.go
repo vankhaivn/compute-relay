@@ -19,6 +19,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
 )
 
 const artifactManifest = "control/execution-result.json"
@@ -298,6 +299,10 @@ func (a *ArtifactReader) FetchArtifactWithProgress(parent context.Context, ref p
 		observer = &artifactProgressWriter{dst: dst, progress: progress}
 		dst = observer
 	}
+	var manifest bytes.Buffer
+	if file.Path == artifactManifest {
+		dst = io.MultiWriter(dst, &manifest)
+	}
 	checked := &artifactWriter{ctx: ctx, dst: dst, limit: file.Bytes, hash: sha256.New(), cancel: cancel}
 	_, err = a.call(ctx, "fetch", ref, &artifactEntry{file.Path, file.Bytes, file.SHA256}, checked)
 	if observer != nil && observer.err != nil {
@@ -305,6 +310,11 @@ func (a *ArtifactReader) FetchArtifactWithProgress(parent context.Context, ref p
 	}
 	if err != nil || checked.failed || checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
 		return none, ErrArtifactTransfer
+	}
+	if file.Path == artifactManifest {
+		if _, err := runnerplan.ParseResult(ref.Identity, manifest.Bytes()); err != nil {
+			return none, ErrArtifactTransfer
+		}
 	}
 	return provider.TransferResult{Bytes: file.Bytes, SHA256: file.SHA256}, nil
 }
