@@ -17,6 +17,7 @@ type principalKey struct{}
 
 type routePolicy struct {
 	public, upload, download, query, logs bool
+	remote                                bool // handler makes bounded read-only provider calls
 	bodyLimit                             int64
 }
 
@@ -37,7 +38,7 @@ func (h *handler) routes() {
 			respondError(w, r, http.StatusMethodNotAllowed, domain.CodeInvalidRequest, domain.FailureStageValidation, "method not implemented for this route")
 		}
 		fallback := policy
-		fallback.public, fallback.upload, fallback.download, fallback.bodyLimit = false, false, false, 0
+		fallback.public, fallback.upload, fallback.download, fallback.remote, fallback.bodyLimit = false, false, false, false, 0
 		// Cleanup query parameters are accepted only by its GET preview.
 		if strings.HasSuffix(path, "/cleanup") {
 			fallback.query = false
@@ -106,7 +107,7 @@ func (h *handler) routes() {
 		if h.config.Cleanup != nil {
 			cleanupMethods = "GET, POST"
 		}
-		add(cleanupMethods, "jobs/{job}/cleanup", routePolicy{query: true, bodyLimit: operations.MaxRequestBytes}, h.controls)
+		add(cleanupMethods, "jobs/{job}/cleanup", routePolicy{query: true, remote: true, bodyLimit: operations.MaxRequestBytes}, h.controls)
 		h.policies["POST "+base+"jobs/{job}/cleanup"] = routePolicy{bodyLimit: operations.MaxRequestBytes}
 		add("GET", "operations/{operation}", routePolicy{}, h.controls)
 	}

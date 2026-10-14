@@ -100,7 +100,7 @@ func NewServer(cfg Config, access *auth.Service, objectService *objects.Service,
 	return &http.Server{
 		Addr: cfg.Listen, Handler: h, MaxHeaderBytes: 32 << 10,
 		ReadHeaderTimeout: cfg.HeaderTimeout, ReadTimeout: cfg.UploadTimeout,
-		WriteTimeout: cfg.UploadTimeout + cfg.RequestTimeout, IdleTimeout: cfg.IdleTimeout,
+		WriteTimeout: max(cfg.UploadTimeout, cleanup.PreviewTimeout) + cfg.RequestTimeout, IdleTimeout: cfg.IdleTimeout,
 	}, nil
 }
 
@@ -194,12 +194,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	timeout, maxBody := h.config.RequestTimeout, h.config.MaxJSONBytes
+	timeout, maxBody := h.timeout(policy), h.config.MaxJSONBytes
 	if policy.upload {
-		timeout, maxBody = h.config.UploadTimeout, h.config.MaxUploadBytes
-	}
-	if policy.download {
-		timeout = h.config.UploadTimeout // JSON body stays bounded by MaxJSONBytes.
+		maxBody = h.config.MaxUploadBytes
 	}
 	if r.ContentLength > maxBody {
 		mapError(w, r, blobfs.ErrTooLarge)
@@ -230,6 +227,17 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	r = r.WithContext(context.WithValue(r.Context(), principalKey{}, principal))
 	h.mux.ServeHTTP(w, r)
+}
+
+// timeout is the per-request deadline for an authenticated route.
+func (h *handler) timeout(policy routePolicy) time.Duration {
+	switch {
+	case policy.upload, policy.download: // A download's JSON body stays bounded by MaxJSONBytes.
+		return h.config.UploadTimeout
+	case policy.remote:
+		return max(h.config.RequestTimeout, cleanup.PreviewTimeout)
+	}
+	return h.config.RequestTimeout
 }
 
 func (h *handler) readiness(w http.ResponseWriter, r *http.Request) {

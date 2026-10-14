@@ -10,6 +10,11 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
+// PreviewTimeout bounds one preview including its read-only provider calls. Kaggle needs
+// several API reads per resource, so the HTTP route grants this budget instead of the
+// short control-request deadline.
+const PreviewTimeout = time.Minute
+
 // WithPreviewResolver returns a service configured before the HTTP server starts.
 // Admission-only installations still expose the local inventory without provider reads.
 func (s *Service) WithPreviewResolver(resolver Resolver) *Service {
@@ -24,7 +29,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 		return Preview{}, err
 	}
 	repo := s.repo
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, PreviewTimeout)
 	defer cancel()
 	plan, err := repo.PlanCleanup(ctx, w, p.TokenID(), job, attempt, discard)
 	if err != nil {
@@ -38,8 +43,17 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	if s.previewResolver != nil {
 		adapter, _ = s.previewResolver.Resolve(plan.Binding)
 	}
+	// One binding check covers every resource of this read-only preview.
+	checked, bindingErr := false, error(nil)
+	verified := func() bool {
+		if !checked {
+			bindingErr = adapter.Verify(ctx, plan.Binding)
+			checked = true
+		}
+		return bindingErr == nil
+	}
 	for _, resource := range plan.Resources {
-		view := previewResource(ctx, plan, resource, adapter)
+		view := previewResource(ctx, plan, resource, adapter, verified)
 		result.Resources = append(result.Resources, view)
 		if !view.Eligible {
 			if result.Eligible {
@@ -60,7 +74,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	return result, nil
 }
 
-func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, adapter provider.Provider) (view ResourcePreview) {
+func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, adapter provider.Provider, verified func() bool) (view ResourcePreview) {
 	request := resource.Request
 	view = ResourcePreview{ResourceID: request.LedgerID, Purpose: request.Purpose, Fingerprint: resource.Fingerprint(), Observation: "not_checked", Reason: plan.Reason}
 	defer func() {
@@ -92,7 +106,7 @@ func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, a
 		view.Reason = description.Reason
 		return view
 	}
-	if adapter.Verify(ctx, plan.Binding) != nil {
+	if !verified() {
 		view.Observation, view.Reason = "unknown", "binding_unverified"
 		return view
 	}

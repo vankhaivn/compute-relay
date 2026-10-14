@@ -279,8 +279,8 @@ func TestCleanupPreviewDoesNotCreateOperationRows(t *testing.T) {
 	probe := &cleanupProbe{probeProvider: f.adapter}
 	service := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
 	preview, err := service.Preview(ctx, actor, "a", id.JobID, id.AttemptID, false)
-	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
-		t.Fatal("successful preview lost the original targets", preview, err)
+	if err != nil || !preview.Eligible || len(preview.Resources) != 2 || probe.verifies != 1 {
+		t.Fatal("successful preview lost the original targets or reverified the binding", preview, err, probe.verifies)
 	}
 	requireUnchangedTableCounts(t, f.s, counts)
 	if controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='cleanup'") != 0 || controlCount(t, f.s, "SELECT count(*) FROM cleanup_resources") != 0 {

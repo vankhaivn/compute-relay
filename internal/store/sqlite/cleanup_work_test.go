@@ -22,11 +22,15 @@ type cleanupProbe struct {
 	mu           sync.Mutex
 	requests     []provider.CleanupRequest
 	verifyErr    error
+	verifies     int
 	err          error
 	resourceHook func(context.Context, provider.CleanupResourceRequest) (provider.CleanupOutcome, error)
 }
 
 func (p *cleanupProbe) Verify(ctx context.Context, b provider.BindingSnapshot) error {
+	p.mu.Lock()
+	p.verifies++
+	p.mu.Unlock()
 	if p.verifyErr != nil {
 		return p.verifyErr
 	}

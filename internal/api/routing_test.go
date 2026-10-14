@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/vankhaivn/compute-relay/internal/cleanup"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
 func TestMuxRoutingRejectsUnsupportedMethodsWithEnvelope(t *testing.T) {
@@ -60,5 +64,20 @@ func TestMuxNeverRedirectsOrAcceptsPathAndQueryAliases(t *testing.T) {
 				t.Fatalf("missing invalid-request envelope: %s", raw)
 			}
 		})
+	}
+}
+
+// Kaggle preview reads exceed the short control deadline; only the GET preview gets more.
+func TestCleanupPreviewRouteGetsPreviewDeadline(t *testing.T) {
+	h := &handler{config: Config{RequestTimeout: 10 * time.Second, UploadTimeout: 2 * time.Minute, Operations: new(operations.Service), Cleanup: new(cleanup.Service)}}
+	h.routes()
+	const path = "/v1/workspaces/{workspace}/jobs/{job}/cleanup"
+	if got := h.timeout(h.policies["GET "+path]); got != cleanup.PreviewTimeout {
+		t.Fatal("cleanup preview deadline", got)
+	}
+	for _, pattern := range []string{"POST " + path, "HEAD " + path, "GET /v1/workspaces/{workspace}/operations/{operation}"} {
+		if got := h.timeout(h.policies[pattern]); got != 10*time.Second {
+			t.Fatal(pattern, got)
+		}
 	}
 }
