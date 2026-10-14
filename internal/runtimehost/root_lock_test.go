@@ -21,17 +21,11 @@ func TestHostedLayoutCreatesOneLockAndKeepsItForLiveChildren(t *testing.T) {
 		}
 	}
 	host, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer host.Close()
 	before, err := os.Stat(filepath.Join(path, "runtime.lock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := host.root.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
+	requireNoError(t, host.root.Close())
 	if _, err := host.root.Child("extra"); !errors.Is(err, statefs.ErrClosed) {
 		t.Fatal("closed host issued child", err)
 	}
@@ -41,22 +35,14 @@ func TestHostedLayoutCreatesOneLockAndKeepsItForLiveChildren(t *testing.T) {
 	if _, err := host.Status(context.Background()); err != nil {
 		t.Fatal("early parent close broke live child", err)
 	}
-	if err := host.results.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := host.inputs.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, host.results.Close())
+	requireNoError(t, host.inputs.Close())
 	if _, err := statefs.Open(path); !errors.Is(err, statefs.ErrLocked) {
 		t.Fatal("database did not pin host lock", err)
 	}
-	if err := host.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, host.Close())
 	reopened, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer reopened.Close()
 	after, err := os.Stat(filepath.Join(path, "runtime.lock"))
 	if err != nil || !os.SameFile(before, after) {
@@ -68,9 +54,7 @@ func TestHostedChildrenRefuseStandaloneConstructors(t *testing.T) {
 	path := initialized(t)
 	for _, malformed := range []bool{false, true} {
 		if malformed {
-			if err := os.WriteFile(filepath.Join(path, markerName), []byte("invalid"), 0600); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, os.WriteFile(filepath.Join(path, markerName), []byte("invalid"), 0600))
 		}
 		if store, err := sqlite.Open(context.Background(), filepath.Join(path, "state"), sqlite.DefaultOptions()); err == nil {
 			store.Close()
@@ -93,40 +77,24 @@ func TestHostedChildrenRefuseStandaloneConstructors(t *testing.T) {
 func TestHostedLegacyMarkerRemovedOnlyAfterCompleteValidation(t *testing.T) {
 	path := initialized(t)
 	host, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	id := host.identity.InstallationID
-	if err := host.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, host.Close())
 	marker := filepath.Join(path, "state", ".installation")
-	if err := os.WriteFile(marker, []byte(id), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.WriteFile(marker, []byte(id), 0600))
 	locks := map[string]os.FileInfo{}
 	for _, name := range []string{"state/runtime.lock", "inputs/.lock", "results/.lock"} {
 		file := filepath.Join(path, filepath.FromSlash(name))
-		if err := os.WriteFile(file, nil, 0600); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, os.WriteFile(file, nil, 0600))
 		locks[file], err = os.Stat(file)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 	}
 	resultsID := filepath.Join(path, "results", ".retention-id")
 	original, err := os.ReadFile(resultsID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	inputID, err := os.ReadFile(filepath.Join(path, "inputs", ".retention-id"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(resultsID, inputID, 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
+	requireNoError(t, os.WriteFile(resultsID, inputID, 0600))
 	if failed, err := Open(context.Background(), path); err == nil {
 		failed.Close()
 		t.Fatal("swapped result identity accepted")
@@ -135,9 +103,7 @@ func TestHostedLegacyMarkerRemovedOnlyAfterCompleteValidation(t *testing.T) {
 	if err != nil || string(retained) != id {
 		t.Fatal("failed startup removed legacy marker", err)
 	}
-	if err := os.WriteFile(resultsID, original, 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.WriteFile(resultsID, original, 0600))
 	host, err = Open(context.Background(), path)
 	if err != nil {
 		t.Fatal("failed startup leaked a lock", err)
@@ -157,15 +123,11 @@ func TestHostedLegacyMarkerRemovedOnlyAfterCompleteValidation(t *testing.T) {
 func TestHostedEmptyAndReplacedDatabaseFailBeforeMutation(t *testing.T) {
 	other := initialized(t)
 	replacement, err := os.ReadFile(filepath.Join(other, "state", "runtime.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, content := range [][]byte{nil, replacement} {
 		path := initialized(t)
 		database := filepath.Join(path, "state", "runtime.db")
-		if err := os.WriteFile(database, content, 0600); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, os.WriteFile(database, content, 0600))
 		if host, err := Open(context.Background(), path); err == nil {
 			host.Close()
 			t.Fatal("empty or foreign database adopted")

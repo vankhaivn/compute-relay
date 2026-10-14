@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
@@ -34,9 +33,7 @@ func localFailureFixture(t *testing.T, kind string) (*managedTestFixture, admiss
 	}
 	// Replay the fixture's accepted request to retain its exact operation identity.
 	r, err := f.controls(t).Submit(t.Context(), f.actor, "app", job.JobID, domain.OperationCleanup, "heartbeat-cleanup", systemControlBody(t, job.AttemptID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return f, job, r.Operation.ID
 }
 
@@ -240,9 +237,7 @@ func TestLocalReadFailuresPreserveDispatchPhases(t *testing.T) {
 					f.dispatchOnce(t)
 				}
 				beforeRecord, err := f.host.store.ReadJob(t.Context(), "app", f.actor.TokenID(), job.JobID)
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				fault.stage, fault.calls = stage, 0
 				f.advance(t, 2*time.Minute)
 				before := f.backend.Stats()
@@ -323,9 +318,7 @@ func TestLocalCancellationReadKeepsOneShotIntent(t *testing.T) {
 			f.dispatchOnce(t)
 			f.dispatchOnce(t)
 			receipt, err := f.controls(t).Submit(t.Context(), f.actor, "app", job.JobID, domain.OperationCancel, "local-cancel", systemControlBody(t, job.AttemptID))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			fault := &localProviderFault{stage: "cancel", cause: cause}
 			f.wrapProvider = func(base provider.Provider) provider.Provider { return localFailureProvider{base, fault} }
 			f.advance(t, 2*time.Minute)
@@ -362,14 +355,10 @@ func TestLocalAttemptReadAfterSubmissionIntentNeverRearmsStart(t *testing.T) {
 	f, job, _ := localFailureFixture(t, "dispatch")
 	f.dispatchOnce(t)
 	connection, err := f.host.store.ReadJob(t.Context(), "app", f.actor.TokenID(), job.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	binding := provider.BindingSnapshot{Binding: connection.Profile.Binding, AccountScope: connection.Profile.AccountScope, CredentialRef: connection.Profile.CredentialRef}
 	frozen, err := f.host.store.ReadManagedBinding(t.Context(), binding)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	inner := binding
 	inner.AccountScope = frozen.CanonicalAccount
 	policy := kaggle.DefaultExecutionPolicy()
@@ -379,9 +368,7 @@ func TestLocalAttemptReadAfterSubmissionIntentNeverRearmsStart(t *testing.T) {
 		func(context.Context, provider.Identity) (provider.Plan, provider.Prepared, error) {
 			return provider.Plan{}, provider.Prepared{}, sqlite.ErrBusy
 		}, policy, true)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	p := &localStartReadProvider{start: func(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
 		record, err := f.host.store.ReadJob(ctx, "app", f.actor.TokenID(), job.JobID)
 		if err != nil || record.Attempt.State.Execution != domain.ExecutionUnknown || record.Attempt.State.Orchestration != domain.OrchestrationDispatching {
@@ -424,9 +411,7 @@ func TestCollectionLocalAndProgressFailuresBothSurvive(t *testing.T) {
 	f.wrapProvider = func(base provider.Provider) provider.Provider { return localFailureProvider{base, fault} }
 	repo := &localCollectionProgressRepository{Store: f.host.store}
 	engine, err := collection.New(repo, f.services.resolver, f.host.results, f.clock, collection.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	worked, err := engine.RunOnce(t.Context())
 	if !worked || !errors.Is(err, sqlite.ErrCorrupt) || !errors.Is(err, context.DeadlineExceeded) || worker.Classify(err) != worker.Stop {
 		t.Fatal("progress checkpoint replaced the fatal local cause", worked, err)
@@ -475,9 +460,7 @@ func TestCollectionProviderFailureKeepsProgressRetryPolicy(t *testing.T) {
 			cfg := collection.DefaultConfig()
 			cfg.Workers, cfg.PollDelay = 1, time.Millisecond
 			engine, err := collection.New(repo, f.services.resolver, f.host.results, f.clock, cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			err = engine.Run(ctx)
 			if cause == sqlite.ErrCorrupt {
 				if !errors.Is(err, cause) || resumed || repo.samples != 2 {
@@ -513,15 +496,11 @@ func TestLocalReadAndHeartbeatFailuresBothSurvive(t *testing.T) {
 			switch kind {
 			case "dispatch":
 				engine, err := dispatch.New(heartbeatDispatchRepository{f.host.store, f.clock.Now, sqlite.ErrBusy}, f.services.resolver, f.host.inputs, f.clock, dispatch.DefaultConfig())
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				step = func(ctx context.Context) (bool, error) { return engine.RunOnce(ctx, "local-heartbeat") }
 			case "collection":
 				engine, err := collection.New(heartbeatCollectionRepository{f.host.store, f.clock.Now, sqlite.ErrBusy}, f.services.resolver, f.host.results, f.clock, collection.DefaultConfig())
-				if err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, err)
 				step = engine.RunOnce
 			default:
 				step = f.cleanupEngine(t, heartbeatCleanupRepository{f.host.store, sqlite.ErrBusy}).RunOnce
@@ -572,9 +551,7 @@ func TestPreparationProgressFailureJoinsBeforeStoppingAndPreservesOutcome(t *tes
 			p := &localPreparationProgressProvider{sampled: make(chan struct{}), release: make(chan struct{})}
 			f.wrapProvider = func(base provider.Provider) provider.Provider { p.Provider = base; return p }
 			engine, err := dispatch.New(localPreparationProgressRepository{f.host.store, cause}, f.services.resolver, f.host.inputs, f.clock, dispatch.DefaultConfig())
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			done := make(chan error, 1)
 			go func() { _, err := engine.RunOnce(t.Context(), "local-progress"); done <- err }()
 			select {
@@ -619,9 +596,7 @@ func TestPreparationProgressAndProviderFailuresStopRuntimeAfterCallbackJoins(t *
 	cfg := dispatch.DefaultConfig()
 	cfg.Workers, cfg.PollDelay = 1, time.Millisecond
 	engine, err := dispatch.New(localPreparationProgressRepository{f.host.store, sqlite.ErrCorrupt}, f.services.resolver, f.host.inputs, f.clock, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	listener := testListener(t)
@@ -677,24 +652,9 @@ type localReadLoopRepository struct {
 	success func()
 }
 
-func (r localReadLoopRepository) ClaimRecovery(ctx context.Context, owner string) (*scheduler.Claim, error) {
-	r.clock.advance(2 * time.Minute)
-	return r.Store.ClaimRecovery(ctx, owner)
-}
 func (r localReadLoopRepository) ClaimCollection(ctx context.Context, ttl time.Duration, workers int) (*collection.Work, error) {
 	r.clock.advance(2 * time.Minute)
 	return r.Store.ClaimCollection(ctx, ttl, workers)
-}
-func (r localReadLoopRepository) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.Work, error) {
-	r.clock.advance(2 * time.Minute)
-	return r.Store.ClaimCleanup(ctx, ttl)
-}
-func (r localReadLoopRepository) CommitDispatch(ctx context.Context, handle dispatch.Handle, action dispatch.Action) (dispatch.Work, error) {
-	work, err := r.Store.CommitDispatch(ctx, handle, action)
-	if err == nil && action.Kind == dispatch.PreparationSeen {
-		r.success()
-	}
-	return work, err
 }
 func (r localReadLoopRepository) CompleteCollection(ctx context.Context, work collection.Work, proof collection.Verified) error {
 	err := r.Store.CompleteCollection(ctx, work, proof)
@@ -702,119 +662,4 @@ func (r localReadLoopRepository) CompleteCollection(ctx context.Context, work co
 		r.success()
 	}
 	return err
-}
-func (r localReadLoopRepository) CompleteCleanup(ctx context.Context, work cleanup.Work, outcome cleanup.Outcome) error {
-	err := r.Store.CompleteCleanup(ctx, work, outcome)
-	if err == nil {
-		r.success()
-	}
-	return err
-}
-
-func TestManagedBindingReadLoopsRetryOrStopRuntime(t *testing.T) {
-	for _, kind := range []string{"dispatch", "collection", "cleanup"} {
-		for _, fatal := range []bool{false, true} {
-			t.Run(kind+map[bool]string{false: "/retry", true: "/fatal"}[fatal], func(t *testing.T) {
-				f, job, cleanupID := localFailureFixture(t, kind)
-				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-				defer cancel()
-				retried, recoverRead, resumed := make(chan struct{}), make(chan struct{}), make(chan struct{})
-				repo := localReadLoopRepository{Store: f.host.store, clock: f.clock.(*fixedClock), success: func() { close(resumed); cancel() }}
-				read, calls := f.services.resolver.read, 0
-				f.services.resolver.read = func(ctx context.Context, binding provider.BindingSnapshot) (connections.RuntimeBinding, error) {
-					calls++
-					if fatal {
-						return connections.RuntimeBinding{}, sqlite.ErrCorrupt
-					}
-					switch calls {
-					case 1:
-						return connections.RuntimeBinding{}, sqlite.ErrBusy
-					case 2:
-						close(retried)
-						return connections.RuntimeBinding{}, context.DeadlineExceeded
-					default:
-						select {
-						case <-recoverRead:
-							return read(ctx, binding)
-						case <-ctx.Done():
-							return connections.RuntimeBinding{}, ctx.Err()
-						}
-					}
-				}
-				var run func(context.Context) error
-				switch kind {
-				case "dispatch":
-					cfg := dispatch.DefaultConfig()
-					cfg.Workers, cfg.PollDelay = 1, time.Millisecond
-					engine, err := dispatch.New(repo, f.services.resolver, f.host.inputs, f.clock, cfg)
-					if err != nil {
-						t.Fatal(err)
-					}
-					run = engine.Run
-				case "collection":
-					cfg := collection.DefaultConfig()
-					cfg.Workers, cfg.PollDelay = 1, time.Millisecond
-					engine, err := collection.New(repo, f.services.resolver, f.host.results, f.clock, cfg)
-					if err != nil {
-						t.Fatal(err)
-					}
-					run = engine.Run
-				default:
-					cfg := cleanup.DefaultConfig()
-					cfg.Workers, cfg.PollDelay = 1, time.Millisecond
-					engine, err := cleanup.New(repo, f.services.resolver, cfg)
-					if err != nil {
-						t.Fatal(err)
-					}
-					run = engine.Run
-				}
-				listener := testListener(t)
-				server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
-				ready, done := make(chan struct{}), make(chan error, 1)
-				started := time.Now()
-				go func() {
-					done <- runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { close(ready); return nil }, []func(context.Context) error{run})
-				}()
-				<-ready
-				if !fatal {
-					select {
-					case <-retried:
-					case err := <-done:
-						t.Fatal("local binding retries stopped runtime", err)
-					case <-ctx.Done():
-						t.Fatal("local binding reads were not retried")
-					}
-					response, err := boundedClient().Get("http://" + listener.Addr().String() + "/readyz")
-					if err != nil {
-						t.Fatal("HTTP stopped during binding retries", err)
-					}
-					_ = response.Body.Close()
-					if response.StatusCode != http.StatusOK {
-						t.Fatal("HTTP unavailable during binding retries", response.StatusCode)
-					}
-					close(recoverRead)
-				}
-				select {
-				case err := <-done:
-					if fatal {
-						if !errors.Is(err, ErrState) || calls != 1 {
-							t.Fatal("binding corruption did not stop runtime", err, calls)
-						}
-						assertLocalWorkPreserved(t, f, job, cleanupID)
-					} else {
-						if err != nil || calls != 3 || time.Since(started) < 15*time.Millisecond {
-							t.Fatal("binding retries skipped backoff or recovery", err, calls)
-						}
-						select {
-						case <-resumed:
-						default:
-							t.Fatal("worker never resumed original durable work")
-						}
-					}
-				case <-time.After(5 * time.Second):
-					t.Fatal("runtime did not join local read worker")
-				}
-			})
-		}
-	}
 }

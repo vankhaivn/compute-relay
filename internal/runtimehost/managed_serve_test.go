@@ -21,9 +21,7 @@ func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *test
 	config := f.config
 	t.Setenv("PATH", t.TempDir())
 	secret, _, err := f.host.access.Issue(context.Background(), "app", []auth.Scope{auth.Read}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	announced, done := make(chan Listening, 1), make(chan error, 1)
@@ -65,14 +63,10 @@ func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *test
 	get := func(path string) []byte {
 		t.Helper()
 		request, err := http.NewRequest(http.MethodGet, "http://"+listening.Address+path, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		request.Header.Set("Authorization", "Bearer "+secret.Reveal())
 		response, err := boundedClient().Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		defer response.Body.Close()
 		raw, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 		if err != nil || response.StatusCode != 200 || response.Header.Get("X-Compute-Relay-Mode") != wantMode {

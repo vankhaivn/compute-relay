@@ -25,9 +25,7 @@ func TestLoopbackListenIsExplicitAndCanonical(t *testing.T) {
 func testListener(t *testing.T) net.Listener {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { listener.Close() })
 	return listener
 }
@@ -62,14 +60,10 @@ func TestHTTPShutdownJoinsActiveHandlerBeforeReturning(t *testing.T) {
 	case <-time.After(25 * time.Millisecond):
 	}
 	close(release)
-	if err := <-response; err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, <-response)
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("shutdown failed to join")
 	}

@@ -34,18 +34,12 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 			}
 			ctx := context.Background()
 			objectService, err := objects.New(f.host.access, f.host.inputs, f.host.store)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			payload := "synthetic bundle never executed"
 			bundle, err := objectService.Upload(ctx, f.actor, "app", int64(len(payload)), provider.Digest([]byte(payload)), strings.NewReader(payload))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			jobs, err := admission.New(f.host.access, f.host.store, admission.DefaultLimits())
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			raw := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"cpu fixture","profile":%q,"bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","MUST_NOT_EXECUTE.py"]},"inputs":[],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`, c.Selection.Profile, bundle.ID)
 			gpuRaw := strings.Replace(raw, `"accelerator":"cpu"`, `"accelerator":"gpu","minimum_gpu_count":1`, 1)
 			if _, err := jobs.Submit(ctx, f.actor, "app", "gpu-on-cpu-rejected", []byte(gpuRaw)); !errors.Is(err, admission.ErrRequirements) {
@@ -92,9 +86,7 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 				otherResource = strings.Replace(gpuRaw, c.Selection.Profile, gpuConnection.Selection.Profile, 1)
 			}
 			second, err := jobs.Submit(ctx, f.actor, "app", "same-account-second-job", []byte(otherResource))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			grant = fmt.Sprintf(`{"attempt_id":%q,"max_remote_wall_seconds":10,"authorize_private_staging":true,"authorize_compute":true}`, second.AttemptID)
 			if _, err := f.services.authorizations.Authorize(ctx, f.actor, "app", second.JobID, "same-account-second-grant", []byte(grant)); err != nil {
 				t.Fatal(err)
@@ -114,9 +106,7 @@ func TestManagedCPURefreshKeepsHistoricalGPUResourcePolicy(t *testing.T) {
 	old := f.binding(t, original)
 	f.adapter.config.MachineShape = "cpu"
 	_, err := f.services.connections.Submit(context.Background(), f.actor, "app", original.ID, "check-cpu-key", []byte(fmt.Sprintf(`{"action":"check","expected_revision":%d}`, original.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(context.Background()); err != nil || !worked {
 		t.Fatal(err)
 	}
@@ -126,9 +116,7 @@ func TestManagedCPURefreshKeepsHistoricalGPUResourcePolicy(t *testing.T) {
 	}
 	for _, snapshot := range []provider.BindingSnapshot{old, f.binding(t, updated), old} {
 		saved, err := f.host.store.ReadManagedBinding(context.Background(), snapshot)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		// Legacy GPU profiles omitted the generic accelerator field. Recovery
 		// must continue using their original private runtime configuration.
 		if snapshot == old {
@@ -148,9 +136,7 @@ func TestManagedCPURefreshKeepsHistoricalGPUResourcePolicy(t *testing.T) {
 		t.Fatal("GPU selection lacks its resource metadata")
 	}
 	saved, err := f.host.store.ReadManagedBinding(context.Background(), f.binding(t, updated))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	saved.Profile.Accelerator = "gpu"
 	if _, err := f.host.managedProvider(f.adapter.config, f.services.connections, saved); err == nil {
 		t.Fatal("conflicting frozen resources accepted")

@@ -73,27 +73,21 @@ func resilienceEngine(t *testing.T, kind string, fault *resilienceFault) func(co
 		cfg.Workers = 1
 		cfg.PollDelay = time.Millisecond
 		engine, err := dispatch.New(resilienceDispatch{resilienceFault: fault}, resilienceResolver{}, resilienceBlobs{}, nil, cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		return engine.Run
 	case "collection":
 		cfg := collection.DefaultConfig()
 		cfg.Workers = 1
 		cfg.PollDelay = time.Millisecond
 		engine, err := collection.New(resilienceCollection{resilienceFault: fault}, resilienceResolver{}, resilienceBlobs{}, nil, cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		return engine.Run
 	default:
 		cfg := cleanup.DefaultConfig()
 		cfg.Workers = 1
 		cfg.PollDelay = time.Millisecond
 		engine, err := cleanup.New(resilienceCleanup{resilienceFault: fault}, resilienceResolver{}, cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		return engine.Run
 	}
 }

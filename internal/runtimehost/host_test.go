@@ -23,24 +23,16 @@ func TestLocalRuntimeInitializeReopenAndExclusiveOwnership(t *testing.T) {
 		t.Fatal("initialization overwrote existing state")
 	}
 	h, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	before, err := h.Status(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if other, err := Open(ctx, path); err == nil {
 		_ = other.Close()
 		t.Fatal("second host acquired state")
 	}
-	if err := h.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, h.Close())
 	h, err = Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer h.Close()
 	after, err := h.Status(ctx)
 	if err != nil || before != after {
@@ -52,9 +44,7 @@ func TestLocalRuntimeMissingEvidenceNeverReinitializes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := initialized(t)
 			missing := filepath.Join(path, filepath.FromSlash(name))
-			if err := os.Remove(missing); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, os.Remove(missing))
 			if h, err := Open(context.Background(), path); err == nil {
 				h.Close()
 				t.Fatal("missing evidence recreated")
@@ -76,30 +66,18 @@ func TestLocalRuntimeCorruptMarkerAndSwappedStoresFailClosed(t *testing.T) {
 	path := initialized(t)
 	marker := filepath.Join(path, markerName)
 	raw, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, bad := range [][]byte{nil, []byte("{}"), append(append([]byte{}, raw...), '\n'), []byte(`{"version":1,"version":1}`)} {
-		if err := os.WriteFile(marker, bad, 0600); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, os.WriteFile(marker, bad, 0600))
 		if h, err := Open(context.Background(), path); err == nil {
 			h.Close()
 			t.Fatal("invalid marker accepted")
 		}
 	}
-	if err := os.WriteFile(marker, raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(filepath.Join(path, "inputs"), filepath.Join(path, "swap")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(filepath.Join(path, "results"), filepath.Join(path, "inputs")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(filepath.Join(path, "swap"), filepath.Join(path, "results")); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.WriteFile(marker, raw, 0600))
+	requireNoError(t, os.Rename(filepath.Join(path, "inputs"), filepath.Join(path, "swap")))
+	requireNoError(t, os.Rename(filepath.Join(path, "results"), filepath.Join(path, "inputs")))
+	requireNoError(t, os.Rename(filepath.Join(path, "swap"), filepath.Join(path, "results")))
 	if h, err := Open(context.Background(), path); err == nil {
 		h.Close()
 		t.Fatal("swapped blob roots adopted")

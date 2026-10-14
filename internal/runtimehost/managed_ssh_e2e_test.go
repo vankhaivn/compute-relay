@@ -57,9 +57,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	request, _ := json.Marshal(map[string]any{"provider_type": "ssh", "label": "Local Docker", "credentials": map[string]string{
 		"host": host, "port": fmt.Sprint(port), "username": server.User, "password": server.Password}})
 	op, err := f.services.connections.Submit(ctx, f.actor, "app", "", "ssh-e2e-connection", request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(ctx); err != nil || !worked {
 		t.Fatal("verify connection", err)
 	}
@@ -68,9 +66,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 		t.Fatalf("connection not verified: %+v %v", connection, err)
 	}
 	install, err := f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-e2e-image-install", []byte(fmt.Sprintf(`{"action":"install_image","expected_revision":%d}`, connection.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err := f.services.connections.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -89,35 +85,23 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 	opened, err := packaging.OpenProject(project, packaging.DefaultLimits(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer opened.Close()
 	selection, err := opened.Prepare(ctx, []string{"main.py"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var bundle bytes.Buffer
 	if _, err = selection.Write(ctx, &bundle); err != nil {
 		t.Fatal(err)
 	}
 	objectService, err := objects.New(f.host.access, f.host.inputs, f.host.store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	uploaded, err := objectService.Upload(ctx, f.actor, "app", int64(bundle.Len()), provider.Digest(bundle.Bytes()), bytes.NewReader(bundle.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	jobs, err := admission.New(f.host.access, f.host.store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	spec := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"ssh e2e","profile":%q,"bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","main.py"]},"inputs":[],"outputs":[{"path":"answer.txt","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":120,"setup_seconds":30,"finalization_grace_seconds":10}}`, connection.Selection.Profile, uploaded.ID)
 	job, err := jobs.Submit(ctx, f.actor, "app", "ssh-e2e-job", []byte(spec))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() {
 		ids, _ := exec.Command("docker", "ps", "-aq", "--filter", "label=io.compute-relay.attempt="+string(job.AttemptID)).Output()
 		for _, id := range strings.Fields(string(ids)) {
@@ -152,25 +136,15 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	}
 
 	cleanups, err := operations.New(f.host.access, f.host.store, nil, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	secret, _, err := f.host.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Operate}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	operator, err := f.host.access.Authenticate(ctx, secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	receipt, err := cleanups.Submit(ctx, operator, "app", job.JobID, domain.OperationCleanup, "ssh-e2e-cleanup", []byte(fmt.Sprintf(`{"attempt_id":%q}`, job.AttemptID)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cleaner, err := cleanupEngine(f.host.store, f.services.resolver)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := cleaner.RunOnce(ctx); err != nil || !worked {
 		t.Fatal("cleanup", worked, err)
 	}

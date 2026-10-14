@@ -95,9 +95,7 @@ func (f passFunc) SweepOnce(context.Context, retention.Policy, int64, int) (rete
 func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = h.Close() })
 	if _, err := h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)
@@ -107,9 +105,7 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(tokenPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	token := strings.TrimSuffix(string(raw), "\n")
 	url, stop := startHost(t, h)
 	upload := func(body string) domain.ObjectMetadata {
@@ -131,13 +127,9 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 	clock := &fixedClock{now: time.Now().UTC().Add(time.Hour)}
 	injectHostClock(t, h, clock.Now)
 	sweeper, err := h.retentionSweeper()
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	pass := func() {
-		if err := sweepRetention(ctx, sweeper); err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, sweepRetention(ctx, sweeper))
 	}
 	present := func(object domain.ObjectMetadata) bool {
 		stream, err := h.inputs.Open(ctx, "app", object.ID)

@@ -9,8 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,11 +26,11 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
-	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
+	"github.com/vankhaivn/compute-relay/internal/testsupport"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -47,9 +45,7 @@ func newSystemFixture(t *testing.T, scenario fake.Scenario) *managedTestFixture 
 func systemJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return raw
 }
 
@@ -77,13 +73,9 @@ func (f *managedTestFixture) principal(t *testing.T, workspace domain.WorkspaceI
 		t.Fatal(err)
 	}
 	secret, _, err := f.host.access.Issue(t.Context(), workspace, scopes, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	actor, err := f.host.access.Authenticate(t.Context(), secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return actor, secret.Reveal()
 }
 
@@ -107,14 +99,10 @@ func (f *managedTestFixture) connectionFor(t *testing.T, actor auth.Principal, w
 func (f *managedTestFixture) jobSpecFor(t *testing.T, actor auth.Principal, workspace domain.WorkspaceID, connection connections.Connection) admission.Spec {
 	t.Helper()
 	inputs, err := objects.New(f.host.access, f.host.inputs, f.host.store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	bundle := systemBundle(t)
 	object, err := inputs.Upload(t.Context(), actor, workspace, int64(len(bundle)), provider.Digest(bundle), bytes.NewReader(bundle))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	spec := admission.Spec{APIVersion: "compute-connector/v1alpha1", Name: "system fixture", Profile: connection.Selection.Profile,
 		Inputs: []admission.Input{}, Outputs: []admission.Output{{Path: "result.json", Required: true}}}
 	spec.Bundle.ObjectID = object.ID
@@ -131,9 +119,7 @@ func (f *managedTestFixture) jobSpecFor(t *testing.T, actor auth.Principal, work
 func (f *managedTestFixture) submitJob(t *testing.T, key string, spec admission.Spec) admission.Receipt {
 	t.Helper()
 	jobs, err := admission.New(f.host.access, f.host.store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	receipt, err := jobs.Submit(t.Context(), f.actor, "app", key, systemJSON(t, spec))
 	if err != nil {
 		t.Fatal("admit system job", err)
@@ -144,9 +130,7 @@ func (f *managedTestFixture) submitJob(t *testing.T, key string, spec admission.
 func (f *managedTestFixture) authorizeJob(t *testing.T, job admission.Receipt) executionauth.Receipt {
 	t.Helper()
 	record, err := f.host.store.ReadJob(t.Context(), "app", f.actor.TokenID(), job.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	raw := systemJSON(t, executionauth.Request{AttemptID: job.AttemptID, MaxRemoteWallSeconds: record.Request.Spec().Timeouts.RemoteWallSeconds, AuthorizePrivateStaging: true, AuthorizeCompute: true})
 	receipt, err := f.services.authorizations.Authorize(t.Context(), f.actor, "app", job.JobID, "authorize-"+string(job.JobID), raw)
 	if err != nil {
@@ -167,24 +151,16 @@ func (f *managedTestFixture) runToCollection(t *testing.T, job admission.Receipt
 	t.Helper()
 	for range 104 {
 		record, err := f.host.store.ReadJob(t.Context(), "app", f.actor.TokenID(), job.JobID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		if record.Attempt.State.Execution.Terminal() {
 			return
 		}
 		attempt, err := f.host.store.ReadLogAttempt(t.Context(), "app", f.actor.TokenID(), job.JobID, job.AttemptID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		if attempt.Remote != nil {
 			control, err := fake.NewBound(f.backend, f.fixtureClock(), attempt.Binding)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := control.Advance(*attempt.Remote); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
+			requireNoError(t, control.Advance(*attempt.Remote))
 		}
 		f.dispatchOnce(t)
 	}
@@ -194,9 +170,7 @@ func (f *managedTestFixture) runToCollection(t *testing.T, job admission.Receipt
 func (f *managedTestFixture) controls(t *testing.T) *operations.Service {
 	t.Helper()
 	service, err := operations.New(f.host.access, f.host.store, f.host.inputs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return service
 }
 
@@ -224,9 +198,7 @@ func (f *managedTestFixture) cleanupEngine(t *testing.T, repo cleanup.WorkReposi
 		repo = f.host.store
 	}
 	engine, err := cleanup.New(repo, f.services.resolver, cleanup.DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return engine
 }
 
@@ -267,17 +239,13 @@ func (f *managedTestFixture) clockedServices(t *testing.T) {
 	now := f.fixtureClock()
 	var err error
 	f.services.authorizations, err = executionauth.New(f.host.access, f.host.store, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if f.services.resolver == nil {
 		return
 	}
 	f.services.authorizations.WithSecrets(f.host.secretPool)
 	f.services.secrets, err = workloadsecret.New(f.host.access, f.host.store, f.host.secretPool, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	var repo dispatch.Repository = f.host.store
 	if f.wrapDispatch != nil {
 		repo = f.wrapDispatch(f.host.store)
@@ -285,25 +253,19 @@ func (f *managedTestFixture) clockedServices(t *testing.T) {
 	cfg := dispatch.DefaultConfig()
 	cfg.Workers, cfg.PollDelay = f.config.MaxWorkers, time.Millisecond
 	f.services.dispatcher, err = dispatch.New(repo, f.services.resolver, f.host.inputs, now, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.services.dispatcher.WithSecrets(f.host.secretPool)
 	collect := collection.DefaultConfig()
 	collect.Workers = f.config.MaxWorkers
 	f.services.collector, err = collection.New(f.host.store, f.services.resolver, f.host.results, now, collect)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }
 
 func (f *managedTestFixture) useFake(t *testing.T, scenario fake.Scenario) {
 	t.Helper()
 	var err error
 	f.backend, err = fake.NewBackend(scenario)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.bindFake(t)
 	f.clockedServices(t)
 }
@@ -352,24 +314,7 @@ func (f *managedTestFixture) reopen(t *testing.T) {
 
 func systemBundle(t *testing.T) []byte {
 	t.Helper()
-	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "main.py"), []byte("raise RuntimeError('fixture must never execute on the host')\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	opened, err := packaging.OpenProject(project, packaging.DefaultLimits(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer opened.Close()
-	selection, err := opened.Prepare(context.Background(), []string{"main.py"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var bundle bytes.Buffer
-	if _, err = selection.Write(context.Background(), &bundle); err != nil {
-		t.Fatal(err)
-	}
-	return bundle.Bytes()
+	return testsupport.Bundle(t, map[string][]byte{"main.py": []byte("raise RuntimeError('fixture must never execute on the host')\n")})
 }
 
 // Keep the fake's synthetic manifest and transfer verification; only map logical paths.
@@ -423,37 +368,23 @@ func (f *managedTestFixture) startHTTP(t *testing.T) {
 	cfg := api.DefaultConfig()
 	var err error
 	cfg.Jobs, err = admission.New(f.host.access, f.host.store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Operations, err = operations.New(f.host.access, f.host.store, f.host.inputs, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Results, err = collection.NewReader(f.host.access, f.host.store, f.host.results)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Cleanup, err = cleanup.NewService(f.host.access, f.host.store, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Cleanup = cfg.Cleanup.WithPreviewResolver(f.services.resolver)
 	cfg.Logs, err = joblogs.NewReader(f.host.access, f.host.store, f.services.resolver)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Connections, cfg.Authorizations, cfg.Secrets = f.services.connections, f.services.authorizations, f.services.secrets
 	cfg.GlobalRate = api.Rate{PerSecond: 10000, Burst: 10000}
 	cfg.WorkspaceRate = cfg.GlobalRate
 	inputs, err := objects.New(f.host.access, f.host.inputs, f.host.store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	cfg.Listen = listener.Addr().String()
 	server, err := api.NewServer(cfg, f.host.access, inputs, f.host.store.Ready)
 	if err != nil {
@@ -501,9 +432,7 @@ func (f *managedTestFixture) request(t *testing.T, method, path, key, contentTyp
 		t.Fatal("fixture HTTP is not running")
 	}
 	request, err := http.NewRequest(method, f.http.url+path, bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	request.Header.Set("Authorization", "Bearer "+f.token)
 	if key != "" {
 		request.Header.Set("Idempotency-Key", key)
@@ -515,14 +444,10 @@ func (f *managedTestFixture) request(t *testing.T, method, path, key, contentTyp
 		request.Header.Set("X-Content-SHA256", string(provider.Digest(body)))
 	}
 	response, err := boundedClient().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer response.Body.Close()
 	raw, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if response.StatusCode != want {
 		t.Fatalf("%s %s: status %d want %d: %s", method, path, response.StatusCode, want, raw)
 	}
@@ -562,17 +487,13 @@ func TestManagedSystemFixtureHTTPProviderAndRestart(t *testing.T) {
 		}
 		_, raw := f.request(t, method, path, key, contentType, body, want)
 		if target != nil {
-			if err := json.Unmarshal(raw, target); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, json.Unmarshal(raw, target))
 		}
 	}
 	marshal := func(value any) []byte {
 		t.Helper()
 		raw, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireNoError(t, err)
 		return raw
 	}
 	_, raw := f.request(t, "POST", "/v1/workspaces/app/objects", "", "application/octet-stream", systemBundle(t), http.StatusCreated)

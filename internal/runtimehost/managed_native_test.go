@@ -11,9 +11,7 @@ func TestManagedCompositionNeedsNoPythonOrAccountRead(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	config := f.config
 	config.MachineShape = "cpu"
-	if err := config.validate(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, config.validate())
 	s, err := f.host.managedWorkers(context.Background(), config)
 	if err != nil {
 		t.Fatal("native startup failed", err)

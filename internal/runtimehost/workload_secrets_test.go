@@ -24,27 +24,21 @@ func secretPoolFingerprint(t *testing.T, pool *workloadsecret.Pool) string {
 		result = hash
 		return workloadsecret.Receipt{AuthorizationID: "secret_1", WorkspaceID: key.WorkspaceID, JobID: key.JobID, Metadata: metadata, Status: "granted", CreatedAt: now}, true, nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return result
 }
 func TestWorkloadSecretReplayKeySurvivesRestartAndPlaintextDoesNot(t *testing.T) {
 	ctx := context.Background()
 	root := initialized(t)
 	host, err := Open(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer func() {
 		if host != nil {
 			_ = host.Close()
 		}
 	}()
 	pool, err := host.workloadSecretPool(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	first := secretPoolFingerprint(t, pool)
 	path := filepath.Join(root, "state", "workload-secret-key")
 	if err := statefs.CheckFile(path); err != nil {
@@ -63,9 +57,7 @@ func TestWorkloadSecretReplayKeySurvivesRestartAndPlaintextDoesNot(t *testing.T)
 		t.Fatal("close retained material")
 	}
 	host, err = Open(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	pool, err = host.workloadSecretPool(ctx)
 	if err != nil || first != secretPoolFingerprint(t, pool) {
 		t.Fatal("restart changed keyed replay identity", err)
@@ -77,9 +69,7 @@ func TestWorkloadSecretKeyRejectsUnsafeOrCorruptState(t *testing.T) {
 			ctx := context.Background()
 			root := initialized(t)
 			host, err := Open(ctx, root)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer host.Close()
 			path := filepath.Join(root, "state", "workload-secret-key")
 			switch kind {
@@ -93,9 +83,7 @@ func TestWorkloadSecretKeyRejectsUnsafeOrCorruptState(t *testing.T) {
 					err = os.Symlink(target, path)
 				}
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if _, err = host.workloadSecretPool(ctx); err != ErrState {
 				t.Fatal("unsafe key accepted", err)
 			}
@@ -109,21 +97,15 @@ func TestWorkloadSecretMissingKeyWithReceiptNeverReinitializes(t *testing.T) {
 			ctx := context.Background()
 			root := initialized(t)
 			host, err := Open(ctx, root)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer host.Close()
 			// Even an incomplete restored authorization must prevent key regeneration. This
 			// artificial damaged database intentionally has no related attempt or key.
 			db, err := sql.Open("sqlite", filepath.Join(root, "state", "runtime.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer db.Close()
 			conn, err := db.Conn(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer conn.Close()
 			if _, err = conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
 				t.Fatal(err)
@@ -137,9 +119,7 @@ func TestWorkloadSecretMissingKeyWithReceiptNeverReinitializes(t *testing.T) {
 				}
 				_, err = conn.ExecContext(ctx, `INSERT INTO receipts(workspace_id,namespace,scope,key_sha256,request_sha256,canonical_version,subject_id,job_id,attempt_id,receipt) VALUES('app',?,?,?,?,'','secret_1','job_1','attempt_1','{}')`, namespace, scope, strings.Repeat("a", 64), strings.Repeat("b", 64))
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if _, err = host.workloadSecretPool(ctx); err != ErrState {
 				t.Fatal("missing replay key was regenerated", err)
 			}

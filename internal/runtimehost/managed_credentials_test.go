@@ -26,13 +26,9 @@ func TestManagedCredentialBackendSelectionSurvivesRestart(t *testing.T) {
 			ctx := context.Background()
 			path := initialized(t)
 			h, err := Open(ctx, path)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if tc.legacy {
-				if err := h.store.MarkFingerprintInitialized(ctx); err != nil {
-					t.Fatal(err)
-				}
+				requireNoError(t, h.store.MarkFingerprintInitialized(ctx))
 				if _, err := h.managedCredentialStore(ctx, "file"); err != ErrRequest {
 					t.Fatal("legacy secrets silently switched to file", err)
 				}
@@ -41,13 +37,9 @@ func TestManagedCredentialBackendSelectionSurvivesRestart(t *testing.T) {
 			if err != nil || selected != tc.want {
 				t.Fatal("wrong initial backend", selected, err)
 			}
-			if err := h.Close(); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, h.Close())
 			h, err = Open(ctx, path)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			defer h.Close()
 			selected, err = h.managedCredentialStore(ctx, "")
 			if err != nil || selected != tc.want {
@@ -78,9 +70,7 @@ func TestManagedCredentialBackendRejectsMissingOrCorruptSelection(t *testing.T) 
 			} else {
 				err = os.WriteFile(path, []byte(marker), 0600)
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, err)
 			if _, err := f.host.managedVault(context.Background(), f.config); err != ErrState {
 				t.Fatal("incomplete state silently selected a backend", err)
 			}
@@ -92,32 +82,20 @@ func TestManagedFileCredentialsReplayAfterReopenWithoutSecretInSQLite(t *testing
 	f := newManagedTestFixture(t, true)
 	ctx := context.Background()
 	vault, err := f.host.managedVault(ctx, f.config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.services, err = f.host.composeManaged(ctx, f.config, vault, f.adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	canary := "SYNTHETIC_FIRST"
 	connection := f.connection(t, "file-connection", canary)
 	path := f.host.root.Path
-	if err := f.host.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, f.host.Close())
 	f.host, err = Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	t.Cleanup(func() { _ = f.host.Close() })
 	vault, err = f.host.managedVault(ctx, f.config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f.services, err = f.host.composeManaged(ctx, f.config, vault, f.adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	body := []byte(`{"provider_type":"kaggle","label":"Fixture","credentials":{"api_token":"` + canary + `"}}`)
 	replay, err := f.services.connections.Submit(ctx, f.actor, "app", "", "file-connection", body)
 	if err != nil || !replay.Replay || replay.ConnectionID != connection.ID || f.adapter.checks != 1 {
@@ -125,9 +103,7 @@ func TestManagedFileCredentialsReplayAfterReopenWithoutSecretInSQLite(t *testing
 	}
 	check, err := f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "check-after-restart",
 		[]byte(fmt.Sprintf(`{"action":"check","expected_revision":%d}`, connection.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(ctx); err != nil || !worked || f.adapter.checks != 2 {
 		t.Fatal("restarted worker could not read the stored provider credential", err)
 	}
@@ -141,9 +117,7 @@ func TestManagedFileCredentialsReplayAfterReopenWithoutSecretInSQLite(t *testing
 		}
 	}
 	// A missing file must not mint a new fingerprint key or recreate credentials.
-	if err := os.Remove(filepath.Join(path, "credentials", "secrets.env")); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.Remove(filepath.Join(path, "credentials", "secrets.env")))
 	if _, err := f.services.connections.Submit(ctx, f.actor, "app", "", "file-connection", body); err == nil {
 		t.Fatal("missing vault was silently initialized")
 	}
@@ -155,13 +129,9 @@ func TestManagedFileCredentialsReplayAfterReopenWithoutSecretInSQLite(t *testing
 func TestManagedFileVaultFailureDoesNotFallBackToKeychain(t *testing.T) {
 	f := newManagedTestFixture(t, true)
 	vault, err := f.host.managedVault(context.Background(), f.config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	path := filepath.Join(f.host.root.Path, "credentials", "secrets.env")
-	if err := os.WriteFile(path, []byte("SYNTHETIC_CORRUPTION"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, os.WriteFile(path, []byte("SYNTHETIC_CORRUPTION"), 0600))
 	if err := vault.WithSecret(context.Background(), "request_fingerprint_v1", func([]byte) error { t.Fatal("corruption invoked consumer"); return nil }); err != credentials.ErrUnavailable {
 		t.Fatal("file failure was not surfaced", err)
 	}

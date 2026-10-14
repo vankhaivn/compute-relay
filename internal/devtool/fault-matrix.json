@@ -40,7 +40,7 @@
       "scenario": "Provider accepts a submission but the response is lost.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_dispatch_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemDispatchLostSubmitResponseRestartAndTerminalCollectionGate"
         }
       ]
@@ -50,7 +50,7 @@
       "scenario": "An ambiguous resource cannot be rediscovered conclusively.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_dispatch_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemDispatchUnknownNotFoundStopsAndKeepsAccountCapacity"
         }
       ]
@@ -60,7 +60,7 @@
       "scenario": "Provider state is unknown or changes format.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_fault_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixUnknownAndModifiedObservations"
         }
       ]
@@ -80,7 +80,7 @@
       "scenario": "Runtime restarts while a remote attempt is active.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_fault_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixRestartKeepsActiveAttempt"
         }
       ]
@@ -90,7 +90,7 @@
       "scenario": "Output collection fails halfway through a large file.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_collection_crash_test.go",
+          "file": "internal/runtimehost/system_collection_suite_test.go",
           "name": "TestFaultMatrixLargeTransferFailureRecoversWithoutCompute"
         }
       ]
@@ -100,7 +100,7 @@
       "scenario": "A required output is missing or has the wrong digest.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_collection_test.go",
+          "file": "internal/runtimehost/system_collection_suite_test.go",
           "name": "TestCollectionBadTransfersRequireExplicitRecovery"
         }
       ]
@@ -110,11 +110,11 @@
       "scenario": "Complete artifact listing contains multiple entries; foreign or oversized catalogs are rejected.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_collection_test.go",
+          "file": "internal/runtimehost/system_collection_suite_test.go",
           "name": "TestCollectionPublicationReceiptAndScopedReads"
         },
         {
-          "file": "internal/runtimehost/system_collection_test.go",
+          "file": "internal/runtimehost/system_collection_suite_test.go",
           "name": "TestCollectionBadTransfersRequireExplicitRecovery"
         }
       ]
@@ -124,11 +124,11 @@
       "scenario": "A cancellation request races with completion.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_collection_test.go",
+          "file": "internal/runtimehost/system_collection_suite_test.go",
           "name": "TestCollectionCancellationRaceKeepsTerminalEvidence"
         },
         {
-          "file": "internal/runtimehost/system_control_scenarios_test.go",
+          "file": "internal/runtimehost/system_gate_secret_suite_test.go",
           "name": "TestSystemControlsUnsupportedAcceptedAndConfirmedCancellation"
         }
       ]
@@ -138,11 +138,11 @@
       "scenario": "Cancellation is unsupported or lacks a usable session identity.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_control_scenarios_test.go",
+          "file": "internal/runtimehost/system_gate_secret_suite_test.go",
           "name": "TestSystemControlsUnsupportedAcceptedAndConfirmedCancellation"
         },
         {
-          "file": "internal/runtimehost/system_fault_policy_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixCancellationWithoutRemoteIdentityStaysUnresolved"
         }
       ]
@@ -152,7 +152,7 @@
       "scenario": "Local deadline expires while remote activity is unknown.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_fault_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixLocalDeadlineKeepsUnknownExecution"
         },
         {
@@ -174,7 +174,7 @@
           "name": "TestSchedulerQuotaLatchAndStrictPolicy"
         },
         {
-          "file": "internal/runtimehost/system_fault_policy_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixQuotaConsumedAfterPositiveObservation"
         }
       ]
@@ -184,7 +184,7 @@
       "scenario": "Input staging succeeds but readiness is delayed.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_dispatch_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemDispatchStagingLossAndDelayedReadinessNeverRepeatPrepare"
         }
       ]
@@ -226,7 +226,7 @@
           "name": "TestDurableAdmissionHTTPContractAndAuthorization"
         },
         {
-          "file": "internal/runtimehost/system_collection_test.go",
+          "file": "internal/runtimehost/system_collection_suite_test.go",
           "name": "TestCollectionPublicationReceiptAndScopedReads"
         }
       ]
@@ -264,11 +264,11 @@
       "scenario": "Provider credentials rotate or the configured account changes.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_fault_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixCredentialRotationKeepsFrozenAccount"
         },
         {
-          "file": "internal/runtimehost/system_dispatch_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemDispatchFrozenProfileDoesNotFollowRemap"
         }
       ]
@@ -278,7 +278,7 @@
       "scenario": "A managed remote resource is manually modified outside the runtime.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_fault_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixUnknownAndModifiedObservations"
         }
       ]
@@ -288,11 +288,11 @@
       "scenario": "Cleanup is retried after the remote resource is already absent.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_cleanup_resources_test.go",
+          "file": "internal/runtimehost/system_cleanup_retention_suite_test.go",
           "name": "TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation"
         },
         {
-          "file": "internal/runtimehost/system_cleanup_test.go",
+          "file": "internal/runtimehost/system_cleanup_retention_suite_test.go",
           "name": "TestCleanupWorkerReportsAlreadyAbsent"
         }
       ]
@@ -302,7 +302,7 @@
       "scenario": "A CLI exits nonzero after a possible remote side effect.",
       "tests": [
         {
-          "file": "internal/runtimehost/system_fault_scenarios_test.go",
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixNonzeroCLIAfterAcceptanceDoesNotResubmit"
         }
       ]

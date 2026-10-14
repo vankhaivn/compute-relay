@@ -13,22 +13,14 @@ import (
 // starting workers. The public SQLite option is the same dependency used in production.
 func injectHostClock(t *testing.T, h *Host, clock func() time.Time) {
 	t.Helper()
-	if err := h.store.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, h.store.Close())
 	opts := sqlite.DefaultOptions()
 	opts.Clock = clock
 	root, err := h.root.Child("state")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer root.Close()
 	h.store, err = sqlite.OpenRoot(context.Background(), root, opts, h.identity.InstallationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	h.access, err = auth.New(h.store, h.store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 }

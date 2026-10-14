@@ -3,6 +3,7 @@ package joblogs
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -14,22 +15,26 @@ import (
 )
 
 type logRepo struct {
-	target Attempt
-	calls  int
+	target    Attempt
+	calls     int
+	requested domain.AttemptID
 }
 
-func (r *logRepo) ReadLogAttempt(_ context.Context, _ domain.WorkspaceID, _ string, _ domain.JobID, _ domain.AttemptID) (Attempt, error) {
+func (r *logRepo) ReadLogAttempt(_ context.Context, _ domain.WorkspaceID, _ string, _ domain.JobID, attempt domain.AttemptID) (Attempt, error) {
 	r.calls++
+	r.requested = attempt
 	return r.target, nil
 }
 
 type logResolver struct {
 	adapter provider.Provider
 	calls   int
+	binding provider.BindingSnapshot
 }
 
-func (r *logResolver) Resolve(provider.BindingSnapshot) (provider.Provider, error) {
+func (r *logResolver) Resolve(binding provider.BindingSnapshot) (provider.Provider, error) {
 	r.calls++
+	r.binding = binding
 	return r.adapter, nil
 }
 
@@ -37,17 +42,39 @@ type logProvider struct {
 	provider.Provider
 	read     func(context.Context) (provider.LogPage, error)
 	verified int
+	binding  provider.BindingSnapshot
+	remote   provider.RemoteReference
 }
 
 func (p *logProvider) Describe() provider.Descriptor {
 	return provider.Descriptor{InstanceID: "fixture"}
 }
-func (p *logProvider) Verify(context.Context, provider.BindingSnapshot) error {
+func (p *logProvider) Verify(_ context.Context, binding provider.BindingSnapshot) error {
 	p.verified++
+	p.binding = binding
 	return nil
 }
-func (p *logProvider) Logs(ctx context.Context, _ provider.RemoteReference, _ provider.PageRequest) (provider.LogPage, error) {
+func (p *logProvider) Logs(ctx context.Context, remote provider.RemoteReference, _ provider.PageRequest) (provider.LogPage, error) {
+	p.remote = remote
 	return p.read(ctx)
+}
+
+func TestReadRoutesHistoricalAttemptThroughItsFrozenBinding(t *testing.T) {
+	r, _, actor, repo, resolver := logSetup(t)
+	repo.target.Remote.Identity.AttemptID = "att_historical"
+	repo.target.Binding.AccountScope = "original_account"
+	repo.target.Binding.CredentialRef = "original_credential"
+	repo.target.Binding.Binding.ConfigurationRevision = "original_revision"
+	adapter := &logProvider{read: func(context.Context) (provider.LogPage, error) {
+		return provider.LogPage{Source: "payload", Availability: "live", Lines: []string{"historical"}}, nil
+	}}
+	resolver.adapter = adapter
+	page, err := r.Read(t.Context(), actor, "ws_fixture", "job_fixture", "att_historical", provider.PageRequest{Limit: 100})
+	if err != nil || len(page.Lines) != 1 || page.Lines[0] != "historical" || repo.requested != "att_historical" ||
+		!reflect.DeepEqual(resolver.binding, repo.target.Binding) || !reflect.DeepEqual(adapter.binding, repo.target.Binding) ||
+		adapter.remote != *repo.target.Remote {
+		t.Fatal("historical log read changed its requested attempt, binding or remote", page, err)
+	}
 }
 func logSetup(t *testing.T) (*Reader, *auth.Service, auth.Principal, *logRepo, *logResolver) {
 	t.Helper()

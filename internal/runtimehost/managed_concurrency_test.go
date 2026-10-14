@@ -38,9 +38,7 @@ func TestManagedKaggleConcurrencyConfiguresTwoAuthorizedJobsAndQueuesThird(t *te
 			}
 			settings := scheduler.DefaultSettings()
 			settings.MaxWorkers, settings.MaxActivePerAccount = 4, 64
-			if err := f.host.store.ConfigureScheduler(ctx, settings); err != nil {
-				t.Fatal(err)
-			}
+			requireNoError(t, f.host.store.ConfigureScheduler(ctx, settings))
 			for i := range 3 {
 				admitConcurrencyJob(t, f, updated, fmt.Sprintf("concurrent-%d", i))
 			}
@@ -75,27 +73,19 @@ func admitConcurrencyJob(t *testing.T, f *managedTestFixture, c connections.Conn
 	t.Helper()
 	ctx := context.Background()
 	objectService, err := objects.New(f.host.access, f.host.inputs, f.host.store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	payload := "synthetic bundle never executed"
 	bundle, err := objectService.Upload(ctx, f.actor, "app", int64(len(payload)), provider.Digest([]byte(payload)), strings.NewReader(payload))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	jobs, err := admission.New(f.host.access, f.host.store, admission.DefaultLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	resources := `"accelerator":"cpu"`
 	if c.Selection.Accelerator == "gpu" {
 		resources = `"accelerator":"gpu","minimum_gpu_count":1`
 	}
 	raw := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"concurrency fixture","profile":%q,"bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","MUST_NOT_EXECUTE.py"]},"inputs":[],"outputs":[{"path":"answer.json","required":true}],"resources":{%s},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`, c.Selection.Profile, bundle.ID, resources)
 	job, err := jobs.Submit(ctx, f.actor, "app", key+"-admit", []byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	grant := fmt.Sprintf(`{"attempt_id":%q,"max_remote_wall_seconds":10,"authorize_private_staging":true,"authorize_compute":true}`, job.AttemptID)
 	if _, err := f.services.authorizations.Authorize(ctx, f.actor, "app", job.JobID, key+"-grant", []byte(grant)); err != nil {
 		t.Fatal(err)

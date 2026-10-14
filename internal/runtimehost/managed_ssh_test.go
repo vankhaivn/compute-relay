@@ -52,9 +52,7 @@ func (f *managedTestFixture) sshConnection(t *testing.T, key, password string) (
 		t.Fatal(err)
 	}
 	connection, err := f.services.connections.Get(ctx, f.actor, "app", op.ConnectionID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return op, connection
 }
 
@@ -71,17 +69,13 @@ func TestManagedSSHConnectionPublishesAnOperatorManagedCPUProvider(t *testing.T)
 	}
 	snapshot := f.binding(t, connection)
 	saved, err := f.host.store.ReadManagedBinding(ctx, snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if saved.Profile.CostClass != admission.CostOperatorManaged || saved.Profile.Accelerator != "cpu" ||
 		!strings.HasPrefix(saved.CanonicalAccount, "ssh-") || !strings.Contains(string(saved.RuntimeConfig), "sha256:"+strings.Repeat("1", 64)) {
 		t.Fatalf("saved = %+v", saved)
 	}
 	p, err := f.host.managedProvider(f.config, f.services.connections, saved)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, ok := p.(*sshhost.Adapter); !ok || p.Describe().Type != "ssh" || p.Describe().Support(domain.CapabilityGPU) != domain.CapabilitySupportUnsupported ||
 		p.Describe().Support(domain.CapabilityRemoteCancellation) != domain.CapabilitySupportSupported {
 		t.Fatalf("provider = %T %+v", p, p.Describe())
@@ -120,9 +114,7 @@ func TestManagedSSHConnectionRefusesRejectedLoginsAndChangedHostKeys(t *testing.
 	original := f.binding(t, connection)
 	replace, err := f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-rekeyed-key", []byte(fmt.Sprintf(
 		`{"action":"replace_credential","expected_revision":%d,"credentials":{"host":"100.64.0.7","username":"kenji","password":"SYNTHETIC_SSH_REKEYED"}}`, connection.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(ctx); err != nil || !worked {
 		t.Fatal(err)
 	}
@@ -173,13 +165,9 @@ func TestManagedSSHConfigurationKeepsLimitsAcrossChecks(t *testing.T) {
 		t.Fatal(op, err)
 	}
 	connection, err = f.services.connections.Get(ctx, f.actor, "app", connection.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	_, err = f.services.connections.Submit(ctx, f.actor, "app", connection.ID, "ssh-limits-check", []byte(fmt.Sprintf(`{"action":"check","expected_revision":%d}`, connection.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if _, err = f.services.connections.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -17,9 +17,7 @@ func TestTokenAncestorAliasCannotEnterProtectedStores(t *testing.T) {
 	ctx := context.Background()
 	root := initialized(t)
 	h, err := Open(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer h.Close()
 	alias := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(h.root.Path, alias); err != nil {
@@ -45,9 +43,7 @@ func TestTokenAncestorAliasCannotEnterProtectedStores(t *testing.T) {
 func TestTokenDeliveryPanicStillRevokesTheIssuedDigest(t *testing.T) {
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	defer h.Close()
 	if _, err := h.CreateWorkspace(ctx, "app"); err != nil {
 		t.Fatal(err)

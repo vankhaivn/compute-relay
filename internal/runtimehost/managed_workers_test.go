@@ -175,9 +175,7 @@ func newManagedTestFixtureAt(t *testing.T, withVault bool, testClock ports.Clock
 	t.Helper()
 	ctx := context.Background()
 	h, err := Open(ctx, initialized(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	f := &managedTestFixture{host: h, clock: testClock, extra: extra}
 	t.Cleanup(func() {
 		f.stopHTTP(t)
@@ -192,13 +190,9 @@ func newManagedTestFixtureAt(t *testing.T, withVault bool, testClock ports.Clock
 		t.Fatal(err)
 	}
 	secret, _, err := h.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Write, auth.Manage, auth.Execute, auth.Operate}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	actor, err := h.access.Authenticate(ctx, secret.Reveal())
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	config := ManagedServeConfig{MachineShape: "NvidiaTeslaT4", MaxRemoteWallSeconds: 300, MaxWorkers: 2}
 	adapter := &managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: config}, clock: testClock}
 	f.adapter, f.actor, f.config, f.token = adapter, actor, config, secret.Reveal()
@@ -217,9 +211,7 @@ func (f *managedTestFixture) connection(t *testing.T, key, token string) connect
 func (f *managedTestFixture) binding(t *testing.T, c connections.Connection) provider.BindingSnapshot {
 	t.Helper()
 	profile, _, err := f.host.store.ReadProfile(context.Background(), c.Selection.Profile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	return provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
 }
 
@@ -291,9 +283,7 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 	f.adapter.config.MachineShape = "NvidiaTeslaP100"
 	_, err := f.services.connections.Submit(context.Background(), f.actor, "app", one.ID, "replace-account-key",
 		[]byte(fmt.Sprintf(`{"action":"replace_credential","expected_revision":%d,"credentials":{"api_token":"SYNTHETIC_REPLACEMENT"}}`, one.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(context.Background()); err != nil || !worked {
 		t.Fatal("replacement failed", err)
 	}
@@ -346,9 +336,7 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 	// Disable changes admission only, not recovery of any saved binding.
 	_, err = f.services.connections.Submit(context.Background(), f.actor, "app", one.ID, "disable-account-key",
 		[]byte(fmt.Sprintf(`{"action":"disable","expected_revision":%d}`, updated.Revision)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	if worked, err := f.services.connections.RunOnce(context.Background()); err != nil || !worked {
 		t.Fatal("disable failed", err)
 	}
@@ -362,9 +350,7 @@ func TestManagedResolverRejectsSubstitutedSnapshotsAndUnfrozenPolicy(t *testing.
 	one := f.connection(t, "binding-policy-key", "SYNTHETIC_FIRST")
 	expected := f.binding(t, one)
 	binding, err := f.host.store.ReadManagedBinding(context.Background(), expected)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	for _, raw := range [][]byte{nil, []byte(`{}`), []byte(`{"schema_version":1,"machine_shape":"paid-gpu"}`)} {
 		bad := binding
 		bad.RuntimeConfig = raw
