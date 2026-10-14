@@ -139,7 +139,7 @@ func (p *RuntimeAdapter) VerifyBinding(ctx context.Context, expected provider.Bi
 	}
 	r, err := p.preflight.Check(ctx, ReadOnly)
 	if err != nil || r.Local != "ready" || r.Authentication != "verified" || r.AccountBinding != "matched" {
-		return ErrProcess
+		return ErrUnavailable
 	}
 	return nil
 }

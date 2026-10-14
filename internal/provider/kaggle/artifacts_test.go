@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
@@ -94,10 +95,10 @@ func TestArtifactCatalogPaginationKeepsOneCompleteSnapshot(t *testing.T) {
 
 func TestArtifactReferenceAndUnselectedFilesFailBeforeCredentialIO(t *testing.T) {
 	a, ref, data := artifactFixture(t)
-	a.executor.stager.local = func(context.Context, Config, Mode, []byte) (Report, error) {
-		t.Fatal("invalid authority caused local/provider work")
-		return Report{}, nil
-	}
+	a.executor.stager.credentials = stagingCredentialFunc(func(context.Context, ports.CredentialRef, func([]byte) error) error {
+		t.Fatal("invalid authority caused credential/provider work")
+		return nil
+	})
 	foreign := ref
 	foreign.Identity.WorkspaceID = "foreign"
 	if _, err := a.ListArtifacts(context.Background(), foreign, provider.PageRequest{Limit: 1}); err == nil {

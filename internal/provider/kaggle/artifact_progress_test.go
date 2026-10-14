@@ -26,7 +26,7 @@ func TestArtifactProgressObservesExactStreamAndPreservesLateFailure(t *testing.T
 				return nil, err
 			}
 			if late {
-				return nil, ErrProcess
+				return nil, ErrUnavailable
 			}
 			return nil, nil
 		}
@@ -50,7 +50,7 @@ func TestArtifactProgressCallbackFailureStopsAndSurvivesBridgeError(t *testing.T
 		if _, err := dst.Write([]byte("y")); !errors.Is(err, stop) {
 			t.Fatal(err)
 		}
-		return nil, ErrProcess
+		return nil, ErrUnavailable
 	}
 	var dst bytes.Buffer
 	if _, err := a.FetchArtifactWithProgress(context.Background(), ref, file, &dst, file.Bytes, func(int64) error { return stop }); !errors.Is(err, stop) || dst.String() != "y" {

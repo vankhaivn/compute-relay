@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +13,7 @@ import (
 
 func testConfig(t *testing.T) Config {
 	t.Helper()
-	return Config{InstanceID: "personal", Revision: "revision-1", AccountName: "fixture_user", CredentialRef: "vault:con_fixture", PythonExecutable: filepath.Join(t.TempDir(), "python.exe")}
+	return Config{InstanceID: "personal", Revision: "revision-1", AccountName: "fixture_user", CredentialRef: "vault:con_fixture"}
 }
 func verified() Report {
 	r := baseline(ReadOnly)
@@ -60,25 +59,23 @@ func TestPreflightLocalNeverResolvesAndReadOnlyUsesFreshCredential(t *testing.T)
 			t.Fatal(r, err)
 		}
 	}
-	if lookups != 2 || len(calls) != 5 {
+	if lookups != 2 || len(calls) != 2 {
 		t.Fatal("unexpected lookup/call count", lookups, calls)
 	}
-	if _, err := p.Check(context.Background(), "automatic"); !errors.Is(err, ErrMode) || len(calls) != 5 {
+	if _, err := p.Check(context.Background(), "automatic"); !errors.Is(err, ErrMode) || len(calls) != 2 {
 		t.Fatal("mode bypass", err)
 	}
 }
-func TestPreflightStopsBeforeCredentialOnLocalMismatch(t *testing.T) {
+func TestPreflightLocalNeedsNoCredentialOrNetwork(t *testing.T) {
 	c := testConfig(t)
 	resolver, _ := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { t.Fatal("credential read"); return "", false })
 	p, _ := New(c, resolver)
 	p.run = func(context.Context, Config, Mode, []byte) (Report, error) {
-		r := baseline(Local)
-		r.Local = "version_mismatch"
-		r.Problem = "version_mismatch"
-		return r, nil
+		t.Fatal("local check performed a network request")
+		return Report{}, nil
 	}
-	r, err := p.Check(context.Background(), ReadOnly)
-	if err != nil || r.Local != "version_mismatch" || r.Authentication != "not_checked" {
+	r, err := p.Check(context.Background(), Local)
+	if err != nil || r != baseline(Local) {
 		t.Fatal(r, err)
 	}
 }
@@ -107,7 +104,7 @@ func TestPreflightRejectsSecretAndSanitizesErrors(t *testing.T) {
 		}
 		return Report{}, errors.New("SYNTHETIC_CANARY")
 	}
-	if _, err := p.Check(context.Background(), ReadOnly); err != ErrProcess {
+	if _, err := p.Check(context.Background(), ReadOnly); err != ErrUnavailable {
 		t.Fatal("raw failure reflected", err)
 	}
 }
@@ -122,11 +119,11 @@ func TestPreflightCancellationAndSerializedChecks(t *testing.T) {
 	p.run = func(context.Context, Config, Mode, []byte) (Report, error) {
 		close(entered)
 		<-release
-		return baseline(Local), nil
+		return verified(), nil
 	}
 	go func() {
 		defer wg.Done()
-		if _, err := p.Check(context.Background(), Local); err != nil {
+		if _, err := p.Check(context.Background(), ReadOnly); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -139,6 +136,37 @@ func TestPreflightCancellationAndSerializedChecks(t *testing.T) {
 	close(release)
 	wg.Wait()
 }
+
+func TestPreflightRejectsIgnoredCredentialCallbackViolations(t *testing.T) {
+	for _, fault := range []string{"no-callback", "twice", "invalid-then-valid"} {
+		t.Run(fault, func(t *testing.T) {
+			p, err := New(testConfig(t), stagingCredentialFunc(func(_ context.Context, _ ports.CredentialRef, use func([]byte) error) error {
+				if fault == "no-callback" {
+					return nil
+				}
+				first := []byte("SYNTHETIC_TOKEN")
+				if fault == "invalid-then-valid" {
+					first = []byte("invalid token")
+				}
+				_ = use(first)
+				_ = use([]byte("SYNTHETIC_TOKEN"))
+				return nil
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			p.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+				calls++
+				return verified(), nil
+			}
+			if report, err := p.Check(context.Background(), ReadOnly); err != ErrProtocol || report != (Report{}) || calls > 1 {
+				t.Fatal("resolver violation established verification", report, err, calls)
+			}
+		})
+	}
+}
+
 func TestPreflightReportIsClosed(t *testing.T) {
 	r := verified()
 	encoded, _ := json.Marshal(r)

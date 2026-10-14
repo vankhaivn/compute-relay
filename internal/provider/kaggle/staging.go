@@ -55,7 +55,6 @@ type Stager struct {
 	blobs       StagingBlobs
 	allowCreate bool
 	slot        chan struct{}
-	local       invocation
 	run         stagingInvocation
 }
 
@@ -65,7 +64,7 @@ func NewStager(c Config, policy StagingPolicy, resolver ports.CredentialResolver
 	if c.Validate() != nil || !policy.valid() || resolver == nil || blobs == nil {
 		return nil, ErrConfig
 	}
-	return &Stager{config: c, policy: policy, credentials: resolver, blobs: blobs, allowCreate: allowCreate, slot: make(chan struct{}, 1), local: runPython, run: runStaging}, nil
+	return &Stager{config: c, policy: policy, credentials: resolver, blobs: blobs, allowCreate: allowCreate, slot: make(chan struct{}, 1), run: runStaging}, nil
 }
 
 func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.Prepared, error) {
@@ -136,13 +135,9 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	if err := ctx.Err(); err != nil {
 		return none, err
 	}
-	local, err := s.local(ctx, s.config, Local, nil)
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return none, ErrProcess
-	}
 	if mode == "create" {
 		// Reject every missing/corrupt local file BEFORE looking up a credential or
-		// creating even a provider upload session. The helper rehashes actual upload.
+		// creating even a provider upload session. Uploads are rehashed by the client.
 		for _, object := range p.objects {
 			if err := verifyStagingInput(ctx, s.blobs, object); err != nil {
 				return none, err
@@ -151,8 +146,10 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	}
 	var result stagingResponse
 	called := false
+	violated := false
 	err = s.credentials.WithCredential(ctx, s.config.CredentialRef, func(secret []byte) error {
 		if called {
+			violated = true
 			return ErrProtocol
 		}
 		called = true
@@ -174,9 +171,9 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	if ctx.Err() != nil {
 		return none, ctx.Err()
 	}
-	if err != nil || !called {
+	if err != nil || !called || violated {
 		return none, ErrStaging
-	} // Do not reflect secret-bearing callback/process errors.
+	} // Do not reflect secret-bearing callback or API errors.
 	return result.observation(p, frozen, operation)
 }
 

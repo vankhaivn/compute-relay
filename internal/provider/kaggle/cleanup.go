@@ -79,14 +79,12 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 	} else if request.RecoverOnly {
 		mode = "recover"
 	}
-	local, err := p.stager.local(ctx, p.config, Local, nil)
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return provider.CleanupOutcome{}, ErrProcess
-	}
 	var response cleanupResponse
 	called := false
+	violated := false
 	err = p.stager.credentials.WithCredential(ctx, p.config.CredentialRef, func(secret []byte) error {
 		if called || len(secret) == 0 || len(secret) > 8192 {
+			violated = true
 			return ErrProtocol
 		}
 		called = true
@@ -102,8 +100,8 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 		response, err = p.runCleanup(ctx, p.config, mode, secret, query)
 		return err
 	})
-	if err != nil || !called || !response.valid() {
-		return provider.CleanupOutcome{}, ErrProcess
+	if err != nil || !called || violated || !response.valid() {
+		return provider.CleanupOutcome{}, ErrUnavailable
 	}
 	switch response.Status {
 	case "absent":

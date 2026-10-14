@@ -47,7 +47,6 @@ func TestMonitorM3QuotaLatchSurvivesUnknownStaleAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.local = func(context.Context, Config, Mode, []byte) (Report, error) { return baseline(Local), nil }
 	// This integration uses the real frozen account configuration and store, but
 	// synthetic helper results. Pinned-SDK transport tests are a separate tier.
 	reply := knownQuota("10000000000", "10000000000", "0")

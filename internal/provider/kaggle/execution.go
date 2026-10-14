@@ -21,12 +21,11 @@ const (
 	reasonStagingUnconfirmed  = "staging_not_confirmed"
 	reasonCallTimeout         = "call_timeout"
 	reasonRuntimeStopped      = "runtime_stopped"
-	reasonLocalRuntime        = "local_runtime_unavailable"
 	reasonCredential          = "credential_unavailable"
 )
 
-// helperReasons are the helper's own refusals, each before its save call.
-var helperReasons = map[string]bool{
+// submissionRefusals are closed refusals before the save call.
+var submissionRefusals = map[string]bool{
 	"token_inactive": true, "account_mismatch": true, "gpu_quota_unverified": true,
 	"auth_read_failed": true, "kernel_read_failed": true, "quota_read_failed": true, "helper_failed": true,
 }
@@ -110,7 +109,7 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 		return unknownExecution()
 	}
 	// Staging byte verification has its own bounded preparation budget. Do not
-	// charge it to the shorter SDK-call timeout before submission can begin.
+	// charge it to the shorter API-call timeout before submission can begin.
 	// Recheck complete remote staging without creating anything. Equality includes
 	// the first-pinned numeric dataset ID, version, marker, privacy and readiness.
 	stage, err := e.stager.ReconcilePreparation(parent, e.plan, e.prepared.PreparationID)
@@ -181,7 +180,7 @@ func (e *Executor) Observe(ctx context.Context, expected provider.RemoteReferenc
 		return none, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "kernel identity or source was replaced; retain the original reference")
 	}
 	if r.Status != "found" {
-		return none, ErrProcess
+		return none, ErrUnavailable
 	}
 	actual, err := e.remote(r)
 	if err != nil || actual != expected {
@@ -230,7 +229,7 @@ func (r executionResponse) valid() bool {
 	}
 	switch r.Status {
 	case "rejected":
-		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && helperReasons[r.Reason]
+		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && submissionRefusals[r.Reason]
 	case "unknown", "not_found", "invalid":
 		return r == (executionResponse{Protocol: 1, Status: r.Status})
 	case "found":
@@ -245,7 +244,7 @@ func (r executionResponse) valid() bool {
 	return false
 }
 
-// call returns a closed stop reason when the helper was never invoked; after
+// call returns a closed stop reason when the native client was never invoked; after
 // invocation any failure is ambiguous and the reason is empty.
 func (e *Executor) call(parent context.Context, mode, kernelID string) (executionResponse, string, error) {
 	var result executionResponse
@@ -260,18 +259,16 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 	if err := ctx.Err(); err != nil {
 		return result, stopReason(ctx, ""), err
 	}
-	local, err := e.stager.local(ctx, e.stager.config, Local, nil)
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return result, stopReason(ctx, reasonLocalRuntime), ErrProcess
-	}
 	request := e.request
 	request.KernelID = kernelID
 	if mode != "submit" {
 		request.Source = "" // observations need its digest, not another copy of private code
 	}
 	called, invoked := false, false
-	err = e.stager.credentials.WithCredential(ctx, e.stager.config.CredentialRef, func(secret []byte) error {
+	violated := false
+	err := e.stager.credentials.WithCredential(ctx, e.stager.config.CredentialRef, func(secret []byte) error {
 		if called {
+			violated = true
 			return ErrProtocol
 		}
 		called = true
@@ -295,13 +292,13 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 		if ctx.Err() != nil {
 			return executionResponse{}, stopReason(ctx, ""), ctx.Err()
 		}
-		return executionResponse{}, reasonCredential, ErrProcess
+		return executionResponse{}, reasonCredential, ErrUnavailable
 	}
 	if ctx.Err() != nil {
 		return executionResponse{}, "", ctx.Err()
 	}
-	if err != nil {
-		return executionResponse{}, "", ErrProcess
+	if err != nil || violated {
+		return executionResponse{}, "", ErrUnavailable
 	}
 	if !result.valid() || (mode != "submit" && result.Status == "rejected") {
 		return executionResponse{}, "", ErrProtocol

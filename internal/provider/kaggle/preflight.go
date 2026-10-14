@@ -1,5 +1,4 @@
-// Package kaggle contains a read-only preflight, not a dispatch-capable Provider.
-// Account authentication is not evidence of private staging, GPU or batch readiness.
+// Package kaggle implements finite private batch execution through Kaggle's API.
 package kaggle
 
 import (
@@ -8,10 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"path/filepath"
 	"reflect"
 	"regexp"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -20,60 +17,43 @@ import (
 )
 
 const (
-	Local         Mode = "local"
-	ReadOnly      Mode = "read_only"
-	PythonSeries       = "3.11"
-	ClientVersion      = "2.2.4"
-	SDKVersion         = "0.1.35"
+	Local    Mode = "local"
+	ReadOnly Mode = "read_only"
 )
 
 type Mode string
 
 var (
-	ErrConfig      = errors.New("invalid Kaggle preflight configuration")
+	ErrConfig      = errors.New("invalid Kaggle configuration")
 	ErrMode        = errors.New("explicit local or read-only preflight mode is required")
-	ErrProcess     = errors.New("Kaggle preflight process unavailable")
-	ErrProtocol    = errors.New("invalid Kaggle preflight response")
+	ErrUnavailable = errors.New("Kaggle API unavailable")
+	ErrProtocol    = errors.New("invalid Kaggle response")
 	idPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	accountPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,49}$`)
 )
 
 // Config is immutable, non-secret instance configuration. AccountName is a
 // conservative canonical subset, not a claim about all upstream username rules.
-// The interpreter must be the absolute path in the pinned client environment.
 // No arbitrary command, endpoint, environment override or credential value exists.
 type Config struct {
-	InstanceID       string              `json:"instance_id"`
-	Revision         string              `json:"revision"`
-	AccountName      string              `json:"account_name"`
-	CredentialRef    ports.CredentialRef `json:"credential_ref"`
-	PythonExecutable string              `json:"python_executable"`
+	InstanceID    string              `json:"instance_id"`
+	Revision      string              `json:"revision"`
+	AccountName   string              `json:"account_name"`
+	CredentialRef ports.CredentialRef `json:"credential_ref"`
 }
 
 func (c Config) Validate() error {
 	_, vaultRef := credentials.VaultReference(c.CredentialRef)
 	if !idPattern.MatchString(c.InstanceID) || !idPattern.MatchString(c.Revision) ||
-		!accountPattern.MatchString(c.AccountName) || !vaultRef ||
-		!validPythonExecutable(c.PythonExecutable) {
+		!accountPattern.MatchString(c.AccountName) || !vaultRef {
 		return ErrConfig
 	}
 	return nil
 }
 
-func validPythonExecutable(path string) bool {
-	if !filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n\ufffd") {
-		return false
-	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".cmd", ".bat", ".ps1", ".sh":
-		return false
-	}
-	return true
-}
-
 // Report contains only validated enums; no provider response, token, username,
-// process output or exception text is returned. Local="ready" means exact pins
-// matched. BatchReady must remain false until separately evidenced integration.
+// or exception text is returned. Local="ready" means the native client is built
+// in. BatchReady is independent of account authentication.
 type Report struct {
 	Protocol       int    `json:"protocol"`
 	Mode           Mode   `json:"mode"`
@@ -176,13 +156,13 @@ func New(c Config, resolver ports.CredentialResolver) (*Preflight, error) {
 	if c.Validate() != nil || resolver == nil {
 		return nil, ErrConfig
 	}
-	return &Preflight{config: c, resolver: resolver, run: runPython, slot: make(chan struct{}, 1)}, nil
+	return &Preflight{config: c, resolver: resolver, run: runPreflight, slot: make(chan struct{}, 1)}, nil
 }
 
 // Check never runs automatically. ReadOnly is an explicit network/credential opt-in,
-// not a dispatch permit. Each call checks local pins before looking up any secret.
-// One invocation at a time per instance; a 60-second budget includes local checks,
-// waiting for the slot, credential resolution and the two read-only SDK requests.
+// not a dispatch permit. Local needs neither credentials nor network access.
+// One invocation at a time per instance; a 60-second budget includes
+// waiting for the slot, credential resolution and the two read-only API requests.
 func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 	if p == nil {
 		return Report{}, ErrConfig
@@ -201,25 +181,18 @@ func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 	if err := ctx.Err(); err != nil {
 		return Report{}, err
 	}
-	r, err := p.run(ctx, p.config, Local, nil)
-	if err != nil {
-		return Report{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return Report{}, err
-	}
-	if !r.valid(Local) {
-		return Report{}, ErrProtocol
-	}
-	r.Mode = mode
-	if mode == Local || r.Local != "ready" {
+	r := baseline(mode)
+	if mode == Local {
 		return r, nil
 	}
-	invoked := false
-	err = p.resolver.WithCredential(ctx, p.config.CredentialRef, func(secret []byte) error {
-		if invoked {
+	called, invoked := false, false
+	violated := false
+	err := p.resolver.WithCredential(ctx, p.config.CredentialRef, func(secret []byte) error {
+		if called {
+			violated = true
 			return ErrProtocol
 		}
+		called = true
 		if len(secret) == 0 || len(secret) > credentials.MaxBytes {
 			return credentials.ErrUnavailable
 		}
@@ -232,8 +205,9 @@ func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 			return err
 		}
 		invoked = true
-		r, err = p.run(ctx, p.config, ReadOnly, secret)
-		return err
+		var runErr error
+		r, runErr = p.run(ctx, p.config, ReadOnly, secret)
+		return runErr
 	})
 	if ctx.Err() != nil {
 		return Report{}, ctx.Err()
@@ -241,14 +215,14 @@ func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 	if err != nil {
 		// A resolver or child error may embed a secret; never wrap or reflect it.
 		if invoked {
-			return Report{}, ErrProcess
+			return Report{}, ErrUnavailable
 		}
 		r = baseline(ReadOnly)
 		r.Authentication = "failed"
 		r.Problem = "credential_unavailable"
 		return r, nil
 	}
-	if !invoked || !r.valid(ReadOnly) {
+	if !invoked || violated || !r.valid(ReadOnly) {
 		return Report{}, ErrProtocol
 	}
 	return r, nil

@@ -91,7 +91,6 @@ func newTestStager(t *testing.T, allow bool) (*Stager, provider.Plan, *stagingTe
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.local = func(context.Context, Config, Mode, []byte) (Report, error) { return baseline(Local), nil }
 	s.run = func(context.Context, Config, string, []byte, stagingPlan, StagingBlobs) (stagingResponse, error) {
 		t.Fatal("unexpected helper invocation")
 		return stagingResponse{}, nil
@@ -112,19 +111,12 @@ func TestStagingCreateChecksAllInputsBeforeCredentials(t *testing.T) {
 }
 
 func TestStagingLocalFailureAndOptInMakeNoSideEffects(t *testing.T) {
-	for _, mode := range []string{"disabled", "pins", "cancelled", "remapped"} {
+	for _, mode := range []string{"disabled", "cancelled", "remapped"} {
 		t.Run(mode, func(t *testing.T) {
 			s, plan, b, reads := newTestStager(t, mode != "disabled")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			switch mode {
-			case "pins":
-				s.local = func(context.Context, Config, Mode, []byte) (Report, error) {
-					r := baseline(Local)
-					r.Local = "version_mismatch"
-					r.Problem = "version_mismatch"
-					return r, nil
-				}
 			case "cancelled":
 				cancel()
 			case "remapped":

@@ -8,7 +8,7 @@ import (
 )
 
 const QuotaFreshFor = 5 * time.Minute
-const quotaSource = "kaggle-sdk/0.1.35:gpu_quota:reservations_included"
+const quotaSource = "kaggle-api/v1:gpu_quota:reservations_included"
 
 var _ provider.QuotaReader = (*Monitor)(nil)
 

@@ -144,7 +144,7 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 	if err = f.store.PutWorkspace(ctx, auth.Workspace{ID: "workspace", Enabled: true, AllowedProfiles: []string{"fixture"}}); err != nil {
 		t.Fatal(err)
 	}
-	f.config = Config{InstanceID: "fixture_instance", Revision: "one", AccountName: "fixture_account", CredentialRef: "vault:con_fixture", PythonExecutable: filepath.Join(t.TempDir(), "never-invoked.exe")}
+	f.config = Config{InstanceID: "fixture_instance", Revision: "one", AccountName: "fixture_account", CredentialRef: "vault:con_fixture"}
 	if err = f.store.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +207,15 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 	f.receipt, err = jobs.Submit(ctx, actor, "workspace", "staging-journal-key", raw)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Admission owns its timestamp. Slow race builds can outlast the fixture's
+	// initial clock offset; authorization must follow the actual persisted state.
+	record, err := f.store.ReadJob(ctx, "workspace", actor.TokenID(), f.receipt.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Attempt.UpdatedAt.After(f.clock.at) {
+		f.clock.at = record.Attempt.UpdatedAt
 	}
 	permits, err := executionauth.New(access, f.store, f.clock)
 	if err != nil {
@@ -276,7 +285,6 @@ func (f *stagingJournalFixture) attach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.local = func(context.Context, Config, Mode, []byte) (Report, error) { return baseline(Local), nil }
 	s.run = func(ctx context.Context, c Config, mode string, token []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
 		if c != f.config || string(token) != "SYNTHETIC_TOKEN" {
 			t.Fatal("changed frozen credential binding")

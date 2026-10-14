@@ -23,7 +23,6 @@ func logFixture(t *testing.T, reply func() monitorResponse) (*LogReader, provide
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.local = e.stager.local
 	count := new(int)
 	m.run = func(_ context.Context, _ Config, mode string, token []byte, r monitorRequest) (monitorResponse, error) {
 		*count++
@@ -126,6 +125,7 @@ func TestLogSnapshotsValidatePageAndCursorBeforeIO(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := monitorFixture(t)
+	m.config.Revision = "foreign"
 	if _, err := NewLogReader(reader.executor, m); !errors.Is(err, ErrConfig) {
 		t.Fatal("foreign monitor binding accepted")
 	}

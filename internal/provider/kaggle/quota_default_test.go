@@ -2,11 +2,12 @@ package kaggle
 
 import (
 	"context"
-	"strconv"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
@@ -32,20 +33,22 @@ func TestMonitorProtoJSONQuotaDefaultReachesGoWithoutInventingAllowance(t *testi
 		{"zero", strings.Replace(complete, "108000s", "0s", 1), "known", 0, false, false},
 		{"fully-reserved", strings.Replace(complete, `"timeReserved":"0s"`, `"timeReserved":"108000s"`, 1), "known", 0, false, false},
 		{"subsecond-reservation", `{"gpuQuota":{"totalTimeAllowed":"120s","timeUsed":"0s","timeReserved":"0.000000001s"}}`, "known", 119, false, false},
-		{"invalid-duration", strings.Replace(complete, "108000s", "-1s", 1), "unavailable", 0, false, true},
+		{"invalid-duration", strings.Replace(complete, "108000s", "-1s", 1), "unavailable", 0, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := monitorFixture(t)
-			m.config.PythonExecutable = pythonForTest(t)
-			program := monitorProgram()
-			// Exercise the exact embedded decoder and process/protocol boundary.
-			// Only replace main's SDK/network entry; no workload or provider runs.
-			source := strings.Replace(program, "\nif __name__ == \"__main__\":", "\nmain=lambda:quota_result(json.loads("+strconv.Quote(tc.wire)+"))\nif __name__ == \"__main__\":", 1)
-			if source == program {
-				t.Fatal("fixture did not replace the network entry point")
-			}
-			m.run = func(ctx context.Context, c Config, mode string, token []byte, request monitorRequest) (monitorResponse, error) {
-				return runMonitorSource(ctx, c, mode, token, request, source)
+			m.run = func(ctx context.Context, _ Config, mode string, token []byte, request monitorRequest) (monitorResponse, error) {
+				client, err := kaggleapi.New(token, kaggleapi.Options{APITransport: apiRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if strings.HasSuffix(r.URL.Path, "IntrospectToken") {
+						return jsonResponse(200, `{"active":true,"username":"`+m.config.AccountName+`"}`), nil
+					}
+					return jsonResponse(200, tc.wire), nil
+				})})
+				if err != nil {
+					return monitorResponse{}, err
+				}
+				defer client.Close()
+				return monitor(ctx, client, mode, request), nil
 			}
 			quota, err := m.ReadQuota(context.Background())
 			if (err != nil) != tc.wantError || string(quota.Status) != tc.status || quota.Validate() != nil || quota.ResetAt != nil {

@@ -24,7 +24,7 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 		domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
 		domain.CapabilityRetainedSessions, domain.CapabilityEphemeralSecrets, domain.CapabilityRemoteCleanup,
 	}
-	d := provider.Descriptor{Type: "kaggle", InstanceID: domain.ProviderInstanceID(c.InstanceID), Version: ClientVersion + "/sdk-" + SDKVersion}
+	d := provider.Descriptor{Type: "kaggle", InstanceID: domain.ProviderInstanceID(c.InstanceID), Version: "native-api/v1"}
 	for _, name := range names {
 		cap := domain.CapabilityStatus{Name: name, Support: domain.CapabilitySupportUnknown,
 			Evidence: domain.EvidenceImplementedOffline, ClientVersion: d.Version,
@@ -51,7 +51,7 @@ func OperationalDescriptor(c Config) (provider.Descriptor, error) {
 			cap.Reason = "explicit account-scoped read with conservative units, reservations and freshness"
 			cap.Conditions = []string{"complete free-quota fields required; not a reservation or live-account capability claim"}
 		case domain.CapabilityExecutionTimeout:
-			cap.Reason = "requested SDK wall limit and runner budgets exist; provider enforcement is unverified"
+			cap.Reason = "requested API wall limit and runner budgets exist; provider enforcement is unverified"
 		case domain.CapabilityStrongIdentity:
 			cap.Reason = "kernel ID, source and version are checked; same-version session reruns are not attestable"
 		}

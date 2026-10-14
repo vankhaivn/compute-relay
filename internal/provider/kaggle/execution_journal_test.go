@@ -86,7 +86,6 @@ func (x *executionJournalFixture) attach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stage.local = func(context.Context, Config, Mode, []byte) (Report, error) { return baseline(Local), nil }
 	stage.run = func(_ context.Context, c Config, mode string, token []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
 		if mode != "observe" || c != f.config || string(token) != "SYNTHETIC_TOKEN" {
 			t.Fatal("execution refreshed staging or changed account")

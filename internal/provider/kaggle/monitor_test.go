@@ -26,7 +26,6 @@ func monitorFixture(t *testing.T) *Monitor {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.local = func(context.Context, Config, Mode, []byte) (Report, error) { return baseline(Local), nil }
 	return m
 }
 
@@ -112,8 +111,8 @@ func (f monitorCredentialFunc) WithCredential(ctx context.Context, ref ports.Cre
 	return f(ctx, ref, use)
 }
 
-func TestMonitorChecksLocalBeforeCredentialsAndSanitizesFailures(t *testing.T) {
-	for _, fault := range []string{"local", "missing", "bad-token", "callback-twice", "process", "panic", "protocol"} {
+func TestMonitorSanitizesCredentialAndTransportFailures(t *testing.T) {
+	for _, fault := range []string{"missing", "bad-token", "callback-twice", "process", "panic", "protocol"} {
 		t.Run(fault, func(t *testing.T) {
 			m := monitorFixture(t)
 			calls := 0
@@ -129,13 +128,7 @@ func TestMonitorChecksLocalBeforeCredentialsAndSanitizesFailures(t *testing.T) {
 				}
 				return knownQuota("1000000000", "0", "0"), nil
 			}
-			if fault == "local" {
-				m.local = func(context.Context, Config, Mode, []byte) (Report, error) { return Report{}, ErrProcess }
-				m.credentials = monitorCredentialFunc(func(context.Context, ports.CredentialRef, func([]byte) error) error {
-					t.Fatal("secret lookup before local pins")
-					return nil
-				})
-			} else if fault == "missing" || fault == "bad-token" || fault == "callback-twice" {
+			if fault == "missing" || fault == "bad-token" || fault == "callback-twice" {
 				m.credentials = monitorCredentialFunc(func(ctx context.Context, ref ports.CredentialRef, use func([]byte) error) error {
 					if fault == "missing" {
 						return errors.New("SYNTHETIC_TOKEN")
@@ -152,7 +145,7 @@ func TestMonitorChecksLocalBeforeCredentialsAndSanitizesFailures(t *testing.T) {
 			if err == nil || strings.Contains(err.Error(), "SYNTHETIC_TOKEN") || q.Status != provider.QuotaUnavailable || q.Remaining != nil {
 				t.Fatal("failure leaked success or secret", q, err)
 			}
-			if calls > 1 || (fault == "local" || fault == "missing" || fault == "bad-token") && calls != 0 {
+			if calls > 1 || (fault == "missing" || fault == "bad-token") && calls != 0 {
 				t.Fatal("unintended read", calls)
 			}
 		})

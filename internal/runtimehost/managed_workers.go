@@ -51,7 +51,7 @@ func (c ManagedServeConfig) validate() error {
 		}
 		return nil
 	}
-	if _, err := kaggle.NewDiscovery(c.PythonExecutable, clock{}); err != nil {
+	if _, err := kaggle.NewDiscovery(clock{}); err != nil {
 		return ErrRequest
 	}
 	info, err := os.Stat(c.PythonExecutable)
@@ -92,7 +92,7 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 			return nil, ErrRequest
 		}
 	} else {
-		discovery, discoveryErr := kaggle.NewDiscovery(config.PythonExecutable, clock{})
+		discovery, discoveryErr := kaggle.NewDiscovery(clock{})
 		if discoveryErr != nil {
 			return nil, ErrRequest
 		}
@@ -182,7 +182,7 @@ func (h *Host) managedProvider(config ManagedServeConfig, resolver ports.Credent
 	inner := outer
 	inner.AccountScope = binding.CanonicalAccount
 	providerConfig := kaggle.Config{InstanceID: string(profile.Binding.ProviderInstanceID), Revision: profile.Binding.ConfigurationRevision,
-		AccountName: binding.CanonicalAccount, CredentialRef: ports.CredentialRef(profile.CredentialRef), PythonExecutable: config.PythonExecutable}
+		AccountName: binding.CanonicalAccount, CredentialRef: ports.CredentialRef(profile.CredentialRef)}
 	policy := kaggle.DefaultExecutionPolicy()
 	policy.MachineShape, policy.AllowInternet, policy.MaxWallSeconds = frozen.MachineShape, profile.AllowRemoteInternet, profile.MaxRemoteWallSeconds
 	accelerator := "gpu"

@@ -54,17 +54,10 @@ type artifactDeclaration struct {
 	Required bool   `json:"required"`
 	MaxBytes int64  `json:"max_bytes"`
 }
-type artifactIdentity struct {
-	JobID     domain.JobID        `json:"job_id"`
-	AttemptID domain.AttemptID    `json:"attempt_id"`
-	Nonce     string              `json:"attempt_nonce"`
-	Bundle    domain.SHA256Digest `json:"bundle_sha256"`
-	Inputs    domain.SHA256Digest `json:"input_manifest_sha256"`
-}
 type artifactRequest struct {
 	Protocol  int                   `json:"protocol"`
 	Execution executionRequest      `json:"execution"`
-	Identity  artifactIdentity      `json:"identity"`
+	Identity  provider.Identity     `json:"identity"`
 	Outputs   []artifactDeclaration `json:"outputs"`
 	MaxFiles  int                   `json:"max_files"`
 	MaxBytes  int64                 `json:"max_bytes"`
@@ -101,8 +94,7 @@ func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, err
 	}
 	r := artifactRequest{Protocol: 1, Execution: e.request, MaxFiles: policy.MaxFiles, MaxBytes: policy.MaxBytes, Outputs: make([]artifactDeclaration, 0, len(outputs))}
 	r.Execution.Source = ""
-	id := e.plan.Job.Identity
-	r.Identity = artifactIdentity{id.JobID, id.AttemptID, id.Nonce, id.BundleSHA256, id.InputManifestSHA256}
+	r.Identity = e.plan.Job.Identity
 	for _, o := range outputs {
 		kind := o.Kind
 		if kind == "" {
@@ -116,11 +108,21 @@ func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, err
 	return &ArtifactReader{executor: e, policy: policy, request: r, slot: make(chan struct{}, 1), run: runArtifacts}, nil
 }
 func artifactSafePath(path string) bool {
-	if !provider.SafeArtifactPath(path) || len(path) > 512 || strings.ContainsAny(path, "%") {
+	if !provider.SafeArtifactPath(path) || len(path) > 512 || strings.ContainsAny(path, `%<>"|?*`) {
 		return false
 	}
 	for _, c := range path {
 		if c < 32 || c > 126 {
+			return false
+		}
+	}
+	for _, part := range strings.Split(path, "/") {
+		if len(part) > 255 || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return false
+		}
+		stem := strings.ToUpper(strings.SplitN(part, ".", 2)[0])
+		if stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+			len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '0' && stem[3] <= '9' {
 			return false
 		}
 	}
@@ -270,7 +272,7 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 }
 
 // Destination MUST be temporary/unpublished. A full payload followed by failed
-// EOF/Close, digest, final identity check or process exit is still an error. M3's
+// EOF/Close, digest or final identity check is still an error. M3's
 // transfer pipe sends successful EOF only after this entire method succeeds.
 func (a *ArtifactReader) FetchArtifact(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
 	return a.FetchArtifactWithProgress(parent, ref, file, dst, limit, nil)
@@ -347,16 +349,9 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 	defer func() {
 		if recover() != nil {
 			raw = nil
-			err = ErrProcess
+			err = ErrUnavailable
 		}
 	}()
-	local, err := a.executor.stager.local(ctx, a.executor.stager.config, Local, nil)
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil || !local.valid(Local) || local.Local != "ready" {
-		return nil, ErrProcess
-	}
 	request := a.request
 	request.Outputs = append([]artifactDeclaration(nil), request.Outputs...)
 	request.Target = target
@@ -391,7 +386,7 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 		return nil, ctx.Err()
 	}
 	if err != nil || !called || violated {
-		return nil, ErrProcess
+		return nil, ErrUnavailable
 	}
 	if mode == "fetch" && len(raw) != 0 {
 		return nil, ErrProtocol
