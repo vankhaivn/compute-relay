@@ -1,0 +1,9 @@
+: fixture comment
+event: log
+data: {"data":"first\r\nSYNTHETIC_"}
+
+data: {"data":"TOKEN\rlast"}
+
+data: END_OF_LOG
+
+: fixture end
