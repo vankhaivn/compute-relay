@@ -573,3 +573,24 @@ func TestManagedResourceRecheckCannotReassignAcceptedWork(t *testing.T) {
 		t.Fatal("credential reached resource failure projection")
 	}
 }
+
+func TestManagedFailedVaultWriteSanitizedAndNoVerification(t *testing.T) {
+	f := newManagedLifecycleFixture(t)
+	// Establish the HMAC key independently before denying the credential write.
+	f.managedCreate(t, "app", "vault-failure-bootstrap", systemManagedSecret)
+	f.vault.mu.Lock()
+	f.vault.failCreate = errors.New("synthetic-secret-bearing-error-canary")
+	f.vault.mu.Unlock()
+	op, err := f.services.connections.Submit(context.Background(), f.actor, "app", "", "failed-secret-write", systemManagedCreateBody(systemManagedOther))
+	requireNoError(t, err)
+	status, err := f.services.connections.Operation(context.Background(), f.actor, "app", op.ID)
+	if err != nil || status.Status != "failed" || status.Problem == nil || strings.Contains(*status.Problem, "canary") {
+		t.Fatal("failed vault write lost sanitized outcome", status, err)
+	}
+	before := f.adapter.checkCount()
+	_, err = f.services.connections.RunOnce(context.Background())
+	requireNoError(t, err)
+	if f.adapter.checkCount() != before {
+		t.Fatal("absent credential reached account verification")
+	}
+}

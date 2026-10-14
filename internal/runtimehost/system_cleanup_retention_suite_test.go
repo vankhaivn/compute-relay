@@ -50,7 +50,8 @@ func TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation(t *testing.T) {
 					t.Fatal("preview changed target or unknown size", resource)
 				}
 			}
-			if len(probe.requests) != 0 || f.backend.Stats().SubmitCalls != before.SubmitCalls || f.backend.Stats().Executions != before.Executions {
+			after := f.backend.Stats()
+			if len(probe.requests) != 0 || after.PrepareCalls != before.PrepareCalls || after.SubmitCalls != before.SubmitCalls || after.Executions != before.Executions || after.FetchCalls != before.FetchCalls {
 				t.Fatal("preview mutated provider")
 			}
 			raw := string(systemJSON(t, preview))

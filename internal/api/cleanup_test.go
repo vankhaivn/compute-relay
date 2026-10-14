@@ -149,7 +149,14 @@ func TestCleanupHTTPAdmissionGuardsWithStore(t *testing.T) {
 		t.Fatal("cleanup HEAD lost methods", response.Code, response.Header().Get("Allow"))
 	}
 	f.call(t, "GET", path, "a", "", "", 400)
-	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID), "a", "", "", 200)
+	query := "?attempt_id=" + string(job.AttemptID)
+	_, preview := f.call(t, "GET", path+query, "a", "", "", 200)
+	wireSchema(t, "cleanup-preview", preview)
+	for _, invalid := range []string{"?attempt_id=", "?attempt_id=a&attempt_id=b", query + "&discard_uncollected=1", query + "&discard_uncollected=true&discard_uncollected=false", query + "&remote_ref=foreign", query + "&discard_uncollected=", query + "&attempt_id=x", query + "&x=y;z"} {
+		f.call(t, "GET", path+invalid, "a", "", "", 400)
+	}
+	f.call(t, "POST", path+query, "a", "query-not-permit", body, 400)
+	f.call(t, "GET", path+query, "a", "", "{}", 400)
 	for _, q := range []string{"&accept_name_based_delete=true", "&accept_name_based_delete=false", "&accept_name_based_delete=1", "&accept_name_based_delete=true&accept_name_based_delete=false", "&accept_name_based_delete="} {
 		f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID)+q, "a", "", "", 400)
 	}

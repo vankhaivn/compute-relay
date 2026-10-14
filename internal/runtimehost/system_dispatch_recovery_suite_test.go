@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -34,6 +35,9 @@ func TestSystemDispatchLostSubmitResponseRestartAndTerminalCollectionGate(t *tes
 	requireNoError(t, f.dispatchStep(t))
 	if trace.journal(t, id).Phase != dispatch.Ready || f.backend.Stats().Executions != 0 {
 		t.Fatal("prepare allocated execution")
+	}
+	if _, err := os.Stat(filepath.Join(f.host.root.Path, "answer.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("unexpected local workload output")
 	}
 	requireNoError(t, f.dispatchStep(t))
 	j := trace.journal(t, id)
@@ -817,5 +821,31 @@ func TestCollectionPublicationSurvivesRenewalDuringTransfer(t *testing.T) {
 	result, err := f.host.store.ReadCollection(t.Context(), "app", f.actor.TokenID(), job.JobID, job.AttemptID)
 	if err != nil || len(result.Files) != 2 || renewals != 1 {
 		t.Fatal("renewal invalidated verified proof", renewals, err)
+	}
+}
+
+type systemCorruptBundle struct {
+	dispatch.BlobStore
+	object domain.ObjectID
+}
+
+func (b *systemCorruptBundle) Open(ctx context.Context, w domain.WorkspaceID, id domain.ObjectID) (io.ReadCloser, error) {
+	if id == b.object {
+		return io.NopCloser(strings.NewReader("not-a-bundle")), nil
+	}
+	return b.BlobStore.Open(ctx, w, id)
+}
+func TestSystemDispatchMalformedBundleNeverStages(t *testing.T) {
+	f, _, trace := newSystemDispatch(t, fake.DefaultScenario())
+	id := f.dispatchJob(t, "app", 1)
+	bad := &systemCorruptBundle{BlobStore: f.host.inputs, object: f.dispatchRecord(t, id).Request.Spec().Bundle.ObjectID}
+	var err error
+	f.services.dispatcher, err = dispatch.New(f.wrapDispatch(f.host.store), f.services.resolver, bad, f.fixtureClock(), dispatch.DefaultConfig())
+	requireNoError(t, err)
+	if err = f.dispatchStep(t); err == nil {
+		t.Fatal("corrupt bundle accepted")
+	}
+	if trace.journal(t, id).Phase != dispatch.Failed || f.backend.Stats().PrepareCalls != 0 {
+		t.Fatal("invalid bytes reached staging")
 	}
 }
