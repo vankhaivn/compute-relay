@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,7 +25,7 @@ func TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation(t *testing.T) {
 	probe := &cleanupProbe{probeProvider: f.adapter}
 	previewService := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
 	before := f.backend.Stats()
-	preview, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
+	preview, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false)
 	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
 		t.Fatal(preview, err)
 	}
@@ -86,7 +85,7 @@ func TestCleanupPreviewRechecksAuthorityAfterReads(t *testing.T) {
 				return probe.probeProvider.CleanupResource(ctx, request)
 			}
 			previewService := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
-			_, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
+			_, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false)
 			if !changed || err == nil || change == "hold" && !errors.Is(err, operations.ErrChanged) {
 				t.Fatal("stale preview escaped current authority/eligibility", err)
 			}
@@ -216,7 +215,7 @@ func TestCleanupSharedReferencesAcrossBindingAliasesAreRetained(t *testing.T) {
 				t.Fatal(err)
 			}
 			service, principal := cleanupService(t, f, "a", auth.Operate)
-			preview, err := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{f.adapter}).Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
+			preview, err := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{f.adapter}).Preview(ctx, principal, "a", id.JobID, id.AttemptID, false)
 			if err != nil || preview.Eligible || preview.Reason != "shared_resource" || len(preview.Resources) != 2 {
 				t.Fatal("shared physical resource was eligible", preview, err)
 			}
@@ -432,93 +431,110 @@ func TestCleanupLegacyUnknownEffectsBlockCollectionAfterUpgrade(t *testing.T) {
 	}
 }
 
-// nameCleanupProbe models an adapter whose delete RPC has no immutable precondition.
-type nameCleanupProbe struct{ *cleanupProbe }
-
-func (p nameCleanupProbe) DescribeCleanup(r provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
-	d, err := p.probeProvider.DescribeCleanup(r)
-	d.NameBasedDelete = true
-	d.Warning = "Deletion uses the verified name; a replacement created after the check may be deleted."
-	return d, err
-}
-
-func TestCleanupNameBasedAcceptanceIsDurableAndDoesNotRetarget(t *testing.T) {
-	ctx := context.Background()
-	for _, accept := range []bool{false, true} {
-		t.Run(fmt.Sprint(accept), func(t *testing.T) {
-			f, id := collectedFixture(t)
-			service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
-			probe := nameCleanupProbe{&cleanupProbe{probeProvider: f.adapter}}
-			previewService := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
-			preview, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
-			if err != nil || preview.Eligible || preview.Resources[0].Reason != "name_based_delete_not_accepted" || preview.Resources[0].Observation != "present" || preview.Resources[0].Target.Warning == "" {
-				t.Fatal(preview, err)
-			}
-			accepted, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, true)
-			if err != nil || !accepted.Eligible || accepted.Resources[0].Fingerprint != preview.Resources[0].Fingerprint {
-				t.Fatal(accepted, err)
-			}
-			body, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: accept})
-			receipt, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "name-cleanup", body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			changed, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: !accept})
-			if _, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "name-cleanup", changed); !errors.Is(err, operations.ErrConflict) {
-				t.Fatal("acceptance changed under existing key", err)
-			}
-			f.restart(t)
-			probe = nameCleanupProbe{&cleanupProbe{probeProvider: f.adapter}}
-			calls := 0
-			probe.resourceHook = func(ctx context.Context, r provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
-				calls++
-				if !r.AcceptNameBasedDelete || r.RecoverOnly {
-					t.Fatal("durable acceptance was lost", r)
-				}
-				return probe.probeProvider.CleanupResource(ctx, r)
-			}
-			worker, err := cleanup.New(f.s, cleanupResolver{probe}, cleanup.DefaultConfig())
-			if err != nil {
-				t.Fatal(err)
-			}
-			runCleanup(t, worker)
-			current, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if accept {
-				if calls != 2 || current.Effect != operations.RemoteDeleted {
-					t.Fatal(current, calls)
-				}
-			} else if calls != 0 || current.Resources[0].Reason != "name_based_delete_not_accepted" {
-				t.Fatal("unaccepted name deletion reached provider", current, calls)
-			}
-			for i, r := range current.Resources {
-				if r.Fingerprint != preview.Resources[i].Fingerprint {
-					t.Fatal("runtime acceptance changed target", r)
-				}
-			}
-		})
-	}
-}
-
-func TestCleanupNameBasedRecoveryOnlyReadsOriginalIntent(t *testing.T) {
+func TestCleanupPreviewAndApplyKeepFrozenTargets(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)
 	service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
-	body, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: true})
+	probe := &cleanupProbe{probeProvider: f.adapter}
+	previewService := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
+	preview, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false)
+	if err != nil || !preview.Eligible || len(preview.Resources) != 2 || preview.Resources[0].Observation != "present" {
+		t.Fatal(preview, err)
+	}
+	raw, _ := json.Marshal(preview)
+	for _, field := range []string{`"name_based_delete"`, `"warning"`} {
+		if strings.Contains(string(raw), field) {
+			t.Fatal("removed preview field remains", string(raw))
+		}
+	}
+	receipt, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "exact-cleanup", cleanupBody(id.AttemptID, false, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The retired runtime flag was false/omitted in immutable snapshots. Its
+	// removal must preserve the pre-removal request encoding and fingerprint.
+	rows, err := f.s.db.Query(`SELECT target,target_sha256 FROM cleanup_resources WHERE operation_id=? ORDER BY ordinal`, receipt.Operation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var target, hash string
+		if err = rows.Scan(&target, &hash); err != nil {
+			t.Fatal(err)
+		}
+		var resource cleanup.Resource
+		if err = json.Unmarshal([]byte(target), &resource); err != nil {
+			t.Fatal(err)
+		}
+		q := resource.Request
+		legacy := struct {
+			provider.CleanupRequest
+			Purpose              string
+			OwnershipOperationID domain.OperationID
+			PlanSHA256           domain.SHA256Digest
+			RetiredAcceptance    bool `json:"AcceptNameBasedDelete,omitempty"`
+			RecoverOnly          bool `json:",omitempty"`
+		}{q.CleanupRequest, q.Purpose, q.OwnershipOperationID, q.PlanSHA256, false, false}
+		original, _ := json.Marshal(legacy)
+		current, _ := json.Marshal(q)
+		if string(original) != string(current) || string(provider.Digest(original)) != hash {
+			t.Fatal("retired option changed the original target fingerprint", target)
+		}
+		count++
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	if count != 2 {
+		t.Fatal("missing original snapshots", count)
+	}
+	f.restart(t)
+	probe = &cleanupProbe{probeProvider: f.adapter}
+	calls := 0
+	probe.resourceHook = func(ctx context.Context, r provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
+		if r.RecoverOnly || r.LedgerID != preview.Resources[calls].ResourceID || preview.Resources[calls].Purpose != r.Purpose {
+			t.Fatal("cleanup changed its frozen target/order", r)
+		}
+		calls++
+		return probe.probeProvider.CleanupResource(ctx, r)
+	}
+	worker, err := cleanup.New(f.s, cleanupResolver{probe}, cleanup.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCleanup(t, worker)
+	current, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+	if err != nil || calls != 2 || current.Effect != operations.RemoteDeleted {
+		t.Fatal(current, calls, err)
+	}
+	for i, r := range current.Resources {
+		if r.Fingerprint != preview.Resources[i].Fingerprint {
+			t.Fatal("cleanup changed original fingerprint", r)
+		}
+	}
+}
+
+func TestCleanupRecoveryOnlyReadsOriginalIntent(t *testing.T) {
+	ctx := context.Background()
+	f, id := collectedFixture(t)
+	service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
+	body, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID})
 	receipt, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "name-recovery", body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first, err := f.s.ClaimCleanup(ctx, time.Second)
-	if err != nil || first == nil || !first.AcceptNameBasedDelete {
+	if err != nil || first == nil {
 		t.Fatal(first, err)
 	}
-	changed := *first
-	changed.AcceptNameBasedDelete = false
-	if err := f.s.BeginCleanupResource(ctx, changed, changed.Resources[0]); !errors.Is(err, operations.ErrChanged) {
-		t.Fatal("worker changed durable acceptance", err)
+	changed := first.Resources[0]
+	changed.Resource.Request.PlanSHA256 = provider.Digest([]byte("changed original plan"))
+	changed.Result.Fingerprint = changed.Resource.Fingerprint()
+	if err := f.s.BeginCleanupResource(ctx, *first, changed); !errors.Is(err, operations.ErrChanged) {
+		t.Fatal("worker changed durable target", err)
 	}
 	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0]); err != nil {
 		t.Fatal(err)
@@ -526,10 +542,10 @@ func TestCleanupNameBasedRecoveryOnlyReadsOriginalIntent(t *testing.T) {
 	f.restart(t)
 	f.clock.advance(2 * time.Second)
 	calls := 0
-	probe := nameCleanupProbe{&cleanupProbe{probeProvider: f.adapter}}
+	probe := &cleanupProbe{probeProvider: f.adapter}
 	probe.resourceHook = func(_ context.Context, r provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 		calls++
-		if !r.RecoverOnly || !r.AcceptNameBasedDelete || r.LedgerID != first.Resources[0].Result.ResourceID {
+		if !r.RecoverOnly || r.LedgerID != first.Resources[0].Result.ResourceID {
 			t.Fatal("recovery could reapply or retarget", r)
 		}
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeProviderStateUnknown, domain.FailureStageObservation, "earlier deletion remains unknown")
@@ -544,6 +560,6 @@ func TestCleanupNameBasedRecoveryOnlyReadsOriginalIntent(t *testing.T) {
 		t.Fatal(current, calls, err)
 	}
 	if worked, err := worker.RunOnce(ctx); worked || err != nil {
-		t.Fatal("unknown name-based deletion repeated", worked, err)
+		t.Fatal("unknown deletion repeated", worked, err)
 	}
 }

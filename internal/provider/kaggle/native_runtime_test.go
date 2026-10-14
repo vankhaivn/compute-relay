@@ -133,7 +133,7 @@ func TestNativeRuntimePrivateBatchRestartLogsArtifactsAndCleanup(t *testing.T) {
 		}
 		request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "res_fixture",
 			CreationOperationID: prepared.PreparationID, Mode: provider.CleanupApply}, Purpose: purpose, OwnershipOperationID: operation,
-			PlanSHA256: plan.Digest(), AcceptNameBasedDelete: true}
+			PlanSHA256: plan.Digest()}
 		cleaned, err := restarted.CleanupResource(ctx, request)
 		if err != nil || !cleaned.Deleted {
 			t.Fatal("original private resource cleanup unconfirmed", purpose, cleaned, err)
@@ -306,7 +306,7 @@ func TestNativeCleanupRecoveryMissingName403IsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	request := cleanupRequest{Protocol: 1, Owner: f.owner, Slug: "crs-" + strings.Repeat("a", 40), Kind: "dataset", ID: "123", SHA256: provider.Digest(nil), AcceptNameBasedDelete: true}
+	request := cleanupRequest{Protocol: 1, Owner: f.owner, Slug: "crs-" + strings.Repeat("a", 40), Kind: "dataset", ID: "123", SHA256: provider.Digest(nil)}
 	if seen := cleanup(context.Background(), client, "recover", request); seen.Status != "unknown" || f.count("DeleteDataset") != 0 || f.count("StartBlobUpload") != 0 {
 		t.Fatal("missing-name 403 became deletion evidence or a mutation", seen)
 	}
@@ -326,7 +326,7 @@ func TestNativeCleanupChecksIdentityAndNeverRepeatsUncertainDelete(t *testing.T)
 				f.staged["relay-stage.bin"] = marker
 				f.kernel = &executionRequest{Owner: f.owner, Slug: "cre-" + strings.Repeat("b", 40), Source: "original-source", Dataset: f.owner + "/" + f.stage.Slug}
 				request := cleanupRequest{Protocol: 1, Owner: f.owner, Slug: f.stage.Slug, Kind: kind, ID: f.datasetID,
-					SHA256: f.stage.MarkerSHA256, AcceptNameBasedDelete: true}
+					SHA256: f.stage.MarkerSHA256}
 				operation := "DeleteDataset"
 				if kind == "kernel" {
 					request.Slug, request.ID, request.SHA256 = f.kernel.Slug, f.kernelID, provider.Digest([]byte(f.kernel.Source))

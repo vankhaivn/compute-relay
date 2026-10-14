@@ -23,7 +23,7 @@ func runCleanup(parent context.Context, _ Config, mode string, token []byte, req
 
 func cleanup(ctx context.Context, client *kaggleapi.Client, mode string, request cleanupRequest) cleanupResponse {
 	result := func(status string) cleanupResponse { return cleanupResponse{1, status} }
-	if mode != "preview" && mode != "apply" && mode != "recover" || mode == "apply" && !request.AcceptNameBasedDelete ||
+	if mode != "preview" && mode != "apply" && mode != "recover" ||
 		request.Kind != "kernel" && request.Kind != "dataset" || !positiveDecimal(request.ID) || !request.SHA256.Valid() {
 		return result("unknown")
 	}

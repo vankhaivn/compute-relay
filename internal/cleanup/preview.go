@@ -18,7 +18,7 @@ func (s *Service) WithPreviewResolver(resolver Resolver) *Service {
 	return &copy
 }
 
-func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID, discard, acceptNameBasedDelete bool) (Preview, error) {
+func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID, discard bool) (Preview, error) {
 	p, err := s.authorize(ctx, principal, w, auth.Operate)
 	if err != nil {
 		return Preview{}, err
@@ -39,7 +39,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 		adapter, _ = s.previewResolver.Resolve(plan.Binding)
 	}
 	for _, resource := range plan.Resources {
-		view := previewResource(ctx, plan, resource, adapter, acceptNameBasedDelete)
+		view := previewResource(ctx, plan, resource, adapter)
 		result.Resources = append(result.Resources, view)
 		if !view.Eligible {
 			if result.Eligible {
@@ -60,7 +60,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	return result, nil
 }
 
-func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, adapter provider.Provider, acceptNameBasedDelete bool) (view ResourcePreview) {
+func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, adapter provider.Provider) (view ResourcePreview) {
 	request := resource.Request
 	view = ResourcePreview{ResourceID: request.LedgerID, Purpose: request.Purpose, Fingerprint: resource.Fingerprint(), Observation: "not_checked", Reason: plan.Reason}
 	defer func() {
@@ -109,9 +109,6 @@ func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, a
 		view.Eligible, view.Observation, view.Reason = true, "present", "eligible"
 	default:
 		view.Observation, view.Reason = "unknown", "remote_state_unverified"
-	}
-	if view.Eligible && description.NameBasedDelete && !acceptNameBasedDelete {
-		view.Eligible, view.Reason = false, "name_based_delete_not_accepted"
 	}
 	return view
 }

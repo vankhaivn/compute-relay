@@ -41,10 +41,9 @@ var (
 // Request always names the intended attempt. A delayed request must not silently
 // target an attempt created by a concurrent retry. Reason is non-secret metadata.
 type Request struct {
-	AttemptID             domain.AttemptID `json:"attempt_id"`
-	Reason                string           `json:"reason,omitempty"`
-	DiscardUncollected    bool             `json:"discard_uncollected,omitempty"`
-	AcceptNameBasedDelete bool             `json:"accept_name_based_delete,omitempty"`
+	AttemptID          domain.AttemptID `json:"attempt_id"`
+	Reason             string           `json:"reason,omitempty"`
+	DiscardUncollected bool             `json:"discard_uncollected,omitempty"`
 }
 
 func Supported(kind domain.OperationKind) bool {
@@ -61,7 +60,7 @@ func (r Request) Validate(kind domain.OperationKind) error {
 			return ErrRequest
 		}
 	}
-	if kind != domain.OperationCleanup && (r.DiscardUncollected || r.AcceptNameBasedDelete) {
+	if kind != domain.OperationCleanup && r.DiscardUncollected {
 		return ErrRequest
 	}
 	if kind == domain.OperationRetryCompute && strings.TrimSpace(r.Reason) == "" {
@@ -77,7 +76,7 @@ func Parse(kind domain.OperationKind, raw []byte) (Request, error) {
 	fields, err := jsonwire.Object(raw, MaxRequestBytes)
 	optional := []string{"reason"}
 	if kind == domain.OperationCleanup {
-		optional = append(optional, "discard_uncollected", "accept_name_based_delete")
+		optional = append(optional, "discard_uncollected")
 	}
 	if err != nil || jsonwire.Fields(fields, []string{"attempt_id"}, optional) != nil || json.Unmarshal(raw, &r) != nil || r.Validate(kind) != nil {
 		return Request{}, ErrRequest
@@ -115,11 +114,10 @@ func (r Request) CanonicalJSON(kind domain.OperationKind) ([]byte, error) {
 	}
 	if kind == domain.OperationCleanup {
 		return json.Marshal(struct {
-			AttemptID             domain.AttemptID `json:"attempt_id"`
-			DiscardUncollected    bool             `json:"discard_uncollected"`
-			AcceptNameBasedDelete bool             `json:"accept_name_based_delete,omitempty"`
-			Reason                string           `json:"reason,omitempty"`
-		}{r.AttemptID, r.DiscardUncollected, r.AcceptNameBasedDelete, r.Reason})
+			AttemptID          domain.AttemptID `json:"attempt_id"`
+			DiscardUncollected bool             `json:"discard_uncollected"`
+			Reason             string           `json:"reason,omitempty"`
+		}{r.AttemptID, r.DiscardUncollected, r.Reason})
 	}
 	return json.Marshal(r)
 }

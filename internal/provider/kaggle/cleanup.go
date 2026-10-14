@@ -9,15 +9,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-const nameBasedDeleteWarning = "Kaggle deletes by owner/name. Renaming may leave the original undeleted. If someone replaces it after Relay checks it, the replacement may be deleted, including its versions and outputs."
-
 func (p *RuntimeAdapter) DescribeCleanup(request provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
 	if p == nil || !request.Valid() || string(request.Remote.Identity.InstanceID) != p.config.InstanceID {
 		return provider.CleanupDescription{}, ErrRuntimeBinding
 	}
 	id := request.Remote.Identity
 	description := provider.CleanupDescription{Version: "1", Support: domain.CapabilitySupportSupported,
-		Reason: "name_based_delete_requires_acceptance", NameBasedDelete: true, Warning: nameBasedDeleteWarning}
+		Reason: "recorded_attempt_resource"}
 	switch request.Purpose {
 	case "staging":
 		var ref stagingReference
@@ -47,9 +45,6 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 	if err != nil {
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "recorded Kaggle resource identity is incomplete or changed")
 	}
-	if request.Mode == provider.CleanupApply && !request.AcceptNameBasedDelete {
-		return provider.CleanupOutcome{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, nameBasedDeleteWarning+" Set accept_name_based_delete to confirm this risk.")
-	}
 	if p.load == nil || p.stager == nil || p.runCleanup == nil {
 		return provider.CleanupOutcome{}, ErrRuntimeBinding
 	}
@@ -57,7 +52,7 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 	if err != nil || plan.Job.Identity != request.Remote.Identity || plan.Job.Binding != p.binding.Binding || plan.Digest() != request.PlanSHA256 || prepared.Validate(plan, request.CreationOperationID) != nil {
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "original cleanup plan or preparation could not be verified")
 	}
-	query := cleanupRequest{Protocol: 1, Owner: p.config.AccountName, Slug: strings.SplitN(description.Name, "/", 2)[1], Kind: description.Kind, ID: description.ID, AcceptNameBasedDelete: request.AcceptNameBasedDelete}
+	query := cleanupRequest{Protocol: 1, Owner: p.config.AccountName, Slug: strings.SplitN(description.Name, "/", 2)[1], Kind: description.Kind, ID: description.ID}
 	if request.Purpose == "staging" {
 		var ref stagingReference
 		if prepared.Resource != request.Remote.Resource || closedObject([]byte(prepared.Resource), &ref) != nil {
@@ -121,13 +116,12 @@ func (p *RuntimeAdapter) CleanupResource(ctx context.Context, request provider.C
 }
 
 type cleanupRequest struct {
-	Protocol              int                 `json:"protocol"`
-	Owner                 string              `json:"owner"`
-	Slug                  string              `json:"slug"`
-	Kind                  string              `json:"kind"`
-	ID                    string              `json:"id"`
-	SHA256                domain.SHA256Digest `json:"sha256"`
-	AcceptNameBasedDelete bool                `json:"accept_name_based_delete"`
+	Protocol int                 `json:"protocol"`
+	Owner    string              `json:"owner"`
+	Slug     string              `json:"slug"`
+	Kind     string              `json:"kind"`
+	ID       string              `json:"id"`
+	SHA256   domain.SHA256Digest `json:"sha256"`
 }
 
 type cleanupResponse struct {

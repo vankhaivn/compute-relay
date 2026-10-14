@@ -83,7 +83,7 @@ func TestCleanupHTTPReceiptsSatisfyPublishedContract(t *testing.T) {
 	} {
 		t.Run(string(c.status)+"/"+string(c.effect), func(t *testing.T) {
 			f, _ := setupControlsHTTP(t, nil, cleanupRepository{record: cleanupRecord(t, c.status, c.effect)})
-			body := `{"attempt_id":"att_fixture","discard_uncollected":true,"accept_name_based_delete":true,"reason":"private-reason-canary"}`
+			body := `{"attempt_id":"att_fixture","discard_uncollected":true,"reason":"private-reason-canary"}`
 			headers, raw := f.call(t, "POST", "/v1/workspaces/a/jobs/job_fixture/cleanup", "a", "cleanup-contract", body, 202)
 			_, read := f.call(t, "GET", headers.Get("Location"), "read", "", "", 200)
 			for _, b := range [][]byte{raw, read} {
@@ -154,7 +154,7 @@ func TestCleanupHTTPAdmissionGuardsWithStore(t *testing.T) {
 	if !bytes.Contains(b, []byte(`"ILLEGAL_STATE_TRANSITION"`)) {
 		t.Fatal("queued attempt cleanup was not refused as a state transition", string(b))
 	}
-	for _, raw := range []string{"", "{}", `{"attempt_id":null}`, `{"attempt_id":"a","attempt_id":"b"}`, strings.TrimSuffix(body, "}") + `,"discard_uncollected":"true"}`, strings.TrimSuffix(body, "}") + `,"extra":true}`, body + "{}"} {
+	for _, raw := range []string{"", "{}", `{"attempt_id":null}`, `{"attempt_id":"a","attempt_id":"b"}`, strings.TrimSuffix(body, "}") + `,"discard_uncollected":"true"}`, strings.TrimSuffix(body, "}") + `,"accept_name_based_delete":true}`, strings.TrimSuffix(body, "}") + `,"accept_name_based_delete":false}`, strings.TrimSuffix(body, "}") + `,"extra":true}`, body + "{}"} {
 		f.call(t, "POST", path, "a", "cleanup-strict", raw, 400)
 	}
 	f.call(t, "POST", path, "a", "", body, 400)
@@ -169,8 +169,7 @@ func TestCleanupHTTPAdmissionGuardsWithStore(t *testing.T) {
 	}
 	f.call(t, "GET", path, "a", "", "", 400)
 	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID), "a", "", "", 200)
-	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID)+"&accept_name_based_delete=true", "a", "", "", 200)
-	for _, q := range []string{"&accept_name_based_delete=1", "&accept_name_based_delete=true&accept_name_based_delete=false", "&accept_name_based_delete="} {
+	for _, q := range []string{"&accept_name_based_delete=true", "&accept_name_based_delete=false", "&accept_name_based_delete=1", "&accept_name_based_delete=true&accept_name_based_delete=false", "&accept_name_based_delete="} {
 		f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID)+q, "a", "", "", 400)
 	}
 	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID), "read", "", "", 403)

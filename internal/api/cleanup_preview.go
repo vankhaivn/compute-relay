@@ -15,12 +15,12 @@ func (h *handler) cleanupPreview(w http.ResponseWriter, r *http.Request, p auth.
 		return
 	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil || r.ContentLength != 0 || len(r.TransferEncoding) != 0 || len(query["attempt_id"]) != 1 || len(query["discard_uncollected"]) > 1 || len(query["accept_name_based_delete"]) > 1 || len(query) > 3 {
+	if err != nil || r.ContentLength != 0 || len(r.TransferEncoding) != 0 || len(query["attempt_id"]) != 1 || len(query["discard_uncollected"]) > 1 || len(query) > 2 {
 		controlError(w, r, operations.ErrRequest)
 		return
 	}
 	for key := range query {
-		if key != "attempt_id" && key != "discard_uncollected" && key != "accept_name_based_delete" {
+		if key != "attempt_id" && key != "discard_uncollected" {
 			controlError(w, r, operations.ErrRequest)
 			return
 		}
@@ -33,15 +33,7 @@ func (h *handler) cleanupPreview(w http.ResponseWriter, r *http.Request, p auth.
 		}
 		discard = values[0] == "true"
 	}
-	acceptNameBasedDelete := false
-	if values, ok := query["accept_name_based_delete"]; ok {
-		if values[0] != "true" && values[0] != "false" {
-			controlError(w, r, operations.ErrRequest)
-			return
-		}
-		acceptNameBasedDelete = values[0] == "true"
-	}
-	preview, err := h.config.Cleanup.Preview(r.Context(), p, workspace, job, domain.AttemptID(query.Get("attempt_id")), discard, acceptNameBasedDelete)
+	preview, err := h.config.Cleanup.Preview(r.Context(), p, workspace, job, domain.AttemptID(query.Get("attempt_id")), discard)
 	if err != nil {
 		controlError(w, r, err)
 		return

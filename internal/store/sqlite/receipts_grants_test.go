@@ -29,9 +29,10 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 	ctx := context.Background()
 	f, collected := collectedFixture(t)
 	cleanupService, principal := cleanupService(t, f, "a", auth.Operate)
-	legacyCleanup := operations.Request{AttemptID: collected.AttemptID, AcceptNameBasedDelete: true}
+	legacyCleanup := operations.Request{AttemptID: collected.AttemptID}
 	legacyCleanupRaw, _ := json.Marshal(legacyCleanup)
-	if _, err := cleanupService.Submit(ctx, principal, "a", collected.JobID, domain.OperationCleanup, "migration-cleanup", legacyCleanupRaw); err != nil {
+	cleanupReceipt, err := cleanupService.Submit(ctx, principal, "a", collected.JobID, domain.OperationCleanup, "migration-cleanup", legacyCleanupRaw)
+	if err != nil {
 		t.Fatal(err)
 	}
 	f.authorizeSeed = false
@@ -45,6 +46,7 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer legacy.Close()
+	legacyHash := rewriteSyntheticCleanupRequest(t, legacy, cleanupReceipt.Operation.ID, true)
 	now := f.clock.Now()
 	stamp := now.Format(time.RFC3339Nano)
 	binding, _ := json.Marshal(f.profile)
@@ -199,11 +201,10 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 		}
 	}
 	cleanupKey, _ := admission.KeyDigest("migration-cleanup")
-	cleanupHash, _ := legacyCleanup.Digest(collected.JobID, domain.OperationCleanup)
+	cleanupHash := legacyHash
 	if replay, e := upgraded.ReplayOperation(ctx, "a", principal.TokenID(), domain.OperationCleanup, cleanupKey, cleanupHash); e != nil || replay == nil || !replay.Replay {
 		t.Fatal("legacy true cleanup replay lost", e)
 	}
-	legacyCleanup.AcceptNameBasedDelete = false
 	changedHash, _ := legacyCleanup.Digest(collected.JobID, domain.OperationCleanup)
 	if _, e := upgraded.ReplayOperation(ctx, "a", principal.TokenID(), domain.OperationCleanup, cleanupKey, changedHash); !errors.Is(e, operations.ErrConflict) {
 		t.Fatal("changed historical cleanup request accepted", e)

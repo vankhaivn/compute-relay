@@ -283,7 +283,7 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	previewService = previewService.WithPreviewResolver(services.resolver)
-	preview, err := previewService.Preview(ctx, actor, "app", job.JobID, job.AttemptID, false, false)
+	preview, err := previewService.Preview(ctx, actor, "app", job.JobID, job.AttemptID, false)
 	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
 		t.Fatal("cleanup preview", preview, err)
 	}

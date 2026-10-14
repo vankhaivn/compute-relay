@@ -8,7 +8,6 @@
   "properties": {
     "attempt_id": {"$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"},
     "discard_uncollected": {"type": "boolean"},
-    "accept_name_based_delete": {"type": "boolean", "description": "Explicitly accepts deletion by owner/name after identity checks. Renaming may leave the original undeleted. A replacement created between the check and deletion may be deleted, including its versions and outputs. Omitted and false are equivalent; this does not grant permission to delete a known mismatched resource."},
     "reason": {
       "type": "string",
       "maxLength": 512,

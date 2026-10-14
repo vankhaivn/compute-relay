@@ -25,7 +25,7 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			ctx := context.Background()
 			f, id := collectedFixture(t)
 			service, actor := cleanupService(t, f, "a", auth.Read, auth.Operate)
-			body := []byte(`{"attempt_id":"` + string(id.AttemptID) + `","accept_name_based_delete":true}`)
+			body := cleanupBody(id.AttemptID, false, "")
 			receipt, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCleanup, "legacy-cleanup", body)
 			if err != nil {
 				t.Fatal(err)
@@ -51,6 +51,7 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
+			legacyHash := rewriteSyntheticCleanupRequest(t, legacy, receipt.Operation.ID, true)
 			// Preserve the exact original legacy JSON layout and insignificant whitespace.
 			var recordRaw string
 			if err = legacy.QueryRow(`SELECT record FROM cleanup_operations WHERE operation_id=?`, receipt.Operation.ID).Scan(&recordRaw); err != nil {
@@ -154,7 +155,7 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 			if strings.HasPrefix(state, "legacy_") && len(got.Resources) != 0 {
 				t.Fatal("migration manufactured resource outcomes", got.Resources)
 			}
-			hash, _ := (operations.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: true}).Digest(id.JobID, domain.OperationCleanup)
+			hash := legacyHash
 			key, _ := admission.KeyDigest("legacy-cleanup")
 			replay, err := f.s.ReplayOperation(ctx, "a", actor.TokenID(), domain.OperationCleanup, key, hash)
 			if err != nil || replay == nil || !replay.Replay || replay.Operation != receipt.Operation || len(replay.Resources) != 0 {

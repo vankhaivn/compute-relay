@@ -50,12 +50,11 @@ func loadOperation(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id dom
 		return operationRow{}, err
 	}
 	op := r.Operation
-	req, err := operations.Parse(op.Kind, []byte(request))
+	req, wantHash, err := decodeStoredOperationRequest(op.JobID, op.Kind, []byte(request))
 	if err != nil {
 		return operationRow{}, ErrCorrupt
 	}
-	wantHash, err := req.Digest(op.JobID, op.Kind)
-	if err != nil || wantHash != hash || req.AttemptID != op.AttemptID || op.ID != id || op.WorkspaceID != w ||
+	if wantHash != hash || req.AttemptID != op.AttemptID || op.ID != id || op.WorkspaceID != w ||
 		string(op.JobID) != job || string(op.AttemptID) != attempt || string(op.Kind) != kind || string(op.Status) != status ||
 		op.Revision != revision || op.CreatedAt.UTC().Format(time.RFC3339Nano) != created || string(r.NewAttemptID) != newAttempt.String ||
 		r.Started && (op.Kind != domain.OperationCancel || op.Status == domain.OperationAccepted) {

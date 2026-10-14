@@ -29,12 +29,11 @@ func (l Lease) Valid() bool {
 // Work is rebuilt from the durable ledger and dispatch journal at claim time. Request
 // always uses CleanupApply; ResultsCollected is the local attestation, never a guess.
 type Work struct {
-	Lease                 Lease
-	Record                operations.Record
-	Binding               provider.BindingSnapshot
-	Request               provider.CleanupRequest
-	Resources             []ResourceWork
-	AcceptNameBasedDelete bool
+	Lease     Lease
+	Record    operations.Record
+	Binding   provider.BindingSnapshot
+	Request   provider.CleanupRequest
+	Resources []ResourceWork
 }
 
 func (w Work) Valid() bool {
@@ -45,7 +44,7 @@ func (w Work) Valid() bool {
 	seen := map[domain.ProviderResourceID]bool{}
 	for _, resource := range w.Resources {
 		q, r := resource.Resource.Request, resource.Result
-		if !q.Valid() || q.AcceptNameBasedDelete || q.RecoverOnly || !r.Valid() || resource.Resource.Reason != "" || resource.Resource.Fingerprint() != r.Fingerprint || q.LedgerID != r.ResourceID ||
+		if !q.Valid() || q.RecoverOnly || !r.Valid() || resource.Resource.Reason != "" || resource.Resource.Fingerprint() != r.Fingerprint || q.LedgerID != r.ResourceID ||
 			q.Remote.Identity != id || q.Purpose != r.Purpose || seen[r.ResourceID] {
 			return false
 		}
