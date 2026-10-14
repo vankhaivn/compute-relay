@@ -90,11 +90,15 @@ func TestExecutorAmbiguityReconcilesWithoutAnotherSubmit(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			e := newExecutionFixture(t)
 			calls := 0
+			recovery := "found"
 			e.run = func(_ context.Context, _ Config, mode string, _ []byte, r executionRequest) (executionResponse, error) {
 				calls++
 				if mode != "submit" {
 					if r.Source != "" {
 						t.Fatal("read retransmitted private source")
+					}
+					if recovery != "found" {
+						return executionResponse{Protocol: 1, Status: recovery}, nil
 					}
 					return executionFound(r, "RUNNING"), nil
 				}
@@ -116,9 +120,12 @@ func TestExecutorAmbiguityReconcilesWithoutAnotherSubmit(t *testing.T) {
 			if e.Start(context.Background(), e.prepared, nil, nil).Status != provider.SubmissionUnknown || calls != 1 {
 				t.Fatal("blind resubmission")
 			}
-			recovered, err := e.Reconcile(context.Background(), e.plan.Job.Identity)
-			if err != nil || recovered.Status != provider.ReconciliationFound || calls != 2 {
-				t.Fatal("failed same-identity recovery", err)
+			for i, status := range []provider.ReconciliationStatus{provider.ReconciliationUnknown, provider.ReconciliationNotFound, provider.ReconciliationFound} {
+				recovery = string(status)
+				recovered, err := e.Reconcile(context.Background(), e.plan.Job.Identity)
+				if err != nil || recovered.Status != status || calls != i+2 {
+					t.Fatal("failed same-identity recovery", status, err)
+				}
 			}
 		})
 	}
