@@ -16,9 +16,9 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
@@ -151,7 +151,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 		t.Fatalf("attempt state %+v problem %v", state, record.Problem)
 	}
 
-	cleanups, err := cleanup.NewService(f.host.access, f.host.store, nil)
+	cleanups, err := operations.New(f.host.access, f.host.store, nil, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := cleanups.Submit(ctx, operator, "app", job.JobID, "ssh-e2e-cleanup", []byte(fmt.Sprintf(`{"attempt_id":%q}`, job.AttemptID)))
+	receipt, err := cleanups.Submit(ctx, operator, "app", job.JobID, domain.OperationCleanup, "ssh-e2e-cleanup", []byte(fmt.Sprintf(`{"attempt_id":%q}`, job.AttemptID)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	if worked, err := cleaner.RunOnce(ctx); err != nil || !worked {
 		t.Fatal("cleanup", worked, err)
 	}
-	if receipt, err = cleanups.Get(ctx, operator, "app", receipt.Operation.ID); err != nil || receipt.Effect != cleanup.RemoteDeleted {
+	if receipt, err = cleanups.Get(ctx, operator, "app", receipt.Operation.ID); err != nil || receipt.Effect != operations.RemoteDeleted {
 		t.Fatalf("cleanup receipt %+v %v", receipt, err)
 	}
 	if ids, err := exec.Command("docker", "ps", "-aq", "--filter", "label=io.compute-relay.attempt="+string(job.AttemptID)).Output(); err != nil || len(strings.TrimSpace(string(ids))) != 0 {

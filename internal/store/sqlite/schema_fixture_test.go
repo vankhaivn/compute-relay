@@ -91,7 +91,28 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		if _, err := tx.Exec("DELETE FROM " + quote(name)); err != nil {
 			t.Fatal("clear fixture table", name, err)
 		}
-		columns := "*"
+		columnRows, err := tx.Query("PRAGMA table_xinfo(" + quote(name) + ")")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var writable []string
+		for columnRows.Next() {
+			var ordinal, notNull, primaryKey, hidden int
+			var column, kind string
+			var defaultValue any
+			if err := columnRows.Scan(&ordinal, &column, &kind, &notNull, &defaultValue, &primaryKey, &hidden); err != nil {
+				t.Fatal(err)
+			}
+			if hidden == 0 {
+				writable = append(writable, column)
+			}
+		}
+		if err := columnRows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		columnRows.Close()
+		targetColumns := strings.Join(writable, ",")
+		columns := targetColumns
 		if name == "managed_connection_operations" && version < 18 {
 			var installed int
 			if err := tx.QueryRow("SELECT count(*) FROM fixture_source.managed_connection_operations WHERE action='install_image' OR length(installation)>0").Scan(&installed); err != nil || installed != 0 {
@@ -123,6 +144,12 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		sourceTable := "fixture_source." + quote(name)
 		// Reconstruct historical receipt/grant layouts without rewriting their JSON.
 		switch name {
+		case "operations":
+			if version < 28 {
+				sourceTable += " WHERE kind!='cleanup'"
+			}
+		case "cleanup_operations":
+			sourceTable = "(SELECT operation_seq AS cleanup_seq,workspace_id,operation_id,job_id,attempt_id,resource_id,status,revision,created_at,request_sha256,request_json,record FROM fixture_source.operations WHERE kind='cleanup')"
 		case "idempotency":
 			sourceTable = "fixture_source.receipts WHERE namespace='admission'"
 			columns = "workspace_id,scope,key_sha256,request_sha256,canonical_version,job_id,attempt_id,receipt"
@@ -133,6 +160,9 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 			sourceTable = "fixture_source.receipts WHERE namespace='operation' AND scope='cleanup'"
 			columns = "workspace_id,key_sha256,request_sha256,canonical_version,subject_id,receipt"
 		case "managed_connection_operations":
+			if version >= 27 {
+				break
+			}
 			sourceTable = "(SELECT o.*,r.request_sha256 AS fingerprint,r.receipt FROM fixture_source.managed_connection_operations o JOIN fixture_source.receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256)"
 			columns = "operation_id,workspace_id,connection_id,action,connection_revision,token_id,key_sha256,fingerprint,stage,status,credential_key,receipt,problem,created_at,updated_at"
 			if version >= 18 {
@@ -171,7 +201,7 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 		case "collection_progress":
 			columns = "workspace_id,job_id,attempt_id,operation_id,generation,fence,stage,progress"
 		}
-		if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT " + columns + " FROM " + sourceTable); err != nil {
+		if _, err := tx.Exec("INSERT INTO " + quote(name) + "(" + targetColumns + ") SELECT " + columns + " FROM " + sourceTable); err != nil {
 			t.Fatal("copy fixture table", name, err)
 		}
 	}

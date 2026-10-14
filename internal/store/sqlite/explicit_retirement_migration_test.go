@@ -3,17 +3,15 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"errors"
-
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
@@ -34,7 +32,7 @@ func TestExplicitRetirementPreservesEvidenceAndNeverClaimsProviderWork(t *testin
 						t.Fatal("collect fixture", worked, err)
 					}
 					service, actor := cleanupService(t, f, "a", auth.Read, auth.Operate)
-					if _, err := service.Submit(ctx, actor, "a", id.JobID, "legacy-pending-cleanup", cleanupBody(id.AttemptID, false, "")); err != nil {
+					if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCleanup, "legacy-pending-cleanup", cleanupBody(id.AttemptID, false, "")); err != nil {
 						t.Fatal("source cleanup fixture", err)
 					}
 					if phase == "cleanup_running" {
@@ -126,12 +124,12 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 		"SELECT * FROM dispatch_journals ORDER BY queue_seq",
 		"SELECT * FROM submission_intents ORDER BY queue_seq",
 		"SELECT * FROM provider_resources ORDER BY resource_id",
-		"SELECT operation_seq,workspace_id,operation_id,job_id,attempt_id,kind,created_at,request_sha256,request_json,new_attempt_id,cancel_started FROM operations ORDER BY operation_seq",
+		"SELECT operation_seq,workspace_id,operation_id,job_id,attempt_id,kind,created_at,request_sha256,request_json,new_attempt_id,cancel_started FROM operations WHERE kind!='cleanup' ORDER BY operation_seq",
 		"SELECT * FROM operation_idempotency ORDER BY workspace_id,kind,key_sha256",
 		"SELECT * FROM collection_snapshots ORDER BY workspace_id,job_id,attempt_id",
 		"SELECT * FROM collection_publications ORDER BY workspace_id,job_id,attempt_id",
 		"SELECT * FROM artifacts ORDER BY workspace_id,job_id,attempt_id,artifact_id",
-		"SELECT cleanup_seq,workspace_id,operation_id,job_id,attempt_id,resource_id,created_at,request_sha256,request_json FROM cleanup_operations ORDER BY cleanup_seq",
+		"SELECT workspace_id,operation_id,job_id,attempt_id,resource_id,created_at,request_sha256,request_json FROM cleanup_operations ORDER BY cleanup_seq",
 		"SELECT * FROM cleanup_idempotency ORDER BY workspace_id,key_sha256",
 		"SELECT workspace_id,operation_id,resource_id,ordinal,target,target_sha256 FROM cleanup_resources ORDER BY workspace_id,operation_id,ordinal",
 	}
@@ -172,6 +170,8 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 			afterQuery = "SELECT workspace_id,scope,key_sha256,request_sha256,canonical_version,job_id,attempt_id,receipt FROM receipts WHERE namespace='admission' ORDER BY workspace_id,scope,key_sha256"
 		case strings.Contains(query, "FROM operation_idempotency"):
 			afterQuery = "SELECT workspace_id,scope,key_sha256,request_sha256,canonical_version,subject_id,receipt FROM receipts WHERE namespace='operation' AND scope!='cleanup' ORDER BY workspace_id,scope,key_sha256"
+		case strings.Contains(query, "FROM cleanup_operations"):
+			afterQuery = strings.ReplaceAll(query, "FROM cleanup_operations ORDER BY cleanup_seq", "FROM operations WHERE kind='cleanup' ORDER BY operation_seq")
 		case strings.Contains(query, "FROM cleanup_idempotency"):
 			afterQuery = "SELECT workspace_id,key_sha256,request_sha256,canonical_version,subject_id,receipt FROM receipts WHERE namespace='operation' AND scope='cleanup' ORDER BY workspace_id,key_sha256"
 		}
@@ -214,7 +214,7 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	if claim, err := upgraded.ClaimCleanup(ctx, time.Minute); err != nil || claim != nil {
 		t.Fatal("retired cleanup claimed", claim, err)
 	}
-	for _, table := range []string{"operations", "cleanup_operations"} {
+	for _, table := range []string{"operations"} {
 		var pending int
 		if err = upgraded.db.QueryRow("SELECT count(*) FROM " + table + " WHERE status IN ('accepted','running')").Scan(&pending); err != nil || pending != 0 {
 			t.Fatal("retired operations remain pending", table, pending, err)
@@ -260,11 +260,11 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 			t.Fatal("retired control admitted", kind, err)
 		}
 	}
-	cleanups, err := cleanup.NewService(access, upgraded, nil)
+	cleanups, err := operations.New(access, upgraded, nil, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = cleanups.Submit(ctx, actor, id.WorkspaceID, id.JobID, "retired-new-cleanup", cleanupBody(id.AttemptID, false, "")); !errors.Is(err, operations.ErrState) {
+	if _, err = cleanups.Submit(ctx, actor, id.WorkspaceID, id.JobID, domain.OperationCleanup, "retired-new-cleanup", cleanupBody(id.AttemptID, false, "")); !errors.Is(err, operations.ErrState) {
 		t.Fatal("retired cleanup admitted", err)
 	}
 	if record, err := upgraded.ReadJob(ctx, id.WorkspaceID, actor.TokenID(), id.JobID); err != nil || record.Attempt != after {

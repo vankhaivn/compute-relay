@@ -180,11 +180,11 @@ func TestWorkLeaseMigrationPreservesEveryGeneration(t *testing.T) {
 						if err := tx.QueryRow(`SELECT workspace_id,cleanup_operation_id FROM work_leases WHERE kind=? AND key=?`, kind, l.key).Scan(&w, &op); err != nil {
 							return err
 						}
-						row, err := loadCleanup(ctx, tx, domain.WorkspaceID(w), domain.OperationID(op))
+						row, err := loadOperation(ctx, tx, domain.WorkspaceID(w), domain.OperationID(op))
 						if err != nil {
 							return err
 						}
-						return failCleanup(ctx, tx, row.record, now)
+						return failCleanup(ctx, tx, row.Record, now)
 					}
 					return nil
 				}); err != nil {

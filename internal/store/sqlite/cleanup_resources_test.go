@@ -24,9 +24,9 @@ func TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation(t *testing.T) {
 	f, id := collectedFixture(t)
 	service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
 	probe := &cleanupProbe{probeProvider: f.adapter}
-	service = service.WithPreviewResolver(cleanupResolver{probe})
+	previewService := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
 	before := f.backend.Stats()
-	preview, err := service.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
+	preview, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
 	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
 		t.Fatal(preview, err)
 	}
@@ -39,7 +39,7 @@ func TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation(t *testing.T) {
 			t.Fatal("preview lost exact target or unknown size", resource)
 		}
 	}
-	if len(probe.requests) != 0 || controlCount(t, f.s, "SELECT count(*) FROM cleanup_operations") != 0 ||
+	if len(probe.requests) != 0 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='cleanup'") != 0 ||
 		f.backend.Stats().SubmitCalls != before.SubmitCalls || f.backend.Stats().Executions != before.Executions {
 		t.Fatal("preview created intent or compute")
 	}
@@ -54,7 +54,7 @@ func TestCleanupPreviewEnumeratesOriginalTargetsWithoutMutation(t *testing.T) {
 	worker, _ := cleanupWorker(t, f)
 	runCleanup(t, worker)
 	current, err := service.Get(ctx, principal, "a", receipt.Operation.ID)
-	if err != nil || current.Effect != cleanup.RemoteDeleted {
+	if err != nil || current.Effect != operations.RemoteDeleted {
 		t.Fatal("preview deleted the resource", current, err)
 	}
 	for i, outcome := range current.Resources {
@@ -69,7 +69,7 @@ func TestCleanupPreviewRechecksAuthorityAfterReads(t *testing.T) {
 	for _, change := range []string{"revoke"} {
 		t.Run(change, func(t *testing.T) {
 			f, id := collectedFixture(t)
-			service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
+			_, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
 			probe := &cleanupProbe{probeProvider: f.adapter}
 			changed := false
 			probe.resourceHook = func(ctx context.Context, request provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
@@ -85,12 +85,12 @@ func TestCleanupPreviewRechecksAuthorityAfterReads(t *testing.T) {
 				}
 				return probe.probeProvider.CleanupResource(ctx, request)
 			}
-			service = service.WithPreviewResolver(cleanupResolver{probe})
-			_, err := service.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
+			previewService := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
+			_, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
 			if !changed || err == nil || change == "hold" && !errors.Is(err, operations.ErrChanged) {
 				t.Fatal("stale preview escaped current authority/eligibility", err)
 			}
-			if len(probe.requests) != 0 || controlCount(t, f.s, "SELECT count(*) FROM cleanup_operations") != 0 {
+			if len(probe.requests) != 0 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='cleanup'") != 0 {
 				t.Fatal("preview mutated cleanup state")
 			}
 		})
@@ -116,8 +116,8 @@ func TestCleanupLostAcknowledgementRecoversOriginalTargets(t *testing.T) {
 			if worked, err := worker.RunOnce(ctx); !worked || !errors.Is(err, context.Canceled) {
 				t.Fatal("fault did not interrupt outcome commit", worked, err)
 			}
-			before, err := f.s.ReadCleanup(context.Background(), "a", principal.TokenID(), receipt.Operation.ID)
-			if err != nil || before.Operation.Status != domain.OperationRunning || len(before.Resources) != 2 || before.Resources[0].State != cleanup.ResourceRunning || before.Resources[1].State != cleanup.ResourcePending {
+			before, err := f.s.ReadOperation(context.Background(), "a", principal.TokenID(), receipt.Operation.ID)
+			if err != nil || before.Operation.Status != domain.OperationRunning || len(before.Resources) != 2 || before.Resources[0].State != operations.ResourceRunning || before.Resources[1].State != operations.ResourcePending {
 				t.Fatal("missing durable intent at fault", before, err)
 			}
 			f.restart(t)
@@ -130,7 +130,7 @@ func TestCleanupLostAcknowledgementRecoversOriginalTargets(t *testing.T) {
 			if err != nil || !worked {
 				t.Fatal("restart did not settle cleanup", worked, err)
 			}
-			after, err := f.s.ReadCleanup(context.Background(), "a", principal.TokenID(), receipt.Operation.ID)
+			after, err := f.s.ReadOperation(context.Background(), "a", principal.TokenID(), receipt.Operation.ID)
 			if err != nil || len(after.Resources) != 2 {
 				t.Fatal(after, err)
 			}
@@ -140,11 +140,11 @@ func TestCleanupLostAcknowledgementRecoversOriginalTargets(t *testing.T) {
 				}
 			}
 			if recovery == "absence" {
-				if after.Operation.Status != domain.OperationSucceeded || after.Effect != cleanup.AlreadyAbsent ||
-					after.Resources[0].State != cleanup.ResourceAbsent || after.Resources[1].State != cleanup.ResourceAbsent || len(probe.requests) != 2 {
+				if after.Operation.Status != domain.OperationSucceeded || after.Effect != operations.AlreadyAbsent ||
+					after.Resources[0].State != operations.ResourceAbsent || after.Resources[1].State != operations.ResourceAbsent || len(probe.requests) != 2 {
 					t.Fatal("recovery did not prove original absence", after)
 				}
-			} else if after.Operation.Status != domain.OperationFailed || after.Resources[0].State != cleanup.ResourceUnknown || after.Resources[1].State != cleanup.ResourceRetained || len(probe.requests) != 0 {
+			} else if after.Operation.Status != domain.OperationFailed || after.Resources[0].State != operations.ResourceUnknown || after.Resources[1].State != operations.ResourceRetained || len(probe.requests) != 0 {
 				t.Fatal("recovery refusal concealed the missing acknowledgement", after, probe.requests)
 			}
 			assertNoNewCompute(t, f)
@@ -165,7 +165,7 @@ func TestCleanupPartialOutcomesRemainImmutableAcrossExplicitRecovery(t *testing.
 	}
 	runCleanup(t, worker)
 	partial, err := service.Get(ctx, principal, "a", first.Operation.ID)
-	if err != nil || partial.Operation.Status != domain.OperationFailed || len(partial.Resources) != 2 || partial.Resources[0].State != cleanup.ResourceDeleted || partial.Resources[1].State != cleanup.ResourceUnknown {
+	if err != nil || partial.Operation.Status != domain.OperationFailed || len(partial.Resources) != 2 || partial.Resources[0].State != operations.ResourceDeleted || partial.Resources[1].State != operations.ResourceUnknown {
 		t.Fatal("partial outcome collapsed into attempt success", partial, err)
 	}
 	controls, cp, _ := controlService(t, f, "a", auth.Operate)
@@ -179,14 +179,14 @@ func TestCleanupPartialOutcomesRemainImmutableAcrossExplicitRecovery(t *testing.
 	}
 	f.restart(t)
 	service, principal = cleanupService(t, f, "a", auth.Read, auth.Operate)
-	second, err := service.Submit(ctx, principal, "a", id.JobID, "recover-partial", cleanupBody(id.AttemptID, true, ""))
+	second, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "recover-partial", cleanupBody(id.AttemptID, true, ""))
 	if err != nil || second.Operation.ID == first.Operation.ID {
 		t.Fatal("explicit recovery was not separately recorded", second, err)
 	}
 	worker, _ = cleanupWorker(t, f)
 	runCleanup(t, worker)
 	settled, err := service.Get(ctx, principal, "a", second.Operation.ID)
-	if err != nil || settled.Operation.Status != domain.OperationSucceeded || settled.Effect != cleanup.AlreadyAbsent {
+	if err != nil || settled.Operation.Status != domain.OperationSucceeded || settled.Effect != operations.AlreadyAbsent {
 		t.Fatal("original targets did not recover", settled, err)
 	}
 	old, err := service.Get(ctx, principal, "a", first.Operation.ID)
@@ -216,7 +216,7 @@ func TestCleanupSharedReferencesAcrossBindingAliasesAreRetained(t *testing.T) {
 				t.Fatal(err)
 			}
 			service, principal := cleanupService(t, f, "a", auth.Operate)
-			preview, err := service.WithPreviewResolver(cleanupResolver{f.adapter}).Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
+			preview, err := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{f.adapter}).Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
 			if err != nil || preview.Eligible || preview.Reason != "shared_resource" || len(preview.Resources) != 2 {
 				t.Fatal("shared physical resource was eligible", preview, err)
 			}
@@ -225,7 +225,7 @@ func TestCleanupSharedReferencesAcrossBindingAliasesAreRetained(t *testing.T) {
 					t.Fatal("excluded target was hidden or eligible", resource)
 				}
 			}
-			if _, err := service.Submit(ctx, principal, "a", id.JobID, "shared-cleanup", cleanupBody(id.AttemptID, false, "")); !errors.Is(err, operations.ErrUnresolved) {
+			if _, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "shared-cleanup", cleanupBody(id.AttemptID, false, "")); !errors.Is(err, operations.ErrUnresolved) {
 				t.Fatal("shared target admitted", err)
 			}
 			if f.backend.Stats().CleanupCalls != 0 {
@@ -253,7 +253,7 @@ func TestCleanupProvenRejectedSubmissionKeepsStagingCleanable(t *testing.T) {
 	runCleanup(t, worker)
 	current, err := service.Get(context.Background(), principal, "a", receipt.Operation.ID)
 	if err != nil || current.Operation.Status != domain.OperationSucceeded || len(current.Resources) != 1 ||
-		current.Resources[0].Purpose != "staging" || current.Resources[0].State != cleanup.ResourceDeleted || len(probe.requests) != 1 {
+		current.Resources[0].Purpose != "staging" || current.Resources[0].State != operations.ResourceDeleted || len(probe.requests) != 1 {
 		t.Fatal("proven non-creation prevented exact staging cleanup", current, err)
 	}
 	if f.backend.Stats().SubmitCalls != 1 || f.backend.Stats().Executions != 0 {
@@ -272,11 +272,11 @@ func TestCleanupResourceFencesAndAggregateEvidence(t *testing.T) {
 	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[1]); !errors.Is(err, operations.ErrUnresolved) {
 		t.Fatal("staging deletion preceded unresolved execution", err)
 	}
-	if err := f.s.CompleteCleanup(ctx, *first, cleanup.Outcome{Effect: cleanup.RemoteDeleted}); !errors.Is(err, ErrInvalid) {
+	if err := f.s.CompleteCleanup(ctx, *first, cleanup.Outcome{Effect: operations.RemoteDeleted}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("aggregate succeeded without resource outcomes", err)
 	}
 	result := first.Resources[0].Result
-	result.State, result.Reason = cleanup.ResourceDeleted, "deletion_confirmed"
+	result.State, result.Reason = operations.ResourceDeleted, "deletion_confirmed"
 	if err := f.s.CompleteCleanupResource(ctx, *first, result); !errors.Is(err, operations.ErrChanged) {
 		t.Fatal("deletion confirmed without resource intent", err)
 	}
@@ -295,10 +295,10 @@ func TestCleanupResourceFencesAndAggregateEvidence(t *testing.T) {
 		t.Fatal("stale worker recorded outcome", err)
 	}
 	finishCleanupResourceFixtures(t, f, *second)
-	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.AlreadyAbsent}); !errors.Is(err, ErrInvalid) {
+	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.AlreadyAbsent}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("aggregate disagreed with resource evidence", err)
 	}
-	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.RemoteDeleted}); err != nil {
+	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.RemoteDeleted}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -320,7 +320,7 @@ func TestCleanupProviderTimeoutPersistsUnknownWithoutStoppingWorker(t *testing.T
 	runCleanup(t, worker)
 	current, err := service.Get(context.Background(), principal, "a", receipt.Operation.ID)
 	if err != nil || current.Operation.Status != domain.OperationFailed || len(current.Resources) != 2 ||
-		current.Resources[0].State != cleanup.ResourceUnknown || current.Resources[1].State != cleanup.ResourceRetained || len(probe.requests) != 1 {
+		current.Resources[0].State != operations.ResourceUnknown || current.Resources[1].State != operations.ResourceRetained || len(probe.requests) != 1 {
 		t.Fatal("provider timeout lost durable uncertainty", current, err)
 	}
 	if worked, err := worker.RunOnce(context.Background()); worked || err != nil {
@@ -339,20 +339,20 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			before, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+			before, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
 			if err != nil || len(before.Resources) != 2 {
 				t.Fatal(before, err)
 			}
 			f.root = copyFixtureAtSchema(t, f.s, 20)
 			f.restart(t)
-			upgraded, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+			upgraded, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
 			if err != nil || upgraded.Operation != before.Operation || len(upgraded.Resources) != 0 || f.backend.Stats().CleanupCalls != 0 {
 				t.Fatal("migration changed receipt or invoked provider", upgraded, err)
 			}
 			f.clock.advance(2 * time.Second)
 			worker, _ := cleanupWorker(t, f)
 			runCleanup(t, worker)
-			after, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+			after, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
 			if err != nil || len(after.Resources) != 2 {
 				t.Fatal("older request lost resource outcomes", after, err)
 			}
@@ -361,7 +361,7 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 					t.Fatal("old running deletion lost uncertainty", after)
 				}
 				for _, resource := range after.Resources {
-					if resource.State != cleanup.ResourceUnknown {
+					if resource.State != operations.ResourceUnknown {
 						t.Fatal("old running deletion acquired invented proof", resource)
 					}
 				}
@@ -412,12 +412,12 @@ func TestCleanupLegacyUnknownEffectsBlockCollectionAfterUpgrade(t *testing.T) {
 			if _, err := worker.RunOnce(ctx); err != nil {
 				t.Fatal(err)
 			}
-			current, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+			current, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
 			if err != nil || current.Operation.Status != domain.OperationFailed || current.Operation.Failure == nil || current.Operation.Failure.Code != domain.CodeProviderStateUnknown {
 				t.Fatal("upgrade turned an unacknowledged call into a known refusal", current, err)
 			}
 			if phase == "running_binding_refused" {
-				if len(current.Resources) != 2 || current.Resources[0].State != cleanup.ResourceUnknown || current.Resources[1].State != cleanup.ResourceUnknown {
+				if len(current.Resources) != 2 || current.Resources[0].State != operations.ResourceUnknown || current.Resources[1].State != operations.ResourceUnknown {
 					t.Fatal("legacy attempt-wide call lost its possible effects", current.Resources)
 				}
 			}
@@ -449,22 +449,22 @@ func TestCleanupNameBasedAcceptanceIsDurableAndDoesNotRetarget(t *testing.T) {
 			f, id := collectedFixture(t)
 			service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
 			probe := nameCleanupProbe{&cleanupProbe{probeProvider: f.adapter}}
-			service = service.WithPreviewResolver(cleanupResolver{probe})
-			preview, err := service.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
+			previewService := cleanupPreviewService(t, f).WithPreviewResolver(cleanupResolver{probe})
+			preview, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, false)
 			if err != nil || preview.Eligible || preview.Resources[0].Reason != "name_based_delete_not_accepted" || preview.Resources[0].Observation != "present" || preview.Resources[0].Target.Warning == "" {
 				t.Fatal(preview, err)
 			}
-			accepted, err := service.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, true)
+			accepted, err := previewService.Preview(ctx, principal, "a", id.JobID, id.AttemptID, false, true)
 			if err != nil || !accepted.Eligible || accepted.Resources[0].Fingerprint != preview.Resources[0].Fingerprint {
 				t.Fatal(accepted, err)
 			}
-			body, _ := json.Marshal(cleanup.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: accept})
-			receipt, err := service.Submit(ctx, principal, "a", id.JobID, "name-cleanup", body)
+			body, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: accept})
+			receipt, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "name-cleanup", body)
 			if err != nil {
 				t.Fatal(err)
 			}
-			changed, _ := json.Marshal(cleanup.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: !accept})
-			if _, err := service.Submit(ctx, principal, "a", id.JobID, "name-cleanup", changed); !errors.Is(err, operations.ErrConflict) {
+			changed, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: !accept})
+			if _, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "name-cleanup", changed); !errors.Is(err, operations.ErrConflict) {
 				t.Fatal("acceptance changed under existing key", err)
 			}
 			f.restart(t)
@@ -482,12 +482,12 @@ func TestCleanupNameBasedAcceptanceIsDurableAndDoesNotRetarget(t *testing.T) {
 				t.Fatal(err)
 			}
 			runCleanup(t, worker)
-			current, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+			current, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if accept {
-				if calls != 2 || current.Effect != cleanup.RemoteDeleted {
+				if calls != 2 || current.Effect != operations.RemoteDeleted {
 					t.Fatal(current, calls)
 				}
 			} else if calls != 0 || current.Resources[0].Reason != "name_based_delete_not_accepted" {
@@ -506,8 +506,8 @@ func TestCleanupNameBasedRecoveryOnlyReadsOriginalIntent(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)
 	service, principal := cleanupService(t, f, "a", auth.Read, auth.Operate)
-	body, _ := json.Marshal(cleanup.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: true})
-	receipt, err := service.Submit(ctx, principal, "a", id.JobID, "name-recovery", body)
+	body, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, AcceptNameBasedDelete: true})
+	receipt, err := service.Submit(ctx, principal, "a", id.JobID, domain.OperationCleanup, "name-recovery", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -539,8 +539,8 @@ func TestCleanupNameBasedRecoveryOnlyReadsOriginalIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCleanup(t, worker)
-	current, err := f.s.ReadCleanup(ctx, "a", principal.TokenID(), receipt.Operation.ID)
-	if err != nil || calls != 1 || current.Resources[0].State != cleanup.ResourceUnknown || current.Resources[1].State != cleanup.ResourceRetained {
+	current, err := f.s.ReadOperation(ctx, "a", principal.TokenID(), receipt.Operation.ID)
+	if err != nil || calls != 1 || current.Resources[0].State != operations.ResourceUnknown || current.Resources[1].State != operations.ResourceRetained {
 		t.Fatal(current, calls, err)
 	}
 	if worked, err := worker.RunOnce(ctx); worked || err != nil {

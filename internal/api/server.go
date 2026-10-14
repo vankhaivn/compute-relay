@@ -248,15 +248,12 @@ func (h *handler) info(w http.ResponseWriter, r *http.Request) {
 		admissionStatus = "implemented-offline"
 	}
 	if h.config.Operations != nil {
-		features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", "operation_status")
+		features = append(features, "job_cancel", "job_retry", "job_reconcile", "job_collect", FeatureJobCleanup, "operation_status")
 		if h.config.Jobs != nil {
 			features = append(features, FeatureManualResultCollection)
 		}
 		if h.config.Cleanup != nil {
-			features = append(features, FeatureJobCleanup)
-			if h.config.Cleanup.PreviewAvailable() {
-				features = append(features, FeatureJobCleanupPreview)
-			}
+			features = append(features, FeatureJobCleanupPreview)
 		}
 	}
 	if h.config.Connections != nil {

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -23,7 +22,7 @@ func TestAuthorityAndControlParsersRejectAmbiguousFields(t *testing.T) {
 		{"start", `{"attempt_id":"attempt_1","readiness_revision":"` + revision + `","max_remote_wall_seconds":60,"execution_deadline":"2099-10-12T01:00:00Z","authorize_compute":true}`, func(raw []byte) error { _, e := executionauth.ParseStart(raw); return e }},
 		{"secret", `{"attempt_id":"attempt_1","readiness_revision":"` + revision + `","expires_at":"2099-10-12T01:00:00Z","values":{"ingest":"YQ=="}}`, func(raw []byte) error { r, e := workloadsecret.ParseSupply(raw); r.Clear(); return e }},
 		{"control", `{"attempt_id":"attempt_1","reason":"explicit"}`, func(raw []byte) error { _, e := operations.Parse(domain.OperationCancel, raw); return e }},
-		{"cleanup", `{"attempt_id":"attempt_1","discard_uncollected":false}`, func(raw []byte) error { _, e := cleanup.Parse(raw); return e }},
+		{"cleanup", `{"attempt_id":"attempt_1","discard_uncollected":false}`, func(raw []byte) error { _, e := operations.Parse(domain.OperationCleanup, raw); return e }},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			if e := row.parse([]byte(row.raw)); e != nil {

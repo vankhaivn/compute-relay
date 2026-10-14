@@ -10,7 +10,7 @@ import (
 )
 
 func (h *handler) cleanupPreview(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID, job domain.JobID) {
-	if h.config.Cleanup == nil || !h.config.Cleanup.PreviewAvailable() {
+	if h.config.Cleanup == nil {
 		controlError(w, r, operations.ErrNotFound)
 		return
 	}

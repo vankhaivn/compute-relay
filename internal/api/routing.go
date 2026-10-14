@@ -102,14 +102,12 @@ func (h *handler) routes() {
 		for _, action := range []string{"cancel", "retry", "reconcile", "collect"} {
 			add("POST", "jobs/{job}/"+action, routePolicy{bodyLimit: operations.MaxRequestBytes}, h.controls)
 		}
+		cleanupMethods := "POST"
 		if h.config.Cleanup != nil {
-			methods := "POST"
-			if h.config.Cleanup.PreviewAvailable() {
-				methods = "GET, POST"
-			}
-			add(methods, "jobs/{job}/cleanup", routePolicy{query: true, bodyLimit: operations.MaxRequestBytes}, h.controls)
-			h.policies["POST "+base+"jobs/{job}/cleanup"] = routePolicy{bodyLimit: operations.MaxRequestBytes}
+			cleanupMethods = "GET, POST"
 		}
+		add(cleanupMethods, "jobs/{job}/cleanup", routePolicy{query: true, bodyLimit: operations.MaxRequestBytes}, h.controls)
+		h.policies["POST "+base+"jobs/{job}/cleanup"] = routePolicy{bodyLimit: operations.MaxRequestBytes}
 		add("GET", "operations/{operation}", routePolicy{}, h.controls)
 	}
 

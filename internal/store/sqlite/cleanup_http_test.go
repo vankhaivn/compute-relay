@@ -103,7 +103,7 @@ func TestCleanupHTTPPreviewUsesBoundedPublishedContract(t *testing.T) {
 		t.Fatal("preview violates published contract", err, string(raw))
 	}
 	resources, ok := value["resources"].([]any)
-	if !ok || len(resources) != 2 || value["eligible"] != true || controlCount(t, f.s, "SELECT count(*) FROM cleanup_operations") != 0 {
+	if !ok || len(resources) != 2 || value["eligible"] != true || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='cleanup'") != 0 {
 		t.Fatal("preview changed state or omitted candidates", string(raw))
 	}
 	for _, invalid := range []string{
@@ -158,19 +158,23 @@ func TestCleanupHTTPAdmitsAppliesAndReplaysWithStore(t *testing.T) {
 	body := `{"attempt_id":"` + string(id.AttemptID) + `","reason":"private-reason-canary"}`
 	headers, raw := cleanupHTTP(t, "POST", path, token, "cleanup-http", body, 202)
 	accepted := decode(raw)
-	if accepted["kind"] != "cleanup" || accepted["status"] != "accepted" || accepted["effect"] != "pending" || strings.Contains(string(raw), "private-reason-canary") {
+	if accepted["kind"] != "cleanup" || accepted["status"] != "accepted" || accepted["effect"] != "pending" || accepted["resources"] != nil || strings.Contains(string(raw), "private-reason-canary") {
 		t.Fatal("unexpected cleanup acceptance", string(raw))
 	}
 	engine, _ := cleanupWorker(t, f)
 	f.clock.advance(time.Second)
 	runCleanup(t, engine)
 	_, raw = cleanupHTTP(t, "GET", endpoint+headers.Get("Location"), token, "", "", 200)
-	if current := decode(raw); current["status"] != "succeeded" || current["effect"] != "remote_deleted" || current["replay"] != false {
+	if current := decode(raw); current["status"] != "succeeded" || current["effect"] != "remote_deleted" || current["replay"] != false || len(current["resources"].([]any)) != 2 {
 		t.Fatal("applied cleanup not readable", string(raw))
 	}
 	_, raw = cleanupHTTP(t, "POST", path, token, "cleanup-http", body, 202)
-	if replay := decode(raw); replay["replay"] != true || replay["status"] != "accepted" || replay["operation_id"] != accepted["operation_id"] {
+	if replay := decode(raw); replay["replay"] != true || replay["status"] != "accepted" || replay["operation_id"] != accepted["operation_id"] || replay["resources"] != nil {
 		t.Fatal("replay did not return the original receipt", string(raw))
+	}
+	_, raw = cleanupHTTP(t, "POST", path, token, "cleanup-coalesced", body, 202)
+	if coalesced := decode(raw); coalesced["status"] != "succeeded" || coalesced["resources"] != nil || coalesced["replay"] != true {
+		t.Fatal("coalesced receipt hydrated resource reads", string(raw))
 	}
 	_, raw = cleanupHTTP(t, "POST", path, token, "cleanup-http", `{"attempt_id":"`+string(id.AttemptID)+`"}`, 409)
 	if !strings.Contains(string(raw), string(domain.CodeIdempotencyConflict)) {

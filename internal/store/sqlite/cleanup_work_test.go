@@ -87,10 +87,10 @@ func runCleanup(t *testing.T, engine *cleanup.Engine) {
 		t.Fatalf("cleanup: worked=%v err=%v", worked, err)
 	}
 }
-func admitCleanup(t *testing.T, f *dispatchFixture, id scheduler.Identity, key string, discard bool) (*cleanup.Service, auth.Principal, cleanup.Record) {
+func admitCleanup(t *testing.T, f *dispatchFixture, id scheduler.Identity, key string, discard bool) (*operations.Service, auth.Principal, operations.Record) {
 	t.Helper()
 	service, p := cleanupService(t, f, "a", auth.Read, auth.Operate)
-	r, err := service.Submit(context.Background(), p, "a", id.JobID, key, cleanupBody(id.AttemptID, discard, ""))
+	r, err := service.Submit(context.Background(), p, "a", id.JobID, domain.OperationCleanup, key, cleanupBody(id.AttemptID, discard, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestCleanupWorkerDeletesOnceAndKeepsReceipts(t *testing.T) {
 	f.clock.advance(time.Second)
 	runCleanup(t, engine)
 	current, err := service.Get(ctx, p, "a", original.Operation.ID)
-	if err != nil || current.Operation.Status != domain.OperationSucceeded || current.Effect != cleanup.RemoteDeleted || current.Operation.Revision != 3 || current.Operation.Failure != nil {
+	if err != nil || current.Operation.Status != domain.OperationSucceeded || current.Effect != operations.RemoteDeleted || current.Operation.Revision != 3 || current.Operation.Failure != nil {
 		t.Fatal("deletion was not recorded", current, err)
 	}
 	j := f.journal(t, id)
@@ -120,12 +120,12 @@ func TestCleanupWorkerDeletesOnceAndKeepsReceipts(t *testing.T) {
 	if worked, err := engine.RunOnce(ctx); worked || err != nil {
 		t.Fatal("completed cleanup repeated", worked, err)
 	}
-	replay, err := service.Submit(ctx, p, "a", id.JobID, "cleanup-apply", cleanupBody(id.AttemptID, false, ""))
-	if err != nil || !replay.Replay || replay.Operation.Status != domain.OperationAccepted || replay.Effect != cleanup.Pending {
+	replay, err := service.Submit(ctx, p, "a", id.JobID, domain.OperationCleanup, "cleanup-apply", cleanupBody(id.AttemptID, false, ""))
+	if err != nil || !replay.Replay || replay.Operation.Status != domain.OperationAccepted || replay.Effect != operations.Pending {
 		t.Fatal("replay rewrote the original receipt", replay, err)
 	}
-	again, err := service.Submit(ctx, p, "a", id.JobID, "cleanup-after-apply", cleanupBody(id.AttemptID, false, ""))
-	if err != nil || again.Operation.ID != original.Operation.ID || again.Effect != cleanup.RemoteDeleted || !again.Replay {
+	again, err := service.Submit(ctx, p, "a", id.JobID, domain.OperationCleanup, "cleanup-after-apply", cleanupBody(id.AttemptID, false, ""))
+	if err != nil || again.Operation.ID != original.Operation.ID || again.Effect != operations.RemoteDeleted || !again.Replay {
 		t.Fatal("applied cleanup was requested again", again, err)
 	}
 	if s := f.state(t, id); s.Result != domain.ResultAvailable || s.Orchestration != domain.OrchestrationSucceeded {
@@ -155,7 +155,7 @@ func TestCleanupWorkerReportsAlreadyAbsent(t *testing.T) {
 	engine, _ := cleanupWorker(t, f)
 	runCleanup(t, engine)
 	current, err := service.Get(ctx, p, "a", r.Operation.ID)
-	if err != nil || current.Operation.Status != domain.OperationSucceeded || current.Effect != cleanup.AlreadyAbsent {
+	if err != nil || current.Operation.Status != domain.OperationSucceeded || current.Effect != operations.AlreadyAbsent {
 		t.Fatal("absence was not recorded", current, err)
 	}
 }
@@ -187,7 +187,7 @@ func TestCleanupWorkerFailuresAreExplicit(t *testing.T) {
 			c.setup(probe)
 			runCleanup(t, engine)
 			current, err := service.Get(ctx, p, "a", r.Operation.ID)
-			if err != nil || current.Operation.Status != domain.OperationFailed || current.Effect != cleanup.Failed {
+			if err != nil || current.Operation.Status != domain.OperationFailed || current.Effect != operations.Failed {
 				t.Fatal("failure was not recorded", current, err)
 			}
 			problem := current.Operation.Failure
@@ -222,12 +222,12 @@ func TestCleanupWorkerFailuresAreExplicit(t *testing.T) {
 		probe.err = errors.New("transient")
 		runCleanup(t, engine)
 		probe.err, probe.result = nil, &provider.CleanupOutcome{Deleted: true}
-		second, err := service.Submit(ctx, p, "a", id.JobID, "cleanup-second", cleanupBody(id.AttemptID, true, ""))
+		second, err := service.Submit(ctx, p, "a", id.JobID, domain.OperationCleanup, "cleanup-second", cleanupBody(id.AttemptID, true, ""))
 		if err != nil || second.Operation.ID == first.Operation.ID || second.Replay {
 			t.Fatal("failed cleanup absorbed a new explicit request", second, err)
 		}
 		runCleanup(t, engine)
-		if current, err := service.Get(ctx, p, "a", second.Operation.ID); err != nil || current.Effect != cleanup.RemoteDeleted {
+		if current, err := service.Get(ctx, p, "a", second.Operation.ID); err != nil || current.Effect != operations.RemoteDeleted {
 			t.Fatal(current, err)
 		}
 		controls, cp, _ := controlService(t, f, "a", auth.Operate)
@@ -252,7 +252,7 @@ func TestCleanupWorkerTargetsPreparedResource(t *testing.T) {
 	if len(probe.requests) != 1 || probe.requests[0] != want {
 		t.Fatal("prepared cleanup did not target the staging resource", probe.requests)
 	}
-	if current, err := service.Get(ctx, p, "a", r.Operation.ID); err != nil || current.Effect != cleanup.RemoteDeleted {
+	if current, err := service.Get(ctx, p, "a", r.Operation.ID); err != nil || current.Effect != operations.RemoteDeleted {
 		t.Fatal(current, err)
 	}
 	if s := f.backend.Stats(); s.SubmitCalls != 0 || s.Executions != 0 {
@@ -277,22 +277,22 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 	if err != nil || second == nil || second.Lease.Generation != 2 || second.Lease.Fence == first.Lease.Fence || second.Record.Operation != first.Record.Operation {
 		t.Fatal("expired claim was not recovered with a new fence", second, err)
 	}
-	deleted := cleanup.Outcome{Effect: cleanup.RemoteDeleted}
+	deleted := cleanup.Outcome{Effect: operations.RemoteDeleted}
 	if err = f.s.CompleteCleanup(ctx, *first, deleted); !errors.Is(err, cleanup.ErrLeaseLost) {
 		t.Fatal("stale worker completed cleanup", err)
 	}
-	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.Failed}); !errors.Is(err, ErrInvalid) {
+	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.Failed}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("failure without a problem accepted", err)
 	}
 	finishCleanupResourceFixtures(t, f, *second)
 	if err = f.s.CompleteCleanup(ctx, *second, deleted); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.AlreadyAbsent}); !errors.Is(err, cleanup.ErrLeaseLost) {
+	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: operations.AlreadyAbsent}); !errors.Is(err, cleanup.ErrLeaseLost) {
 		t.Fatal("terminal cleanup was rewritten", err)
 	}
 	current, err := service.Get(ctx, p, "a", r.Operation.ID)
-	if err != nil || current.Effect != cleanup.RemoteDeleted || current.Operation.Revision != 3 {
+	if err != nil || current.Effect != operations.RemoteDeleted || current.Operation.Revision != 3 {
 		t.Fatal(current, err)
 	}
 	if f.backend.Stats().CleanupCalls != 0 {
@@ -308,7 +308,7 @@ func finishCleanupResourceFixtures(t *testing.T, f *dispatchFixture, w cleanup.W
 			t.Fatal(err)
 		}
 		result := item.Result
-		result.State, result.Reason = cleanup.ResourceDeleted, "fixture_deletion_confirmed"
+		result.State, result.Reason = operations.ResourceDeleted, "fixture_deletion_confirmed"
 		if err := f.s.CompleteCleanupResource(context.Background(), w, result); err != nil {
 			t.Fatal(err)
 		}

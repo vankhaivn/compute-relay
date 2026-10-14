@@ -46,9 +46,9 @@ func setupControlHTTP(t *testing.T, override operations.Repository) (*jobHTTP, *
 	return setupControlsHTTP(t, override, nil)
 }
 
-// setupControlsHTTP composes durable controls and cleanup admission over one store.
-// A non-nil cleanup repository replaces only cleanup admission and reads.
-func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOverride cleanup.Repository) (*jobHTTP, *controlBlobs) {
+// setupControlsHTTP composes one operation repository and an optional preview.
+// Both operation overrides exercise the same admission and read port.
+func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOverride operations.Repository) (*jobHTTP, *controlBlobs) {
 	t.Helper()
 	ctx := context.Background()
 	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "state"), sqlite.DefaultOptions())
@@ -104,16 +104,17 @@ func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOver
 	if override != nil {
 		repo = override
 	}
+	if cleanupOverride != nil {
+		if _, off := cleanupOverride.(noCleanup); !off {
+			repo = cleanupOverride
+		}
+	}
 	blobs := &controlBlobs{}
 	controls, err := operations.New(access, repo, blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cleanups cleanup.Repository = store
-	if cleanupOverride != nil {
-		cleanups = cleanupOverride
-	}
-	cleaner, err := cleanup.NewService(access, cleanups, nil)
+	cleaner, err := cleanup.NewService(access, store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

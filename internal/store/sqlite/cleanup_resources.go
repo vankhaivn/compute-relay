@@ -14,7 +14,7 @@ import (
 )
 
 func snapshotCleanupResources(ctx context.Context, tx *sql.Tx, op domain.Operation, resources []cleanup.Resource) error {
-	if len(resources) == 0 || len(resources) > cleanup.MaxResources {
+	if len(resources) == 0 || len(resources) > operations.MaxCleanupResources {
 		return ErrInvalid
 	}
 	for ordinal, resource := range resources {
@@ -34,7 +34,7 @@ func snapshotCleanupResources(ctx context.Context, tx *sql.Tx, op domain.Operati
 }
 
 func loadCleanupResources(ctx context.Context, tx *sql.Tx, op domain.Operation) ([]cleanup.ResourceWork, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT resource_id,target,target_sha256,state,reason FROM cleanup_resources WHERE workspace_id=? AND operation_id=? ORDER BY ordinal LIMIT ?`, string(op.WorkspaceID), string(op.ID), cleanup.MaxResources+1)
+	rows, err := tx.QueryContext(ctx, `SELECT resource_id,target,target_sha256,state,reason FROM cleanup_resources WHERE workspace_id=? AND operation_id=? ORDER BY ordinal LIMIT ?`, string(op.WorkspaceID), string(op.ID), operations.MaxCleanupResources+1)
 	if err != nil {
 		return nil, dbError(err)
 	}
@@ -63,26 +63,26 @@ func loadCleanupResources(ctx context.Context, tx *sql.Tx, op domain.Operation) 
 	if err := rows.Err(); err != nil {
 		return nil, dbError(err)
 	}
-	if len(result) > cleanup.MaxResources {
+	if len(result) > operations.MaxCleanupResources {
 		return nil, ErrCorrupt
 	}
 	return result, nil
 }
 
-func verifyCleanupLease(ctx context.Context, tx *sql.Tx, w cleanup.Work, now time.Time) (cleanupRow, error) {
+func verifyCleanupLease(ctx context.Context, tx *sql.Tx, w cleanup.Work, now time.Time) (operationRow, error) {
 	l := w.Lease
 	if _, err := checkWorkLease(ctx, tx, cleanupLease(l), now); err != nil {
-		return cleanupRow{}, err
+		return operationRow{}, err
 	}
-	row, err := loadCleanup(ctx, tx, l.WorkspaceID, l.OperationID)
+	row, err := loadOperation(ctx, tx, l.WorkspaceID, l.OperationID)
 	if err != nil {
-		return cleanupRow{}, err
+		return operationRow{}, err
 	}
-	if row.record.Operation.Status != domain.OperationRunning || row.record.Operation.Revision != w.Record.Operation.Revision {
-		return cleanupRow{}, cleanup.ErrLeaseLost
+	if row.Record.Operation.Status != domain.OperationRunning || row.Record.Operation.Revision != w.Record.Operation.Revision {
+		return operationRow{}, cleanup.ErrLeaseLost
 	}
-	if row.request.AcceptNameBasedDelete != w.AcceptNameBasedDelete {
-		return cleanupRow{}, operations.ErrChanged
+	if row.Request.AcceptNameBasedDelete != w.AcceptNameBasedDelete {
+		return operationRow{}, operations.ErrChanged
 	}
 	return row, nil
 }
@@ -96,12 +96,12 @@ func (s *Store) BeginCleanupResource(ctx context.Context, w cleanup.Work, resour
 		if err != nil {
 			return err
 		}
-		op := row.record.Operation
+		op := row.Record.Operation
 		target, err := controlTarget(ctx, tx, op.WorkspaceID, op.JobID, op.AttemptID)
 		if err != nil {
 			return err
 		}
-		current, err := eligibleCleanup(ctx, tx, target, row.request.DiscardUncollected, now, op.ID)
+		current, err := eligibleCleanup(ctx, tx, target, row.Request.DiscardUncollected, now, op.ID)
 		if err != nil {
 			return err
 		}
@@ -140,8 +140,8 @@ func (s *Store) BeginCleanupResource(ctx context.Context, w cleanup.Work, resour
 	})
 }
 
-func (s *Store) CompleteCleanupResource(ctx context.Context, w cleanup.Work, result cleanup.ResourceResult) error {
-	if !w.Valid() || !result.Valid() || result.State == cleanup.ResourcePending || result.State == cleanup.ResourceRunning {
+func (s *Store) CompleteCleanupResource(ctx context.Context, w cleanup.Work, result operations.ResourceResult) error {
+	if !w.Valid() || !result.Valid() || result.State == operations.ResourcePending || result.State == operations.ResourceRunning {
 		return ErrInvalid
 	}
 	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {

@@ -1,24 +1,18 @@
 package sqlite
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"io"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
-	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
-
-var _ cleanup.Repository = (*Store)(nil)
 
 // preparedVersion marks a reference to a prepared, never-executed attempt resource.
 const preparedVersion = "prepared"
@@ -66,9 +60,8 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
  EXISTS(SELECT 1 FROM scheduler_queue q JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
  WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1 AND l.until_ms>?)
  OR EXISTS(SELECT 1 FROM work_leases WHERE kind='collection' AND key=json_array(?,?,?) AND held=1 AND until_ms>?)
- OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))
- OR EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)`,
-		w, job, attempt, at, w, job, attempt, at, w, job, attempt, w, job, attempt, string(self)).Scan(&busy)
+ OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)`,
+		w, job, attempt, at, w, job, attempt, at, w, job, attempt, string(self)).Scan(&busy)
 	if err != nil {
 		return result, dbError(err)
 	}
@@ -129,7 +122,7 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
 		}
 		result.collected = published && (s.Result == domain.ResultAvailable || s.Result == domain.ResultExpired)
 		if !result.collected && !discard {
-			return result, cleanup.ErrUncollected
+			return result, operations.ErrUncollected
 		}
 	}
 	result.binding = provider.BindingSnapshot{Binding: target.Profile.Binding, AccountScope: target.Profile.AccountScope, CredentialRef: target.Profile.CredentialRef}
@@ -143,7 +136,7 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
 // was requested or applied. It never changes an existing control.
 func pendingCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID) error {
 	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_operations c WHERE workspace_id=? AND job_id=? AND attempt_id=? AND
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM operations c WHERE kind='cleanup' AND workspace_id=? AND job_id=? AND attempt_id=? AND
  (status IN ('accepted','running','succeeded')
  OR EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id AND r.state IN ('running','deleted','absent','unknown'))
  OR (status='failed' AND json_extract(c.record,'$.Operation.Failure.Code')=?
@@ -154,232 +147,4 @@ func pendingCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job d
 		return operations.ErrState
 	}
 	return nil
-}
-
-func decodeCleanup(raw string, limit int) (cleanup.Record, error) {
-	var r cleanup.Record
-	d := json.NewDecoder(bytes.NewBufferString(raw))
-	d.DisallowUnknownFields()
-	if len(raw) > limit || d.Decode(&r) != nil || d.Decode(new(any)) != io.EOF || r.Validate() != nil || r.Replay {
-		return cleanup.Record{}, ErrCorrupt
-	}
-	return r, nil
-}
-
-type cleanupRow struct {
-	record   cleanup.Record
-	request  cleanup.Request
-	resource domain.ProviderResourceID
-}
-
-func loadCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id domain.OperationID) (cleanupRow, error) {
-	var row cleanupRow
-	var job, attempt, status, created, hash, request, raw string
-	var revision uint64
-	err := tx.QueryRowContext(ctx, `SELECT job_id,attempt_id,resource_id,status,revision,created_at,request_sha256,request_json,record
- FROM cleanup_operations WHERE workspace_id=? AND operation_id=?`, string(w), string(id)).Scan(&job, &attempt, &row.resource, &status, &revision, &created, &hash, &request, &raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return row, operations.ErrNotFound
-	}
-	if err != nil {
-		return row, dbError(err)
-	}
-	row.record, err = decodeCleanup(raw, 8192)
-	if err != nil {
-		return cleanupRow{}, err
-	}
-	op := row.record.Operation
-	row.request, err = cleanup.Parse([]byte(request))
-	if err != nil {
-		return cleanupRow{}, ErrCorrupt
-	}
-	wantHash, err := row.request.Digest(op.JobID)
-	if err != nil || wantHash != hash || row.request.AttemptID != op.AttemptID || op.ID != id || op.WorkspaceID != w ||
-		string(op.JobID) != job || string(op.AttemptID) != attempt || string(op.Status) != status || op.Revision != revision ||
-		op.CreatedAt.UTC().Format(time.RFC3339Nano) != created || !row.resource.Valid() {
-		return cleanupRow{}, ErrCorrupt
-	}
-	return row, nil
-}
-
-func replayCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, key, hash string) (*cleanup.Record, error) {
-	prior, found, err := replayOrCreate(ctx, tx, receiptKey{w, "operation", "cleanup", key, hash, cleanup.CanonicalVersion, operations.ErrConflict}, nil)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, nil
-	}
-	id, raw := prior.subject, prior.raw
-	r, err := decodeCleanup(raw, 4096)
-	if err != nil || string(r.Operation.ID) != id || r.Operation.WorkspaceID != w {
-		return nil, ErrCorrupt
-	}
-	// The receipt keeps its original outcome, not the latest status.
-	current, err := loadCleanup(ctx, tx, w, r.Operation.ID)
-	if err != nil {
-		if errors.Is(err, operations.ErrNotFound) {
-			return nil, ErrCorrupt
-		}
-		return nil, err
-	}
-	if current.record.Operation.JobID != r.Operation.JobID || current.record.Operation.AttemptID != r.Operation.AttemptID {
-		return nil, ErrCorrupt
-	}
-	r.Replay = true
-	return &r, nil
-}
-
-func (s *Store) ReplayCleanup(ctx context.Context, w domain.WorkspaceID, token, key, hash string) (*cleanup.Record, error) {
-	if !w.Valid() || !domain.SHA256Digest(key).Valid() || !domain.SHA256Digest(hash).Valid() {
-		return nil, operations.ErrRequest
-	}
-	var result *cleanup.Record
-	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
-		if _, err := actorInTx(ctx, tx, w, token, auth.Operate); err != nil {
-			return err
-		}
-		var err error
-		result, err = replayCleanup(ctx, tx, w, key, hash)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-func (s *Store) ReadCleanup(ctx context.Context, w domain.WorkspaceID, token string, id domain.OperationID) (cleanup.Record, error) {
-	if !w.Valid() || !id.Valid() {
-		return cleanup.Record{}, operations.ErrNotFound
-	}
-	var result cleanup.Record
-	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
-		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
-			return err
-		}
-		row, err := loadCleanup(ctx, tx, w, id)
-		result = row.record
-		if err != nil {
-			return err
-		}
-		resources, err := loadCleanupResources(ctx, tx, result.Operation)
-		for _, resource := range resources {
-			result.Resources = append(result.Resources, resource.Result)
-		}
-		return err
-	})
-	if err != nil {
-		return cleanup.Record{}, err
-	}
-	return result, nil
-}
-
-// AdmitCleanup records intent only. Coalescing returns the attempt's pending or already
-// succeeded cleanup; a failed one never blocks a new explicit request.
-func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Record, error) {
-	if c.Validate() != nil {
-		return cleanup.Record{}, operations.ErrRequest
-	}
-	var result cleanup.Record
-	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
-		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Operate); err != nil {
-			return err
-		}
-		prior, err := replayCleanup(ctx, tx, c.WorkspaceID, c.KeyDigest, c.RequestHash)
-		if err != nil {
-			return err
-		}
-		if prior != nil {
-			result = *prior
-			return nil
-		}
-		if _, _, err = schedulerControl(ctx, tx); err != nil {
-			return err
-		}
-		target, err := controlTarget(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID)
-		if err != nil {
-			return err
-		}
-		if err = actionableAttempt(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID); err != nil {
-			return err
-		}
-		if now.Before(target.Attempt.UpdatedAt) {
-			return ErrCorrupt
-		}
-		var existing string
-		err = tx.QueryRowContext(ctx, `SELECT operation_id FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running','succeeded') ORDER BY cleanup_seq DESC LIMIT 1`, string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID)).Scan(&existing)
-		if err == nil {
-			row, err := loadCleanup(ctx, tx, c.WorkspaceID, domain.OperationID(existing))
-			if err != nil {
-				return err
-			}
-			if err = saveCleanupReceipt(ctx, tx, c, row.record); err != nil {
-				return err
-			}
-			result = row.record
-			result.Replay = true
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, now, "")
-		if err != nil {
-			return err
-		}
-		id, err := randomID("op_", 16)
-		if err != nil {
-			return err
-		}
-		op, err := domain.NewOperation(domain.OperationID(id), c.WorkspaceID, c.JobID, c.Request.AttemptID, domain.OperationCleanup, now)
-		if err != nil {
-			return ErrInvalid
-		}
-		r := cleanup.Record{Operation: op, Effect: cleanup.Pending}
-		if err = insertCleanup(ctx, tx, c, r, plan.resource); err != nil {
-			return err
-		}
-		if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
-			return err
-		}
-		if err = saveCleanupReceipt(ctx, tx, c, r); err != nil {
-			return err
-		}
-		result = r
-		return nil
-	})
-	if err != nil {
-		// No identifier or success escapes a failed or uncertain acknowledgement.
-		return cleanup.Record{}, err
-	}
-	return result, nil
-}
-
-func insertCleanup(ctx context.Context, tx *sql.Tx, c cleanup.Command, r cleanup.Record, resource domain.ProviderResourceID) error {
-	if r.Validate() != nil || r.Replay || r.Operation.Revision != 1 || r.Operation.Status != domain.OperationAccepted || !resource.Valid() {
-		return ErrInvalid
-	}
-	raw, err := json.Marshal(r)
-	if err != nil || len(raw) > 8192 {
-		return ErrInvalid
-	}
-	request, err := json.Marshal(c.Request)
-	if err != nil {
-		return ErrInvalid
-	}
-	op := r.Operation
-	_, err = tx.ExecContext(ctx, `INSERT INTO cleanup_operations(workspace_id,operation_id,job_id,attempt_id,resource_id,status,revision,created_at,request_sha256,request_json,record)
- VALUES(?,?,?,?,?,?,?,?,?,?,?)`, string(op.WorkspaceID), string(op.ID), string(op.JobID), string(op.AttemptID), string(resource), string(op.Status), op.Revision, op.CreatedAt.UTC().Format(time.RFC3339Nano), c.RequestHash, string(request), string(raw))
-	return dbError(err)
-}
-
-func saveCleanupReceipt(ctx context.Context, tx *sql.Tx, c cleanup.Command, r cleanup.Record) error {
-	r.Replay = false
-	raw, err := json.Marshal(r)
-	if err != nil || len(raw) > 4096 {
-		return ErrInvalid
-	}
-	_, _, err = replayOrCreate(ctx, tx, receiptKey{c.WorkspaceID, "operation", "cleanup", c.KeyDigest, c.RequestHash, cleanup.CanonicalVersion, operations.ErrConflict}, &savedReceipt{string(r.Operation.ID), r.Operation.JobID, r.Operation.AttemptID, string(raw)})
-	return err
 }

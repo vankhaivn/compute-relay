@@ -3,9 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"math"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
@@ -24,23 +22,23 @@ func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.W
 	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var w domain.WorkspaceID
 		var id domain.OperationID
-		err := tx.QueryRowContext(ctx, `SELECT c.workspace_id,c.operation_id FROM cleanup_operations c
+		err := tx.QueryRowContext(ctx, `SELECT c.workspace_id,c.operation_id FROM operations c
  JOIN jobs j ON j.workspace_id=c.workspace_id AND j.job_id=c.job_id
  LEFT JOIN work_leases l ON l.kind='cleanup' AND l.key=json_array(c.workspace_id,c.operation_id)
- WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=c.workspace_id AND r.job_id=c.job_id AND r.attempt_id=c.attempt_id)
+ WHERE c.kind='cleanup' AND NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=c.workspace_id AND r.job_id=c.job_id AND r.attempt_id=c.attempt_id)
  AND (c.status='accepted' OR (c.status='running' AND (l.until_ms IS NULL OR l.held=0 OR l.until_ms<=?)))
- ORDER BY c.cleanup_seq LIMIT 1`, now.UnixMilli()).Scan(&w, &id)
+ ORDER BY c.operation_seq LIMIT 1`, now.UnixMilli()).Scan(&w, &id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return dbError(err)
 		}
-		row, err := loadCleanup(ctx, tx, w, id)
+		row, err := loadOperation(ctx, tx, w, id)
 		if err != nil {
 			return err
 		}
-		op := row.record.Operation
+		op := row.Record.Operation
 		target, err := controlTarget(ctx, tx, w, op.JobID, op.AttemptID)
 		if err != nil {
 			return err
@@ -48,14 +46,14 @@ func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.W
 		if now.Before(target.Attempt.UpdatedAt) || now.Before(op.UpdatedAt) {
 			return ErrCorrupt
 		}
-		plan, err := eligibleCleanup(ctx, tx, target, row.request.DiscardUncollected, now, op.ID)
-		if errors.Is(err, operations.ErrBusy) || errors.Is(err, operations.ErrState) || errors.Is(err, operations.ErrUnresolved) || errors.Is(err, cleanup.ErrUncollected) {
-			return failCleanup(ctx, tx, row.record, now)
+		plan, err := eligibleCleanup(ctx, tx, target, row.Request.DiscardUncollected, now, op.ID)
+		if errors.Is(err, operations.ErrBusy) || errors.Is(err, operations.ErrState) || errors.Is(err, operations.ErrUnresolved) || errors.Is(err, operations.ErrUncollected) {
+			return failCleanup(ctx, tx, row.Record, now)
 		}
 		if err != nil {
 			return err
 		}
-		if plan.resource != row.resource {
+		if plan.resource != row.Resource {
 			return ErrCorrupt
 		}
 		resources, err := loadCleanupResources(ctx, tx, op)
@@ -87,14 +85,14 @@ func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.W
 				return ErrCorrupt
 			}
 		}
-		current := row.record
+		current := row.Record
 		if op.Status == domain.OperationAccepted {
 			next, err := op.Transition(domain.OperationRunning, nil, now)
 			if err != nil {
 				return ErrInvalid
 			}
-			current = cleanup.Record{Operation: next, Effect: cleanup.Pending}
-			if err = saveCleanup(ctx, tx, row.record, current); err != nil {
+			current = operations.Record{Operation: next, Effect: operations.Pending}
+			if err = saveOperation(ctx, tx, row, operationRow{Record: current}); err != nil {
 				return err
 			}
 		}
@@ -108,7 +106,7 @@ func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.W
 			Binding:               plan.binding,
 			Request:               provider.CleanupRequest{Remote: plan.remote, LedgerID: plan.resource, CreationOperationID: plan.creation, ResultsCollected: plan.collected, Mode: provider.CleanupApply},
 			Resources:             resources,
-			AcceptNameBasedDelete: row.request.AcceptNameBasedDelete,
+			AcceptNameBasedDelete: row.Request.AcceptNameBasedDelete,
 		}
 		if !work.Valid() {
 			return ErrCorrupt
@@ -140,7 +138,7 @@ func (s *Store) RenewCleanup(ctx context.Context, w cleanup.Work, ttl time.Durat
 
 // failCleanup settles a request whose attempt is no longer eligible. A recovered
 // running resource keeps an unknown outcome; confirmed earlier outcomes stay intact.
-func failCleanup(ctx context.Context, tx *sql.Tx, before cleanup.Record, now time.Time) error {
+func failCleanup(ctx context.Context, tx *sql.Tx, before operations.Record, now time.Time) error {
 	p, err := domain.NewProblem(domain.CodeIllegalStateTransition, "The attempt is no longer eligible for remote cleanup; no further deletion was attempted. Inspect its resource outcomes before requesting cleanup again.", domain.FailureStageOperation)
 	if err != nil {
 		return ErrInvalid
@@ -169,7 +167,7 @@ func failCleanup(ctx context.Context, tx *sql.Tx, before cleanup.Record, now tim
 	if err != nil {
 		return dbError(err)
 	}
-	return saveCleanup(ctx, tx, before, cleanup.Record{Operation: next, Effect: cleanup.Failed})
+	return saveOperation(ctx, tx, operationRow{Record: before}, operationRow{Record: operations.Record{Operation: next, Effect: operations.Failed}})
 }
 
 // CompleteCleanup records the aggregate of the resource outcomes under w's fence.
@@ -182,7 +180,7 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 		if err != nil {
 			return err
 		}
-		before := row.record
+		before := row.Record
 		if before.Operation.Status != domain.OperationRunning || before.Operation.Revision != w.Record.Operation.Revision {
 			return cleanup.ErrLeaseLost
 		}
@@ -195,25 +193,25 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 		}
 		allConfirmed, anyDeleted := true, false
 		for _, resource := range resources {
-			if resource.Result.State == cleanup.ResourcePending || resource.Result.State == cleanup.ResourceRunning ||
-				o.Effect != cleanup.Failed && !resource.Result.State.Confirmed() {
+			if resource.Result.State == operations.ResourcePending || resource.Result.State == operations.ResourceRunning ||
+				o.Effect != operations.Failed && !resource.Result.State.Confirmed() {
 				return ErrInvalid
 			}
 			allConfirmed = allConfirmed && resource.Result.State.Confirmed()
-			anyDeleted = anyDeleted || resource.Result.State == cleanup.ResourceDeleted
+			anyDeleted = anyDeleted || resource.Result.State == operations.ResourceDeleted
 		}
-		if len(resources) > 0 && (allConfirmed != (o.Effect != cleanup.Failed) || allConfirmed && (anyDeleted != (o.Effect == cleanup.RemoteDeleted))) {
+		if len(resources) > 0 && (allConfirmed != (o.Effect != operations.Failed) || allConfirmed && (anyDeleted != (o.Effect == operations.RemoteDeleted))) {
 			return ErrInvalid
 		}
 		status := domain.OperationSucceeded
-		if o.Effect == cleanup.Failed {
+		if o.Effect == operations.Failed {
 			status = domain.OperationFailed
 		}
 		next, err := before.Operation.Transition(status, o.Problem, now)
 		if err != nil {
 			return ErrInvalid
 		}
-		if o.Effect == cleanup.RemoteDeleted || o.Effect == cleanup.AlreadyAbsent {
+		if o.Effect == operations.RemoteDeleted || o.Effect == operations.AlreadyAbsent {
 			if err = releaseGateStorage(ctx, tx, string(before.Operation.WorkspaceID), string(before.Operation.JobID), string(before.Operation.AttemptID)); err != nil {
 				return err
 			}
@@ -221,35 +219,6 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 		if err = releaseWorkLease(ctx, tx, cleanupLease(w.Lease), now); err != nil {
 			return err
 		}
-		return saveCleanup(ctx, tx, before, cleanup.Record{Operation: next, Effect: o.Effect})
+		return saveOperation(ctx, tx, operationRow{Record: before}, operationRow{Record: operations.Record{Operation: next, Effect: o.Effect}})
 	})
-}
-
-// saveCleanup advances exactly one revision through an allowed transition.
-func saveCleanup(ctx context.Context, tx *sql.Tx, before, after cleanup.Record) error {
-	if after.Validate() != nil || after.Replay || after.Operation.Revision != before.Operation.Revision+1 || after.Operation.Revision > math.MaxInt64 ||
-		after.Operation.ID != before.Operation.ID || after.Operation.WorkspaceID != before.Operation.WorkspaceID || after.Operation.JobID != before.Operation.JobID ||
-		after.Operation.AttemptID != before.Operation.AttemptID || !after.Operation.CreatedAt.Equal(before.Operation.CreatedAt) {
-		return ErrInvalid
-	}
-	want, err := before.Operation.Transition(after.Operation.Status, after.Operation.Failure, after.Operation.UpdatedAt)
-	if err != nil || want.Revision != after.Operation.Revision {
-		return ErrInvalid
-	}
-	raw, err := json.Marshal(after)
-	if err != nil || len(raw) > 8192 {
-		return ErrInvalid
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE cleanup_operations SET status=?,revision=?,record=? WHERE workspace_id=? AND operation_id=? AND revision=?`, string(after.Operation.Status), after.Operation.Revision, string(raw), string(after.Operation.WorkspaceID), string(after.Operation.ID), before.Operation.Revision)
-	if err != nil {
-		return dbError(err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return dbError(err)
-	}
-	if n != 1 {
-		return operations.ErrChanged
-	}
-	return nil
 }

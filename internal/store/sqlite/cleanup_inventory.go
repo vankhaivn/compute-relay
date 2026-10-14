@@ -26,7 +26,7 @@ func cleanupResources(ctx context.Context, tx *sql.Tx, target admission.Record) 
 	j := work.Journal
 	w, job, attempt := string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID)
 	rows, err := tx.QueryContext(ctx, `SELECT resource_id,purpose,operation_id,instance_id,account_scope,resource_key,identity,plan_sha256,resource_ref
- FROM provider_resources WHERE workspace_id=? AND job_id=? AND attempt_id=? ORDER BY CASE purpose WHEN 'execution' THEN 0 ELSE 1 END LIMIT ?`, w, job, attempt, cleanup.MaxResources+1)
+ FROM provider_resources WHERE workspace_id=? AND job_id=? AND attempt_id=? ORDER BY CASE purpose WHEN 'execution' THEN 0 ELSE 1 END LIMIT ?`, w, job, attempt, operations.MaxCleanupResources+1)
 	if err != nil {
 		return nil, dbError(err)
 	}
@@ -49,7 +49,7 @@ func cleanupResources(ctx context.Context, tx *sql.Tx, target admission.Record) 
 	if err != nil {
 		return nil, dbError(err)
 	}
-	if len(entries) > cleanup.MaxResources {
+	if len(entries) > operations.MaxCleanupResources {
 		return nil, ErrCorrupt
 	}
 	var collected bool
@@ -134,7 +134,7 @@ func cleanupReason(err error) string {
 	switch {
 	case err == nil:
 		return "eligible"
-	case errors.Is(err, cleanup.ErrUncollected):
+	case errors.Is(err, operations.ErrUncollected):
 		return "uncollected_results"
 	case errors.Is(err, operations.ErrBusy):
 		return "active_lease_or_control"
@@ -163,7 +163,7 @@ func (s *Store) PlanCleanup(ctx context.Context, w domain.WorkspaceID, token str
 			return err
 		}
 		_, eligibility := eligibleCleanupAttempt(ctx, tx, target, discard, now, "")
-		if eligibility != nil && !errors.Is(eligibility, operations.ErrBusy) && !errors.Is(eligibility, operations.ErrState) && !errors.Is(eligibility, operations.ErrUnresolved) && !errors.Is(eligibility, cleanup.ErrUncollected) {
+		if eligibility != nil && !errors.Is(eligibility, operations.ErrBusy) && !errors.Is(eligibility, operations.ErrState) && !errors.Is(eligibility, operations.ErrUnresolved) && !errors.Is(eligibility, operations.ErrUncollected) {
 			return eligibility
 		}
 		result = cleanup.PreviewPlan{WorkspaceID: w, JobID: job, AttemptID: attempt, Revision: target.Attempt.Revision,

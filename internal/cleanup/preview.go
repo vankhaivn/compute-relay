@@ -18,27 +18,19 @@ func (s *Service) WithPreviewResolver(resolver Resolver) *Service {
 	return &copy
 }
 
-func (s *Service) PreviewAvailable() bool {
-	_, ok := s.repo.(PreviewRepository)
-	return ok
-}
-
 func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID, discard, acceptNameBasedDelete bool) (Preview, error) {
 	p, err := s.authorize(ctx, principal, w, auth.Operate)
 	if err != nil {
 		return Preview{}, err
 	}
-	repo, ok := s.repo.(PreviewRepository)
-	if !ok {
-		return Preview{}, operations.ErrNotFound
-	}
+	repo := s.repo
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	plan, err := repo.PlanCleanup(ctx, w, p.TokenID(), job, attempt, discard)
 	if err != nil {
 		return Preview{}, err
 	}
-	if len(plan.Resources) > MaxResources || plan.WorkspaceID != w || plan.JobID != job || plan.AttemptID != attempt {
+	if len(plan.Resources) > operations.MaxCleanupResources || plan.WorkspaceID != w || plan.JobID != job || plan.AttemptID != attempt {
 		return Preview{}, ErrInvalid
 	}
 	result := Preview{WorkspaceID: w, JobID: job, AttemptID: attempt, ObservedAt: s.clock.Now().UTC(), Eligible: plan.Eligible, Reason: plan.Reason, Resources: make([]ResourcePreview, 0, len(plan.Resources))}

@@ -14,7 +14,6 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
@@ -30,9 +29,9 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 	ctx := context.Background()
 	f, collected := collectedFixture(t)
 	cleanupService, principal := cleanupService(t, f, "a", auth.Operate)
-	legacyCleanup := cleanup.Request{AttemptID: collected.AttemptID, AcceptNameBasedDelete: true}
+	legacyCleanup := operations.Request{AttemptID: collected.AttemptID, AcceptNameBasedDelete: true}
 	legacyCleanupRaw, _ := json.Marshal(legacyCleanup)
-	if _, err := cleanupService.Submit(ctx, principal, "a", collected.JobID, "migration-cleanup", legacyCleanupRaw); err != nil {
+	if _, err := cleanupService.Submit(ctx, principal, "a", collected.JobID, domain.OperationCleanup, "migration-cleanup", legacyCleanupRaw); err != nil {
 		t.Fatal(err)
 	}
 	f.authorizeSeed = false
@@ -200,13 +199,13 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 		}
 	}
 	cleanupKey, _ := admission.KeyDigest("migration-cleanup")
-	cleanupHash, _ := legacyCleanup.Digest(collected.JobID)
-	if replay, e := upgraded.ReplayCleanup(ctx, "a", principal.TokenID(), cleanupKey, cleanupHash); e != nil || replay == nil || !replay.Replay {
+	cleanupHash, _ := legacyCleanup.Digest(collected.JobID, domain.OperationCleanup)
+	if replay, e := upgraded.ReplayOperation(ctx, "a", principal.TokenID(), domain.OperationCleanup, cleanupKey, cleanupHash); e != nil || replay == nil || !replay.Replay {
 		t.Fatal("legacy true cleanup replay lost", e)
 	}
 	legacyCleanup.AcceptNameBasedDelete = false
-	changedHash, _ := legacyCleanup.Digest(collected.JobID)
-	if _, e := upgraded.ReplayCleanup(ctx, "a", principal.TokenID(), cleanupKey, changedHash); !errors.Is(e, operations.ErrConflict) {
+	changedHash, _ := legacyCleanup.Digest(collected.JobID, domain.OperationCleanup)
+	if _, e := upgraded.ReplayOperation(ctx, "a", principal.TokenID(), domain.OperationCleanup, cleanupKey, changedHash); !errors.Is(e, operations.ErrConflict) {
 		t.Fatal("changed historical cleanup request accepted", e)
 	}
 	testSharedGrantConsumption(t, upgraded, ids, now)

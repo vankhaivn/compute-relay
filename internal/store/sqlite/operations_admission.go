@@ -143,7 +143,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if err != nil {
 			return err
 		}
-		prior, err := replayControl(ctx, tx, c.WorkspaceID, c.Kind, c.KeyDigest, c.RequestHash)
+		prior, err := replayOperation(ctx, tx, c.WorkspaceID, c.Kind, c.KeyDigest, c.RequestHash)
 		if err != nil {
 			return err
 		}
@@ -171,14 +171,16 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		query := `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind=? AND status IN ('accepted','running')`
 		if c.Kind == domain.OperationCancel {
 			query = `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind=?`
+		} else if c.Kind == domain.OperationCleanup {
+			query = `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind=? AND status IN ('accepted','running','succeeded') ORDER BY operation_seq DESC LIMIT 1`
 		}
 		err = tx.QueryRowContext(ctx, query, string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID), string(c.Kind)).Scan(&existing)
 		if err == nil {
-			r, err := loadControl(ctx, tx, c.WorkspaceID, domain.OperationID(existing))
+			r, err := loadOperation(ctx, tx, c.WorkspaceID, domain.OperationID(existing))
 			if err != nil {
 				return err
 			}
-			if err = saveControlReceipt(ctx, tx, c, r.Record); err != nil {
+			if err = saveOperationReceipt(ctx, tx, c, r.Record); err != nil {
 				return err
 			}
 			result = r.Record
@@ -190,7 +192,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		}
 		// A pending explicit cleanup owns the attempt's remote resource until it settles.
 		var cleaning bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))`, string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID)).Scan(&cleaning); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM operations WHERE kind='cleanup' AND workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))`, string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID)).Scan(&cleaning); err != nil {
 			return dbError(err)
 		}
 		if cleaning {
@@ -215,7 +217,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 			if err = controlLimit(ctx, tx, c, true); err != nil {
 				return err
 			}
-		} else if c.Kind != domain.OperationCancel {
+		} else if c.Kind != domain.OperationCancel && c.Kind != domain.OperationCleanup {
 			if err = controlLimit(ctx, tx, c, false); err != nil {
 				return err
 			}
@@ -228,11 +230,29 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if err != nil {
 			return ErrInvalid
 		}
-		r := controlRecord{Record: operations.Record{Operation: op, Effect: operations.Pending}}
+		r := operationRow{Record: operations.Record{Operation: op, Effect: operations.Pending}}
 		if c.Kind == domain.OperationCollect {
 			r.Effect = operations.CollectionRequested
 		}
-		if err = insertControl(ctx, tx, c, r.Record); err != nil {
+		if c.Kind == domain.OperationCleanup {
+			plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, now, "")
+			if err != nil {
+				return err
+			}
+			r.Resource = plan.resource
+			if err = insertOperation(ctx, tx, c, r); err != nil {
+				return err
+			}
+			if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
+				return err
+			}
+			if err = saveOperationReceipt(ctx, tx, c, r.Record); err != nil {
+				return err
+			}
+			result = r.Record
+			return nil
+		}
+		if err = insertOperation(ctx, tx, c, r); err != nil {
 			return err
 		}
 		if err = controlEvent(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID, op.ID, domain.EventOperationAccepted, now); err != nil {
@@ -251,7 +271,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if err != nil {
 			return err
 		}
-		if err = saveControlReceipt(ctx, tx, c, r.Record); err != nil {
+		if err = saveOperationReceipt(ctx, tx, c, r.Record); err != nil {
 			return err
 		}
 		result = r.Record
@@ -265,7 +285,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 }
 
 func controlLimit(ctx context.Context, tx *sql.Tx, c operations.Command, retry bool) error {
-	query := `SELECT count(*),COALESCE(sum(CASE WHEN workspace_id=? THEN 1 ELSE 0 END),0) FROM operations WHERE status IN ('accepted','running')`
+	query := `SELECT count(*),COALESCE(sum(CASE WHEN workspace_id=? THEN 1 ELSE 0 END),0) FROM operations WHERE kind!='cleanup' AND status IN ('accepted','running')`
 	if retry {
 		query = `SELECT count(*),COALESCE(sum(CASE WHEN j.workspace_id=? THEN 1 ELSE 0 END),0) FROM jobs j JOIN attempts a ON a.workspace_id=j.workspace_id AND a.job_id=j.job_id AND a.attempt_id=j.active_attempt_id WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out')`
 	}
@@ -279,7 +299,7 @@ func controlLimit(ctx context.Context, tx *sql.Tx, c operations.Command, retry b
 	return nil
 }
 
-func createRetry(ctx context.Context, tx *sql.Tx, target admission.Record, r controlRecord, now time.Time) (controlRecord, error) {
+func createRetry(ctx context.Context, tx *sql.Tx, target admission.Record, r operationRow, now time.Time) (operationRow, error) {
 	if target.Job.ActiveAttemptID != target.Attempt.ID || target.Attempt.Number == math.MaxUint32 {
 		return r, operations.ErrChanged
 	}
@@ -322,7 +342,7 @@ func createRetry(ctx context.Context, tx *sql.Tx, target admission.Record, r con
 	}
 	r.NewAttemptID = a.ID
 	r.Effect = operations.NewAttemptCreated
-	if err = saveControl(ctx, tx, before, r); err != nil {
+	if err = saveOperation(ctx, tx, before, r); err != nil {
 		return r, err
 	}
 	if err = controlEvent(ctx, tx, target.Job.WorkspaceID, target.Job.ID, a.ID, r.Operation.ID, domain.EventAttemptRetried, now); err != nil {

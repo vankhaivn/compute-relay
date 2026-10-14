@@ -9,9 +9,9 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 )
@@ -187,7 +187,7 @@ func TestDeadlineExpiredPreparedAttemptCanBeCleanedWithoutResult(t *testing.T) {
 	if len(probe.requests) != 1 || probe.requests[0].Remote.Resource != j.Prepared.Resource || probe.requests[0].Remote.Version != "prepared" || probe.requests[0].ResultsCollected {
 		t.Fatal("expired cleanup lost exact never-started identity", probe.requests)
 	}
-	if got, err := service.Get(context.Background(), p, "a", receipt.Operation.ID); err != nil || got.Effect != cleanup.RemoteDeleted {
+	if got, err := service.Get(context.Background(), p, "a", receipt.Operation.ID); err != nil || got.Effect != operations.RemoteDeleted {
 		t.Fatal("cleanup not confirmed", err)
 	}
 	if stats := f.backend.Stats(); stats.SubmitCalls != 0 || stats.Executions != 0 {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
@@ -70,7 +71,7 @@ func (s *stubTarget) DescribeCleanup(provider.CleanupResourceRequest) (provider.
 func (r *stubRepo) BeginCleanupResource(context.Context, Work, ResourceWork) error {
 	return nil
 }
-func (r *stubRepo) CompleteCleanupResource(context.Context, Work, ResourceResult) error {
+func (r *stubRepo) CompleteCleanupResource(context.Context, Work, operations.ResourceResult) error {
 	return nil
 }
 
@@ -96,12 +97,12 @@ func stubWork(t *testing.T) *Work {
 		ResourceKey: "key", Nonce: strings.Repeat("n", 64), BundleSHA256: domain.SHA256Digest(strings.Repeat("a", 64)), InputManifestSHA256: domain.SHA256Digest(strings.Repeat("b", 64))}
 	w := &Work{
 		Lease:   Lease{WorkspaceID: "a", OperationID: "op_1", Generation: 1, Fence: strings.Repeat("f", 64), Until: now.Add(time.Minute)},
-		Record:  Record{Operation: op, Effect: Pending},
+		Record:  operations.Record{Operation: op, Effect: operations.Pending},
 		Binding: binding,
 		Request: provider.CleanupRequest{Remote: provider.RemoteReference{Identity: identity, Resource: "resource", Version: "1"}, LedgerID: "res_staging_int_1", CreationOperationID: "op_prepare", ResultsCollected: true, Mode: provider.CleanupApply},
 	}
 	resource := Resource{Request: provider.CleanupResourceRequest{CleanupRequest: w.Request, Purpose: "staging", OwnershipOperationID: w.Request.CreationOperationID, PlanSHA256: provider.Digest([]byte("plan"))}}
-	w.Resources = []ResourceWork{{Resource: resource, Result: ResourceResult{ResourceID: w.Request.LedgerID, Purpose: "staging", Fingerprint: resource.Fingerprint(), State: ResourcePending, Reason: "cleanup_requested"}}}
+	w.Resources = []ResourceWork{{Resource: resource, Result: operations.ResourceResult{ResourceID: w.Request.LedgerID, Purpose: "staging", Fingerprint: resource.Fingerprint(), State: operations.ResourcePending, Reason: "cleanup_requested"}}}
 	if !w.Valid() {
 		t.Fatal("invalid stub work")
 	}
@@ -113,21 +114,21 @@ func TestEngineMapsEveryOutcome(t *testing.T) {
 		name     string
 		target   *stubTarget
 		resolver error
-		effect   Effect
+		effect   operations.Effect
 		code     domain.ErrorCode
 		applied  int
 	}{
-		{"deleted", &stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil, RemoteDeleted, "", 1},
-		{"already absent", &stubTarget{result: provider.CleanupOutcome{AlreadyAbsent: true}}, nil, AlreadyAbsent, "", 1},
-		{"contradictory", &stubTarget{result: provider.CleanupOutcome{Deleted: true, AlreadyAbsent: true}}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"dry-run evidence only", &stubTarget{result: provider.CleanupOutcome{WouldDelete: true}}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"unsupported", &stubTarget{err: errors.Join(errors.New("adapter-canary"), provider.ErrCleanupUnsupported)}, nil, Failed, domain.CodeUnsupportedCapability, 1},
-		{"identity", &stubTarget{err: provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "adapter-canary")}, nil, Failed, domain.CodeRemoteIdentityMismatch, 1},
-		{"unresolved", &stubTarget{err: provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "adapter-canary")}, nil, Failed, domain.CodeRemoteExecutionUnresolved, 1},
-		{"unknown", &stubTarget{err: errors.New("adapter-canary")}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"panic", &stubTarget{panics: true}, nil, Failed, domain.CodeProviderStateUnknown, 1},
-		{"binding", &stubTarget{verify: errors.New("adapter-canary")}, nil, Failed, domain.CodeRemoteIdentityMismatch, 0},
-		{"unconfigured", &stubTarget{}, errors.New("adapter-canary"), Failed, domain.CodeConfigurationInvalid, 0},
+		{"deleted", &stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil, operations.RemoteDeleted, "", 1},
+		{"already absent", &stubTarget{result: provider.CleanupOutcome{AlreadyAbsent: true}}, nil, operations.AlreadyAbsent, "", 1},
+		{"contradictory", &stubTarget{result: provider.CleanupOutcome{Deleted: true, AlreadyAbsent: true}}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"dry-run evidence only", &stubTarget{result: provider.CleanupOutcome{WouldDelete: true}}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"unsupported", &stubTarget{err: errors.Join(errors.New("adapter-canary"), provider.ErrCleanupUnsupported)}, nil, operations.Failed, domain.CodeUnsupportedCapability, 1},
+		{"identity", &stubTarget{err: provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "adapter-canary")}, nil, operations.Failed, domain.CodeRemoteIdentityMismatch, 1},
+		{"unresolved", &stubTarget{err: provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "adapter-canary")}, nil, operations.Failed, domain.CodeRemoteExecutionUnresolved, 1},
+		{"unknown", &stubTarget{err: errors.New("adapter-canary")}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"panic", &stubTarget{panics: true}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
+		{"binding", &stubTarget{verify: errors.New("adapter-canary")}, nil, operations.Failed, domain.CodeRemoteIdentityMismatch, 0},
+		{"unconfigured", &stubTarget{}, errors.New("adapter-canary"), operations.Failed, domain.CodeConfigurationInvalid, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			repo := &stubRepo{work: stubWork(t)}
@@ -219,7 +220,7 @@ func TestEngineEmptyInventorySettlesWithoutProviderCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	worked, err := engine.RunOnce(context.Background())
-	if !worked || err != nil || target.applied != 0 || len(repo.outcomes) != 1 || repo.outcomes[0].Effect != AlreadyAbsent {
+	if !worked || err != nil || target.applied != 0 || len(repo.outcomes) != 1 || repo.outcomes[0].Effect != operations.AlreadyAbsent {
 		t.Fatalf("empty inventory did not settle locally: %v %v %+v", worked, err, repo.outcomes)
 	}
 }

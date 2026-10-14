@@ -23,7 +23,7 @@ func pendingCancellation(ctx context.Context, tx *sql.Tx, work dispatch.Work) (*
 	if err != nil {
 		return nil, dbError(err)
 	}
-	r, err := loadControl(ctx, tx, work.Job.Job.WorkspaceID, id)
+	r, err := loadOperation(ctx, tx, work.Job.Job.WorkspaceID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 		if work.Cancellation == nil || work.Cancellation.Operation.ID != id || work.Journal.Phase != dispatch.Submitted || work.Journal.Remote == nil {
 			return dispatch.ErrConflict
 		}
-		r, err := loadControl(ctx, tx, work.Job.Job.WorkspaceID, id)
+		r, err := loadOperation(ctx, tx, work.Job.Job.WorkspaceID, id)
 		if err != nil {
 			return err
 		}
@@ -64,7 +64,7 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 			}
 			next.Started = true
 			next.Effect = operations.CancellationRequested
-			if err = saveControl(ctx, tx, r, next); err != nil {
+			if err = saveOperation(ctx, tx, r, next); err != nil {
 				return err
 			}
 			state.Cancellation = domain.CancellationRequesting
@@ -166,7 +166,7 @@ func finishObservedOperations(ctx context.Context, tx *sql.Tx, work *dispatch.Wo
 		return dbError(err)
 	}
 	for _, id := range ids {
-		r, err := loadControl(ctx, tx, work.Job.Job.WorkspaceID, id)
+		r, err := loadOperation(ctx, tx, work.Job.Job.WorkspaceID, id)
 		if err != nil {
 			return err
 		}

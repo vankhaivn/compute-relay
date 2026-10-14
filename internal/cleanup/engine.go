@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/worker"
 )
@@ -29,7 +30,7 @@ func (l Lease) Valid() bool {
 // always uses CleanupApply; ResultsCollected is the local attestation, never a guess.
 type Work struct {
 	Lease                 Lease
-	Record                Record
+	Record                operations.Record
 	Binding               provider.BindingSnapshot
 	Request               provider.CleanupRequest
 	Resources             []ResourceWork
@@ -38,7 +39,7 @@ type Work struct {
 
 func (w Work) Valid() bool {
 	op, id := w.Record.Operation, w.Request.Remote.Identity
-	if len(w.Resources) > MaxResources {
+	if len(w.Resources) > operations.MaxCleanupResources {
 		return false
 	}
 	seen := map[domain.ProviderResourceID]bool{}
@@ -50,7 +51,7 @@ func (w Work) Valid() bool {
 		}
 		seen[r.ResourceID] = true
 	}
-	return w.Lease.Valid() && w.Record.Validate() == nil && !w.Record.Replay && op.Status == domain.OperationRunning &&
+	return w.Lease.Valid() && w.Record.Validate() == nil && op.Kind == domain.OperationCleanup && !w.Record.Replay && op.Status == domain.OperationRunning &&
 		op.ID == w.Lease.OperationID && op.WorkspaceID == w.Lease.WorkspaceID && w.Binding.Valid() &&
 		w.Request.Remote.Validate() == nil && id.WorkspaceID == op.WorkspaceID && id.JobID == op.JobID && id.AttemptID == op.AttemptID &&
 		id.InstanceID == w.Binding.Binding.ProviderInstanceID && w.Request.LedgerID.Valid() && w.Request.CreationOperationID.Valid() &&
@@ -59,15 +60,15 @@ func (w Work) Valid() bool {
 
 // Outcome is the only result a worker records. A failure carries a public problem.
 type Outcome struct {
-	Effect  Effect
+	Effect  operations.Effect
 	Problem *domain.Problem
 }
 
 func (o Outcome) Valid() bool {
 	switch o.Effect {
-	case RemoteDeleted, AlreadyAbsent:
+	case operations.RemoteDeleted, operations.AlreadyAbsent:
 		return o.Problem == nil
-	case Failed:
+	case operations.Failed:
 		return o.Problem != nil && o.Problem.Validate() == nil
 	}
 	return false
@@ -143,7 +144,7 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 			return true, err
 		}
 	} else {
-		outcome = Outcome{Effect: AlreadyAbsent}
+		outcome = Outcome{Effect: operations.AlreadyAbsent}
 	}
 	if owned.Err() != nil {
 		// Shutdown leaves the running claim for lease-expiry recovery.
@@ -173,7 +174,7 @@ func failure(code domain.ErrorCode, message string, action domain.RecommendedAct
 		p, _ = domain.NewProblem(domain.CodeProviderStateUnknown, message, domain.FailureStageObservation)
 	}
 	p = p.WithRetrySemantics(false, false).WithRecommendedAction(action)
-	return Outcome{Effect: Failed, Problem: &p}
+	return Outcome{Effect: operations.Failed, Problem: &p}
 }
 
 // Run polls until ctx ends. Lost fences continue; transient store failures back off.

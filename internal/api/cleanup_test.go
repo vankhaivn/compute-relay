@@ -5,36 +5,37 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/api"
-	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
-// noCleanup composes durable controls without cleanup admission.
-type noCleanup struct{ cleanup.Repository }
+// noCleanup composes shared operation admission without provider preview.
+type noCleanup struct{ operations.Repository }
 
-// Explicit test-only cleanup repository for wire and refusal checks; production uses SQLite.
+// This operation-port fixture exercises cleanup wire and refusal checks.
 type cleanupRepository struct {
-	record cleanup.Record
+	operations.Repository
+	record operations.Record
 	err    error
 }
 
-func (c cleanupRepository) ReplayCleanup(context.Context, domain.WorkspaceID, string, string, string) (*cleanup.Record, error) {
+func (c cleanupRepository) ReplayOperation(context.Context, domain.WorkspaceID, string, domain.OperationKind, string, string) (*operations.Record, error) {
 	return nil, nil
 }
-func (c cleanupRepository) AdmitCleanup(context.Context, cleanup.Command) (cleanup.Record, error) {
+func (c cleanupRepository) AdmitOperation(context.Context, operations.Command) (operations.Record, error) {
 	return c.record, c.err
 }
-func (c cleanupRepository) ReadCleanup(context.Context, domain.WorkspaceID, string, domain.OperationID) (cleanup.Record, error) {
+func (c cleanupRepository) ReadOperation(context.Context, domain.WorkspaceID, string, domain.OperationID) (operations.Record, error) {
 	return c.record, c.err
 }
 
-func cleanupRecord(t *testing.T, status domain.OperationStatus, effect cleanup.Effect) cleanup.Record {
+func cleanupRecord(t *testing.T, status domain.OperationStatus, effect operations.Effect) operations.Record {
 	t.Helper()
 	now := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
 	op, err := domain.NewOperation("op_cleanup", "a", "job_fixture", "att_fixture", domain.OperationCleanup, now)
@@ -61,7 +62,7 @@ func cleanupRecord(t *testing.T, status domain.OperationStatus, effect cleanup.E
 			t.Fatal(err)
 		}
 	}
-	r := cleanup.Record{Operation: op, Effect: effect}
+	r := operations.Record{Operation: op, Effect: effect}
 	if r.Validate() != nil {
 		t.Fatal("invalid cleanup fixture", status, effect)
 	}
@@ -72,13 +73,13 @@ func TestCleanupHTTPReceiptsSatisfyPublishedContract(t *testing.T) {
 	schema := transportControlSchema(t, "schemas/control-operation.v1alpha1.schema.json", "")
 	for _, c := range []struct {
 		status domain.OperationStatus
-		effect cleanup.Effect
+		effect operations.Effect
 	}{
-		{domain.OperationAccepted, cleanup.Pending},
-		{domain.OperationRunning, cleanup.Pending},
-		{domain.OperationSucceeded, cleanup.RemoteDeleted},
-		{domain.OperationSucceeded, cleanup.AlreadyAbsent},
-		{domain.OperationFailed, cleanup.Failed},
+		{domain.OperationAccepted, operations.Pending},
+		{domain.OperationRunning, operations.Pending},
+		{domain.OperationSucceeded, operations.RemoteDeleted},
+		{domain.OperationSucceeded, operations.AlreadyAbsent},
+		{domain.OperationFailed, operations.Failed},
 	} {
 		t.Run(string(c.status)+"/"+string(c.effect), func(t *testing.T) {
 			f, _ := setupControlsHTTP(t, nil, cleanupRepository{record: cleanupRecord(t, c.status, c.effect)})
@@ -115,7 +116,7 @@ func TestCleanupHTTPRefusalsUseStableProblems(t *testing.T) {
 		code   string
 		action string
 	}{
-		{cleanup.ErrUncollected, 409, "ILLEGAL_STATE_TRANSITION", "collect"},
+		{operations.ErrUncollected, 409, "ILLEGAL_STATE_TRANSITION", "collect"},
 		{operations.ErrUnresolved, 409, "REMOTE_EXECUTION_UNRESOLVED", "reconcile"},
 		{operations.ErrBusy, 409, "ILLEGAL_STATE_TRANSITION", "retry_read"},
 		{operations.ErrState, 409, "ILLEGAL_STATE_TRANSITION", "retry_read"},
@@ -159,6 +160,13 @@ func TestCleanupHTTPAdmissionGuardsWithStore(t *testing.T) {
 	f.call(t, "POST", path, "a", "", body, 400)
 	f.call(t, "POST", path, "read", "cleanup-read-scope", body, 403)
 	f.call(t, "POST", path, "b", "cleanup-foreign", body, 403)
+	head := httptest.NewRequest("HEAD", f.url+path, nil)
+	head.Header.Set("Authorization", "Bearer "+f.tokens["a"])
+	response := httptest.NewRecorder()
+	f.handler.ServeHTTP(response, head)
+	if response.Code != 405 || response.Header().Get("Allow") != "GET, POST" {
+		t.Fatal("cleanup HEAD lost methods", response.Code, response.Header().Get("Allow"))
+	}
 	f.call(t, "GET", path, "a", "", "", 400)
 	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID), "a", "", "", 200)
 	f.call(t, "GET", path+"?attempt_id="+string(job.AttemptID)+"&accept_name_based_delete=true", "a", "", "", 200)
@@ -174,9 +182,9 @@ func TestCleanupHTTPAdmissionGuardsWithStore(t *testing.T) {
 
 	off, _ := setupControlsHTTP(t, nil, noCleanup{})
 	offJob := admitControlJob(t, off)
-	off.call(t, "POST", offJob.Links.Self+"/cleanup", "a", "cleanup-unconfigured", `{"attempt_id":"`+string(offJob.AttemptID)+`"}`, 404)
+	off.call(t, "POST", offJob.Links.Self+"/cleanup", "a", "cleanup-unconfigured", `{"attempt_id":"`+string(offJob.AttemptID)+`"}`, 409)
 	_, b = off.call(t, "GET", "/v1/info", "a", "", "", 200)
-	if bytes.Contains(b, []byte(`"`+api.FeatureJobCleanup+`"`)) {
-		t.Fatal("unconfigured cleanup advertised")
+	if !bytes.Contains(b, []byte(`"`+api.FeatureJobCleanup+`"`)) || bytes.Contains(b, []byte(`"`+api.FeatureJobCleanupPreview+`"`)) {
+		t.Fatal("shared cleanup admission or preview capability misrepresented")
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/testsupport/sshtest"
@@ -273,12 +274,16 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	}
 	name := strings.TrimPrefix(string(docker(nil, "inspect", "--format", "{{.Name}}", target)), "/")
 	clock := cleanupE2EClock{}
-	service, err := cleanup.NewService(h.access, h.store, clock)
+	service, err := operations.New(h.access, h.store, nil, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	service = service.WithPreviewResolver(services.resolver)
-	preview, err := service.Preview(ctx, actor, "app", job.JobID, job.AttemptID, false, false)
+	previewService, err := cleanup.NewService(h.access, h.store, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewService = previewService.WithPreviewResolver(services.resolver)
+	preview, err := previewService.Preview(ctx, actor, "app", job.JobID, job.AttemptID, false, false)
 	if err != nil || !preview.Eligible || len(preview.Resources) != 2 {
 		t.Fatal("cleanup preview", preview, err)
 	}
@@ -290,7 +295,7 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	save("preview", preview)
 	localBefore := cleanupE2EFiles(t, state)
 	raw := []byte(fmt.Sprintf(`{"attempt_id":%q}`, job.AttemptID))
-	receipt, err := service.Submit(ctx, actor, "app", job.JobID, "cleanup-e2e-original", raw)
+	receipt, err := service.Submit(ctx, actor, "app", job.JobID, domain.OperationCleanup, "cleanup-e2e-original", raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +312,7 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 		t.Fatal("fault must interrupt outcome commit after real deletion", worked, err)
 	}
 	before, err := service.Get(ctx, actor, "app", receipt.Operation.ID)
-	if err != nil || before.Operation.Status != domain.OperationRunning || before.Resources[0].State != cleanup.ResourceRunning {
+	if err != nil || before.Operation.Status != domain.OperationRunning || before.Resources[0].State != operations.ResourceRunning {
 		t.Fatal("missing durable deletion intent", before, err)
 	}
 	save("interrupted", before)
@@ -337,21 +342,21 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	if worked, err := worker.RunOnce(ctx); err != nil || !worked {
 		t.Fatal("original-target restart recovery", worked, err)
 	}
-	service, err = cleanup.NewService(h.access, h.store, clock)
+	service, err = operations.New(h.access, h.store, nil, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	after, err := service.Get(ctx, actor, "app", receipt.Operation.ID)
-	if err != nil || after.Operation.Status != domain.OperationSucceeded || after.Effect != cleanup.AlreadyAbsent || len(after.Resources) != 2 {
+	if err != nil || after.Operation.Status != domain.OperationSucceeded || after.Effect != operations.AlreadyAbsent || len(after.Resources) != 2 {
 		t.Fatal("recovery did not prove original absence", after, err)
 	}
 	for i, resource := range after.Resources {
-		if resource.State != cleanup.ResourceAbsent || resource.ResourceID != before.Resources[i].ResourceID || resource.Fingerprint != before.Resources[i].Fingerprint {
+		if resource.State != operations.ResourceAbsent || resource.ResourceID != before.Resources[i].ResourceID || resource.Fingerprint != before.Resources[i].Fingerprint {
 			t.Fatal("recovery changed the target or lost the resource outcome", before, after)
 		}
 	}
 	save("recovered", after)
-	replayed, err := service.Submit(ctx, actor, "app", job.JobID, "cleanup-e2e-original", raw)
+	replayed, err := service.Submit(ctx, actor, "app", job.JobID, domain.OperationCleanup, "cleanup-e2e-original", raw)
 	if err != nil || !replayed.Replay || replayed.Operation.ID != receipt.Operation.ID {
 		t.Fatal("repeat request changed original operation", replayed, err)
 	}

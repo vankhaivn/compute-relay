@@ -13,7 +13,7 @@ import (
 )
 
 func TestExplicitTargetAndCanonicalControls(t *testing.T) {
-	for _, kind := range []domain.OperationKind{domain.OperationCancel, domain.OperationRetryCompute, domain.OperationReconcile, domain.OperationCollect} {
+	for _, kind := range []domain.OperationKind{domain.OperationCancel, domain.OperationRetryCompute, domain.OperationReconcile, domain.OperationCollect, domain.OperationCleanup} {
 		valid := []byte(`{"attempt_id":"attempt_1","reason":"operator request"}`)
 		r, err := Parse(kind, valid)
 		if err != nil {
@@ -38,7 +38,7 @@ func TestExplicitTargetAndCanonicalControls(t *testing.T) {
 			}
 		}
 	}
-	for _, kind := range []domain.OperationKind{domain.OperationCancel, domain.OperationReconcile, domain.OperationCollect} {
+	for _, kind := range []domain.OperationKind{domain.OperationCancel, domain.OperationReconcile, domain.OperationCollect, domain.OperationCleanup} {
 		a, err := Parse(kind, []byte(`{"attempt_id":"a"}`))
 		if err != nil {
 			t.Fatal(err)
@@ -53,8 +53,12 @@ func TestExplicitTargetAndCanonicalControls(t *testing.T) {
 	if _, err := Parse(domain.OperationRetryCompute, []byte(`{"attempt_id":"a","reason":"  "}`)); err == nil {
 		t.Fatal("retry reason required")
 	}
-	if _, err := Parse(domain.OperationCleanup, []byte(`{"attempt_id":"a"}`)); err == nil {
-		t.Fatal("cleanup entered job controls")
+	for _, kind := range []domain.OperationKind{domain.OperationCancel, domain.OperationCollect, domain.OperationReconcile, domain.OperationRetryCompute} {
+		for _, field := range []string{"discard_uncollected", "accept_name_based_delete"} {
+			if _, err := Parse(kind, []byte(`{"attempt_id":"a","reason":"explicit","`+field+`":false}`)); err == nil {
+				t.Fatal("cleanup-only field entered another operation", kind, field)
+			}
+		}
 	}
 }
 

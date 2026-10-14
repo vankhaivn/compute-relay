@@ -16,30 +16,40 @@ import (
 )
 
 const MaxRequestBytes = 4096
-const CanonicalVersion = "control/v1"
+
+// CanonicalVersion preserves the original request format for each operation family.
+func CanonicalVersion(kind domain.OperationKind) string {
+	if kind == domain.OperationCleanup {
+		return "cleanup/v1"
+	}
+	return "control/v1"
+}
 
 var (
-	ErrRequest    = errors.New("invalid control request")
-	ErrNotFound   = errors.New("operation or attempt not found")
-	ErrConflict   = errors.New("control idempotency conflict")
-	ErrChanged    = errors.New("the target attempt changed")
-	ErrUnresolved = errors.New("remote execution is unresolved")
-	ErrCollect    = errors.New("recover results without rerunning successful compute")
-	ErrInputs     = errors.New("original immutable inputs are unavailable")
-	ErrState      = errors.New("control is not appropriate for the current state")
-	ErrBusy       = errors.New("a control of this kind is already pending")
+	ErrRequest     = errors.New("invalid control request")
+	ErrNotFound    = errors.New("operation or attempt not found")
+	ErrConflict    = errors.New("control idempotency conflict")
+	ErrChanged     = errors.New("the target attempt changed")
+	ErrUnresolved  = errors.New("remote execution is unresolved")
+	ErrCollect     = errors.New("recover results without rerunning successful compute")
+	ErrInputs      = errors.New("original immutable inputs are unavailable")
+	ErrState       = errors.New("control is not appropriate for the current state")
+	ErrBusy        = errors.New("a control of this kind is already pending")
+	ErrUncollected = errors.New("results were not collected; confirm discard_uncollected")
 )
 
 // Request always names the intended attempt. A delayed request must not silently
 // target an attempt created by a concurrent retry. Reason is non-secret metadata.
 type Request struct {
-	AttemptID domain.AttemptID `json:"attempt_id"`
-	Reason    string           `json:"reason,omitempty"`
+	AttemptID             domain.AttemptID `json:"attempt_id"`
+	Reason                string           `json:"reason,omitempty"`
+	DiscardUncollected    bool             `json:"discard_uncollected,omitempty"`
+	AcceptNameBasedDelete bool             `json:"accept_name_based_delete,omitempty"`
 }
 
 func Supported(kind domain.OperationKind) bool {
 	return kind == domain.OperationCancel || kind == domain.OperationRetryCompute ||
-		kind == domain.OperationReconcile || kind == domain.OperationCollect
+		kind == domain.OperationReconcile || kind == domain.OperationCollect || kind == domain.OperationCleanup
 }
 
 func (r Request) Validate(kind domain.OperationKind) error {
@@ -50,6 +60,9 @@ func (r Request) Validate(kind domain.OperationKind) error {
 		if unicode.IsControl(c) {
 			return ErrRequest
 		}
+	}
+	if kind != domain.OperationCleanup && (r.DiscardUncollected || r.AcceptNameBasedDelete) {
+		return ErrRequest
 	}
 	if kind == domain.OperationRetryCompute && strings.TrimSpace(r.Reason) == "" {
 		return ErrRequest
@@ -62,7 +75,11 @@ func (r Request) Validate(kind domain.OperationKind) error {
 func Parse(kind domain.OperationKind, raw []byte) (Request, error) {
 	var r Request
 	fields, err := jsonwire.Object(raw, MaxRequestBytes)
-	if err != nil || jsonwire.Fields(fields, []string{"attempt_id"}, []string{"reason"}) != nil || json.Unmarshal(raw, &r) != nil || r.Validate(kind) != nil {
+	optional := []string{"reason"}
+	if kind == domain.OperationCleanup {
+		optional = append(optional, "discard_uncollected", "accept_name_based_delete")
+	}
+	if err != nil || jsonwire.Fields(fields, []string{"attempt_id"}, optional) != nil || json.Unmarshal(raw, &r) != nil || r.Validate(kind) != nil {
 		return Request{}, ErrRequest
 	}
 	return r, nil
@@ -74,12 +91,16 @@ func (r Request) Digest(job domain.JobID, kind domain.OperationKind) (string, er
 	if !job.Valid() || r.Validate(kind) != nil {
 		return "", ErrRequest
 	}
+	request, err := r.CanonicalJSON(kind)
+	if err != nil {
+		return "", err
+	}
 	raw, err := json.Marshal(struct {
 		Version string               `json:"version"`
 		Job     domain.JobID         `json:"job_id"`
 		Kind    domain.OperationKind `json:"kind"`
-		Request Request              `json:"request"`
-	}{CanonicalVersion, job, kind, r})
+		Request json.RawMessage      `json:"request"`
+	}{CanonicalVersion(kind), job, kind, request})
 	if err != nil {
 		return "", ErrRequest
 	}
@@ -87,10 +108,28 @@ func (r Request) Digest(job domain.JobID, kind domain.OperationKind) (string, er
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// CanonicalJSON keeps cleanup/v1's explicit false field and historical field order.
+func (r Request) CanonicalJSON(kind domain.OperationKind) ([]byte, error) {
+	if r.Validate(kind) != nil {
+		return nil, ErrRequest
+	}
+	if kind == domain.OperationCleanup {
+		return json.Marshal(struct {
+			AttemptID             domain.AttemptID `json:"attempt_id"`
+			DiscardUncollected    bool             `json:"discard_uncollected"`
+			AcceptNameBasedDelete bool             `json:"accept_name_based_delete,omitempty"`
+			Reason                string           `json:"reason,omitempty"`
+		}{r.AttemptID, r.DiscardUncollected, r.AcceptNameBasedDelete, r.Reason})
+	}
+	return json.Marshal(r)
+}
+
 type Effect string
 
 const (
 	Pending               Effect = "pending"
+	RemoteDeleted         Effect = "remote_deleted"
+	AlreadyAbsent         Effect = "already_absent"
 	DispatchPrevented     Effect = "dispatch_prevented"
 	CancellationRequested Effect = "cancellation_requested"
 	CancellationConfirmed Effect = "cancellation_confirmed"
@@ -105,7 +144,7 @@ const (
 
 func (e Effect) Valid() bool {
 	switch e {
-	case Pending, DispatchPrevented, CancellationRequested, CancellationConfirmed, TooLate,
+	case RemoteDeleted, AlreadyAbsent, Pending, DispatchPrevented, CancellationRequested, CancellationConfirmed, TooLate,
 		ObservationRefreshed, CollectionRequested, ResultsAvailable, NewAttemptCreated, ManualRequired, Failed:
 		return true
 	default:
@@ -121,11 +160,19 @@ type Record struct {
 	NewAttemptID         domain.AttemptID
 	TerminationConfirmed bool
 	Replay               bool
+	Resources            []ResourceResult `json:"-"`
 }
 
 func (r Record) Validate() error {
-	if r.Operation.Validate() != nil || !Supported(r.Operation.Kind) || !r.Effect.Valid() {
+	if r.Operation.Validate() != nil || !Supported(r.Operation.Kind) || !r.Effect.Valid() || !r.Operation.JobID.Valid() || !r.Operation.AttemptID.Valid() || len(r.Resources) > MaxCleanupResources || r.Operation.Kind != domain.OperationCleanup && len(r.Resources) != 0 {
 		return ErrRequest
+	}
+	seen := map[domain.ProviderResourceID]bool{}
+	for _, resource := range r.Resources {
+		if !resource.Valid() || seen[resource.ResourceID] {
+			return ErrRequest
+		}
+		seen[resource.ResourceID] = true
 	}
 	if r.NewAttemptID != "" && (!r.NewAttemptID.Valid() || r.Operation.Kind != domain.OperationRetryCompute || r.NewAttemptID == r.Operation.AttemptID || r.Effect != NewAttemptCreated) {
 		return ErrRequest
@@ -139,7 +186,7 @@ func (r Record) Validate() error {
 			return ErrRequest
 		}
 	case domain.OperationRunning:
-		if r.Operation.Kind != domain.OperationCancel || r.Effect != CancellationRequested {
+		if !(r.Operation.Kind == domain.OperationCancel && r.Effect == CancellationRequested || r.Operation.Kind == domain.OperationCleanup && r.Effect == Pending) {
 			return ErrRequest
 		}
 	case domain.OperationFailed:
@@ -147,11 +194,15 @@ func (r Record) Validate() error {
 			return ErrRequest
 		}
 	case domain.OperationManualRequired:
-		if r.Effect != ManualRequired {
+		if r.Operation.Kind == domain.OperationCleanup || r.Effect != ManualRequired {
 			return ErrRequest
 		}
 	case domain.OperationSucceeded:
 		switch r.Operation.Kind {
+		case domain.OperationCleanup:
+			if r.Effect != RemoteDeleted && r.Effect != AlreadyAbsent {
+				return ErrRequest
+			}
 		case domain.OperationCancel:
 			if r.Effect != DispatchPrevented && r.Effect != CancellationConfirmed && r.Effect != TooLate {
 				return ErrRequest

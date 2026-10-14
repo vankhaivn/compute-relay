@@ -1,4 +1,4 @@
-package cleanup
+package operations
 
 import (
 	"errors"
@@ -7,23 +7,22 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-func TestParseIsStrictAndCanonical(t *testing.T) {
+func TestCleanupParseIsStrictAndCanonical(t *testing.T) {
 	for _, raw := range []string{
 		`{"attempt_id":"att_1"}`,
 		`{"attempt_id":"att_1","discard_uncollected":false}`,
 		`{"attempt_id":"att_1","accept_name_based_delete":false}`,
 		`{"reason":"","discard_uncollected":false,"attempt_id":"att_1"}`,
 	} {
-		r, err := Parse([]byte(raw))
+		r, err := Parse(domain.OperationCleanup, []byte(raw))
 		if err != nil || r != (Request{AttemptID: "att_1"}) {
 			t.Fatal("equivalent request parsed differently", raw, r, err)
 		}
 	}
-	r, err := Parse([]byte(`{"attempt_id":"att_1","discard_uncollected":true,"reason":"operator confirmed"}`))
+	r, err := Parse(domain.OperationCleanup, []byte(`{"attempt_id":"att_1","discard_uncollected":true,"reason":"operator confirmed"}`))
 	if err != nil || !r.DiscardUncollected || r.Reason != "operator confirmed" {
 		t.Fatal("explicit discard lost", r, err)
 	}
@@ -36,13 +35,13 @@ func TestParseIsStrictAndCanonical(t *testing.T) {
 		`{"attempt_id":"att_1","unknown":true}`, `{"attempt_id":"att_1"}{}`, `{"attempt_id":"att_1"} x`,
 		`{"attempt_id":"att_1","reason":"` + strings.Repeat("r", 513) + `"}`, "{\"attempt_id\":\"att_1\",\"reason\":\"\xff\"}",
 	} {
-		if _, err := Parse([]byte(raw)); !errors.Is(err, operations.ErrRequest) {
+		if _, err := Parse(domain.OperationCleanup, []byte(raw)); !errors.Is(err, ErrRequest) {
 			t.Fatal("invalid cleanup request accepted", raw, err)
 		}
 	}
 }
 
-func TestDigestBindsJobAndEveryField(t *testing.T) {
+func TestCleanupDigestBindsJobAndEveryField(t *testing.T) {
 	base := Request{AttemptID: "att_1"}
 	seen := map[string]bool{}
 	for _, c := range []struct {
@@ -52,18 +51,18 @@ func TestDigestBindsJobAndEveryField(t *testing.T) {
 		{"job_1", base}, {"job_2", base}, {"job_1", Request{AttemptID: "att_2"}},
 		{"job_1", Request{AttemptID: "att_1", DiscardUncollected: true}}, {"job_1", Request{AttemptID: "att_1", Reason: "why"}}, {"job_1", Request{AttemptID: "att_1", AcceptNameBasedDelete: true}},
 	} {
-		digest, err := c.r.Digest(c.job)
+		digest, err := c.r.Digest(c.job, domain.OperationCleanup)
 		if err != nil || len(digest) != 64 || seen[digest] {
 			t.Fatal("digest is not distinct", c, err)
 		}
 		seen[digest] = true
 	}
-	if _, err := base.Digest(""); !errors.Is(err, operations.ErrRequest) {
+	if _, err := base.Digest("", domain.OperationCleanup); !errors.Is(err, ErrRequest) {
 		t.Fatal("digest accepted an invalid job", err)
 	}
 }
 
-func TestRecordStatusEffectMatrix(t *testing.T) {
+func TestCleanupRecordStatusEffectMatrix(t *testing.T) {
 	now := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
 	op, err := domain.NewOperation("op_1", "a", "job_1", "att_1", domain.OperationCleanup, now)
 	if err != nil {
@@ -107,7 +106,7 @@ func TestRecordStatusEffectMatrix(t *testing.T) {
 	}
 	collect := op
 	collect.Kind = domain.OperationCollect
-	if (Record{Operation: collect, Effect: Pending}).Validate() == nil {
+	if (Record{Operation: collect, Effect: RemoteDeleted}).Validate() == nil {
 		t.Fatal("non-cleanup operation accepted")
 	}
 	orphan := op
@@ -118,12 +117,12 @@ func TestRecordStatusEffectMatrix(t *testing.T) {
 }
 
 func TestNameBasedAcceptancePreservesLegacyDigest(t *testing.T) {
-	r, err := Parse([]byte(`{"attempt_id":"att_1","accept_name_based_delete":true}`))
+	r, err := Parse(domain.OperationCleanup, []byte(`{"attempt_id":"att_1","accept_name_based_delete":true}`))
 	if err != nil || !r.AcceptNameBasedDelete {
 		t.Fatal(r, err)
 	}
 	old := []byte(`{"version":"cleanup/v1","job_id":"job_1","kind":"cleanup","request":{"attempt_id":"att_1","discard_uncollected":false}}`)
-	digest, err := (Request{AttemptID: "att_1"}).Digest("job_1")
+	digest, err := (Request{AttemptID: "att_1"}).Digest("job_1", domain.OperationCleanup)
 	if err != nil || digest != string(provider.Digest(old)) {
 		t.Fatal("old persisted hash changed", digest, err)
 	}

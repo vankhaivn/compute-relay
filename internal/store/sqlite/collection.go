@@ -71,7 +71,7 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time) err
 	}
 	c := operations.Command{WorkspaceID: w, JobID: job, Kind: domain.OperationCollect, Request: req, RequestHash: hash}
 	r := operations.Record{Operation: op, Effect: operations.CollectionRequested}
-	if err = insertControl(ctx, tx, c, r); err != nil {
+	if err = insertOperation(ctx, tx, c, operationRow{Record: r}); err != nil {
 		return err
 	}
 	if err = controlEvent(ctx, tx, w, job, attempt, op.ID, domain.EventOperationAccepted, now); err != nil {
@@ -111,7 +111,7 @@ func (s *Store) ClaimCollection(ctx context.Context, ttl time.Duration, workers 
 		if err != nil {
 			return dbError(err)
 		}
-		op, err := loadControl(ctx, tx, w, id)
+		op, err := loadOperation(ctx, tx, w, id)
 		if err != nil {
 			return err
 		}
@@ -219,9 +219,9 @@ func collectionWork(ctx context.Context, tx *sql.Tx, l collection.Lease) (collec
 	return result, nil
 }
 
-func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now time.Time) (collection.Work, controlRecord, domain.Attempt, error) {
+func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now time.Time) (collection.Work, operationRow, domain.Attempt, error) {
 	var empty collection.Work
-	var zero controlRecord
+	var zero operationRow
 	var noAttempt domain.Attempt
 	if !w.Valid() {
 		return empty, zero, noAttempt, collection.ErrInvalid
@@ -230,7 +230,7 @@ func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now t
 	if _, err := checkWorkLease(ctx, tx, collectionLease(l), now); err != nil {
 		return empty, zero, noAttempt, err
 	}
-	op, err := loadControl(ctx, tx, l.WorkspaceID, l.OperationID)
+	op, err := loadOperation(ctx, tx, l.WorkspaceID, l.OperationID)
 	if err != nil {
 		return empty, zero, noAttempt, err
 	}

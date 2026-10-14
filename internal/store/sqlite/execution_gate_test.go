@@ -15,6 +15,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -404,10 +405,10 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 		t.Fatal("cleanup request guessed released storage")
 	}
 	finishCleanupResourceFixtures(t, f, *w)
-	if err = f.s.CompleteCleanup(ctx, *w, cleanup.Outcome{Effect: cleanup.RemoteDeleted}); err != nil {
+	if err = f.s.CompleteCleanup(ctx, *w, cleanup.Outcome{Effect: operations.RemoteDeleted}); err != nil {
 		t.Fatal(err)
 	}
-	if current, err := service.Get(ctx, p, "a", receipt.Operation.ID); err != nil || current.Effect != cleanup.RemoteDeleted || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0") != 0 {
+	if current, err := service.Get(ctx, p, "a", receipt.Operation.ID); err != nil || current.Effect != operations.RemoteDeleted || controlCount(t, f.s, "SELECT count(*) FROM attempt_grants WHERE kind='prepare' AND storage_released=0") != 0 {
 		t.Fatal("confirmed deletion did not release hold", current, err)
 	}
 }
@@ -415,16 +416,25 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 func TestExecutionGateReadyYieldsWorkerButPreservesAccountCapacity(t *testing.T) {
 	f := gateFixture(t, fake.Accept, 2)
 	settings := scheduler.DefaultSettings()
-	settings.MaxWorkers, settings.MaxActivePerAccount = 1, 2
+	settings.MaxWorkers, settings.MaxActivePerAccount = 3, 2
 	if err := f.s.ConfigureScheduler(context.Background(), settings); err != nil {
 		t.Fatal(err)
 	}
 	for n := 1; n <= 2; n++ {
 		id := gateSeed(t, f, n)
 		readyGate(t, f, id)
+		if held := controlCount(t, f.s, "SELECT count(*) FROM work_leases WHERE kind='dispatch' AND held=1"); held != 0 {
+			t.Fatal("ready attempt retained a worker lease", held)
+		}
 	}
 	id := gateSeed(t, f, 3)
 	prepareGrant(t, f, id)
+	// Previously granted holds survive a lower limit; readiness still yields the
+	// sole worker while retaining the two occupied account slots.
+	settings.MaxWorkers = 1
+	if err := f.s.ConfigureScheduler(context.Background(), settings); err != nil {
+		t.Fatal(err)
+	}
 	if worked, err := gateStep(t, f); err != nil || worked || f.backend.Stats().PrepareCalls != 2 || f.backend.Stats().SubmitCalls != 0 {
 		t.Fatal("ready hold lost worker or account bound", worked, err, f.backend.Stats())
 	}
