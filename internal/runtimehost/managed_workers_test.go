@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -112,11 +111,7 @@ func newManagedTestFixture(t *testing.T, withVault bool, extra ...connections.Ad
 	if err != nil {
 		t.Fatal(err)
 	}
-	python, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := ManagedServeConfig{PythonExecutable: python, MachineShape: "NvidiaTeslaT4", MaxRemoteWallSeconds: 300, MaxWorkers: 2}
+	config := ManagedServeConfig{MachineShape: "NvidiaTeslaT4", MaxRemoteWallSeconds: 300, MaxWorkers: 2}
 	adapter := &managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: config}}
 	f := &managedTestFixture{host: h, adapter: adapter, actor: actor, config: config}
 	var vault credentials.Vault

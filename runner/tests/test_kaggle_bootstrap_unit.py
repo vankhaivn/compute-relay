@@ -8,15 +8,11 @@ import tempfile
 import unittest
 from unittest import mock
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
     "execution_bootstrap_fixture", ROOT / "internal/provider/kaggle/execution_bootstrap.py")
 bootstrap = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bootstrap)
-CONTRACT_SPEC = importlib.util.spec_from_file_location(
-    "artifact_contract_fixture", ROOT / "internal/provider/kaggle/artifact_contract.py")
-artifact_contract = importlib.util.module_from_spec(CONTRACT_SPEC)
-CONTRACT_SPEC.loader.exec_module(artifact_contract)
 PACKAGE = "_compute_relay_remote_runner"
 
 
@@ -158,7 +154,7 @@ class ExecutionBootstrapTests(unittest.TestCase):
         main = sys.modules[PACKAGE + ".main"]
         self.assertEqual(main.VERSION, "fixture")
         self.assertEqual(main.calls, [(self.staging.resolve(), self.root / "working" / "relay-result", "disabled", False)])
-        self.assertEqual(main.calls[0][1].name + "/", artifact_contract.PREFIX)
+        self.assertEqual(main.calls[0][1].name + "/", "relay-result/")
         self.assertFalse((self.root / "working").exists())
         for sig, handler in previous.items():
             self.assertEqual(signal.getsignal(sig), handler)

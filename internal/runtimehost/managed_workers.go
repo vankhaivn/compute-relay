@@ -3,7 +3,6 @@ package runtimehost
 import (
 	"context"
 	"errors"
-	"os"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -24,7 +23,6 @@ import (
 // Account verification is requested through durable connection operations. Every
 // new attempt separately requires the explicit persisted authorization endpoint.
 type ManagedServeConfig struct {
-	PythonExecutable     string
 	CredentialStore      string
 	MachineShape         string
 	MaxRemoteWallSeconds int64
@@ -43,19 +41,6 @@ func (c ManagedServeConfig) validate() error {
 	}
 	if c.MachineShape != "cpu" && c.MachineShape != "NvidiaTeslaT4" && c.MachineShape != "NvidiaTeslaP100" ||
 		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
-		return ErrRequest
-	}
-	if c.PythonExecutable == "" {
-		if c.MachineShape != "cpu" {
-			return ErrRequest
-		}
-		return nil
-	}
-	if _, err := kaggle.NewDiscovery(clock{}); err != nil {
-		return ErrRequest
-	}
-	info, err := os.Stat(c.PythonExecutable)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
 		return ErrRequest
 	}
 	return nil
@@ -82,22 +67,11 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	adapters := []connections.Adapter{newManagedSSHAdapter(config)}
-	if config.PythonExecutable == "" {
-		present, err := h.store.HasManagedConnections(ctx, "kaggle")
-		if err != nil {
-			return nil, ErrState
-		}
-		if present {
-			return nil, ErrRequest
-		}
-	} else {
-		discovery, discoveryErr := kaggle.NewDiscovery(clock{})
-		if discoveryErr != nil {
-			return nil, ErrRequest
-		}
-		adapters = append(adapters, &managedKaggleAdapter{discovery: discovery, config: config})
+	discovery, err := kaggle.NewDiscovery(clock{})
+	if err != nil {
+		return nil, ErrRequest
 	}
+	adapters := []connections.Adapter{newManagedSSHAdapter(config), &managedKaggleAdapter{discovery: discovery, config: config}}
 	vault, err := h.managedVault(ctx, config)
 	if err != nil {
 		return nil, err

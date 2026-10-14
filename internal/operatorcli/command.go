@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +23,6 @@ type Request struct {
 	Output                 string
 	File                   string
 	Listen                 string
-	ManagedPython          string
 	ManagedCredentialStore string
 	ManagedMachineShape    string
 	ManagedMaxWallSeconds  int64
@@ -37,7 +35,7 @@ type Request struct {
 const Usage = `Local runtime commands:
   compute-relay init --root DIR
   compute-relay state --root DIR
-  compute-relay serve --root DIR [--listen 127.0.0.1:7331] [--managed-python ABS] \
+  compute-relay serve --root DIR [--listen 127.0.0.1:7331] \
     [--managed-machine-shape cpu] [--managed-max-wall-seconds 1800] \
     [--managed-max-workers 2] [--managed-allow-internet] [--managed-credential-store file|keychain]
   compute-relay workspace create|show|enable|disable --root DIR --id ID
@@ -48,10 +46,10 @@ const Usage = `Local runtime commands:
 Stop serve before local administration. Secrets are never printed; token output
 requires a new file in an existing private directory. Serve manages connections;
 each attempt needs separate API execution authorization. Policy flags grant no
-compute consent. --managed-python ABS temporarily enables the Kaggle bridge.
+compute consent. Kaggle and SSH adapters are built in.
 New installations store credentials in private, unencrypted secrets.env;
 existing Keychain installations keep Keychain. The selected store is retained on restart.
-Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100; GPU shapes need --managed-python.
+Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100.
 Wall limit: 1-86400 seconds; workers: 1-16; internet defaults to disabled.
 Local shutdown is not remote cancellation. Validation is local schema validation,
 not admission.
@@ -132,7 +130,6 @@ func Parse(args []string) (Request, error) {
 	add("output", &r.Output)
 	add("file", &r.File)
 	add("listen", &r.Listen)
-	add("managed-python", &r.ManagedPython)
 	add("managed-credential-store", &r.ManagedCredentialStore)
 	add("managed-machine-shape", &r.ManagedMachineShape)
 	addBool := func(name string, dst *bool) {
@@ -198,7 +195,7 @@ func Parse(args []string) (Request, error) {
 	allowed := map[string]bool{"root": true}
 	switch r.Command {
 	case "serve":
-		for _, k := range []string{"listen", "managed-python", "managed-credential-store", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
+		for _, k := range []string{"listen", "managed-credential-store", "managed-machine-shape", "managed-max-wall-seconds", "managed-max-workers", "managed-allow-internet"} {
 			allowed[k] = true
 		}
 	case "workspace":
@@ -230,14 +227,8 @@ func Parse(args []string) (Request, error) {
 		if seen["managed-credential-store"] && r.ManagedCredentialStore != "file" && r.ManagedCredentialStore != "keychain" {
 			return r, ErrArguments
 		}
-		if seen["managed-python"] && (!filepath.IsAbs(r.ManagedPython) || strings.ContainsAny(r.ManagedPython, "\r\n\ufffd")) {
-			return r, ErrArguments
-		}
 		if !seen["managed-machine-shape"] {
 			r.ManagedMachineShape = "cpu"
-			if r.ManagedPython != "" {
-				r.ManagedMachineShape = "NvidiaTeslaT4"
-			}
 		}
 		if !seen["managed-max-wall-seconds"] {
 			r.ManagedMaxWallSeconds = 1800
@@ -245,7 +236,7 @@ func Parse(args []string) (Request, error) {
 		if !seen["managed-max-workers"] {
 			r.ManagedMaxWorkers = 2
 		}
-		if r.ManagedMachineShape != "cpu" && r.ManagedMachineShape != "NvidiaTeslaT4" && r.ManagedMachineShape != "NvidiaTeslaP100" || r.ManagedPython == "" && r.ManagedMachineShape != "cpu" {
+		if r.ManagedMachineShape != "cpu" && r.ManagedMachineShape != "NvidiaTeslaT4" && r.ManagedMachineShape != "NvidiaTeslaP100" {
 			return r, ErrArguments
 		}
 	}

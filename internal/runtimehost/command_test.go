@@ -56,16 +56,10 @@ func TestInvalidListenerDoesNotOpenOrCreateState(t *testing.T) {
 }
 
 func TestInvalidManagedCommandDoesNotOpenOrCreateState(t *testing.T) {
-	python := filepath.Join(t.TempDir(), "synthetic-python3")
-	if err := os.WriteFile(python, []byte("synthetic executable fixture; must never run"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	root := filepath.Join(t.TempDir(), "absent")
-	base := operatorcli.Request{Command: "serve", Root: root, Listen: "127.0.0.1:0", ManagedPython: python,
+	base := operatorcli.Request{Command: "serve", Root: root, Listen: "127.0.0.1:0",
 		ManagedMachineShape: "NvidiaTeslaT4", ManagedMaxWallSeconds: 1800, ManagedMaxWorkers: 2}
 	for _, mutate := range []func(*operatorcli.Request){
-		func(r *operatorcli.Request) { r.ManagedPython = "relative-python" },
-		func(r *operatorcli.Request) { r.ManagedPython = "" },
 		func(r *operatorcli.Request) { r.ManagedMaxWallSeconds = 0 },
 		func(r *operatorcli.Request) { r.ManagedMaxWorkers = 17 },
 		func(r *operatorcli.Request) { r.ManagedMachineShape = "T4" },
@@ -98,13 +92,8 @@ func TestManagedCommandComposesPolicyWithoutReadingCredentials(t *testing.T) {
 	if _, err := Initialize(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
-	// This file is intentionally not an interpreter. Empty managed startup must
-	// never execute it to discover an account, read a credential or grant compute.
-	python := filepath.Join(t.TempDir(), "synthetic-python3")
-	if err := os.WriteFile(python, []byte("synthetic executable fixture; must never run"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	request, err := operatorcli.Parse([]string{"serve", "--root", root, "--listen", "127.0.0.1:0", "--managed-python", python,
+	// Empty startup configures both adapters without credential or provider calls.
+	request, err := operatorcli.Parse([]string{"serve", "--root", root, "--listen", "127.0.0.1:0",
 		"--managed-machine-shape", "NvidiaTeslaP100", "--managed-max-wall-seconds", "120", "--managed-max-workers", "1"})
 	if err != nil {
 		t.Fatal(err)

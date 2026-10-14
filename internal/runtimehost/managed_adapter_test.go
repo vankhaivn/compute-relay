@@ -69,7 +69,7 @@ func TestManagedKaggleVerificationSanitizesErrorsAndProfileUsesFinitePolicy(t *t
 }
 
 func TestManagedKaggleRuntimePolicyIsClosedAndContainsNoLocalInterpreter(t *testing.T) {
-	a := &managedKaggleAdapter{config: ManagedServeConfig{PythonExecutable: "/private/local/python", MachineShape: "NvidiaTeslaT4"}}
+	a := &managedKaggleAdapter{config: ManagedServeConfig{MachineShape: "NvidiaTeslaT4"}}
 	raw := a.RuntimeConfig()
 	parsed, err := parseManagedKaggleRuntimeConfig(raw)
 	if err != nil || parsed.MachineShape != "NvidiaTeslaT4" || strings.Contains(string(raw), "python") || strings.Contains(string(raw), "private") {

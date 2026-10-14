@@ -143,13 +143,12 @@ func TestExecutableLocalLifecycleAndSignalReopen(t *testing.T) {
 
 func TestExecutableManagedHelpAndInvalidModeFlags(t *testing.T) {
 	help := runChild(t, 0, "serve", "--help")
-	for _, required := range []string{"--managed-python ABS", "--managed-max-workers 2", "separate API execution authorization"} {
+	for _, required := range []string{"--managed-max-workers 2", "separate API execution authorization"} {
 		if !bytes.Contains(help, []byte(required)) {
 			t.Fatal("executable help omitted managed mode semantics")
 		}
 	}
 	root := filepath.Join(t.TempDir(), "must-not-create")
-	python := filepath.Join(t.TempDir(), "synthetic-python3")
 	for _, flags := range [][]string{
 		{"--managed-python", "relative-python"},
 		{"--managed-max-workers", "0"},
@@ -159,8 +158,8 @@ func TestExecutableManagedHelpAndInvalidModeFlags(t *testing.T) {
 		{"--provider-machine-shape", "NvidiaTeslaT4"},
 		{"--max-provider-attempts", "1"},
 		{"--allow-private-staging"},
-		{"--managed-python", python, "--allow-gpu"},
-		{"--managed-python", python, "--managed-allow-internet", "--managed-allow-internet=false"},
+		{"--allow-gpu"},
+		{"--managed-allow-internet", "--managed-allow-internet=false"},
 	} {
 		runChild(t, 2, append([]string{"serve", "--root", root}, flags...)...)
 		if _, err := os.Lstat(root); !os.IsNotExist(err) {
@@ -169,9 +168,9 @@ func TestExecutableManagedHelpAndInvalidModeFlags(t *testing.T) {
 	}
 }
 
-// Pins the managed companion surface that installed application clients drive: exact receipts,
+// Pins the managed executable surface that installed application clients drive: exact receipts,
 // readiness body and feature names, a minimal process environment and owned-state refusal.
-func TestExecutableManagedCompanionClientSurface(t *testing.T) {
+func TestExecutableManagedClientSurface(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "runtime")
 	var initialized, reopened struct {
 		InstallationID string `json:"installation_id"`
@@ -210,15 +209,10 @@ func TestExecutableManagedCompanionClientSurface(t *testing.T) {
 	if !tokenPattern.MatchString(token) {
 		t.Fatal("token format changed")
 	}
-	// Never executed: managed startup performs no account read.
-	python := filepath.Join(t.TempDir(), "synthetic-python3")
-	if err := os.WriteFile(python, []byte("synthetic executable fixture; must never run"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	server := exec.CommandContext(ctx, os.Args[0], "serve", "--root", root, "--listen", "127.0.0.1:0",
-		"--managed-python", python, "--managed-machine-shape", "cpu")
+		"--managed-machine-shape", "cpu")
 	server.Env = []string{"LANG=C.UTF-8", "COMPUTE_RELAY_CLI_TEST_CHILD=1"} // No PATH or HOME.
 	output, err := server.StdoutPipe()
 	if err != nil {

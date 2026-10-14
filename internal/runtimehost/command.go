@@ -47,7 +47,7 @@ func Command(parent context.Context, r operatorcli.Request, out io.Writer) (err 
 			return ErrRequest
 		}
 		managed = &ManagedServeConfig{
-			PythonExecutable: r.ManagedPython, MachineShape: r.ManagedMachineShape,
+			MachineShape:         r.ManagedMachineShape,
 			CredentialStore:      r.ManagedCredentialStore,
 			MaxRemoteWallSeconds: r.ManagedMaxWallSeconds, MaxWorkers: r.ManagedMaxWorkers,
 			AllowRemoteInternet: r.ManagedAllowInternet,
