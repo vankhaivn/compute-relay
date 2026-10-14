@@ -38,14 +38,28 @@ never selects another backend. See [managed connections](managed-connections.md)
 
 ## Provider evidence
 
-Native Kaggle read-only account/quota access and original-binary Keychain continuity were observed
-on 2026-10-14. Keychain access required owner-approved macOS permission; no token re-entry was
-needed. Native deletion was denied, so exact creator-helper cleanup was required for that local
-test item. This does not prove transparent migration or permission-free future upgrades.
+The native candidate was qualified on 2026-10-14 for Kaggle account/quota verification, finite CPU
+execution, live logs, verified artifact collection, running restart without resubmission and exact
+resource cleanup. A separately bound finite GPU job completed with two Tesla T4 devices, CUDA 12.8
+and Torch 2.11.0+cu128; runner device evidence and all five artifacts were verified. Cleanup
+acknowledgements and complete authenticated owner inventories confirmed the created datasets and
+kernels absent. Test connection credentials, installation fingerprints and temporary roots were
+removed after preserving sanitized evidence.
 
-Final native Kaggle CPU/GPU execution, logs, verified artifacts, restart reconciliation and exact
-cleanup qualification remain pending. Final live SSH qualification also remains pending. Existing
-offline adapter/contract tests and historical transport runs do not close those checks.
+The same native candidate used a credential created by the original Python-backed binary for two
+fresh verification operations across a restart without token re-entry. On the test Mac, the owner
+granted the candidate access to both exact Keychain items and its code-hash partition while
+preserving the original helper's access. Native deletion of those legacy items remained denied;
+the original helper removed them. This proves credential-format continuity with explicit access
+permission, not unattended migration across arbitrary Keychain ACLs. Access remains noninteractive
+and fails closed when denied.
+
+Seven finite CPU cases passed on the owner's Mac Intel Docker host: execution, separate preparation
+and start with a workload secret and absolute deadline, cancellation, completed and never-started
+container cleanup, running restart and shared capacity across two connection paths. All attempt
+containers and both connection credentials were removed; the preexisting image was preserved.
+Workload-secret evidence covers the payload assertion and checked API/log/artifact surfaces, not
+a complete runtime-directory scan.
 
 Kaggle cancellation may remain manual-required without a verified session target. Provider timeout
 enforcement, same-version rerun count and hardware release require evidence independent of local

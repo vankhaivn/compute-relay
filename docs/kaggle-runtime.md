@@ -58,10 +58,18 @@ matching original ownership/version checks.
 
 ## Qualification boundary
 
-Read-only native account/quota access and native access to an original-binary Keychain item have
-been observed; Keychain access required owner-approved macOS permission. These checks establish
-neither native end-to-end CPU/GPU execution nor restart/log/artifact/cleanup qualification.
-Those final live checks remain pending. SSH qualification is independent.
+The native candidate completed finite CPU execution, live logs, a restart while running without
+resubmission, verified artifacts and exact cleanup on 2026-10-14. Cleanup acknowledgements plus
+complete authenticated owner inventories confirmed the original dataset and kernel absent. A
+separately bound finite GPU job completed with two Tesla T4 devices, CUDA 12.8 and Torch
+2.11.0+cu128. Runner hardware evidence and all five artifacts passed verification; exact cleanup
+and complete authenticated inventories confirmed its dataset and kernel absent. Test credentials,
+installation fingerprints and temporary roots were removed after preserving sanitized evidence.
+
+A credential created by the original Python-backed binary remained usable across a native restart
+without token re-entry after explicit macOS item-access and code-hash permission. The original
+helper removed those legacy test items. This establishes format continuity; changed executable
+identity may still require owner permission. See [compatibility](compatibility.md).
 
 Provider timeout enforcement, exact same-version execution count and hardware release cannot be
 inferred from local clocks, a successful output or an offline fixture. Record the exact binary,
