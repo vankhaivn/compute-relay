@@ -56,6 +56,7 @@ type Store struct {
 	options Options
 	life    sync.RWMutex
 	closed  bool
+	hosted  bool
 }
 
 func Open(ctx context.Context, path string, options Options) (*Store, error) {
@@ -69,7 +70,29 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{root: root, options: options}
+	return openRoot(ctx, root, options, false, "")
+}
+
+// OpenRoot retains a host-locked child instead of acquiring another OS lock.
+// expectedInstallation is required when reopening an established host; its DB
+// identity is checked before journal or schema changes.
+func OpenRoot(ctx context.Context, root *statefs.Root, options Options, expectedInstallation string) (*Store, error) {
+	if !options.valid() || expectedInstallation != "" && !validID(expectedInstallation) {
+		return nil, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	retained, err := root.Retain()
+	if err != nil {
+		return nil, err
+	}
+	return openRoot(ctx, retained, options, true, expectedInstallation)
+}
+
+func openRoot(ctx context.Context, root *statefs.Root, options Options, hosted bool, expectedInstallation string) (*Store, error) {
+	var err error
+	s := &Store{root: root, options: options, hosted: hosted}
 	success := false
 	defer func() {
 		if !success {
@@ -79,10 +102,19 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 			_ = root.Close()
 		}
 	}()
+	path := filepath.Join(root.Path, databaseName)
+	if expectedInstallation != "" {
+		if err := preflightFiles(root.Path); err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.Size() == 0 {
+			return nil, ErrCorrupt
+		}
+	}
 	if err := initializeRoot(root.Path); err != nil {
 		return nil, err
 	}
-	path = filepath.Join(root.Path, databaseName)
 	if err := preflightFiles(root.Path); err != nil {
 		return nil, err
 	}
@@ -104,6 +136,9 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	if _, err := inspectSchema(ctx, s.db, migrations, true); err != nil {
 		return nil, err
 	}
+	if err := checkInstallation(ctx, s.db, root.Path, expectedInstallation); err != nil {
+		return nil, err
+	}
 	var journal string
 	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode=WAL").Scan(&journal); err != nil {
 		return nil, dbError(err)
@@ -114,8 +149,10 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	if err := migrate(ctx, s.db, migrations); err != nil {
 		return nil, err
 	}
-	if err := recordInstallation(ctx, s.db, root.Path); err != nil {
-		return nil, err
+	if !hosted {
+		if err := recordInstallation(ctx, s.db, root.Path); err != nil {
+			return nil, err
+		}
 	}
 	if err := integrity(ctx, s.db); err != nil {
 		return nil, err

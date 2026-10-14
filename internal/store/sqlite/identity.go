@@ -40,6 +40,52 @@ func readInstallation(path string) (string, error) {
 	}
 	return string(raw), nil
 }
+
+// checkInstallation validates durable identity before journal or migration writes.
+func checkInstallation(ctx context.Context, db *sql.DB, root, expected string) error {
+	marker := filepath.Join(root, ".installation")
+	if _, err := os.Lstat(marker); !errors.Is(err, os.ErrNotExist) {
+		legacy, err := readInstallation(marker)
+		if err != nil {
+			return err
+		}
+		if expected != "" && legacy != expected {
+			return ErrCorrupt
+		}
+		expected = legacy
+	}
+	if expected == "" {
+		return nil
+	}
+	var id string
+	if err := db.QueryRowContext(ctx, "SELECT installation_id FROM runtime_installation WHERE singleton=1").Scan(&id); err != nil || id != expected {
+		return ErrCorrupt
+	}
+	return nil
+}
+
+// RemoveLegacyInstallation is only used after the host validates its complete
+// layout. Standalone stores keep their marker as a deletion/replacement guard.
+func (s *Store) RemoveLegacyInstallation(ctx context.Context, expected string) error {
+	if !validID(expected) {
+		return ErrInvalid
+	}
+	if !s.hosted {
+		return ErrInvalid
+	}
+	_, err := read(ctx, s, func(ctx context.Context) (struct{}, error) {
+		if err := checkInstallation(ctx, s.db, s.root.Path, expected); err != nil {
+			return struct{}{}, err
+		}
+		path := filepath.Join(s.root.Path, ".installation")
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return struct{}{}, ErrUnavailable
+		}
+		return struct{}{}, statefs.SyncDir(s.root.Path)
+	})
+	return err
+}
+
 func recordInstallation(ctx context.Context, db *sql.DB, root string) error {
 	var id string
 	if err := db.QueryRowContext(ctx, "SELECT installation_id FROM runtime_installation WHERE singleton=1").Scan(&id); err != nil {

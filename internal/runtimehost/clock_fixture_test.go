@@ -2,7 +2,6 @@ package runtimehost
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,8 +18,12 @@ func injectHostClock(t *testing.T, h *Host, clock func() time.Time) {
 	}
 	opts := sqlite.DefaultOptions()
 	opts.Clock = clock
-	var err error
-	h.store, err = sqlite.Open(context.Background(), filepath.Join(h.root.Path, "state"), opts)
+	root, err := h.root.Child("state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	h.store, err = sqlite.OpenRoot(context.Background(), root, opts, h.identity.InstallationID)
 	if err != nil {
 		t.Fatal(err)
 	}
