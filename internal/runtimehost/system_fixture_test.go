@@ -35,6 +35,163 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
+func newSystemFixture(t *testing.T, scenario fake.Scenario) *managedTestFixture {
+	t.Helper()
+	f := newManagedTestFixtureAt(t, true, &fixedClock{now: time.Now().UTC().Truncate(time.Second)})
+	f.adapter.config.MachineShape = "cpu"
+	f.useFake(t, scenario)
+	return f
+}
+
+func systemJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func (f *managedTestFixture) advance(t *testing.T, duration time.Duration) {
+	t.Helper()
+	c, ok := f.clock.(*fixedClock)
+	if !ok {
+		t.Fatal("fixture needs a controllable clock")
+	}
+	c.advance(duration)
+}
+
+func (f *managedTestFixture) jobSpec(t *testing.T, connection connections.Connection) admission.Spec {
+	t.Helper()
+	inputs, err := objects.New(f.host.access, f.host.inputs, f.host.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := systemBundle(t)
+	object, err := inputs.Upload(t.Context(), f.actor, "app", int64(len(bundle)), provider.Digest(bundle), bytes.NewReader(bundle))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := admission.Spec{APIVersion: "compute-connector/v1alpha1", Name: "system fixture", Profile: connection.Selection.Profile,
+		Inputs: []admission.Input{}, Outputs: []admission.Output{{Path: "result.json", Required: true}}}
+	spec.Bundle.ObjectID = object.ID
+	spec.Execution.Kind, spec.Execution.Command = "python", []string{"python", "main.py"}
+	spec.Resources.Accelerator = connection.Selection.Accelerator
+	if spec.Resources.Accelerator == "gpu" {
+		spec.Resources.MinimumGPUCount = 1
+	}
+	spec.Network.RemoteInternet = "disabled"
+	spec.Timeouts.RemoteWallSeconds, spec.Timeouts.SetupSeconds, spec.Timeouts.FinalizationGraceSeconds = 10, 5, 2
+	return spec
+}
+
+func (f *managedTestFixture) submitJob(t *testing.T, key string, spec admission.Spec) admission.Receipt {
+	t.Helper()
+	jobs, err := admission.New(f.host.access, f.host.store, admission.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := jobs.Submit(t.Context(), f.actor, "app", key, systemJSON(t, spec))
+	if err != nil {
+		t.Fatal("admit system job", err)
+	}
+	return receipt
+}
+
+func (f *managedTestFixture) authorizeJob(t *testing.T, job admission.Receipt) executionauth.Receipt {
+	t.Helper()
+	record, err := f.host.store.ReadJob(t.Context(), "app", f.actor.TokenID(), job.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := systemJSON(t, executionauth.Request{AttemptID: job.AttemptID, MaxRemoteWallSeconds: record.Request.Spec().Timeouts.RemoteWallSeconds, AuthorizePrivateStaging: true, AuthorizeCompute: true})
+	receipt, err := f.services.authorizations.Authorize(t.Context(), f.actor, "app", job.JobID, "authorize-"+string(job.JobID), raw)
+	if err != nil {
+		t.Fatal("authorize system job", err)
+	}
+	return receipt
+}
+
+func (f *managedTestFixture) dispatchOnce(t *testing.T) {
+	t.Helper()
+	f.advance(t, 30*time.Second)
+	if worked, err := f.services.dispatcher.RunOnce(t.Context(), "system-worker"); !worked || err != nil {
+		t.Fatal("dispatch system job", worked, err)
+	}
+}
+
+func (f *managedTestFixture) runToCollection(t *testing.T, job admission.Receipt) {
+	t.Helper()
+	for range 104 {
+		record, err := f.host.store.ReadJob(t.Context(), "app", f.actor.TokenID(), job.JobID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.Attempt.State.Execution.Terminal() {
+			return
+		}
+		attempt, err := f.host.store.ReadLogAttempt(t.Context(), "app", f.actor.TokenID(), job.JobID, job.AttemptID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attempt.Remote != nil {
+			control, err := fake.NewBound(f.backend, f.fixtureClock(), attempt.Binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := control.Advance(*attempt.Remote); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.dispatchOnce(t)
+	}
+	t.Fatal("fake execution did not become terminal")
+}
+
+func (f *managedTestFixture) controls(t *testing.T) *operations.Service {
+	t.Helper()
+	service, err := operations.New(f.host.access, f.host.store, f.host.inputs, admission.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
+func (f *managedTestFixture) collectibleJob(t *testing.T, key, mode string) admission.Receipt {
+	t.Helper()
+	connection := f.connection(t, key+"-connection", "SYNTHETIC_FIRST")
+	spec := f.jobSpec(t, connection)
+	spec.ResultCollection = mode
+	job := f.submitJob(t, key, spec)
+	f.authorizeJob(t, job)
+	f.runToCollection(t, job)
+	return job
+}
+
+func (f *managedTestFixture) collectOnce(t *testing.T) {
+	t.Helper()
+	if worked, err := f.services.collector.RunOnce(t.Context()); !worked || err != nil {
+		t.Fatal("collect system job", worked, err)
+	}
+}
+
+func (f *managedTestFixture) cleanupEngine(t *testing.T, repo cleanup.WorkRepository) *cleanup.Engine {
+	t.Helper()
+	if repo == nil {
+		repo = f.host.store
+	}
+	engine, err := cleanup.New(repo, f.services.resolver, cleanup.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine
+}
+
+func systemControlBody(t *testing.T, attempt domain.AttemptID) []byte {
+	t.Helper()
+	return systemJSON(t, operations.Request{AttemptID: attempt, Reason: "explicit system fixture request"})
+}
+
 func (f *managedTestFixture) fixtureClock() ports.Clock {
 	if f.clock != nil {
 		return f.clock
@@ -119,7 +276,11 @@ func (f *managedTestFixture) bindFake(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return &systemProvider{Bound: bound}, nil
+		var result provider.Provider = &systemProvider{Bound: bound}
+		if f.wrapProvider != nil {
+			result = f.wrapProvider(result)
+		}
+		return result, nil
 	}
 }
 

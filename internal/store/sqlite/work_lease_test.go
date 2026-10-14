@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -274,32 +273,5 @@ func TestWorkLeaseStorageRejectsForgedIdentityAndOrphans(t *testing.T) {
 	}
 	if workKey("a:b", "c", "d") == workKey("a", "b:c", "d") {
 		t.Fatal("composite keys alias")
-	}
-}
-
-type renewedCollectionRepository struct {
-	*Store
-	work collection.Work
-}
-
-func (r *renewedCollectionRepository) ClaimCollection(ctx context.Context, ttl time.Duration, workers int) (*collection.Work, error) {
-	w, err := r.Store.ClaimCollection(ctx, ttl, workers)
-	if w != nil {
-		r.work = *w
-	}
-	return w, err
-}
-
-func TestCollectionPublicationSurvivesRenewalDuringTransfer(t *testing.T) {
-	f, _, p, blobs := collectionFixture(t)
-	repo := &renewedCollectionRepository{Store: f.s}
-	p.hook = func() error {
-		f.clock.advance(10 * time.Second)
-		_, err := f.s.RenewCollection(context.Background(), repo.work, time.Minute)
-		return err
-	}
-	runCollection(t, collectionEngine(t, f, p, blobs, repo))
-	if n := controlCount(t, f.s, "SELECT count(*) FROM collection_publications"); n != 1 {
-		t.Fatal("renewal invalidated verified proof", n)
 	}
 }

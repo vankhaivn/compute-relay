@@ -101,6 +101,7 @@ type managedTestFixture struct {
 	extra        []connections.Adapter
 	backend      *fake.Backend
 	wrapDispatch func(*sqlite.Store) dispatch.Repository
+	wrapProvider func(provider.Provider) provider.Provider
 	http         *systemHTTP
 }
 
