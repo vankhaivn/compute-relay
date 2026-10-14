@@ -122,7 +122,7 @@ func TestHostedHistoricalIdentityCheckedBeforeMigration(t *testing.T) {
 				t.Fatal(err)
 			}
 			existing := loadStateScript(t, string(script))
-			original, err := connect(filepath.Join(existing, databaseName), false)
+			original, err := connect(filepath.Join(existing, databaseName))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -160,7 +160,7 @@ func TestHostedHistoricalIdentityCheckedBeforeMigration(t *testing.T) {
 			if err != nil || string(raw) != id {
 				t.Fatal("failed startup removed legacy marker", err)
 			}
-			original, err = connect(filepath.Join(child.Path, databaseName), false)
+			original, err = connect(filepath.Join(child.Path, databaseName))
 			if err != nil {
 				t.Fatal(err)
 			}

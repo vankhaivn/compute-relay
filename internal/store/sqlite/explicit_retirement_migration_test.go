@@ -83,7 +83,7 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	t.Helper()
 	ctx := context.Background()
 	root := copyFixtureAtSchema(t, f.s, 23)
-	legacy, err := connect(filepath.Join(root, databaseName), false)
+	legacy, err := connect(filepath.Join(root, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}

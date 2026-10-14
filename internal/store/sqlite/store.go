@@ -126,7 +126,7 @@ func openRoot(ctx context.Context, root *statefs.Root, options Options, hosted b
 			return nil, err
 		}
 	}
-	s.db, err = connect(path, false)
+	s.db, err = connect(path)
 	if err != nil {
 		return nil, err
 	}
@@ -222,22 +222,16 @@ func preflightFiles(path string) error {
 	return nil
 }
 
-func connect(path string, readonly bool) (*sql.DB, error) {
-	// Never treat operator paths as raw DSNs. Escaping preserves #, ?, spaces and Windows
-	// drive letters; arbitrary URI parameters cannot enable shared cache or change mode.
+func connect(path string) (*sql.DB, error) {
+	// Never treat operator paths as raw DSNs. Escaping preserves #, ? and spaces;
+	// arbitrary URI parameters cannot enable shared cache or change mode.
 	p := filepath.ToSlash(path)
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
 	u := url.URL{Scheme: "file", Path: p}
 	q := url.Values{}
-	if readonly {
-		q.Set("mode", "ro")
-		// Only validated, copied standalone backup snapshots use immutable, never a live DB.
-		q.Set("immutable", "1")
-	} else {
-		q.Set("mode", "rw")
-	}
+	q.Set("mode", "rw")
 	q.Set("cache", "private")
 	q.Set("_txlock", "immediate")
 	for _, pragma := range []string{"busy_timeout(1000)", "foreign_keys(ON)", "synchronous(FULL)", "trusted_schema(OFF)", "wal_autocheckpoint(1000)"} {

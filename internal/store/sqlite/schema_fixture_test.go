@@ -31,7 +31,7 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 	if err := statefs.WriteNew(filepath.Join(path, databaseName), nil); err != nil {
 		t.Fatal(err)
 	}
-	db, err := connect(filepath.Join(path, databaseName), false)
+	db, err := connect(filepath.Join(path, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func TestUpgradeFromFirstMigrationPreservesIdentity(t *testing.T) {
 	if err := statefs.WriteNew(filepath.Join(path, databaseName), nil); err != nil {
 		t.Fatal(err)
 	}
-	db, err := connect(filepath.Join(path, databaseName), false)
+	db, err := connect(filepath.Join(path, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}

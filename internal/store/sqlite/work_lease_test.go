@@ -134,7 +134,7 @@ func TestWorkLeaseGenerationOverflowFailsWithoutReset(t *testing.T) {
 	f, l, _ := workLeaseFixture(t, dispatchWork)
 	f.clock.advance(2 * time.Second)
 	root := copyFixtureAtSchema(t, f.s, 25)
-	old, err := connect(filepath.Join(root, databaseName), false)
+	old, err := connect(filepath.Join(root, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestWorkLeaseMigrationPreservesEveryGeneration(t *testing.T) {
 					t.Fatal(err)
 				}
 				root := copyFixtureAtSchema(t, f.s, 25)
-				old, err := connect(filepath.Join(root, databaseName), false)
+				old, err := connect(filepath.Join(root, databaseName))
 				if err != nil {
 					t.Fatal(err)
 				}

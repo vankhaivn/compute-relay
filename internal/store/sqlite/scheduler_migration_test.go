@@ -25,7 +25,7 @@ func TestSchedulerMigrationBackfillsStableAcceptanceOrder(t *testing.T) {
 		root.Close()
 		t.Fatal(err)
 	}
-	db, err := connect(filepath.Join(root.Path, databaseName), false)
+	db, err := connect(filepath.Join(root.Path, databaseName))
 	if err != nil {
 		root.Close()
 		t.Fatal(err)

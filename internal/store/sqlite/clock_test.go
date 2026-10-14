@@ -32,7 +32,7 @@ func clockStore(t *testing.T, options Options, version int) (*Store, string) {
 	if err = statefs.WriteNew(filepath.Join(root.Path, databaseName), nil); err != nil {
 		t.Fatal(err)
 	}
-	db, err := connect(filepath.Join(root.Path, databaseName), false)
+	db, err := connect(filepath.Join(root.Path, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestClockLegacySubmillisecondWriteSurvivesRollback(t *testing.T) {
 	}
 	id := schedulerSeed(t, s, "fraction", "a", "p", "account")
 	root := copyFixtureAtSchema(t, s, 24)
-	legacy, err := connect(filepath.Join(root, databaseName), false)
+	legacy, err := connect(filepath.Join(root, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}

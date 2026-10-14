@@ -41,7 +41,7 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 			root := loadStateScript(t, string(script))
-			original, err := connect(filepath.Join(root, databaseName), false)
+			original, err := connect(filepath.Join(root, databaseName))
 			if err != nil {
 				t.Fatal(err)
 			}

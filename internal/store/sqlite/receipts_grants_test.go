@@ -40,7 +40,7 @@ func TestReceiptGrantMigrationPreservesEveryStateAndOriginalBytes(t *testing.T) 
 		ids[i] = f.seedRaw(t, "a", i+20, false, dispatchJSON)
 	}
 	root := copyFixtureAtSchema(t, f.s, 26)
-	legacy, err := connect(filepath.Join(root, databaseName), false)
+	legacy, err := connect(filepath.Join(root, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}

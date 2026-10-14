@@ -47,7 +47,7 @@ func TestCleanupOperationMigrationPreservesOriginalBytesAndFences(t *testing.T) 
 				runCleanup(t, worker)
 			}
 			root := copyFixtureAtSchema(t, f.s, 27)
-			legacy, err := connect(filepath.Join(root, databaseName), false)
+			legacy, err := connect(filepath.Join(root, databaseName))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,7 +176,7 @@ func TestCleanupOperationMigrationKeepsFIFOAndSequenceHighWater(t *testing.T) {
 	f, id := collectedFixture(t)
 	_, _, receipt := admitCleanup(t, f, id, "fifo-cleanup", false)
 	root := copyFixtureAtSchema(t, f.s, 27)
-	old, err := connect(filepath.Join(root, databaseName), false)
+	old, err := connect(filepath.Join(root, databaseName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestCleanupOperationMigrationEmptyHighWaterAndOverflowRollback(t *testing.T
 				source, _ = newStore(t)
 			}
 			root := copyFixtureAtSchema(t, source, 27)
-			old, err := connect(filepath.Join(root, databaseName), false)
+			old, err := connect(filepath.Join(root, databaseName))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -272,7 +272,7 @@ func TestCleanupOperationMigrationEmptyHighWaterAndOverflowRollback(t *testing.T
 				upgraded.Close()
 				t.Fatal("overflow silently reassigned operation order")
 			}
-			old, err = connect(filepath.Join(root, databaseName), false)
+			old, err = connect(filepath.Join(root, databaseName))
 			if err != nil {
 				t.Fatal(err)
 			}
