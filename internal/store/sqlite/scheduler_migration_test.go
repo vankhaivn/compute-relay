@@ -81,8 +81,14 @@ func TestSchedulerMigrationBackfillsStableAcceptanceOrder(t *testing.T) {
 	if err = upgraded.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
-	c := schedulerClaim(t, upgraded, "migration", schedulerNow)
-	if c.JobID != "job_z-first" {
-		t.Fatal("backfilled FIFO", c)
+	r, err = upgraded.ClaimNext(ctx, "migration", schedulerNow)
+	if err != nil || r.Claim != nil {
+		t.Fatal("retired explicit work was rearmed", r, err)
+	}
+	for _, job := range order {
+		var phase string
+		if err = upgraded.db.QueryRow(`SELECT orchestration FROM attempts WHERE job_id=?`, job).Scan(&phase); err != nil || phase != "failed" {
+			t.Fatal("never-started explicit work was not stopped locally", phase, err)
+		}
 	}
 }

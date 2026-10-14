@@ -12,16 +12,12 @@ import (
 )
 
 type managedCleanupProbe struct {
-	explicit, managed, completes int
-	claimErr                     error
+	claims, completes int
+	claimErr          error
 }
 
 func (p *managedCleanupProbe) ClaimCleanup(context.Context, time.Time, time.Duration) (*cleanup.Work, error) {
-	p.explicit++
-	return nil, nil
-}
-func (p *managedCleanupProbe) ClaimCleanupManaged(context.Context, time.Time, time.Duration) (*cleanup.Work, error) {
-	p.managed++
+	p.claims++
 	return nil, p.claimErr
 }
 func (p *managedCleanupProbe) CompleteCleanup(context.Context, cleanup.Work, cleanup.Outcome, time.Time) error {
@@ -32,11 +28,11 @@ func (p *managedCleanupProbe) CompleteCleanup(context.Context, cleanup.Work, cle
 	return nil
 }
 
-func TestManagedCleanupClaimsOnlyManagedAttemptsAndRetriesClock(t *testing.T) {
+func TestCleanupUsesSingleClaimPathAndRetriesClock(t *testing.T) {
 	probe := &managedCleanupProbe{claimErr: scheduler.ErrClock}
 	repo := managedCleanupRepository{probe}
-	if w, err := repo.ClaimCleanup(context.Background(), time.Now().UTC(), time.Minute); w != nil || err != nil || probe.managed != 1 || probe.explicit != 0 {
-		t.Fatal("managed cleanup claim did not use the managed partition", w, err)
+	if w, err := repo.ClaimCleanup(context.Background(), time.Now().UTC(), time.Minute); w != nil || err != nil || probe.claims != 1 {
+		t.Fatal("cleanup claim did not use the repository", w, err)
 	}
 	probe.claimErr = errors.New("store unavailable")
 	if _, err := repo.ClaimCleanup(context.Background(), time.Now().UTC(), time.Minute); !errors.Is(err, probe.claimErr) {

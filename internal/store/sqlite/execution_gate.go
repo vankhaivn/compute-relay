@@ -85,7 +85,7 @@ func gateRecord(ctx context.Context, tx *sql.Tx, c executionauth.GateCommand, at
 	if r.Attempt.ID != attempt {
 		return r, executionauth.ErrConflict
 	}
-	if !r.Request.Spec().SeparateStart() || !executionauth.Managed(r.Profile) || !scheduler.LocalOnly(r.Attempt.State) {
+	if !r.Request.Spec().SeparateStart() || !scheduler.LocalOnly(r.Attempt.State) {
 		return r, executionauth.ErrState
 	}
 	if c.Now.Before(r.Attempt.UpdatedAt) {

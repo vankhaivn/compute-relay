@@ -91,6 +91,10 @@ func TestRetentionRejectsExpiredInputsBeforeReadAndCommit(t *testing.T) {
 func TestRetentionAdmissionReplayOutlivesInputExpiry(t *testing.T) {
 	ctx := context.Background()
 	f := newDispatchFixture(t, fake.DefaultScenario())
+	seedAuthorizationConnection(t, f, "a", "con_fixture")
+	if _, err := f.s.db.Exec(`UPDATE managed_connections SET current_profile=? WHERE connection_id='con_fixture'`, f.profile.Binding.Profile); err != nil {
+		t.Fatal(err)
+	}
 	service, actor, _ := controlService(t, f, "a", auth.Read, auth.Write, auth.Operate)
 	job, err := admission.Parse([]byte(dispatchJSON))
 	if err != nil {

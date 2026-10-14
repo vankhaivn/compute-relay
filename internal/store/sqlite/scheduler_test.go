@@ -2,9 +2,7 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,8 +13,10 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
+	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -39,17 +39,36 @@ func schedulerStore(t *testing.T) (*Store, string) {
 
 // These are synthetic durable queue fixtures, not assertions that their payload ran.
 // Existing admission/API tests exercise real canonicalization/auth/idempotent enqueue.
-func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string) scheduler.Identity {
+func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, accelerator ...string) scheduler.Identity {
 	t.Helper()
 	ctx := context.Background()
 	identity := scheduler.Identity{WorkspaceID: domain.WorkspaceID(w), JobID: domain.JobID("job_" + id), AttemptID: domain.AttemptID("att_" + id)}
 	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "profile-" + instance, ProviderInstanceID: domain.ProviderInstanceID(instance), ConfigurationRevision: "r1"}, account)
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	resource := "cpu"
+	if len(accelerator) == 1 {
+		resource = accelerator[0]
+	}
+	if version >= 11 {
+		profile.CredentialRef = "vault:con_" + instance + "_" + w
+		profile.MaxActiveAttempts = 64
+	}
 	p, _ := json.Marshal(profile)
-	raw := `{"api_version":"compute-connector/v1alpha1","name":"fixture","profile":"` + profile.Binding.Profile + `","bundle":{"object_id":"bundle"},"execution":{"kind":"python","command":["python","main.py"]},"inputs":[],"outputs":[{"path":"out.txt","required":true}],"resources":{"accelerator":"gpu","minimum_gpu_count":1},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":120,"setup_seconds":30,"finalization_grace_seconds":15}}`
-	sum := sha256.Sum256([]byte(raw))
+	raw := `{"api_version":"compute-connector/v1alpha1","name":"fixture","profile":"` + profile.Binding.Profile + `","bundle":{"object_id":"bundle"},"execution":{"kind":"python","command":["python","main.py"]},"inputs":[],"outputs":[{"path":"out.txt","required":true}],"resources":{"accelerator":"` + resource + `"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":120,"setup_seconds":30,"finalization_grace_seconds":15}}`
+	if resource == "gpu" {
+		raw = strings.Replace(raw, `"accelerator":"gpu"`, `"accelerator":"gpu","minimum_gpu_count":1`, 1)
+	}
+	req, err := admission.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = string(req.Canonical())
 	state, _ := json.Marshal(domain.InitialAttemptState())
 	at := schedulerNow.Add(-time.Hour).Format(time.RFC3339Nano)
-	err := withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
 		for _, q := range []struct {
 			sql  string
 			args []any
@@ -57,7 +76,7 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string) sche
 			{`INSERT INTO workspaces VALUES(?,1,?) ON CONFLICT(workspace_id) DO NOTHING`, []any{w, `["` + profile.Binding.Profile + `"]`}},
 			{`INSERT INTO profile_revisions VALUES(?,?,?) ON CONFLICT(profile,revision) DO NOTHING`, []any{profile.Binding.Profile, "r1", string(p)}},
 			{`INSERT INTO profiles VALUES(?,?,1) ON CONFLICT(profile) DO NOTHING`, []any{profile.Binding.Profile, "r1"}},
-			{`INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?)`, []any{w, string(identity.JobID), raw, admission.CanonicalVersion, hex.EncodeToString(sum[:]), profile.Binding.Profile, "r1", string(identity.AttemptID), at}},
+			{`INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?)`, []any{w, string(identity.JobID), raw, admission.CanonicalVersion, string(req.Hash()), profile.Binding.Profile, "r1", string(identity.AttemptID), at}},
 			{`INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?,?)`, []any{w, string(identity.JobID), string(identity.AttemptID), 1, strings.Repeat("a", 64), string(state), "queued", 1, at, at}},
 			{`INSERT INTO events VALUES(?,?,?,?,?,?,?,?)`, []any{w, string(identity.JobID), "evt_" + id, 1, string(identity.AttemptID), "", "job.accepted", at}},
 		} {
@@ -69,6 +88,36 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string) sche
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if version >= 11 {
+		connection := strings.TrimPrefix(profile.CredentialRef, "vault:")
+		_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,updated_at) VALUES(?,?,'fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?) ON CONFLICT(connection_id) DO NOTHING`, connection, w, account, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := domain.ObjectMetadata{WorkspaceID: identity.WorkspaceID, ID: "bundle", Bytes: 1, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}
+		if err = s.CommitObject(ctx, m); err != nil {
+			stored, readErr := s.GetObject(ctx, m.WorkspaceID, m.ID)
+			if !errors.Is(err, ErrConflict) || readErr != nil || stored != m {
+				t.Fatal(err, readErr)
+			}
+		}
+		_, err = s.db.Exec(`INSERT INTO job_objects VALUES(?,?,'bundle','bundle',1,?)`, w, string(identity.JobID), string(m.SHA256))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := &dispatchFixture{s: s, clock: &dispatchClock{at: schedulerNow.Add(-time.Millisecond)}}
+		permits, actor := authorizationService(t, f, identity.WorkspaceID, auth.Execute)
+		if resource == "gpu" {
+			q := schedulerQuota(10, schedulerNow.Add(-time.Millisecond))
+			if err = s.RecordQuota(ctx, account, "gpu", q, q.ObservedAt); err != nil {
+				t.Fatal(err)
+			}
+		}
+		request, _ := json.Marshal(executionauth.Request{AttemptID: identity.AttemptID, MaxRemoteWallSeconds: 120, AuthorizePrivateStaging: true, AuthorizeCompute: true})
+		if _, err = permits.Authorize(ctx, actor, identity.WorkspaceID, identity.JobID, "scheduler-grant-"+id, request); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return identity
 }
@@ -305,7 +354,7 @@ func schedulerQuota(remaining float64, at time.Time) provider.QuotaObservation {
 }
 func TestSchedulerQuotaLatchAndStrictPolicy(t *testing.T) {
 	s, _ := schedulerStore(t)
-	schedulerSeed(t, s, "a", "a", "p", "account")
+	schedulerSeed(t, s, "a", "a", "p", "account", "gpu")
 	ctx := context.Background()
 	if err := s.RecordQuota(ctx, "account", "gpu", schedulerQuota(0, schedulerNow), schedulerNow); err != nil {
 		t.Fatal(err)

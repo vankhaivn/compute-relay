@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -84,7 +83,7 @@ func newTestStager(t *testing.T, allow bool) (*Stager, provider.Plan, *stagingTe
 	c, plan := stagingFixture(t)
 	b := &stagingTestBlobs{data: map[domain.ObjectID][]byte{"code": []byte("synthetic-code"), "input": []byte("abc")}}
 	reads := new(int)
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { *reads++; return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { *reads++; return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}

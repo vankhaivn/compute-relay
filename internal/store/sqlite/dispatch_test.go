@@ -40,15 +40,17 @@ func (c *dispatchClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unloc
 func (c *dispatchClock) advance(d time.Duration) { c.mu.Lock(); c.at = c.at.Add(d); c.mu.Unlock() }
 
 type dispatchFixture struct {
-	s        *Store
-	root     string
-	blobs    *blobfs.Store
-	clock    *dispatchClock
-	profile  admission.Profile
-	registry *provider.SnapshotRegistry
-	backend  *fake.Backend
-	adapter  *probeProvider
-	engine   *dispatch.Engine
+	s             *Store
+	root          string
+	blobs         *blobfs.Store
+	clock         *dispatchClock
+	profile       admission.Profile
+	registry      *provider.SnapshotRegistry
+	backend       *fake.Backend
+	adapter       *probeProvider
+	engine        *dispatch.Engine
+	authorizeSeed bool
+	extraProfiles map[domain.WorkspaceID]admission.Profile
 }
 type probeProvider struct {
 	*fake.Bound
@@ -149,7 +151,7 @@ func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &dispatchFixture{s: s, root: root, blobs: blobs, clock: &dispatchClock{at: time.Now().UTC().Truncate(time.Millisecond).Add(time.Second)}}
+	f := &dispatchFixture{authorizeSeed: true, extraProfiles: map[domain.WorkspaceID]admission.Profile{}, s: s, root: root, blobs: blobs, clock: &dispatchClock{at: time.Now().UTC().Truncate(time.Millisecond).Add(time.Second)}}
 	t.Cleanup(func() { _ = f.s.Close(); _ = blobs.Close() })
 	for _, w := range []domain.WorkspaceID{"a", "b"} {
 		if err = s.PutWorkspace(ctx, auth.Workspace{ID: w, Enabled: true, AllowedProfiles: []string{"fixture"}}); err != nil {
@@ -166,6 +168,8 @@ func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 		}
 	}
 	f.profile = admission.DefaultProfile(domain.ProviderBinding{Profile: "fixture", ProviderInstanceID: "fake_1", ConfigurationRevision: "one"}, "shared_account")
+	f.profile.CredentialRef = "vault:con_fixture"
+	f.profile.MaxActiveAttempts = 64
 	if err = s.PutProfile(ctx, f.profile, true); err != nil {
 		t.Fatal(err)
 	}
@@ -192,6 +196,16 @@ func (f *dispatchFixture) attach(t testing.TB, s *Store) {
 	if err = f.registry.Register(binding, f.adapter); err != nil {
 		t.Fatal(err)
 	}
+	for _, profile := range f.extraProfiles {
+		binding := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
+		adapter, bindErr := fake.NewBound(f.backend, f.clock, binding)
+		if bindErr != nil {
+			t.Fatal(bindErr)
+		}
+		if bindErr = f.registry.Register(binding, &probeProvider{Bound: adapter, store: s}); bindErr != nil {
+			t.Fatal(bindErr)
+		}
+	}
 	f.engine, err = dispatch.New(s, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +229,31 @@ func (f *dispatchFixture) seed(t testing.TB, w domain.WorkspaceID, number int, u
 func (f *dispatchFixture) seedRaw(t testing.TB, w domain.WorkspaceID, number int, url bool, raw string) scheduler.Identity {
 	t.Helper()
 	ctx := context.Background()
+	profile := f.profile
+	if f.authorizeSeed {
+		if w != "a" {
+			profile.Binding.Profile += "_" + string(w)
+			profile.CredentialRef += "_" + string(w)
+			raw = strings.Replace(raw, `"profile":"`+f.profile.Binding.Profile+`"`, `"profile":"`+profile.Binding.Profile+`"`, 1)
+			if err := f.s.PutProfile(ctx, profile, true); err != nil {
+				t.Fatal(err)
+			}
+			f.extraProfiles[w] = profile
+			binding := provider.BindingSnapshot{Binding: profile.Binding, AccountScope: profile.AccountScope, CredentialRef: profile.CredentialRef}
+			adapter, err := fake.NewBound(f.backend, f.clock, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = f.registry.Register(binding, &probeProvider{Bound: adapter, store: f.s}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		connection := strings.TrimPrefix(profile.CredentialRef, "vault:")
+		_, err := f.s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES(?,?,'fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?) ON CONFLICT(connection_id) DO NOTHING`, connection, w, profile.AccountScope, profile.Binding.Profile, f.clock.Now().Format(time.RFC3339Nano))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	req, err := admission.Parse([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +262,7 @@ func (f *dispatchFixture) seedRaw(t testing.TB, w domain.WorkspaceID, number int
 	at := f.clock.Now().Add(-time.Millisecond).Format(time.RFC3339Nano)
 	state, _ := json.Marshal(domain.InitialAttemptState())
 	err = withTx(ctx, f.s.db, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?)", string(w), string(id.JobID), string(req.Canonical()), admission.CanonicalVersion, string(req.Hash()), f.profile.Binding.Profile, f.profile.Binding.ConfigurationRevision, string(id.AttemptID), at)
+		_, err := tx.ExecContext(ctx, "INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?)", string(w), string(id.JobID), string(req.Canonical()), admission.CanonicalVersion, string(req.Hash()), profile.Binding.Profile, profile.Binding.ConfigurationRevision, string(id.AttemptID), at)
 		if err != nil {
 			return err
 		}
@@ -245,6 +284,13 @@ func (f *dispatchFixture) seedRaw(t testing.TB, w domain.WorkspaceID, number int
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if f.authorizeSeed && !req.Spec().SeparateStart() {
+		service, actor := authorizationService(t, f, w, auth.Execute)
+		_, err := service.Authorize(ctx, actor, w, id.JobID, "seed-grant-"+string(id.AttemptID), authorizationRequest(id.AttemptID, req.Spec().Timeouts.RemoteWallSeconds))
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	return id
 }
@@ -296,6 +342,10 @@ func (f *dispatchFixture) claim(t testing.TB) dispatch.Work {
 		t.Fatalf("claim: %v", err)
 	}
 	w, err := f.s.LoadDispatch(context.Background(), *r.Claim, f.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err = f.s.ConsumeAuthorization(context.Background(), w.Handle, f.clock.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

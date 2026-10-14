@@ -104,7 +104,7 @@ func TestExecutableLocalLifecycleAndSignalReopen(t *testing.T) {
 	}
 	select {
 	case raw := <-line:
-		if json.Unmarshal(raw, &announcement) != nil || announcement.Address == "" || announcement.Dispatch {
+		if json.Unmarshal(raw, &announcement) != nil || announcement.Address == "" || !announcement.Dispatch {
 			t.Fatal("invalid listening announcement")
 		}
 	case <-time.After(10 * time.Second):
@@ -121,7 +121,7 @@ func TestExecutableLocalLifecycleAndSignalReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != 200 || response.Header.Get("X-Compute-Relay-Mode") != "local-admission-only" {
+	if response.StatusCode != 200 || response.Header.Get("X-Compute-Relay-Mode") != "managed-workers" {
 		t.Fatal("real CLI HTTP boundary failed")
 	}
 	runChild(t, 1, "state", "--root", root) // OS ownership survives across command entry points.
@@ -152,7 +152,13 @@ func TestExecutableManagedHelpAndInvalidModeFlags(t *testing.T) {
 	python := filepath.Join(t.TempDir(), "synthetic-python3")
 	for _, flags := range [][]string{
 		{"--managed-python", "relative-python"},
-		{"--managed-max-workers", "2"},
+		{"--managed-max-workers", "0"},
+		{"--managed"},
+		{"--provider-config", "removed.json"},
+		{"--provider-profile", "removed"},
+		{"--provider-machine-shape", "NvidiaTeslaT4"},
+		{"--max-provider-attempts", "1"},
+		{"--allow-private-staging"},
 		{"--managed-python", python, "--allow-gpu"},
 		{"--managed-python", python, "--managed-allow-internet", "--managed-allow-internet=false"},
 	} {

@@ -46,12 +46,12 @@ func TestManagedKaggleConcurrencyConfiguresTwoAuthorizedJobsAndQueuesThird(t *te
 				admitConcurrencyJob(t, f, updated, fmt.Sprintf("concurrent-%d", i))
 			}
 			for i := range 2 {
-				result, err := f.host.store.ClaimNextManaged(ctx, fmt.Sprintf("worker-%d", i), time.Now().UTC())
+				result, err := f.host.store.ClaimNext(ctx, fmt.Sprintf("worker-%d", i), time.Now().UTC())
 				if err != nil || result.Claim == nil {
 					t.Fatal("authorized account slot unavailable", result, err)
 				}
 			}
-			result, err := f.host.store.ClaimNextManaged(ctx, "third-worker", time.Now().UTC())
+			result, err := f.host.store.ClaimNext(ctx, "third-worker", time.Now().UTC())
 			if err != nil || result.Claim != nil || result.View.AccountReservations[*updated.AccountID] != 2 || len(result.View.Heads) != 1 || result.View.Heads[0].Reason != scheduler.AccountLimit {
 				t.Fatal("third job bypassed account capacity", result, err)
 			}

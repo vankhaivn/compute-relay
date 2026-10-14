@@ -23,18 +23,11 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
-type managedDispatchRepository struct{ *Store }
-
-func (r managedDispatchRepository) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
-	return r.Store.ClaimNextManaged(ctx, owner, now)
-}
-func (r managedDispatchRepository) ClaimRecovery(ctx context.Context, owner string, now time.Time) (*scheduler.Claim, error) {
-	return r.Store.ClaimRecoveryManaged(ctx, owner, now)
-}
-
 func managedFixture(t testing.TB, scenario fake.Scenario, maxActive ...int) *dispatchFixture {
 	t.Helper()
 	f := newDispatchFixture(t, scenario)
+	f.authorizeSeed = false
+	f.profile.MaxActiveAttempts = 1
 	f.profile.Binding.ConfigurationRevision = "managed"
 	f.profile.Binding.ProviderInstanceID = "con_fixture"
 	f.profile.CredentialRef = "vault:con_fixture"
@@ -59,7 +52,7 @@ func attachManaged(t testing.TB, f *dispatchFixture) {
 	t.Helper()
 	f.attach(t, f.s)
 	var err error
-	f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(f.s, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +92,7 @@ func grantAuthorization(t testing.TB, f *dispatchFixture, id scheduler.Identity)
 }
 func managedClaim(t testing.TB, f *dispatchFixture) dispatch.Work {
 	t.Helper()
-	r, err := f.s.ClaimNextManaged(context.Background(), "managed_worker", f.clock.Now())
+	r, err := f.s.ClaimNext(context.Background(), "managed_worker", f.clock.Now())
 	if err != nil || r.Claim == nil {
 		t.Fatalf("managed claim=%+v error=%v", r, err)
 	}
@@ -257,37 +250,24 @@ func TestAuthorizationReplayOriginalAndReadConsumedAfterRestart(t *testing.T) {
 		t.Fatal("same permit repeated mutation")
 	}
 }
-func TestAuthorizationManagedAndStandaloneClaimIsolation(t *testing.T) {
+func TestEveryClaimRequiresDurableAuthorization(t *testing.T) {
 	f := managedFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
-	r, err := f.s.ClaimNextManaged(context.Background(), "managed", f.clock.Now())
+	r, err := f.s.ClaimNext(context.Background(), "worker", f.clock.Now())
 	if err != nil || r.Claim != nil || len(r.View.Heads) != 1 || r.View.Heads[0].Reason != scheduler.AuthorizationRequired {
-		t.Fatal("ungranted managed job claimed", r, err)
+		t.Fatal("ungranted attempt claimed", r, err)
 	}
 	grantAuthorization(t, f, id)
-	r, err = f.s.ClaimNext(context.Background(), "standalone", f.clock.Now())
-	if err != nil || r.Claim != nil {
-		t.Fatal("standalone claimed managed permit", r, err)
-	}
 	if err = f.step(t); err != nil {
 		t.Fatal(err)
 	}
+	if f.backend.Stats().PrepareCalls != 1 {
+		t.Fatal("authorized attempt did not prepare exactly once")
+	}
 	f.clock.advance(time.Minute)
-	recovery, err := f.s.ClaimRecovery(context.Background(), "standalone", f.clock.Now())
-	if err != nil || recovery != nil {
-		t.Fatal("standalone claimed managed recovery", recovery, err)
-	}
-	standalone := newDispatchFixture(t, fake.DefaultScenario())
-	sid := standalone.seed(t, "a", 1, false)
-	service, p := authorizationService(t, standalone, "a", auth.Execute)
-	if _, err = service.Authorize(context.Background(), p, "a", sid.JobID, "standalone-grant", authorizationRequest(sid.AttemptID, 10)); !errors.Is(err, executionauth.ErrState) {
-		t.Fatal("standalone became managed", err)
-	}
-	if err = standalone.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if standalone.backend.Stats().PrepareCalls != 1 || controlCount(t, standalone.s, "SELECT count(*) FROM execution_authorizations") != 0 {
-		t.Fatal("standalone requires grant")
+	recovery, err := f.s.ClaimRecovery(context.Background(), "recovery", f.clock.Now())
+	if err != nil || recovery == nil || recovery.Identity != id {
+		t.Fatal("single recovery path lost original attempt", recovery, err)
 	}
 }
 func TestAuthorizationAmbiguousSubmissionAndRetryNeedSeparateGrant(t *testing.T) {
@@ -328,7 +308,7 @@ func TestAuthorizationAmbiguousSubmissionAndRetryNeedSeparateGrant(t *testing.T)
 		if retry.Effect != operations.NewAttemptCreated {
 			t.Fatal("retry missing")
 		}
-		r, err := f.s.ClaimNextManaged(context.Background(), "after_retry", f.clock.Now())
+		r, err := f.s.ClaimNext(context.Background(), "after_retry", f.clock.Now())
 		if err != nil || r.Claim != nil {
 			t.Fatal("retry inherited authorization", r, err)
 		}
@@ -425,7 +405,7 @@ func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Its own reservation must not prevent the already-authorized attempt from starting.
-	r, err := f.s.ClaimNextManaged(context.Background(), "quota_worker", f.clock.Now())
+	r, err := f.s.ClaimNext(context.Background(), "quota_worker", f.clock.Now())
 	if err != nil || r.Claim == nil || r.Claim.Identity != a {
 		t.Fatal("own reservation double counted", r, err)
 	}
@@ -441,58 +421,30 @@ func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
 	}
 }
 
-func TestAuthorizationCollectionClaimModeIsolation(t *testing.T) {
-	t.Run("managed", func(t *testing.T) {
-		f := managedFixture(t, fake.DefaultScenario())
-		id := f.seed(t, "a", 1, false)
-		grantAuthorization(t, f, id)
-		submittedControl(t, f, id)
-		for i := 0; i < 2; i++ {
-			if err := f.adapter.Advance(*f.journal(t, id).Remote); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.step(t); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if work, err := f.s.ClaimCollection(context.Background(), f.clock.Now(), time.Minute, 1); err != nil || work != nil {
-			t.Fatal("standalone claimed managed collection", work, err)
-		}
-		if count := controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'"); count != 0 {
-			t.Fatal("standalone created managed collection ticket", count)
-		}
-		work, err := f.s.ClaimCollectionManaged(context.Background(), f.clock.Now(), time.Minute, 1)
-		if err != nil || work == nil || work.Lease.AttemptID != id.AttemptID {
-			t.Fatal("missing managed collection", work, err)
-		}
-		f.clock.advance(2 * time.Minute)
-		if work, err = f.s.ClaimCollection(context.Background(), f.clock.Now(), time.Minute, 1); err != nil || work != nil {
-			t.Fatal("standalone reclaimed managed ticket", work, err)
-		}
-		if work, err = f.s.ClaimCollectionManaged(context.Background(), f.clock.Now(), time.Minute, 1); err != nil || work == nil {
-			t.Fatal("managed ticket not recoverable", work, err)
-		}
-		if count := controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations"); count != 1 {
-			t.Fatal("collection created authorization", count)
-		}
-	})
-	t.Run("standalone", func(t *testing.T) {
-		f, _, _, _ := collectionFixture(t)
-		if work, err := f.s.ClaimCollectionManaged(context.Background(), f.clock.Now(), time.Minute, 1); err != nil || work != nil {
-			t.Fatal("managed claimed standalone collection", work, err)
-		}
-		if count := controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'"); count != 0 {
-			t.Fatal("managed created standalone ticket", count)
-		}
-		work, err := f.s.ClaimCollection(context.Background(), f.clock.Now(), time.Minute, 1)
-		if err != nil || work == nil {
-			t.Fatal("standalone collection missing", work, err)
-		}
-		f.clock.advance(2 * time.Minute)
-		if work, err = f.s.ClaimCollectionManaged(context.Background(), f.clock.Now(), time.Minute, 1); err != nil || work != nil {
-			t.Fatal("managed reclaimed standalone ticket", work, err)
-		}
-	})
+func TestCollectionRecoveryReusesOriginalPermitAndOperation(t *testing.T) {
+	f, id, _, _ := collectionFixture(t)
+	ctx := context.Background()
+	work, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1)
+	if err != nil || work == nil || work.Lease.AttemptID != id.AttemptID {
+		t.Fatal("collection claim missing", work, err)
+	}
+	original := work.Lease
+	if count := controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'"); count != 1 {
+		t.Fatal("collection created duplicate tickets", count)
+	}
+	if again, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1); err != nil || again != nil {
+		t.Fatal("live collection claimed twice", again, err)
+	}
+	f.clock.advance(2 * time.Minute)
+	f.restart(t)
+	work, err = f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1)
+	if err != nil || work == nil || work.Lease.OperationID != original.OperationID || work.Lease.AttemptID != original.AttemptID || work.Lease.Generation != original.Generation+1 || work.Lease.Fence == original.Fence {
+		t.Fatal("collection recovery changed identity or lost fencing", work, err)
+	}
+	if count := controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations"); count != 1 {
+		t.Fatal("collection created authorization", count)
+	}
+	assertNoNewCompute(t, f)
 }
 
 func TestAuthorizationConcurrentDifferentKeysHaveOneWinner(t *testing.T) {

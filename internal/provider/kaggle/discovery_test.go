@@ -186,14 +186,13 @@ func TestDiscoveryCancellationSerializesAndTimestampPrecedesRead(t *testing.T) {
 
 func TestDiscoveryConfigurationAndVaultBindings(t *testing.T) {
 	c := testConfig(t)
-	for _, ref := range []ports.CredentialRef{"env:PROBE_TOKEN", "vault:con_fixture"} {
+	for _, ref := range []ports.CredentialRef{"vault:con_fixture"} {
 		c.CredentialRef = ref
-		raw, _ := json.Marshal(c)
-		if _, err := ParseConfig(raw); err != nil {
+		if err := c.Validate(); err != nil {
 			t.Fatal("explicit credential reference rejected", err)
 		}
 	}
-	for _, ref := range []ports.CredentialRef{"vault:", "vault:other", "vault:con_", "vault:con_bad/path", "file:/token", "ambient"} {
+	for _, ref := range []ports.CredentialRef{"env:PROBE_TOKEN", "vault:", "vault:other", "vault:con_", "vault:con_bad/path", "file:/token", "ambient"} {
 		c.CredentialRef = ref
 		if c.Validate() == nil {
 			t.Fatal("invalid reference accepted")

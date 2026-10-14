@@ -69,11 +69,6 @@ func TestInvalidManagedCommandDoesNotOpenOrCreateState(t *testing.T) {
 		func(r *operatorcli.Request) { r.ManagedMaxWallSeconds = 0 },
 		func(r *operatorcli.Request) { r.ManagedMaxWorkers = 17 },
 		func(r *operatorcli.Request) { r.ManagedMachineShape = "T4" },
-		func(r *operatorcli.Request) { r.ProviderConfig = "SYNTHETIC_PRIVATE_PATH" },
-		func(r *operatorcli.Request) { r.ProviderProfile = "standalone" },
-		func(r *operatorcli.Request) { r.AllowGPU = true },
-		func(r *operatorcli.Request) { r.AllowPrivateStaging = true },
-		func(r *operatorcli.Request) { r.MaxProviderAttempts = 1 },
 	} {
 		request := base
 		mutate(&request)
@@ -118,7 +113,7 @@ func TestManagedCommandComposesPolicyWithoutReadingCredentials(t *testing.T) {
 	defer cancel()
 	output := &cancelCommandAnnouncement{cancel: cancel}
 	if err := Command(ctx, request, output); err != nil {
-		t.Fatal("managed command did not compose its explicit mode", err)
+		t.Fatal("managed command did not compose its policy", err)
 	}
 	var announcement Listening
 	if json.Unmarshal(output.Bytes(), &announcement) != nil || announcement.Status != "listening" || announcement.Address == "" {

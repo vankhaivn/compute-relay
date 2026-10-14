@@ -56,7 +56,7 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 			if err != nil {
 				t.Fatal("CPU admission failed", err)
 			}
-			claim, err := f.host.store.ClaimNextManaged(ctx, "cpu_worker", time.Now().UTC())
+			claim, err := f.host.store.ClaimNext(ctx, "cpu_worker", time.Now().UTC())
 			if err != nil || claim.Claim != nil {
 				t.Fatal("CPU skipped finite consent", err)
 			}
@@ -64,7 +64,7 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 			if _, err := f.services.authorizations.Authorize(ctx, f.actor, "app", job.JobID, "cpu-grant-key", []byte(grant)); err != nil {
 				t.Fatal("exhausted GPU quota blocked CPU grant", err)
 			}
-			claim, err = f.host.store.ClaimNextManaged(ctx, "cpu_worker", time.Now().UTC())
+			claim, err = f.host.store.ClaimNext(ctx, "cpu_worker", time.Now().UTC())
 			if err != nil || claim.Claim == nil || claim.Claim.JobID != job.JobID {
 				t.Fatal("CPU dispatch claim blocked", claim, err)
 			}
@@ -100,7 +100,7 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 			if _, err := f.services.authorizations.Authorize(ctx, f.actor, "app", second.JobID, "same-account-second-grant", []byte(grant)); err != nil {
 				t.Fatal(err)
 			}
-			next, err := f.host.store.ClaimNextManaged(ctx, "second_worker", time.Now().UTC())
+			next, err := f.host.store.ClaimNext(ctx, "second_worker", time.Now().UTC())
 			if err != nil || next.Claim != nil {
 				t.Fatal("CPU ignored shared account concurrency", next, err)
 			}

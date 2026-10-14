@@ -13,9 +13,6 @@ import (
 )
 
 func dispatchAuthorization(ctx context.Context, tx *sql.Tx, work dispatch.Work, now time.Time) (executionauth.Status, error) {
-	if !executionauth.Managed(work.Job.Profile) {
-		return "", nil
-	}
 	if work.Job.Request.Spec().SeparateStart() {
 		if work.Gate == nil {
 			return "", dispatch.ErrPolicy

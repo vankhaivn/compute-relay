@@ -37,19 +37,8 @@ func (s *Store) cleanupTx(ctx context.Context, now time.Time, fn func(context.Co
 	})
 }
 
+// ClaimCleanup commits a fresh fence before provider I/O and rechecks eligibility.
 func (s *Store) ClaimCleanup(ctx context.Context, now time.Time, ttl time.Duration) (*cleanup.Work, error) {
-	return s.claimCleanup(ctx, now, ttl, false)
-}
-
-// ClaimCleanupManaged claims cleanups of attempts frozen to managed connections.
-func (s *Store) ClaimCleanupManaged(ctx context.Context, now time.Time, ttl time.Duration) (*cleanup.Work, error) {
-	return s.claimCleanup(ctx, now, ttl, true)
-}
-
-// claimCleanup commits the running status and a fresh fence before any provider call.
-// Eligibility is rechecked against current durable state; a request that is no longer
-// eligible fails explicitly instead of reaching the provider.
-func (s *Store) claimCleanup(ctx context.Context, now time.Time, ttl time.Duration, managed bool) (*cleanup.Work, error) {
 	now = now.UTC()
 	if ttl < time.Second || ttl > 31*time.Minute {
 		return nil, ErrInvalid
@@ -60,11 +49,10 @@ func (s *Store) claimCleanup(ctx context.Context, now time.Time, ttl time.Durati
 		var id domain.OperationID
 		err := tx.QueryRowContext(ctx, `SELECT c.workspace_id,c.operation_id FROM cleanup_operations c
  JOIN jobs j ON j.workspace_id=c.workspace_id AND j.job_id=c.job_id
- JOIN profile_revisions p ON p.profile=j.profile AND p.revision=j.profile_revision
  LEFT JOIN cleanup_leases l ON l.workspace_id=c.workspace_id AND l.operation_id=c.operation_id
- WHERE (COALESCE(json_extract(p.snapshot,'$.credential_ref'),'') LIKE 'vault:%')=?
+ WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=c.workspace_id AND r.job_id=c.job_id AND r.attempt_id=c.attempt_id)
  AND (c.status='accepted' OR (c.status='running' AND (l.until_ms IS NULL OR l.until_ms<=?)))
- ORDER BY c.cleanup_seq LIMIT 1`, managed, now.UnixMilli()).Scan(&w, &id)
+ ORDER BY c.cleanup_seq LIMIT 1`, now.UnixMilli()).Scan(&w, &id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

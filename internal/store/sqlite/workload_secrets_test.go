@@ -268,7 +268,7 @@ func TestWorkloadSecretCrashAfterConsumptionNeverRestoresOrSends(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.clock.advance(10 * time.Millisecond)
-	claim, err := f.s.ClaimRecoveryManaged(ctx, "secret_crash_worker", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(ctx, "secret_crash_worker", f.clock.Now())
 	if err != nil || claim == nil {
 		t.Fatal("missing claim", err)
 	}

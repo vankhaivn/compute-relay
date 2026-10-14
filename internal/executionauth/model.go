@@ -9,11 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 )
 
@@ -97,10 +95,6 @@ func (r Request) Digest(job domain.JobID) (string, error) {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }
-
-// Managed requires an already validated immutable profile; malformed vault refs
-// must never fall through to the standalone process-budget compatibility mode.
-func Managed(p admission.Profile) bool { return strings.HasPrefix(p.CredentialRef, "vault:") }
 
 type Status string
 

@@ -10,7 +10,7 @@ import (
 )
 
 // cleanupEngine applies accepted cleanup requests with the same frozen-binding resolver as
-// the collector of the active mode. It is never composed in admission-only mode.
+// the collector.
 func cleanupEngine(repo cleanup.WorkRepository, resolver cleanup.Resolver) (*cleanup.Engine, error) {
 	engine, err := cleanup.New(repo, resolver, clock{}, cleanup.DefaultConfig())
 	if err != nil {
@@ -21,15 +21,13 @@ func cleanupEngine(repo cleanup.WorkRepository, resolver cleanup.Resolver) (*cle
 
 type managedCleanupStore interface {
 	cleanup.WorkRepository
-	ClaimCleanupManaged(context.Context, time.Time, time.Duration) (*cleanup.Work, error)
 }
 
-// managedCleanupRepository claims only attempts frozen to managed connections and retries
-// a definite clock rollback like the other managed workers.
+// managedCleanupRepository retries definite clock rollbacks like the other workers.
 type managedCleanupRepository struct{ managedCleanupStore }
 
 func (r managedCleanupRepository) ClaimCleanup(ctx context.Context, now time.Time, ttl time.Duration) (*cleanup.Work, error) {
-	result, err := r.ClaimCleanupManaged(ctx, now, ttl)
+	result, err := r.managedCleanupStore.ClaimCleanup(ctx, now, ttl)
 	if errors.Is(err, scheduler.ErrClock) {
 		return nil, nil
 	}

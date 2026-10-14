@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -19,41 +18,6 @@ import (
 var _ admission.Repository = (*Store)(nil)
 
 const createJobOperation = "job.create"
-
-// PutProfile is a LOCAL operator operation. A revision cannot change its contents.
-// Disabling/remapping a profile affects new admissions only, not historical resolution.
-func (s *Store) PutProfile(ctx context.Context, p admission.Profile, enabled bool) error {
-	if p.Validate() != nil {
-		return ErrInvalid
-	}
-	b, err := json.Marshal(p)
-	if err != nil || len(b) > 8192 {
-		return ErrInvalid
-	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		var prior string
-		err := tx.QueryRowContext(ctx, "SELECT snapshot FROM profile_revisions WHERE profile=? AND revision=?", p.Binding.Profile, p.Binding.ConfigurationRevision).Scan(&prior)
-		switch {
-		case err == nil:
-			if prior != string(b) {
-				return ErrConflict
-			}
-		case errors.Is(err, sql.ErrNoRows):
-			if _, err = tx.ExecContext(ctx, "INSERT INTO profile_revisions VALUES(?,?,?)", p.Binding.Profile, p.Binding.ConfigurationRevision, string(b)); err != nil {
-				return dbError(err)
-			}
-		default:
-			return dbError(err)
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO profiles VALUES(?,?,?) ON CONFLICT(profile) DO UPDATE SET revision=excluded.revision,enabled=excluded.enabled`, p.Binding.Profile, p.Binding.ConfigurationRevision, enabled)
-		return dbError(err)
-	})
-}
 
 // actorInTx closes revocation/disable/scope races between HTTP auth and commit. Token IDs
 // are NOT bearer secrets; only an authenticated application service calls this store seam.
@@ -105,15 +69,9 @@ func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID st
 	return workspace.AllowedProfiles, nil
 }
 
-func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed []string, req admission.Request) (admission.Profile, []admission.FrozenObject, error) {
+func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, req admission.Request) (admission.Profile, []admission.FrozenObject, error) {
 	var profile admission.Profile
 	spec := req.Spec()
-	permitted := false
-	for _, v := range allowed {
-		if v == spec.Profile {
-			permitted = true
-		}
-	}
 	var raw string
 	var enabled bool
 	err := tx.QueryRowContext(ctx, `SELECT r.snapshot,p.enabled FROM profiles p JOIN profile_revisions r ON p.profile=r.profile AND p.revision=r.revision WHERE p.profile=?`, spec.Profile).Scan(&raw, &enabled)
@@ -126,22 +84,15 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 	if len(raw) > 8192 || json.Unmarshal([]byte(raw), &profile) != nil || profile.Validate() != nil || profile.Binding.Profile != spec.Profile {
 		return profile, nil, ErrCorrupt
 	}
-	if strings.HasPrefix(profile.CredentialRef, "vault:") {
-		if err = managedProfileOwned(ctx, tx, w, profile); err != nil {
-			return profile, nil, err
-		}
-		var selected bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE workspace_id=? AND current_profile=? AND new_work='enabled' AND pending_operation='')`, w, spec.Profile).Scan(&selected); err != nil {
-			return profile, nil, dbError(err)
-		}
-		if !selected || !enabled {
-			return profile, nil, admission.ErrSelection
-		}
-	} else if !permitted || !enabled {
-		return profile, nil, auth.ErrForbidden
+	if err = managedProfileOwned(ctx, tx, w, profile); err != nil {
+		return profile, nil, err
 	}
-	if spec.SeparateStart() && !strings.HasPrefix(profile.CredentialRef, "vault:") {
-		return profile, nil, admission.ErrRequirements
+	var selected bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE workspace_id=? AND current_profile=? AND new_work='enabled' AND pending_operation='')`, w, spec.Profile).Scan(&selected); err != nil {
+		return profile, nil, dbError(err)
+	}
+	if !selected || !enabled {
+		return profile, nil, admission.ErrSelection
 	}
 	if err = profile.Check(spec); err != nil {
 		return profile, nil, err
@@ -194,11 +145,11 @@ func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID s
 	defer done()
 	result := admission.Validation{Valid: true, Warnings: []string{"Offline admission checks only; provider capability and bundle validation are still required before dispatch."}, Requirements: []admission.Requirement{{Name: "provider_validation", Verification: "before_dispatch"}, {Name: "bundle_integrity_and_layout", Verification: "before_dispatch"}}}
 	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		allowed, err := actorInTx(ctx, tx, w, tokenID, auth.Read)
+		_, err := actorInTx(ctx, tx, w, tokenID, auth.Read)
 		if err != nil {
 			return err
 		}
-		_, _, err = resolveJob(ctx, tx, w, allowed, req)
+		_, _, err = resolveJob(ctx, tx, w, req)
 		if err != nil {
 			return err
 		}
@@ -227,7 +178,7 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 	defer done()
 	var receipt admission.Receipt
 	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		allowed, err := actorInTx(ctx, tx, w, tokenID, auth.Write)
+		_, err := actorInTx(ctx, tx, w, tokenID, auth.Write)
 		if err != nil {
 			return err
 		}
@@ -249,7 +200,7 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if !errors.Is(err, sql.ErrNoRows) {
 			return dbError(err)
 		}
-		profile, refs, err := resolveJob(ctx, tx, w, allowed, req)
+		profile, refs, err := resolveJob(ctx, tx, w, req)
 		if err != nil {
 			return err
 		}

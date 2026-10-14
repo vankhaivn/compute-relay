@@ -46,7 +46,7 @@ func attachGate(t testing.TB, f *dispatchFixture) {
 	cfg := dispatch.DefaultConfig()
 	cfg.PollDelay = time.Millisecond
 	var err error
-	f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, f.clock, cfg)
+	f.engine, err = dispatch.New(f.s, f.registry, f.blobs, f.clock, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestExecutionGateCrashAtDurableBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.clock.advance(10 * time.Millisecond)
-	claim, err := f.s.ClaimRecoveryManaged(ctx, "crash_start_worker", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(ctx, "crash_start_worker", f.clock.Now())
 	if err != nil || claim == nil {
 		t.Fatal("start claim", err)
 	}
@@ -390,7 +390,7 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 	}
 	service, p, receipt := admitCleanup(t, f, id, "expired-gate-cleanup", false)
 	ctx := context.Background()
-	w, err := f.s.ClaimCleanupManaged(ctx, f.clock.Now(), time.Minute)
+	w, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Minute)
 	if err != nil || w == nil || w.Request.Remote.Resource != j.Prepared.Resource || w.Request.ResultsCollected || w.Request.Remote.Version != "prepared" {
 		t.Fatal("never-started cleanup required a result or changed identity", w, err)
 	}

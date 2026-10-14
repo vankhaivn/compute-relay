@@ -8,12 +8,11 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 func readSchedulingStatus(ctx context.Context, tx *sql.Tx, record admission.Record, now time.Time) (*admission.SchedulingStatus, error) {
-	if !executionauth.Managed(record.Profile) || !scheduler.LocalOnly(record.Attempt.State) ||
+	if !scheduler.LocalOnly(record.Attempt.State) ||
 		record.Attempt.State.Orchestration != domain.OrchestrationQueued && record.Attempt.State.Orchestration != domain.OrchestrationBlocked {
 		return nil, nil
 	}
@@ -27,9 +26,6 @@ func readSchedulingStatus(ctx context.Context, tx *sql.Tx, record admission.Reco
 	rows, err := schedulerSnapshot(ctx, tx, settings, now)
 	if err != nil {
 		return nil, err
-	}
-	for i := range rows {
-		rows[i].DispatchModeExcluded = !rows[i].Managed
 	}
 	_, view, err := scheduler.Select(rows, domain.WorkspaceID(last), settings, now)
 	if err != nil {

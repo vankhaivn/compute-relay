@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
@@ -79,7 +78,7 @@ func (x *executionJournalFixture) attach(t *testing.T) {
 	t.Helper()
 	f := x.f
 	j := f.journal(t)
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{f.config.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{f.config.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +224,7 @@ func TestExecutionM3LostSaveAndOutcomeAcknowledgementsRecoverSameAttempt(t *test
 			changed := x.f.profile
 			changed.Binding.ConfigurationRevision = "replacement"
 			changed.AccountScope = "other_account"
-			if err := x.f.store.PutProfile(context.Background(), changed, false); err != nil {
+			if err := replaceJournalProfile(t, x.f, changed, false); err != nil {
 				t.Fatal(err)
 			}
 			x.restart(t)

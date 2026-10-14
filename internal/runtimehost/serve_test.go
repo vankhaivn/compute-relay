@@ -18,6 +18,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 )
 
@@ -36,7 +37,7 @@ func startHost(t *testing.T, h *Host) (string, func()) {
 		cancel()
 		t.Fatal("serve startup deadline")
 	}
-	if event.DispatchEnabled || event.Mode != "local-admission-only" {
+	if !event.DispatchEnabled || event.Mode != "managed-workers" {
 		t.Fatal("misleading serve mode")
 	}
 	stopped := false
@@ -80,7 +81,7 @@ func requestHost(t *testing.T, url, method, token, body string, headers map[stri
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	closeErr := resp.Body.Close()
-	if readErr != nil || closeErr != nil || resp.StatusCode != want || resp.Header.Get("X-Compute-Relay-Mode") != "local-admission-only" {
+	if readErr != nil || closeErr != nil || resp.StatusCode != want || resp.Header.Get("X-Compute-Relay-Mode") != "managed-workers" {
 		t.Fatalf("HTTP %d want %d body=%s read=%v close=%v", resp.StatusCode, want, raw, readErr, closeErr)
 	}
 	return raw
@@ -125,13 +126,8 @@ func TestLocalHTTPAuthUploadAdmissionAndReopenWithoutDispatch(t *testing.T) {
 	// New installations have no profiles. Explicit TEST-ONLY profile seeding below
 	// proves handler composition without inventing a production provider setup path.
 	requestHost(t, url+"/v1/workspaces/app/jobs", "POST", token, spec, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "local-idempotency-001"}, 403)
-	if err := h.store.PutWorkspace(ctx, auth.Workspace{ID: "app", Enabled: true, AllowedProfiles: []string{"local-test"}}); err != nil {
-		t.Fatal(err)
-	}
-	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "local-test", ProviderInstanceID: "fixture", ConfigurationRevision: "one"}, "offline_account")
-	if err := h.store.PutProfile(ctx, profile, true); err != nil {
-		t.Fatal(err)
-	}
+	profile := createLocalManagedProfile(t, h)
+	spec = strings.Replace(spec, `"profile":"local-test"`, `"profile":"`+profile+`"`, 1)
 	raw = requestHost(t, url+"/v1/workspaces/app/jobs", "POST", token, spec, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "local-idempotency-001"}, 202)
 	var job admission.Receipt
 	if json.Unmarshal(raw, &job) != nil || !job.JobID.Valid() {
@@ -183,4 +179,44 @@ func TestLocalHTTPAuthUploadAdmissionAndReopenWithoutDispatch(t *testing.T) {
 			t.Fatal("local HTTP caused provider work", table, count, err)
 		}
 	}
+}
+
+// These HTTP tests admit without execution authority. The profile still comes
+// from a real verified connection rather than the removed offline profile path.
+type localManagedAdapter struct{ *managedTestAdapter }
+
+func (a *localManagedAdapter) Descriptor() connections.Descriptor {
+	d := a.managedTestAdapter.Descriptor()
+	d.Type = "fixture"
+	return d
+}
+func createLocalManagedProfile(t *testing.T, h *Host) string {
+	t.Helper()
+	ctx := context.Background()
+	token, receipt, err := h.access.Issue(ctx, "app", []auth.Scope{auth.Read, auth.Manage}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.access.Revoke(ctx, receipt.ID)
+	actor, err := h.access.Authenticate(ctx, token.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &localManagedAdapter{&managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: DefaultManagedServeConfig()}}}
+	service, err := connections.New(h.access, managedConnectionRepository{h.store}, &managedTestVault{entries: map[string][]byte{}}, []connections.Adapter{adapter}, clock{}.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err := service.Submit(ctx, actor, "app", "", "create-fixture-profile", []byte(`{"provider_type":"fixture","label":"Local fixture","credentials":{"api_token":"SYNTHETIC_FIRST"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := service.RunOnce(ctx); err != nil || !worked {
+		t.Fatal("verify fixture connection", worked, err)
+	}
+	connection, err := service.Get(ctx, actor, "app", op.ConnectionID)
+	if err != nil || connection.Selection == nil {
+		t.Fatal("fixture profile unavailable", err)
+	}
+	return connection.Selection.Profile
 }

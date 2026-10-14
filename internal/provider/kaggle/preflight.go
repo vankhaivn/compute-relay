@@ -51,10 +51,9 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
-	_, environmentRef := credentials.EnvironmentName(c.CredentialRef)
 	_, vaultRef := credentials.VaultReference(c.CredentialRef)
 	if !idPattern.MatchString(c.InstanceID) || !idPattern.MatchString(c.Revision) ||
-		!accountPattern.MatchString(c.AccountName) || (!environmentRef && !vaultRef) ||
+		!accountPattern.MatchString(c.AccountName) || !vaultRef ||
 		!validPythonExecutable(c.PythonExecutable) {
 		return ErrConfig
 	}
@@ -70,13 +69,6 @@ func validPythonExecutable(path string) bool {
 		return false
 	}
 	return true
-}
-func ParseConfig(raw []byte) (Config, error) {
-	var c Config
-	if len(raw) == 0 || len(raw) > 8192 || closedObject(raw, &c) != nil || c.Validate() != nil {
-		return Config{}, ErrConfig
-	}
-	return c, nil
 }
 
 // Report contains only validated enums; no provider response, token, username,

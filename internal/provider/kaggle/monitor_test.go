@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -19,7 +18,7 @@ import (
 func monitorFixture(t *testing.T) *Monitor {
 	t.Helper()
 	c := testConfig(t)
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +164,7 @@ func TestMonitorRotationTimestampAndSerializedReads(t *testing.T) {
 	clock := m.clock.(*stagingClock)
 	value := "FIRST_TOKEN"
 	lookups := 0
-	m.credentials, _ = credentials.NewEnvironment([]ports.CredentialRef{m.config.CredentialRef}, func(string) (string, bool) { lookups++; return value, true })
+	m.credentials, _ = fixtureCredentials([]ports.CredentialRef{m.config.CredentialRef}, func(string) (string, bool) { lookups++; return value, true })
 	m.run = func(_ context.Context, c Config, mode string, token []byte, r monitorRequest) (monitorResponse, error) {
 		if mode != "quota" || c != m.config || r.Owner != c.AccountName || r.Execution != nil || string(token) != value {
 			t.Fatal("read changed account or cached secret")

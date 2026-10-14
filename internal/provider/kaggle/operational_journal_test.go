@@ -10,7 +10,6 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -40,7 +39,7 @@ func quotaJournal(t *testing.T, f *stagingJournalFixture) scheduler.Quota {
 func TestMonitorM3QuotaLatchSurvivesUnknownStaleAndRestart(t *testing.T) {
 	ctx := context.Background()
 	f := newStagingJournalFixture(t)
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{f.config.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{f.config.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +54,7 @@ func TestMonitorM3QuotaLatchSurvivesUnknownStaleAndRestart(t *testing.T) {
 	reads := 0
 	m.run = func(_ context.Context, c Config, mode string, _ []byte, request monitorRequest) (monitorResponse, error) {
 		reads++
-		if mode != "quota" || c.AccountName != f.profile.AccountScope || request.Owner != c.AccountName || request.Execution != nil {
+		if mode != "quota" || c.AccountName != f.config.AccountName || request.Owner != c.AccountName || request.Execution != nil {
 			t.Fatal("quota remapped its account")
 		}
 		return reply, nil

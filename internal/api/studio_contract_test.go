@@ -222,18 +222,6 @@ type studioClock struct{}
 
 func (studioClock) Now() time.Time { return time.Now().UTC() }
 
-type studioManagedStore struct{ *sqlite.Store }
-
-func (r studioManagedStore) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
-	return r.ClaimNextManaged(ctx, owner, now)
-}
-func (r studioManagedStore) ClaimCollection(ctx context.Context, now time.Time, ttl time.Duration, workers int) (*collection.Work, error) {
-	return r.ClaimCollectionManaged(ctx, now, ttl, workers)
-}
-func (r studioManagedStore) ClaimRecovery(ctx context.Context, owner string, now time.Time) (*scheduler.Claim, error) {
-	return r.ClaimRecoveryManaged(ctx, owner, now)
-}
-
 // Adapt only the fake's fixture artifact namespace to the runner namespace. The
 // manifest, identity, digests and bytes still come from the fake provider.
 type studioProvider struct {
@@ -572,11 +560,11 @@ func TestStudioHTTPContract(t *testing.T) {
 	}
 	dispatchConfig := dispatch.DefaultConfig()
 	dispatchConfig.PollDelay = time.Millisecond
-	engine, err := dispatch.New(studioManagedStore{f.store}, f.registry, f.blobs, studioClock{}, dispatchConfig)
+	engine, err := dispatch.New(f.store, f.registry, f.blobs, studioClock{}, dispatchConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	collector, err := collection.New(studioManagedStore{f.store}, f.registry, f.blobs, studioClock{}, collection.DefaultConfig())
+	collector, err := collection.New(f.store, f.registry, f.blobs, studioClock{}, collection.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,10 +769,14 @@ func TestStudioHTTPReleaseEvidenceValues(t *testing.T) {
 	var repo *studioReleaseRead
 	f := newStudioHTTP(t, func(s *sqlite.Store) admission.Repository { repo = &studioReleaseRead{Store: s}; return repo })
 	ctx := context.Background()
-	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "default-gpu", ProviderInstanceID: "fake", ConfigurationRevision: "one"}, "fixture_account")
-	if err := f.store.PutProfile(ctx, profile, true); err != nil {
-		t.Fatal(err)
+	base := "/v1/workspaces/studio"
+	op := f.json(t, "POST", base+"/connections", "studio-release-connection", map[string]any{
+		"provider_type": "fixture", "label": "Release fixture", "credentials": map[string]string{"api_token": managedSecret},
+	}, 202)
+	if worked, err := f.service.RunOnce(ctx); err != nil || !worked {
+		t.Fatal("connection verification", worked, err)
 	}
+	connection := f.json(t, "GET", base+"/connections/"+op["connection_id"].(string), "", nil, 200)
 	if err := f.store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "studio", Bytes: 0, SHA256: provider.Digest(nil)}); err != nil {
 		t.Fatal(err)
 	}
@@ -792,6 +784,7 @@ func TestStudioHTTPReleaseEvidenceValues(t *testing.T) {
 	if err := json.Unmarshal([]byte(jobBody), &spec); err != nil {
 		t.Fatal(err)
 	}
+	spec["profile"] = studioMap(t, connection["selection"])["profile"]
 	job := f.json(t, "POST", "/v1/workspaces/studio/jobs", "studio-release-admit", spec, 202)
 	for _, value := range []string{"unknown", "not_applicable", "not_observable", "provider_reported", "confirmed"} {
 		t.Run(value, func(t *testing.T) {

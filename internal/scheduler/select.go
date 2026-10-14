@@ -25,14 +25,11 @@ type Candidate struct {
 	LeaseUntil         time.Time
 	NotBefore          time.Time
 	Quota              Quota
-	Managed            bool
 	ResourceKind       string
 	ResourceScope      string
 	ResourceMaxActive  int
 	// AuthorizationGranted includes a consumed permit usable by this same attempt.
 	AuthorizationGranted bool
-	// Excluded candidates still count against shared capacity.
-	DispatchModeExcluded bool
 }
 
 // LocalOnly is deliberately narrower than "not terminal". In particular an
@@ -128,7 +125,7 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 				}
 			}
 		}
-		if !r.ActiveAttempt || live || r.DispatchBarrier || !LocalOnly(r.State) || r.DispatchModeExcluded {
+		if !r.ActiveAttempt || live || r.DispatchBarrier || !LocalOnly(r.State) {
 			continue
 		}
 		if prior, ok := heads[r.WorkspaceID]; !ok || r.Sequence < rows[prior].Sequence {
@@ -146,7 +143,7 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 		limit, resourceLimit := EffectiveLimits(r, settings, view)
 		status := QueueStatus{Identity: r.Identity, Sequence: r.Sequence, AccountScope: r.AccountScope, ResourceScope: r.ResourceScope, Reason: Eligible, NotBefore: r.NotBefore}
 		switch {
-		case r.Managed && !r.AuthorizationGranted:
+		case !r.AuthorizationGranted:
 			status.Reason = AuthorizationRequired
 		case settings.Paused:
 			status.Reason = Paused

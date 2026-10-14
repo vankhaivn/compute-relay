@@ -142,6 +142,10 @@ func TestDispatchCrashHelper(t *testing.T) {
 	}
 	action := dispatch.Action{Kind: dispatch.BeginSubmission}
 	if strings.HasPrefix(mode, "prepare") {
+		work, err = s.ConsumeAuthorization(context.Background(), work.Handle, now)
+		if err != nil {
+			t.Fatal(err)
+		}
 		plan, op := storePlan(t, work)
 		action = dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}
 	}

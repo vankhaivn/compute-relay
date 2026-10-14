@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/retention"
@@ -112,14 +111,9 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 		return object
 	}
 	referenced, unreferenced := upload("bundle bytes of an admitted job"), upload("bytes no job references")
-	if err := h.store.PutWorkspace(ctx, auth.Workspace{ID: "app", Enabled: true, AllowedProfiles: []string{"local-test"}}); err != nil {
-		t.Fatal(err)
-	}
-	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "local-test", ProviderInstanceID: "fixture", ConfigurationRevision: "one"}, "offline_account")
-	if err := h.store.PutProfile(ctx, profile, true); err != nil {
-		t.Fatal(err)
-	}
+	profile := createLocalManagedProfile(t, h)
 	spec := fmt.Sprintf(`{"api_version":"compute-connector/v1alpha1","name":"retained fixture","profile":"local-test","bundle":{"object_id":%q},"execution":{"kind":"python","command":["python","main.py"]},"inputs":[],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":5,"finalization_grace_seconds":2}}`, referenced.ID)
+	spec = strings.Replace(spec, `"profile":"local-test"`, `"profile":"`+profile+`"`, 1)
 	requestHost(t, url+"/v1/workspaces/app/jobs", "POST", token, spec, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "retention-fixture-001"}, 202)
 	stop()
 

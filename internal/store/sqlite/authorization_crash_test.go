@@ -104,7 +104,7 @@ func TestAuthorizationCrashHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	claim, err := s.ClaimNextManaged(context.Background(), "authorization_crash", now)
+	claim, err := s.ClaimNext(context.Background(), "authorization_crash", now)
 	if err != nil || claim.Claim == nil {
 		t.Fatal("missing child claim", err)
 	}

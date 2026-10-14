@@ -17,21 +17,19 @@ import (
 type RuntimeLoader func(context.Context, provider.Identity) (provider.Plan, provider.Prepared, error)
 
 // RuntimeAdapter composes the reviewed Kaggle components for normal durable
-// orchestration. Mutation authorization is finite and process-local; M3 remains
-// the durable authority for whether Prepare or Submit may be called at all.
+// orchestration. The repository owns durable authorization and one-shot intents
+// for every preparation and submission; this adapter keeps no process budget.
 type RuntimeAdapter struct {
 	config        Config
 	binding       provider.BindingSnapshot
 	policy        ExecutionPolicy
 	allow         bool
-	maxAttempts   int
 	load          RuntimeLoader
 	clock         ports.Clock
 	preflight     *Preflight
 	stager        *Stager
 	monitor       *Monitor
 	mu            sync.Mutex
-	authorized    map[provider.Identity]bool
 	components    map[provider.Identity]*runtimeComponents
 	makeExecutor  func(*Stager, ExecutionPolicy, provider.Plan, provider.Prepared, bool) (*Executor, error)
 	makeArtifacts func(*Executor, ArtifactPolicy) (*ArtifactReader, error)
@@ -54,12 +52,10 @@ var (
 	_ provider.LogReader              = (*RuntimeAdapter)(nil)
 
 	ErrRuntimeBinding = errors.New("runtime provider binding does not match the configured immutable profile")
-	ErrRuntimeBudget  = errors.New("runtime provider mutation budget exhausted; restart only with explicit authorization after resolving uncertain attempts")
 )
 
-// NewRuntimeAdapter creates one immutable Kaggle provider revision. maxAttempts
-// bounds how many distinct attempt identities this process may newly mutate.
-// Read-only recovery does not consume this budget.
+// NewRuntimeAdapter creates one immutable Kaggle provider revision.
+// Read-only recovery never creates a mutation permit.
 func NewRuntimeAdapter(
 	c Config,
 	binding provider.BindingSnapshot,
@@ -68,7 +64,6 @@ func NewRuntimeAdapter(
 	clock ports.Clock,
 	load RuntimeLoader,
 	policy ExecutionPolicy,
-	maxAttempts int,
 	allowMutations bool,
 ) (*RuntimeAdapter, error) {
 	if c.Validate() != nil || !binding.Valid() || resolver == nil || blobs == nil || clock == nil || load == nil || !policy.valid() {
@@ -79,13 +74,6 @@ func NewRuntimeAdapter(
 		binding.AccountScope != c.AccountName ||
 		binding.CredentialRef != string(c.CredentialRef) {
 		return nil, ErrRuntimeBinding
-	}
-	if allowMutations {
-		if maxAttempts < 1 || maxAttempts > 64 {
-			return nil, ErrRuntimeBudget
-		}
-	} else if maxAttempts != 0 {
-		return nil, ErrRuntimeBudget
 	}
 	stager, err := NewStager(c, DefaultStagingPolicy(), resolver, blobs, allowMutations)
 	if err != nil {
@@ -101,8 +89,8 @@ func NewRuntimeAdapter(
 	}
 	return &RuntimeAdapter{
 		config: c, binding: binding, policy: policy, allow: allowMutations,
-		maxAttempts: maxAttempts, load: load, clock: clock, preflight: preflight,
-		stager: stager, monitor: monitor, authorized: make(map[provider.Identity]bool),
+		load: load, clock: clock, preflight: preflight,
+		stager: stager, monitor: monitor,
 		components:   make(map[provider.Identity]*runtimeComponents),
 		makeExecutor: NewExecutor, makeArtifacts: NewArtifactReader,
 		runCleanup: runCleanup,
@@ -214,31 +202,6 @@ func (p *RuntimeAdapter) localPlan(ctx context.Context, job provider.ResolvedJob
 	return plan, nil
 }
 
-func (p *RuntimeAdapter) authorize(id provider.Identity) error {
-	if p == nil || !p.allow || id.Validate() != nil {
-		return ErrRuntimeBudget
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.authorized[id] {
-		return nil
-	}
-	if len(p.authorized) >= p.maxAttempts {
-		return ErrRuntimeBudget
-	}
-	p.authorized[id] = true
-	return nil
-}
-
-func (p *RuntimeAdapter) BudgetExhausted() bool {
-	if p == nil || !p.allow {
-		return true
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.authorized) >= p.maxAttempts
-}
-
 func (p *RuntimeAdapter) validPlan(ctx context.Context, plan provider.Plan) error {
 	expected, err := p.localPlan(ctx, plan.Job)
 	if err != nil || expected.Digest() != plan.Digest() {
@@ -252,9 +215,6 @@ func (p *RuntimeAdapter) validPlan(ctx context.Context, plan provider.Plan) erro
 
 func (p *RuntimeAdapter) Prepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.Prepared, error) {
 	if err := p.validPlan(ctx, plan); err != nil {
-		return provider.Prepared{}, err
-	}
-	if err := p.authorize(plan.Job.Identity); err != nil {
 		return provider.Prepared{}, err
 	}
 	return p.stager.Prepare(ctx, plan, operation)
@@ -305,9 +265,6 @@ func (p *RuntimeAdapter) Submit(ctx context.Context, prepared provider.Prepared)
 	}
 	if prepared.Identity.Validate() != nil {
 		return rejectedExecution(reasonPreparationMismatch)
-	}
-	if p.authorize(prepared.Identity) != nil {
-		return rejectedExecution(reasonMutationBudget)
 	}
 	c, err := p.attempt(ctx, prepared.Identity)
 	if err != nil || c.prepared != prepared {

@@ -17,7 +17,6 @@ import (
 const (
 	reasonSubmissionDisabled  = "submission_disabled"
 	reasonPreparationMismatch = "preparation_mismatch"
-	reasonMutationBudget      = "mutation_budget_exhausted"
 	reasonStagingRecheck      = "staging_recheck_failed"
 	reasonStagingUnconfirmed  = "staging_not_confirmed"
 	reasonCallTimeout         = "call_timeout"

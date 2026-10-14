@@ -18,9 +18,11 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
+	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -142,12 +144,7 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 	if err = f.store.PutWorkspace(ctx, auth.Workspace{ID: "workspace", Enabled: true, AllowedProfiles: []string{"fixture"}}); err != nil {
 		t.Fatal(err)
 	}
-	f.config = Config{InstanceID: "fixture_instance", Revision: "one", AccountName: "fixture_account", CredentialRef: "env:STAGING_FIXTURE_TOKEN", PythonExecutable: filepath.Join(t.TempDir(), "never-invoked.exe")}
-	f.profile = admission.DefaultProfile(domain.ProviderBinding{Profile: "fixture", ProviderInstanceID: domain.ProviderInstanceID(f.config.InstanceID), ConfigurationRevision: f.config.Revision}, f.config.AccountName)
-	f.profile.CredentialRef = string(f.config.CredentialRef)
-	if err = f.store.PutProfile(ctx, f.profile, true); err != nil {
-		t.Fatal(err)
-	}
+	f.config = Config{InstanceID: "fixture_instance", Revision: "one", AccountName: "fixture_account", CredentialRef: "vault:con_fixture", PythonExecutable: filepath.Join(t.TempDir(), "never-invoked.exe")}
 	if err = f.store.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +161,7 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secret, _, err := access.Issue(ctx, "workspace", []auth.Scope{auth.Read, auth.Write, auth.Operate}, time.Time{})
+	secret, _, err := access.Issue(ctx, "workspace", []auth.Scope{auth.Read, auth.Write, auth.Operate, auth.Manage, auth.Execute}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,13 +169,51 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	info, err := f.store.Info(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault, err := credentials.NewFile(info.InstallationID, filepath.Join(t.TempDir(), "credentials"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionsService, err := connections.New(access, f.store, vault, []connections.Adapter{journalConnectionAdapter{clock: f.clock}}, f.clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err := connectionsService.Submit(ctx, actor, "workspace", "", "journal-connection-key", []byte(`{"provider_type":"kaggle","label":"Journal fixture","credentials":{"api_token":"SYNTHETIC_TOKEN"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := connectionsService.RunOnce(ctx); err != nil || !worked {
+		t.Fatal("verify journal connection", worked, err)
+	}
+	connection, err := connectionsService.Get(ctx, actor, "workspace", op.ConnectionID)
+	if err != nil || connection.Selection == nil {
+		t.Fatal("journal connection unavailable", err)
+	}
+	f.profile, _, err = f.store.ReadProfile(ctx, connection.Selection.Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.config.InstanceID, f.config.Revision = string(f.profile.Binding.ProviderInstanceID), f.profile.Binding.ConfigurationRevision
+	f.config.CredentialRef = ports.CredentialRef(f.profile.CredentialRef)
 	jobs, err := admission.New(access, f.store, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw := []byte(`{"api_version":"compute-connector/v1alpha1","name":"staging-journal-fixture","profile":"fixture","bundle":{"object_id":"code"},"execution":{"kind":"python","command":["python","never-executed.py"]},"inputs":[{"name":"input","source":{"kind":"object","object_id":"input"},"target":"data.txt"}],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":2,"finalization_grace_seconds":2}}`)
+	raw = []byte(strings.Replace(string(raw), `"profile":"fixture"`, `"profile":"`+f.profile.Binding.Profile+`"`, 1))
 	f.receipt, err = jobs.Submit(ctx, actor, "workspace", "staging-journal-key", raw)
 	if err != nil {
+		t.Fatal(err)
+	}
+	permits, err := executionauth.New(access, f.store, f.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, _ := json.Marshal(executionauth.Request{AttemptID: f.receipt.AttemptID, MaxRemoteWallSeconds: 10, AuthorizePrivateStaging: true, AuthorizeCompute: true})
+	if _, err = permits.Authorize(ctx, actor, "workspace", f.receipt.JobID, "journal-permit-key", grant); err != nil {
 		t.Fatal(err)
 	}
 	f.attach(t)
@@ -233,7 +268,7 @@ func (f *stagingJournalFixture) noCompute(t *testing.T) {
 }
 func (f *stagingJournalFixture) attach(t *testing.T) {
 	t.Helper()
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{f.config.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{f.config.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +377,7 @@ func TestStagingM3JournalSurvivesLostAcknowledgementsAndRemap(t *testing.T) {
 			changed := f.profile
 			changed.Binding.ConfigurationRevision = "replacement"
 			changed.AccountScope = "other_account"
-			if err := f.store.PutProfile(context.Background(), changed, true); err != nil {
+			if err := replaceJournalProfile(t, f, changed, true); err != nil {
 				t.Fatal(err)
 			}
 			f.ready = true

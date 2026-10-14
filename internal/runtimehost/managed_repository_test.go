@@ -30,7 +30,7 @@ type advanceBeforeFinish struct {
 func (r *advanceBeforeFinish) FinishConnection(ctx context.Context, record connections.Record, result connections.Completion) error {
 	r.calls++
 	if r.calls == 1 {
-		if _, err := r.Store.ClaimNextManaged(ctx, "clock_fixture", result.Now.Add(time.Millisecond)); err != nil {
+		if _, err := r.Store.ClaimNext(ctx, "clock_fixture", result.Now.Add(time.Millisecond)); err != nil {
 			return err
 		}
 	}
@@ -55,7 +55,7 @@ func TestManagedConnectionCompletionRetriesClockWithoutReverification(t *testing
 	}
 	// Capacity GET/list uses the same guard but never re-verifies the account.
 	now := time.Now().UTC()
-	if _, err := f.host.store.ClaimNextManaged(context.Background(), "clock_fixture", now); err != nil {
+	if _, err := f.host.store.ClaimNext(context.Background(), "clock_fixture", now); err != nil {
 		t.Fatal(err)
 	}
 	stale := now.Add(-time.Second)
@@ -80,7 +80,7 @@ func (r *advanceBeforeDispatchCommit) CommitDispatch(ctx context.Context, handle
 	r.calls++
 	if r.calls == 1 {
 		r.handle, r.action = handle, action
-		if _, err := r.Store.ClaimNextManaged(ctx, "clock_fixture", now.Add(time.Millisecond)); err != nil {
+		if _, err := r.Store.ClaimNext(ctx, "clock_fixture", now.Add(time.Millisecond)); err != nil {
 			return dispatch.Work{}, err
 		}
 	} else if handle != r.handle || !reflect.DeepEqual(action, r.action) {
@@ -130,7 +130,7 @@ func TestManagedPostProviderCommitRetriesClockWithoutRepeatingCallback(t *testin
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if _, err = f.host.store.ClaimNextManaged(ctx, "clock_fixture", now.Add(time.Millisecond)); err != nil {
+	if _, err = f.host.store.ClaimNext(ctx, "clock_fixture", now.Add(time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
 	key, _ := admission.KeyDigest("clock-job-authorization")

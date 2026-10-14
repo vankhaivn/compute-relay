@@ -19,7 +19,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/api"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
-	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/objects"
@@ -183,7 +182,7 @@ func TestWriteBaselineState(t *testing.T) {
 	}
 	defer results.Close()
 	outputs := &collectionProvider{fetches: map[string]int{}, files: completedOutputs(t, f, f.journal(t, collected).Remote.Identity)}
-	runCollection(t, collectionEngine(t, f, outputs, results, managedCollectionRepository{f.s}))
+	runCollection(t, collectionEngine(t, f, outputs, results, f.s))
 	jobPath := "/v1/workspaces/a/jobs/" + string(collected.JobID)
 	requests = append(requests,
 		baselineRequest{Name: "collected collect replay", Method: "POST", Path: jobPath + "/collect", Key: "collect-collected", Body: collect},
@@ -220,14 +219,6 @@ func TestWriteBaselineState(t *testing.T) {
 	}
 }
 
-type managedCollectionRepository struct{ *Store }
-
-func (r managedCollectionRepository) ClaimCollection(ctx context.Context, now time.Time, ttl time.Duration, workers int) (*collection.Work, error) {
-	return r.Store.ClaimCollectionManaged(ctx, now, ttl, workers)
-}
-
-// dumpState writes the complete logical database: schema text exactly as stored, every row as
-// SQL literals, then indexes and triggers so loading never fires write-time triggers.
 func dumpState(t *testing.T, s *Store) string {
 	t.Helper()
 	var out strings.Builder

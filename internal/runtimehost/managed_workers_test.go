@@ -201,7 +201,7 @@ func TestManagedClaimsRetryStaleClockWithoutWeakeningStoreGuard(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	stale := now.Add(-time.Second)
-	if _, err := f.host.store.ClaimNextManaged(ctx, "fixture_worker", now); err != nil {
+	if _, err := f.host.store.ClaimNext(ctx, "fixture_worker", now); err != nil {
 		t.Fatal(err)
 	}
 	dispatchRepo := managedDispatchRepository{f.host.store}
@@ -217,15 +217,15 @@ func TestManagedClaimsRetryStaleClockWithoutWeakeningStoreGuard(t *testing.T) {
 	}
 	// The wrappers cannot move persisted time backwards or bypass its protection.
 	for _, claim := range []func() error{
-		func() error { _, err := f.host.store.ClaimNextManaged(ctx, "fixture_worker", stale); return err },
-		func() error { _, err := f.host.store.ClaimRecoveryManaged(ctx, "fixture_worker", stale); return err },
-		func() error { _, err := f.host.store.ClaimCollectionManaged(ctx, stale, time.Minute, 2); return err },
+		func() error { _, err := f.host.store.ClaimNext(ctx, "fixture_worker", stale); return err },
+		func() error { _, err := f.host.store.ClaimRecovery(ctx, "fixture_worker", stale); return err },
+		func() error { _, err := f.host.store.ClaimCollection(ctx, stale, time.Minute, 2); return err },
 	} {
 		if err := claim(); !errors.Is(err, scheduler.ErrClock) {
 			t.Fatal("persisted monotonic guard changed", err)
 		}
 	}
-	if _, err := f.host.store.ClaimNextManaged(ctx, "fixture_worker", now.Add(time.Second)); err != nil {
+	if _, err := f.host.store.ClaimNext(ctx, "fixture_worker", now.Add(time.Second)); err != nil {
 		t.Fatal("claims cannot resume once time catches up", err)
 	}
 }

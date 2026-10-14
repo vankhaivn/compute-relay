@@ -1,3 +1,4 @@
+// Package credentials stores installation-scoped secrets without ambient lookup.
 package credentials
 
 import (
@@ -13,8 +14,12 @@ import (
 )
 
 const MaxVaultBytes = 64 << 10
+const MaxBytes = 8192
 
 var (
+	ErrInvalid      = errors.New("invalid credential configuration")
+	ErrUnconfigured = errors.New("credential source is not configured")
+	ErrUnavailable  = errors.New("configured credential is unavailable")
 	ErrUnsupported  = errors.New("protected credential storage is unsupported")
 	ErrConflict     = errors.New("protected credential entry already exists with different contents")
 	vaultKey        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)

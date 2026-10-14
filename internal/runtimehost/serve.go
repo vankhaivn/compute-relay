@@ -17,8 +17,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
-	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 type clock struct{}
@@ -34,20 +32,19 @@ type Listening struct {
 
 type ServeConfig struct {
 	Address string
-	Kaggle  *KaggleServeConfig
 	Managed *ManagedServeConfig
 }
 
-// Serve preserves the safe default: HTTP admission and published-result delivery
-// only. Provider workers require ServeConfigured with explicit provider settings.
+// Serve composes managed connections with finite CPU policy by default.
+// Empty installations perform no provider work until a connection is configured.
 func (h *Host) Serve(ctx context.Context, address string, announce func(Listening) error) error {
 	return h.ServeConfigured(ctx, ServeConfig{Address: address}, announce)
 }
 
-// ServeConfigured joins HTTP handlers and any explicitly enabled provider workers
+// ServeConfigured joins HTTP handlers and managed provider workers
 // before returning. Local shutdown never calls provider cancellation or cleanup.
 func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce func(Listening) error) error {
-	if h == nil || announce == nil || !ValidListen(serve.Address) || serve.Kaggle != nil && serve.Managed != nil {
+	if h == nil || announce == nil || !ValidListen(serve.Address) {
 		return ErrRequest
 	}
 	if err := ctx.Err(); err != nil {
@@ -74,43 +71,26 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		return ErrState
 	}
 
-	mode := "local-admission-only"
-	dispatchEnabled := false
-	var dispatcher *dispatch.Engine
-	var collector *collection.Engine
-	var schedulerSettings scheduler.Settings
-	var managed *managedServices
+	config := DefaultManagedServeConfig()
+	if serve.Managed != nil {
+		config = *serve.Managed
+	}
+	managed, err := h.managedWorkers(ctx, config)
+	if err != nil {
+		return err
+	}
+	dispatcher, collector, schedulerSettings := managed.dispatcher, managed.collector, managed.settings
+	mode := "managed-connections"
+	dispatchEnabled := dispatcher != nil
 	var logResolver joblogs.Resolver
-	// Cleanup applies requests with the same repository partition and frozen-binding
-	// resolver as the collector of the active provider mode.
 	var cleanupRepo cleanup.WorkRepository
 	var cleanupResolver cleanup.Resolver
-	if serve.Kaggle != nil {
-		var registry *provider.SnapshotRegistry
-		dispatcher, collector, schedulerSettings, registry, err = h.kaggleWorkers(ctx, *serve.Kaggle)
-		if err != nil {
-			return err
-		}
-		logResolver = registry
-		cleanupRepo, cleanupResolver = h.store, registry
-		mode = "kaggle-workers"
-		dispatchEnabled = true
+	if managed.resolver != nil {
+		logResolver, cleanupResolver = managed.resolver, managed.resolver
 	}
-	if serve.Managed != nil {
-		managed, err = h.managedWorkers(ctx, *serve.Managed)
-		if err != nil {
-			return err
-		}
-		dispatcher, collector, schedulerSettings = managed.dispatcher, managed.collector, managed.settings
-		if managed.resolver != nil {
-			logResolver = managed.resolver
-		}
-		mode = "managed-connections"
-		dispatchEnabled = dispatcher != nil
-		if dispatchEnabled {
-			mode = "managed-workers"
-			cleanupRepo, cleanupResolver = managedCleanupRepository{h.store}, managed.resolver
-		}
+	if dispatchEnabled {
+		mode = "managed-workers"
+		cleanupRepo = managedCleanupRepository{h.store}
 	}
 	if dispatchEnabled {
 		defer func() {

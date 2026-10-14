@@ -235,7 +235,7 @@ func TestArtifactsM3PublicationUsesScopedVerifiedBytesAndOriginalReceipt(t *test
 	}
 	changed := f.x.f.profile
 	changed.Binding.ConfigurationRevision, changed.AccountScope = "remapped", "foreign_account"
-	if err := f.x.f.store.PutProfile(ctx, changed, false); err != nil {
+	if err := replaceJournalProfile(t, f.x.f, changed, false); err != nil {
 		t.Fatal(err)
 	}
 	f.run(t, false)

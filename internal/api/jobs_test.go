@@ -20,6 +20,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/api"
 	"github.com/vankhaivn/compute-relay/internal/auth"
+	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
@@ -34,6 +35,7 @@ func (noUpload) Put(context.Context, domain.ObjectMetadata, io.Reader) (domain.O
 }
 
 type jobHTTP struct {
+	profiles map[string]string
 	url      string
 	handler  http.Handler
 	store    *sqlite.Store
@@ -78,9 +80,7 @@ func setupJobHTTP(t *testing.T) *jobHTTP {
 		}
 		f.tokens[name], f.tokenIDs[name] = sec.Reveal(), record.ID
 	}
-	if err = store.PutProfile(ctx, admission.DefaultProfile(domain.ProviderBinding{Profile: "default-gpu", ProviderInstanceID: "fake", ConfigurationRevision: "rev1"}, "account"), true); err != nil {
-		t.Fatal(err)
-	}
+	f.profiles = configureJobProfiles(t, store, access)
 	if err = store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: 0, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +106,58 @@ func setupJobHTTP(t *testing.T) *jobHTTP {
 	return f
 }
 
+// Configure the same managed selection used in production; these tests grant no compute.
+func configureJobProfiles(t *testing.T, store *sqlite.Store, access *auth.Service) map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	service, err := connections.New(access, store, &managedVault{values: map[string][]byte{}}, []connections.Adapter{&managedAdapter{}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := map[string]string{}
+	for _, workspace := range []domain.WorkspaceID{"a", "b"} {
+		secret, token, err := access.Issue(ctx, workspace, []auth.Scope{auth.Read, auth.Manage}, time.Time{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		principal, err := access.Authenticate(ctx, secret.Reveal())
+		if err != nil {
+			t.Fatal(err)
+		}
+		op, err := service.Submit(ctx, principal, workspace, "", "job-fixture-connection", []byte(managedBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if worked, err := service.RunOnce(ctx); err != nil || !worked {
+			t.Fatal("managed fixture verification", worked, err)
+		}
+		connection, err := service.Get(ctx, principal, workspace, op.ConnectionID)
+		if err != nil || connection.Selection == nil {
+			t.Fatal("managed fixture selection", err)
+		}
+		profiles[string(workspace)] = connection.Selection.Profile
+		if err := store.RevokeToken(ctx, token.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return profiles
+}
+
+func (f *jobHTTP) job(workspace, body string) string {
+	if profile := f.profiles[workspace]; profile != "" {
+		return strings.ReplaceAll(body, `"profile":"default-gpu"`, `"profile":"`+profile+`"`)
+	}
+	return body
+}
+
 const jobBody = `{"api_version":"compute-connector/v1alpha1","name":"test","profile":"default-gpu","bundle":{"object_id":"code"},"execution":{"kind":"python","command":["python","not-executed.py"]},"inputs":[],"outputs":[{"path":"result.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":120,"setup_seconds":30,"finalization_grace_seconds":15}}`
 
 func (f *jobHTTP) call(t *testing.T, method, path, who, key, body string, want int) (http.Header, []byte) {
 	t.Helper()
+	parts := strings.Split(path, "/")
+	if len(parts) > 3 {
+		body = f.job(parts[3], body)
+	}
 	r, err := http.NewRequest(method, f.url+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +277,7 @@ func (*lostAdmissionResponse) Write([]byte) (int, error) { return 0, io.ErrClose
 func TestLostHTTPReceiptReplaysCommittedIDs(t *testing.T) {
 	f := setupJobHTTP(t)
 	path := "/v1/workspaces/a/jobs"
-	r := httptest.NewRequest("POST", f.url+path, strings.NewReader(jobBody))
+	r := httptest.NewRequest("POST", f.url+path, strings.NewReader(f.job("a", jobBody)))
 	r.Header.Set("Authorization", "Bearer "+f.tokens["a"])
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Idempotency-Key", "lost-http-receipt")

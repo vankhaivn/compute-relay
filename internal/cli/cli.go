@@ -47,7 +47,7 @@ func RunContext(parent context.Context, args []string, stdout, stderr io.Writer)
 			return 1
 		}
 		return 0
-	case "init", "state", "serve", "workspace", "token", "validate", "profile":
+	case "init", "state", "serve", "workspace", "token", "validate":
 		return operatorcli.Run(parent, args, stdout, stderr, runtimehost.Command)
 	case "bundle":
 		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)

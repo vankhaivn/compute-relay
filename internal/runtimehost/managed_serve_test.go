@@ -124,12 +124,8 @@ func TestManagedHTTPAdvertisesComposedServicesWithoutStartupAccountReads(t *test
 	}
 }
 
-func TestManagedServeRejectsMixedModeAndInvalidFiniteConfiguration(t *testing.T) {
+func TestManagedServeRejectsInvalidFiniteConfiguration(t *testing.T) {
 	f := newManagedTestFixture(t, true)
-	if err := f.host.ServeConfigured(context.Background(), ServeConfig{Address: "127.0.0.1:0", Managed: &f.config, Kaggle: &KaggleServeConfig{}},
-		func(Listening) error { t.Fatal("mixed mode started"); return nil }); err != ErrRequest {
-		t.Fatal("legacy process budget and managed permits combined", err)
-	}
 	for _, mutate := range []func(*ManagedServeConfig){
 		func(c *ManagedServeConfig) { c.PythonExecutable = "relative/python" },
 		func(c *ManagedServeConfig) { c.PythonExecutable = filepath.Join(t.TempDir(), "missing.exe") },

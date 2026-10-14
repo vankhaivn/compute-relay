@@ -11,7 +11,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -61,8 +60,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 			return nil, ErrCorrupt
 		}
 		frozenLimits[c.Sequence] = p.MaxActiveAttempts
-		c.Managed = executionauth.Managed(p)
-		if c.Managed && p.MaxActiveAttempts == 0 {
+		if p.MaxActiveAttempts == 0 {
 			frozenLimits[c.Sequence] = 1
 		}
 		frozenResources[c.Sequence] = p.ResourceScope
@@ -105,11 +103,8 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 		if frozen := frozenLimits[c.Sequence]; frozen > 0 {
 			c.Policy.MaxActive = min(c.Policy.MaxActive, frozen)
 		}
-		if c.Managed {
-			// Explicit CPU work retains unknown-quota warnings and known
-			// exhaustion checks; only GPU work requires a positive allowance.
-			c.Policy.StrictQuota = c.Resource != "cpu"
-		}
+		// CPU work retains unknown-quota warnings and exhaustion checks.
+		c.Policy.StrictQuota = c.Resource != "cpu"
 		key := c.AccountScope + "/" + c.Resource // validated opaque account IDs cannot contain '/'.
 		if q, ok := quotas[key]; ok {
 			c.Quota = q
@@ -138,15 +133,8 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 	return result, nil
 }
 
+// ClaimNext requires the attempt's durable execution or preparation permit.
 func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
-	return s.claimNext(ctx, owner, now, false)
-}
-
-// ClaimNextManaged uses durable attempt permits, independent of standalone budgets.
-func (s *Store) ClaimNextManaged(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
-	return s.claimNext(ctx, owner, now, true)
-}
-func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, managed bool) (scheduler.Result, error) {
 	if !domain.ObjectID(owner).Valid() {
 		return scheduler.Result{}, scheduler.ErrInvalid
 	}
@@ -164,9 +152,6 @@ func (s *Store) claimNext(ctx context.Context, owner string, now time.Time, mana
 		rows, err := schedulerSnapshot(ctx, tx, settings, now)
 		if err != nil {
 			return err
-		}
-		for i := range rows {
-			rows[i].DispatchModeExcluded = rows[i].Managed != managed
 		}
 		index, view, err := scheduler.Select(rows, domain.WorkspaceID(last), settings, now)
 		if err != nil {

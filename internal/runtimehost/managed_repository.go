@@ -93,8 +93,6 @@ func (r managedAuthorizationRepository) ReadReadiness(ctx context.Context, works
 type managedDispatchStore interface {
 	dispatch.Repository
 	dispatch.CancellationRepository
-	ClaimNextManaged(context.Context, string, time.Time) (scheduler.Result, error)
-	ClaimRecoveryManaged(context.Context, string, time.Time) (*scheduler.Claim, error)
 }
 type managedDispatchRepository struct{ managedDispatchStore }
 
@@ -102,14 +100,14 @@ var _ dispatch.CancellationRepository = managedDispatchRepository{}
 
 // Claims have no retained provider outcome; a later poll can safely retry them.
 func (r managedDispatchRepository) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
-	result, err := r.ClaimNextManaged(ctx, owner, now)
+	result, err := r.managedDispatchStore.ClaimNext(ctx, owner, now)
 	if errors.Is(err, scheduler.ErrClock) {
 		return scheduler.Result{}, nil
 	}
 	return result, err
 }
 func (r managedDispatchRepository) ClaimRecovery(ctx context.Context, owner string, now time.Time) (*scheduler.Claim, error) {
-	result, err := r.ClaimRecoveryManaged(ctx, owner, now)
+	result, err := r.managedDispatchStore.ClaimRecovery(ctx, owner, now)
 	if errors.Is(err, scheduler.ErrClock) {
 		return nil, nil
 	}
@@ -150,12 +148,11 @@ func (r managedDispatchRepository) YieldDispatch(ctx context.Context, handle dis
 
 type managedCollectionStore interface {
 	collection.Repository
-	ClaimCollectionManaged(context.Context, time.Time, time.Duration, int) (*collection.Work, error)
 }
 type managedCollectionRepository struct{ managedCollectionStore }
 
 func (r managedCollectionRepository) ClaimCollection(ctx context.Context, now time.Time, ttl time.Duration, workers int) (*collection.Work, error) {
-	result, err := r.ClaimCollectionManaged(ctx, now, ttl, workers)
+	result, err := r.managedCollectionStore.ClaimCollection(ctx, now, ttl, workers)
 	if errors.Is(err, scheduler.ErrClock) {
 		return nil, nil
 	}

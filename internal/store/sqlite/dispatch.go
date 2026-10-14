@@ -136,11 +136,9 @@ func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.T
 				return dispatch.Work{}, ErrCorrupt
 			}
 		}
-		if executionauth.Managed(record.Profile) {
-			status, err := dispatchAuthorization(ctx, tx, work, now)
-			if err != nil || status != executionauth.Consumed {
-				return dispatch.Work{}, ErrCorrupt
-			}
+		status, err := dispatchAuthorization(ctx, tx, work, now)
+		if err != nil || status != executionauth.Consumed {
+			return dispatch.Work{}, ErrCorrupt
 		}
 		if err = matchesFrozenPlan(work, *j.Plan, j.PreparationID); err != nil {
 			return dispatch.Work{}, ErrCorrupt
@@ -280,7 +278,7 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 			if err != nil {
 				return err
 			}
-			if executionauth.Managed(work.Job.Profile) && status != executionauth.Consumed {
+			if status != executionauth.Consumed {
 				return dispatch.ErrPolicy
 			}
 			if err = newMutationPolicy(ctx, tx, work, now); err != nil {

@@ -32,6 +32,11 @@ type ManagedServeConfig struct {
 	MaxWorkers           int
 }
 
+// DefaultManagedServeConfig installs finite policy without resolving an account.
+func DefaultManagedServeConfig() ManagedServeConfig {
+	return ManagedServeConfig{MachineShape: "cpu", MaxRemoteWallSeconds: 1800, MaxWorkers: 2}
+}
+
 func (c ManagedServeConfig) validate() error {
 	if c.CredentialStore != "" && c.CredentialStore != "file" && c.CredentialStore != "keychain" {
 		return ErrRequest
@@ -188,10 +193,8 @@ func (h *Host) managedProvider(config ManagedServeConfig, resolver ports.Credent
 	if profile.Accelerator != "" && profile.Accelerator != accelerator {
 		return nil, ErrRequest
 	}
-	// One resolver invocation belongs to one dispatch/collection step. A fresh
-	// adapter's one-attempt budget cannot admit work: the managed repository alone
-	// claims durable permits and consumes them before preparation intents.
-	adapter, err := kaggle.NewRuntimeAdapter(providerConfig, inner, resolver, h.inputs, clock{}, h.store.LoadProviderAttempt, policy, 1, true)
+	// The repository consumes a durable permit before every preparation intent.
+	adapter, err := kaggle.NewRuntimeAdapter(providerConfig, inner, resolver, h.inputs, clock{}, h.store.LoadProviderAttempt, policy, true)
 	if err != nil {
 		return nil, ErrRequest
 	}

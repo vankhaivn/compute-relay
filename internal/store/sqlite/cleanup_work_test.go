@@ -272,9 +272,6 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 	if again, err := f.s.ClaimCleanup(ctx, f.clock.Now(), 2*time.Second); again != nil || err != nil {
 		t.Fatal("live claim was taken twice", again, err)
 	}
-	if managed, err := f.s.ClaimCleanupManaged(ctx, f.clock.Now(), 2*time.Second); managed != nil || err != nil {
-		t.Fatal("managed worker claimed an explicit attempt", managed, err)
-	}
 	f.clock.advance(3 * time.Second)
 	second, err := f.s.ClaimCleanup(ctx, f.clock.Now(), 2*time.Second)
 	if err != nil || second == nil || second.Lease.Generation != 2 || second.Lease.Fence == first.Lease.Fence || second.Record.Operation != first.Record.Operation {

@@ -95,9 +95,7 @@ func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOver
 		}
 		f.tokens[who], f.tokenIDs[who] = secret.Reveal(), record.ID
 	}
-	if err = store.PutProfile(ctx, admission.DefaultProfile(domain.ProviderBinding{Profile: "default-gpu", ProviderInstanceID: "fake", ConfigurationRevision: "rev1"}, "account"), true); err != nil {
-		t.Fatal(err)
-	}
+	f.profiles = configureJobProfiles(t, store, access)
 	digest := sha256.Sum256([]byte(controlBytes))
 	if err = store.CommitObject(ctx, domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: int64(len(controlBytes)), SHA256: domain.SHA256Digest(hex.EncodeToString(digest[:]))}); err != nil {
 		t.Fatal(err)

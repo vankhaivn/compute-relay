@@ -324,6 +324,9 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 		if err != nil {
 			return err
 		}
+		if err = actionableAttempt(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID); err != nil {
+			return err
+		}
 		if c.Now.Before(target.Attempt.UpdatedAt) {
 			return scheduler.ErrClock
 		}

@@ -14,7 +14,6 @@ import (
 func TestOperatorParserAcceptsOnlyExplicitCommandFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"init", "--root", "run"}, {"state", "--root", "run"}, {"serve", "--root", "run", "--listen", "127.0.0.1:0"},
-		{"serve", "--root", "run", "--provider-config", "provider.json", "--provider-profile", "kaggle-t4", "--provider-machine-shape", "NvidiaTeslaT4", "--max-provider-attempts", "2", "--allow-private-staging", "--allow-gpu"},
 		{"workspace", "create", "--root", "run", "--id", "app"}, {"workspace", "disable", "--root", "run", "--id", "app"},
 		{"token", "issue", "--root", "run", "--workspace", "app", "--scope", "read", "--scope", "write", "--output", "private-token", "--ttl", "2h"},
 		{"token", "revoke", "--root", "run", "--id", "tok_id"}, {"validate", "--file", "job.json"},
@@ -31,7 +30,7 @@ func TestOperatorParserAcceptsOnlyExplicitCommandFlags(t *testing.T) {
 }
 func TestOperatorInvalidAndHelpNeverPerformAnActionOrEchoInput(t *testing.T) {
 	for _, args := range [][]string{
-		nil, {"unknown-SYNTHETIC_SECRET"}, {"init"}, {"init", "--root", "a", "--root", "b"},
+		nil, {"unknown-SYNTHETIC_SECRET"}, {"profile", "show", "--root", "run", "--name", "fixture"}, {"init"}, {"init", "--root", "a", "--root", "b"},
 		{"state", "--root", "run", "--scope", "read"}, {"serve", "--root", "run", "--allow-gpu=false"},
 		{"serve", "--root", "run", "--provider-config", "provider.json"},
 		{"serve", "--root", "run", "--provider-config", "provider.json", "--provider-profile", "kaggle-t4", "--provider-machine-shape", "NvidiaTeslaT4", "--max-provider-attempts", "0", "--allow-private-staging", "--allow-gpu"},
@@ -90,9 +89,6 @@ func TestManagedServeParserDefaultsAndExplicitPolicy(t *testing.T) {
 	if err != nil || r.ManagedPython != python || r.ManagedMachineShape != "NvidiaTeslaT4" || r.ManagedMaxWallSeconds != 1800 || r.ManagedMaxWorkers != 2 || r.ManagedAllowInternet {
 		t.Fatal("managed defaults do not match the bounded policy", err)
 	}
-	if r.ProviderConfig != "" || r.ProviderProfile != "" || r.MaxProviderAttempts != 0 || r.AllowGPU || r.AllowPrivateStaging {
-		t.Fatal("managed policy implied standalone credentials or compute consent")
-	}
 	r, err = Parse(append(append([]string{}, base...), "--managed-machine-shape", "NvidiaTeslaP100", "--managed-max-wall-seconds", "86400", "--managed-max-workers", "16", "--managed-allow-internet"))
 	if err != nil || r.ManagedMachineShape != "NvidiaTeslaP100" || r.ManagedMaxWallSeconds != 86400 || r.ManagedMaxWorkers != 16 || !r.ManagedAllowInternet {
 		t.Fatal("explicit managed policy was not preserved", err)
@@ -102,8 +98,8 @@ func TestManagedServeParserDefaultsAndExplicitPolicy(t *testing.T) {
 		t.Fatal("minimum managed bounds or explicit internet denial rejected", err)
 	}
 	r, err = Parse([]string{"serve", "--root", "run"})
-	if err != nil || r.ManagedPython != "" || r.ManagedMachineShape != "" || r.ManagedMaxWallSeconds != 0 || r.ManagedMaxWorkers != 0 || r.ManagedAllowInternet {
-		t.Fatal("plain serve acquired managed defaults", err)
+	if err != nil || r.ManagedPython != "" || r.ManagedMachineShape != "cpu" || r.ManagedMaxWallSeconds != 1800 || r.ManagedMaxWorkers != 2 || r.ManagedAllowInternet {
+		t.Fatal("plain serve omitted finite managed defaults", err)
 	}
 	r, err = Parse([]string{"token", "issue", "--root", "run", "--workspace", "app", "--scope", "manage", "--scope", "execute", "--output", "private-token"})
 	if err != nil || len(r.Scopes) != 2 || r.Scopes[0] != "manage" || r.Scopes[1] != "execute" {
@@ -143,12 +139,8 @@ func TestManagedServeParserRejectsAmbiguousOrUnboundedFlags(t *testing.T) {
 			t.Fatal("invalid managed Python path accepted")
 		}
 	}
-	for _, flags := range [][]string{
-		{"--managed-machine-shape", "NvidiaTeslaT4"}, {"--managed-max-wall-seconds", "1800"}, {"--managed-max-workers", "2"}, {"--managed-allow-internet=false"},
-	} {
-		if _, err := Parse(append([]string{"serve", "--root", "run"}, flags...)); !errors.Is(err, ErrArguments) {
-			t.Fatal("managed companion flags selected a mode without its interpreter")
-		}
+	if _, err := Parse([]string{"serve", "--root", "run", "--managed-machine-shape", "NvidiaTeslaT4"}); !errors.Is(err, ErrArguments) {
+		t.Fatal("GPU shape accepted without a Kaggle interpreter")
 	}
 	for _, args := range [][]string{
 		{"init", "--root", "run"}, {"state", "--root", "run"}, {"workspace", "create", "--root", "run", "--id", "app"},
@@ -176,7 +168,7 @@ func TestManagedServeHelpDescribesPolicyWithoutPerformingWork(t *testing.T) {
 	}); code != 0 || diagnostic.Len() != 0 {
 		t.Fatal("managed serve help failed")
 	}
-	for _, required := range []string{"--managed-python ABS", "--managed-machine-shape NvidiaTeslaT4", "--managed-max-wall-seconds 1800", "--managed-max-workers 2", "--managed-allow-internet", "each attempt needs separate API execution authorization"} {
+	for _, required := range []string{"--managed-python ABS", "--managed-machine-shape cpu", "--managed-max-wall-seconds 1800", "--managed-max-workers 2", "--managed-allow-internet", "each attempt needs separate API execution authorization"} {
 		if !strings.Contains(out.String(), required) {
 			t.Fatal("help omitted managed policy or authorization semantics")
 		}
@@ -189,26 +181,26 @@ func TestManagedServeCPUIsExplicitAndDoesNotGrantCompute(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := Parse([]string{"serve", "--root", "run", "--managed-python", python, "--managed-machine-shape", "cpu"})
-	if err != nil || r.ManagedMachineShape != "cpu" || r.AllowGPU || r.MaxProviderAttempts != 0 {
+	if err != nil || r.ManagedMachineShape != "cpu" {
 		t.Fatal("explicit CPU managed policy rejected or granted compute", err)
 	}
 }
 
-func TestManagedSSHOnlyModeNeedsNoPythonAndStaysExplicit(t *testing.T) {
+func TestManagedServeDefaultsToSSHWithoutPython(t *testing.T) {
 	for _, backend := range []string{"file", "keychain"} {
-		r, err := Parse([]string{"serve", "--root", "run", "--managed", "--managed-credential-store", backend})
-		if err != nil || !r.Managed || r.ManagedPython != "" || r.ManagedCredentialStore != backend {
+		r, err := Parse([]string{"serve", "--root", "run", "--managed-credential-store", backend})
+		if err != nil || r.ManagedPython != "" || r.ManagedCredentialStore != backend {
 			t.Fatal("SSH-only credential choice rejected", err)
 		}
 	}
-	r, err := Parse([]string{"serve", "--root", "run", "--managed"})
-	if err != nil || !r.Managed || r.ManagedPython != "" || r.ManagedMachineShape != "cpu" || r.ManagedMaxWorkers != 2 || r.ManagedMaxWallSeconds != 1800 || r.AllowGPU || r.MaxProviderAttempts != 0 {
+	r, err := Parse([]string{"serve", "--root", "run"})
+	if err != nil || r.ManagedPython != "" || r.ManagedMachineShape != "cpu" || r.ManagedMaxWorkers != 2 || r.ManagedMaxWallSeconds != 1800 {
 		t.Fatal("SSH-only defaults or authority changed", err)
 	}
 	for _, flags := range [][]string{
 		{"--managed=false"}, {"--managed", "--managed"}, {"--managed", "--managed-machine-shape", "NvidiaTeslaT4"},
 		{"--managed", "--provider-profile", "fixture"}, {"--managed", "--managed-python", ""},
-		{"--managed-credential-store", "file"}, {"--managed", "--managed-credential-store", "unknown"},
+		{"--managed", "--managed-credential-store", "unknown"},
 	} {
 		if _, err := Parse(append([]string{"serve", "--root", "run"}, flags...)); err != ErrArguments {
 			t.Fatal("ambiguous SSH-only flags accepted", flags, err)

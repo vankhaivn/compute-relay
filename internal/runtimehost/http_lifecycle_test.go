@@ -42,7 +42,7 @@ func TestHTTPShutdownJoinsActiveHandlerBeforeReturning(t *testing.T) {
 	defer cancel()
 	ready, done := make(chan struct{}), make(chan error, 1)
 	go func() {
-		done <- serveHTTP(ctx, server, listener, time.Second, func() error { close(ready); return nil })
+		done <- serveHTTPMode(ctx, server, listener, time.Second, "managed-workers", func() error { close(ready); return nil })
 	}()
 	<-ready
 	response := make(chan error, 1)
@@ -82,7 +82,7 @@ func TestHTTPForcedCloseCancelsThenJoinsHandler(t *testing.T) {
 	defer cancel()
 	ready, done := make(chan struct{}), make(chan error, 1)
 	go func() {
-		done <- serveHTTP(ctx, server, listener, 50*time.Millisecond, func() error { close(ready); return nil })
+		done <- serveHTTPMode(ctx, server, listener, 50*time.Millisecond, "managed-workers", func() error { close(ready); return nil })
 	}()
 	<-ready
 	response := make(chan struct{})
@@ -114,7 +114,7 @@ func TestHTTPAnnouncementFailureClosesListener(t *testing.T) {
 	listener := testListener(t)
 	address := listener.Addr().String()
 	server := &http.Server{Handler: http.NotFoundHandler()}
-	err := serveHTTP(context.Background(), server, listener, time.Second, func() error { return errors.New("SYNTHETIC_PRIVATE_OUTPUT") })
+	err := serveHTTPMode(context.Background(), server, listener, time.Second, "managed-workers", func() error { return errors.New("SYNTHETIC_PRIVATE_OUTPUT") })
 	if !errors.Is(err, ErrState) {
 		t.Fatal("unacknowledged startup succeeded", err)
 	}

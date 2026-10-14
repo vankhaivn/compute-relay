@@ -13,7 +13,7 @@ import (
 var testNow = time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
 
 func candidate(seq int64, w, account string) Candidate {
-	return Candidate{Identity: Identity{domain.WorkspaceID(w), domain.JobID(fmt.Sprintf("job_%d", seq)), domain.AttemptID(fmt.Sprintf("att_%d", seq))}, Sequence: seq, State: domain.InitialAttemptState(), ActiveAttempt: true, WorkspaceEnabled: true, AccountScope: account, ProviderInstanceID: "instance", Policy: AccountPolicy{MaxActive: 1}, Resource: "gpu", WallSeconds: 120}
+	return Candidate{Identity: Identity{domain.WorkspaceID(w), domain.JobID(fmt.Sprintf("job_%d", seq)), domain.AttemptID(fmt.Sprintf("att_%d", seq))}, Sequence: seq, State: domain.InitialAttemptState(), AuthorizationGranted: true, ActiveAttempt: true, WorkspaceEnabled: true, AccountScope: account, ProviderInstanceID: "instance", Policy: AccountPolicy{MaxActive: 1}, Resource: "gpu", WallSeconds: 120}
 }
 func TestSelectFIFOAndRoundRobin(t *testing.T) {
 	rows := []Candidate{candidate(3, "a", "x"), candidate(2, "b", "x"), candidate(1, "a", "x")}

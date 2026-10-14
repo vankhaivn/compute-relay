@@ -132,7 +132,7 @@ func TestManagedHTTPConcurrencyUsesSharedSchedulerWithoutRemoteReads(t *testing.
 				t.Fatal("unclaimed authorizations occupied execution slots", before)
 			}
 			for i := 0; i < 2; i++ {
-				claim, err := f.store.ClaimNextManaged(ctx, "parallel-worker", time.Now().UTC())
+				claim, err := f.store.ClaimNext(ctx, "parallel-worker", time.Now().UTC())
 				if err != nil || claim.Claim == nil || claim.Claim.JobID != jobs[i].JobID {
 					t.Fatal("two independent claims unavailable", claim, err)
 				}

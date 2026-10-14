@@ -51,7 +51,22 @@ func newAdmission(t *testing.T) admissionFixture {
 		}
 	}
 	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "default-gpu", ProviderInstanceID: "fake_1", ConfigurationRevision: "rev_1"}, "account_1")
+	profile.CredentialRef = "vault:con_admission_a"
 	if err = s.PutProfile(ctx, profile, true); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES('con_admission_a','a','fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?)`, profile.AccountScope, profile.Binding.Profile, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := profile
+	second.Binding.Profile += "_b"
+	second.CredentialRef = "vault:con_admission_b"
+	if err = s.PutProfile(ctx, second, true); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.Exec(`INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,updated_at) VALUES('con_admission_b','b','fixture','fixture',1,'verified','enabled','fixture_account',?,'fixture_key',?,?)`, second.AccountScope, second.Binding.Profile, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
 		t.Fatal(err)
 	}
 	access, err := auth.New(s, s, nil)
@@ -200,7 +215,7 @@ func TestAdmissionConcurrentKeysAndConflicts(t *testing.T) {
 	if _, err := f.service.Submit(ctx, f.p, "a", "concurrent-key", []byte(strings.Replace(admissionJSON, "offline-admission", "changed", 1))); !errors.Is(err, admission.ErrConflict) {
 		t.Fatal("different request did not conflict", err)
 	}
-	second, err := f.service.Submit(ctx, f.other, "b", "concurrent-key", []byte(admissionJSON))
+	second, err := f.service.Submit(ctx, f.other, "b", "concurrent-key", []byte(strings.Replace(admissionJSON, `"profile":"default-gpu"`, `"profile":"default-gpu_b"`, 1)))
 	if err != nil || second.JobID == first.JobID || second.Replay {
 		t.Fatal("workspace key collision", err)
 	}

@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -30,7 +29,7 @@ func (executionUnreadBlobs) Open(context.Context, domain.WorkspaceID, domain.Obj
 func newExecutionFixture(t *testing.T) *Executor {
 	t.Helper()
 	c, plan, prepared := executionFixture(t)
-	resolver, err := credentials.NewEnvironment([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
+	resolver, err := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_TOKEN", true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +160,7 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 					return stagingResponse{}, ErrProcess
 				}
 			case "credential":
-				missing, err := credentials.NewEnvironment([]ports.CredentialRef{e.stager.config.CredentialRef}, func(string) (string, bool) { return "", false })
+				missing, err := fixtureCredentials([]ports.CredentialRef{e.stager.config.CredentialRef}, func(string) (string, bool) { return "", false })
 				if err != nil {
 					t.Fatal(err)
 				}

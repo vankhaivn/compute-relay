@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -66,7 +65,7 @@ func controlWork(ctx context.Context, tx *sql.Tx, record admission.Record) (disp
 	return work, nil
 }
 
-func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed []string, job domain.JobID, attempt domain.AttemptID) (operations.RetryInputs, error) {
+func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID) (operations.RetryInputs, error) {
 	var result operations.RetryInputs
 	r, err := controlTarget(ctx, tx, w, job, attempt)
 	if err != nil {
@@ -75,18 +74,8 @@ func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed 
 	if r.Job.ActiveAttemptID != attempt {
 		return result, operations.ErrChanged
 	}
-	permitted := false
-	for _, profile := range allowed {
-		if profile == r.Profile.Binding.Profile {
-			permitted = true
-		}
-	}
-	if strings.HasPrefix(r.Profile.CredentialRef, "vault:") {
-		if err = managedProfileOwned(ctx, tx, w, r.Profile); err != nil {
-			return result, err
-		}
-	} else if !permitted {
-		return result, auth.ErrForbidden
+	if err = managedProfileOwned(ctx, tx, w, r.Profile); err != nil {
+		return result, err
 	}
 	if err = operations.RetryAllowed(r.Attempt.State); err != nil {
 		return result, err
@@ -137,11 +126,11 @@ func (s *Store) RetryInputs(ctx context.Context, w domain.WorkspaceID, token str
 	defer done()
 	var result operations.RetryInputs
 	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		allowed, err := actorInTx(ctx, tx, w, token, auth.Operate)
+		_, err := actorInTx(ctx, tx, w, token, auth.Operate)
 		if err != nil {
 			return err
 		}
-		result, err = retryInputs(ctx, tx, w, allowed, job, attempt)
+		result, err = retryInputs(ctx, tx, w, job, attempt)
 		return err
 	})
 	if err != nil {
@@ -162,7 +151,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 	defer done()
 	var result operations.Record
 	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		allowed, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Operate)
+		_, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Operate)
 		if err != nil {
 			return err
 		}
@@ -179,6 +168,9 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		}
 		target, err := controlTarget(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID)
 		if err != nil {
+			return err
+		}
+		if err = actionableAttempt(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID); err != nil {
 			return err
 		}
 		if c.Now.Before(target.Attempt.UpdatedAt) {
@@ -220,7 +212,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 			if target.Request.Spec().Expired(c.Now) {
 				return admission.ErrExpired
 			}
-			proof, err := retryInputs(ctx, tx, c.WorkspaceID, allowed, c.JobID, c.Request.AttemptID)
+			proof, err := retryInputs(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID)
 			if err != nil {
 				return err
 			}

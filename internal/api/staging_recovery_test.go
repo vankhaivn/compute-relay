@@ -2,12 +2,15 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -16,6 +19,26 @@ func TestControlHTTPReconcilesExhaustedOriginalPreparation(t *testing.T) {
 	f, blobs := setupControlHTTP(t, nil)
 	job := admitControlJob(t, f)
 	ctx := context.Background()
+	access, err := auth.New(f.store, f.store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := access.Issue(ctx, "a", []auth.Scope{auth.Execute}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := access.Authenticate(ctx, secret.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	permits, err := executionauth.New(access, f.store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, _ := json.Marshal(executionauth.Request{AttemptID: job.AttemptID, MaxRemoteWallSeconds: 120, AuthorizePrivateStaging: true, AuthorizeCompute: true})
+	if _, err := permits.Authorize(ctx, principal, "a", job.JobID, "staging-fixture-grant", grant); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.store.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
@@ -24,6 +47,10 @@ func TestControlHTTPReconcilesExhaustedOriginalPreparation(t *testing.T) {
 		t.Fatal("fixture claim failed", err)
 	}
 	work, err := f.store.LoadDispatch(ctx, *claimed.Claim, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err = f.store.ConsumeAuthorization(ctx, work.Handle, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -328,7 +328,7 @@ func TestManagedManualCollectionRecoveryNeedsNoNewGrant(t *testing.T) {
 		}
 	}
 	f.restart(t)
-	if w, err := f.s.ClaimCollectionManaged(ctx, f.clock.Now(), time.Second, 1); w != nil || err != nil {
+	if w, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 1); w != nil || err != nil {
 		t.Fatal("managed manual job auto-collected", w, err)
 	}
 	service, principal, _ := controlService(t, f, "a", auth.Operate)
@@ -336,13 +336,13 @@ func TestManagedManualCollectionRecoveryNeedsNoNewGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := f.s.ClaimCollectionManaged(ctx, f.clock.Now(), time.Second, 1)
+	w, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 1)
 	if w == nil || err != nil || w.Lease.OperationID != r.Operation.ID || w.Binding.AccountScope != f.profile.AccountScope {
 		t.Fatal(w, err)
 	}
 	f.clock.advance(2 * time.Second)
 	f.restart(t)
-	w, err = f.s.ClaimCollectionManaged(ctx, f.clock.Now(), time.Second, 1)
+	w, err = f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 1)
 	if w == nil || err != nil || w.Lease.Generation != 2 || w.Lease.OperationID != r.Operation.ID {
 		t.Fatal(w, err)
 	}

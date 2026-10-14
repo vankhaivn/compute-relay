@@ -99,12 +99,12 @@ func TestManagedLimitsFreezeAndShareCapacityAcrossWorkspaces(t *testing.T) {
 		}
 	}
 	for i := range 2 {
-		result, err := f.s.ClaimNextManaged(ctx, fmt.Sprintf("limited-worker-%d", i), f.clock.Now())
+		result, err := f.s.ClaimNext(ctx, fmt.Sprintf("limited-worker-%d", i), f.clock.Now())
 		if err != nil || result.Claim == nil {
 			t.Fatalf("slot %d not available: %+v %v", i, result.View, err)
 		}
 	}
-	result, err := f.s.ClaimNextManaged(ctx, "limited-third", f.clock.Now())
+	result, err := f.s.ClaimNext(ctx, "limited-third", f.clock.Now())
 	if err != nil || result.Claim != nil || result.View.AccountReservations[*first.AccountID] != 2 {
 		t.Fatal("shared host allowed a third attempt", result, err)
 	}
