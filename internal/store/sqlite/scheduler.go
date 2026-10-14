@@ -27,7 +27,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id
  JOIN workspaces w ON w.workspace_id=q.workspace_id
  JOIN profile_revisions r ON r.profile=j.profile AND r.revision=j.profile_revision
- LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
+ LEFT JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
  LEFT JOIN execution_authorizations e ON e.workspace_id=q.workspace_id AND e.job_id=q.job_id AND e.attempt_id=q.attempt_id
  LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
  LEFT JOIN scheduler_resource_reservations rr ON rr.queue_seq=q.queue_seq
@@ -170,26 +170,9 @@ func (s *Store) ClaimNext(ctx context.Context, owner string) (scheduler.Result, 
 		if now.Before(a.UpdatedAt) {
 			return ErrCorrupt
 		}
-		var generation int64
-		err = tx.QueryRowContext(ctx, "SELECT generation FROM scheduler_leases WHERE queue_seq=?", row.Sequence).Scan(&generation)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		if generation == math.MaxInt64 {
-			return ErrConflict
-		}
-		fence, err := randomID("", 32)
+		lease, err := claimWorkLease(ctx, tx, workLease{kind: dispatchWork, key: workKey(row.Sequence), owner: owner}, now, settings.LeaseDuration)
 		if err != nil {
 			return err
-		}
-		expires := time.UnixMilli(now.Add(settings.LeaseDuration).UnixMilli()).UTC()
-		if !scheduler.ValidTime(expires) {
-			return scheduler.ErrInvalid
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO scheduler_leases VALUES(?,?,?,?,?,1)
- ON CONFLICT(queue_seq) DO UPDATE SET generation=excluded.generation,owner=excluded.owner,fence=excluded.fence,until_ms=excluded.until_ms,held=1`, row.Sequence, generation+1, owner, fence, expires.UnixMilli())
-		if err != nil {
-			return dbError(err)
 		}
 		next := a.State
 		next.Orchestration = domain.OrchestrationPreparing
@@ -201,7 +184,7 @@ func (s *Store) ClaimNext(ctx context.Context, owner string) (scheduler.Result, 
 		if err != nil {
 			return dbError(err)
 		}
-		claim := scheduler.Claim{Identity: row.Identity, Sequence: row.Sequence, Owner: owner, Generation: generation + 1, Fence: fence, ExpiresAt: expires, AttemptRevision: updated.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
+		claim := scheduler.Claim{Identity: row.Identity, Sequence: row.Sequence, Owner: owner, Generation: lease.generation, Fence: lease.fence, ExpiresAt: lease.until, AttemptRevision: updated.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
 		for _, head := range view.Heads {
 			if head.Sequence == row.Sequence {
 				claim.QuotaWarning = head.Warning

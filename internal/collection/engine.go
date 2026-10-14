@@ -42,14 +42,14 @@ func New(repo Repository, resolver Resolver, blobs BlobStore, clock Clock, cfg C
 
 // RunOnce is finite. An uncertain SQL acknowledgement is never turned into a second
 // mutation or a failed job. The durable lease expires; recovery reloads the same pin.
-func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
+func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	select {
 	case e.slots <- struct{}{}:
 		defer func() { <-e.slots }()
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	w, err := e.repo.ClaimCollection(ctx, e.config.Timeout+30*time.Second, e.config.Workers)
+	w, err := e.repo.ClaimCollection(ctx, worker.LeaseDuration, e.config.Workers)
 	if err != nil || w == nil {
 		return false, err
 	}
@@ -58,27 +58,47 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, e.config.Timeout)
 	defer cancel()
-	src, err := e.resolve(ctx, *w)
+	renewWork := *w
+	call, stop := worker.Heartbeat(ctx, w.Lease.Until, e.clock.Now, func(c context.Context) (time.Time, error) {
+		return e.repo.RenewCollection(c, renewWork, worker.LeaseDuration)
+	})
+	defer func() {
+		resultErr = worker.HeartbeatError(resultErr, stop())
+	}()
+	recordFailure := func(err error) error {
+		if renewalErr := stop(); renewalErr != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return worker.HeartbeatError(err, renewalErr)
+			}
+			// Provider failures normally become collection evidence, not fatal store errors.
+			return worker.HeartbeatError(collectionFailure(err), renewalErr)
+		}
+		return e.recordFailure(ctx, *w, err)
+	}
+	src, err := e.resolve(call, *w)
 	if err != nil {
-		return true, e.recordFailure(ctx, *w, err)
+		return true, recordFailure(err)
 	}
 	if w.Snapshot == nil {
-		snapshot, err := e.discover(ctx, src, *w)
+		snapshot, err := e.discover(call, src, *w)
 		if err != nil {
-			return true, e.recordFailure(ctx, *w, err)
+			return true, recordFailure(err)
 		}
-		if err = e.repo.PinCollection(ctx, *w, snapshot); err != nil {
+		if err = e.repo.PinCollection(call, *w, snapshot); err != nil {
 			return true, err
 		}
 		w.Snapshot = &snapshot
 	}
-	proof, err := e.verifyFiles(ctx, src, *w)
+	proof, err := e.verifyFiles(call, src, *w)
 	if err != nil {
 		var progressErr progressWriteError
 		if errors.As(err, &progressErr) {
 			return true, progressErr.error
 		}
-		return true, e.recordFailure(ctx, *w, err)
+		return true, recordFailure(err)
+	}
+	if err := stop(); err != nil {
+		return true, err
 	}
 	// No failure write follows a possibly committed publication acknowledgement.
 	return true, e.repo.CompleteCollection(ctx, *w, proof)
@@ -87,13 +107,18 @@ func (e *Engine) recordFailure(ctx context.Context, w Work, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	} // Restart/cancellation recovers the existing accepted ticket.
+	f := collectionFailure(err)
+	if commitErr := e.repo.FailCollection(ctx, w, f); commitErr != nil {
+		return commitErr
+	}
+	return f
+}
+
+func collectionFailure(err error) Failure {
 	f := Failure{Code: domain.CodeArtifactCollectionFailed}
 	var known Failure
 	if errors.As(err, &known) {
-		f = known
-	}
-	if commitErr := e.repo.FailCollection(ctx, w, f); commitErr != nil {
-		return commitErr
+		return known
 	}
 	return f
 }
@@ -106,10 +131,19 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src source, err error) {
 	}()
 	p, err := e.resolver.Resolve(w.Binding)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, ErrUnavailable
 	}
 	src, ok := p.(source)
-	if !ok || src.VerifyBinding(ctx, w.Binding) != nil {
+	if !ok {
+		return nil, failure(domain.CodeRemoteIdentityMismatch, true)
+	}
+	if err := src.VerifyBinding(ctx, w.Binding); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, failure(domain.CodeRemoteIdentityMismatch, true)
 	}
 	return src, nil

@@ -45,23 +45,23 @@ func ownedDispatchClaim(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now 
 	if !c.Valid() {
 		return domain.Attempt{}, false, scheduler.ErrInvalid
 	}
-	var owner, fence, profile string
-	var generation, until int64
-	var held, barrier bool
-	err := tx.QueryRowContext(ctx, `SELECT l.owner,l.fence,l.generation,l.until_ms,l.held,q.dispatch_barrier,r.snapshot
- FROM scheduler_leases l JOIN scheduler_queue q ON q.queue_seq=l.queue_seq
+	if _, err := checkWorkLease(ctx, tx, dispatchLease(c), now); err != nil {
+		return domain.Attempt{}, false, err
+	}
+	var profile string
+	var barrier bool
+	err := tx.QueryRowContext(ctx, `SELECT q.dispatch_barrier,r.snapshot
+ FROM scheduler_queue q
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id AND j.active_attempt_id=q.attempt_id
  JOIN profile_revisions r ON r.profile=j.profile AND r.revision=j.profile_revision
- WHERE q.queue_seq=? AND q.workspace_id=? AND q.job_id=? AND q.attempt_id=?`, c.Sequence, string(c.WorkspaceID), string(c.JobID), string(c.AttemptID)).Scan(&owner, &fence, &generation, &until, &held, &barrier, &profile)
+ WHERE q.queue_seq=? AND q.workspace_id=? AND q.job_id=? AND q.attempt_id=?`, c.Sequence, string(c.WorkspaceID), string(c.JobID), string(c.AttemptID)).Scan(&barrier, &profile)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Attempt{}, false, scheduler.ErrLeaseLost
 	}
 	if err != nil {
 		return domain.Attempt{}, false, dbError(err)
 	}
-	if !held || owner != c.Owner || fence != c.Fence || generation != c.Generation || until <= now.UnixMilli() || until != c.ExpiresAt.UnixMilli() {
-		return domain.Attempt{}, false, scheduler.ErrLeaseLost
-	}
+
 	// readJobRecord independently validates this snapshot; check ownership binding here
 	// without resolving a mutable profile alias or requiring the submitting token again.
 	var p struct {

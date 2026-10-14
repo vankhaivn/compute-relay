@@ -117,8 +117,8 @@ func readCollectionStatus(ctx context.Context, tx *sql.Tx, r admission.Record, n
 		var raw, stage string
 		var until int64
 		var held bool
-		err = tx.QueryRowContext(ctx, `SELECT p.stage,p.progress,c.until_ms,c.held FROM collection_progress p JOIN collection_leases c
- ON c.workspace_id=p.workspace_id AND c.job_id=p.job_id AND c.attempt_id=p.attempt_id
+		err = tx.QueryRowContext(ctx, `SELECT p.stage,p.progress,c.until_ms,c.held FROM collection_progress p JOIN work_leases c
+ ON c.kind='collection' AND c.key=p.lease_key
  AND c.operation_id=p.operation_id AND c.generation=p.generation AND c.fence=p.fence
  WHERE p.workspace_id=? AND p.job_id=? AND p.attempt_id=? AND p.operation_id=?`, r.Job.WorkspaceID, r.Job.ID, a.ID, id).Scan(&stage, &raw, &until, &held)
 		if err == nil {

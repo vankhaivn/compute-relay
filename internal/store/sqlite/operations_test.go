@@ -99,7 +99,7 @@ func TestControlsPreventDispatchFenceOldWorkerAndReplayAfterRestart(t *testing.T
 		t.Fatal("cancel created remote resources")
 	}
 	// The running callback's lease is not falsely released by the HTTP request.
-	if controlCount(t, f.s, "SELECT count(*) FROM scheduler_leases WHERE held=1") != 1 {
+	if controlCount(t, f.s, "SELECT count(*) FROM work_leases WHERE kind='dispatch' AND held=1") != 1 {
 		t.Fatal("local ownership released prematurely")
 	}
 	before := controlCount(t, f.s, "SELECT count(*) FROM events")

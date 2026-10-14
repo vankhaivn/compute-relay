@@ -77,6 +77,7 @@ func (o Outcome) Valid() bool {
 // ClaimCleanup commits the running status and lease before any provider call.
 type WorkRepository interface {
 	ClaimCleanup(context.Context, time.Duration) (*Work, error)
+	RenewCleanup(context.Context, Work, time.Duration) (time.Time, error)
 	CompleteCleanup(context.Context, Work, Outcome) error
 }
 type Resolver interface {
@@ -113,34 +114,43 @@ func New(repo WorkRepository, resolver Resolver, cfg Config) (*Engine, error) {
 // RunOnce processes one bounded attempt inventory. If the process stops after a call
 // but before its outcome commits, lease expiry permits the original target again;
 // adapters must therefore prove absence of an already deleted resource.
-func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
+func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	select {
 	case e.slots <- struct{}{}:
 		defer func() { <-e.slots }()
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	w, err := e.repo.ClaimCleanup(ctx, e.config.Timeout+30*time.Second)
+	w, err := e.repo.ClaimCleanup(ctx, worker.LeaseDuration)
 	if err != nil || w == nil {
 		return false, err
 	}
 	if !w.Valid() {
 		return true, ErrInvalid
 	}
-	call, cancel := context.WithTimeout(ctx, e.config.Timeout)
+	owned, stop := worker.Heartbeat(ctx, w.Lease.Until, nil, func(c context.Context) (time.Time, error) {
+		return e.repo.RenewCleanup(c, *w, worker.LeaseDuration)
+	})
+	defer func() {
+		resultErr = worker.HeartbeatError(resultErr, stop())
+	}()
+	call, cancel := context.WithTimeout(owned, e.config.Timeout)
 	defer cancel()
 	var outcome Outcome
 	if len(w.Resources) > 0 {
-		outcome, err = e.applyResources(ctx, call, *w)
+		outcome, err = e.applyResources(owned, call, *w)
 		if err != nil {
 			return true, err
 		}
 	} else {
 		outcome = Outcome{Effect: AlreadyAbsent}
 	}
-	if ctx.Err() != nil {
+	if owned.Err() != nil {
 		// Shutdown leaves the running claim for lease-expiry recovery.
-		return true, ctx.Err()
+		return true, owned.Err()
+	}
+	if err := stop(); err != nil {
+		return true, err
 	}
 	return true, e.repo.CompleteCleanup(ctx, *w, outcome)
 }

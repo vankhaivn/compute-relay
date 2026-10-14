@@ -118,6 +118,7 @@ func (v Verified) Matches(w Work) bool {
 
 type Repository interface {
 	ClaimCollection(context.Context, time.Duration, int) (*Work, error)
+	RenewCollection(context.Context, Work, time.Duration) (time.Time, error)
 	PinCollection(context.Context, Work, Snapshot) error
 	CompleteCollection(context.Context, Work, Verified) error
 	FailCollection(context.Context, Work, Failure) error

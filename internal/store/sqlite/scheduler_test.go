@@ -215,7 +215,7 @@ func TestSchedulerConcurrentClaimsShareAccountAcrossInstances(t *testing.T) {
 	}
 	wg.Wait()
 	close(claims)
-	if len(claims) != 1 || schedulerCount(t, s, "SELECT count(*) FROM scheduler_leases WHERE held=1") != 1 {
+	if len(claims) != 1 || schedulerCount(t, s, "SELECT count(*) FROM work_leases WHERE kind='dispatch' AND held=1") != 1 {
 		t.Fatal("account overcommitted")
 	}
 	// Alias remapping cannot move an accepted attempt into another account.
@@ -269,7 +269,7 @@ func TestSchedulerClaimAndEventFailureRollBackTogether(t *testing.T) {
 	if err != nil || a.State.Orchestration != domain.OrchestrationQueued || a.Revision != 1 {
 		t.Fatal("partial state persisted", a, err)
 	}
-	if schedulerCount(t, s, "SELECT count(*) FROM scheduler_leases") != 0 || schedulerCount(t, s, "SELECT count(*) FROM scheduler_control WHERE last_workspace!=''") != 0 {
+	if schedulerCount(t, s, "SELECT count(*) FROM work_leases WHERE kind='dispatch'") != 0 || schedulerCount(t, s, "SELECT count(*) FROM scheduler_control WHERE last_workspace!=''") != 0 {
 		t.Fatal("partial lease/cursor persisted")
 	}
 	if _, err = s.db.Exec("DROP TRIGGER fail_scheduler_event"); err != nil {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"io"
 	"time"
 
@@ -72,17 +71,8 @@ func loadCleanupResources(ctx context.Context, tx *sql.Tx, op domain.Operation) 
 
 func verifyCleanupLease(ctx context.Context, tx *sql.Tx, w cleanup.Work, now time.Time) (cleanupRow, error) {
 	l := w.Lease
-	var generation, until int64
-	var fence string
-	err := tx.QueryRowContext(ctx, `SELECT generation,fence,until_ms FROM cleanup_leases WHERE workspace_id=? AND operation_id=?`, string(l.WorkspaceID), string(l.OperationID)).Scan(&generation, &fence, &until)
-	if errors.Is(err, sql.ErrNoRows) {
-		return cleanupRow{}, cleanup.ErrLeaseLost
-	}
-	if err != nil {
-		return cleanupRow{}, dbError(err)
-	}
-	if generation != l.Generation || fence != l.Fence || until != l.Until.UnixMilli() || now.UnixMilli() >= until {
-		return cleanupRow{}, cleanup.ErrLeaseLost
+	if _, err := checkWorkLease(ctx, tx, cleanupLease(l), now); err != nil {
+		return cleanupRow{}, err
 	}
 	row, err := loadCleanup(ctx, tx, l.WorkspaceID, l.OperationID)
 	if err != nil {

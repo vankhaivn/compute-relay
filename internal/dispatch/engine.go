@@ -121,12 +121,20 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return err
 	}
 	ctx, cancel := context.WithTimeout(parent, e.config.PreparationTimeout)
-	s := &session{e: e, current: work, ctx: ctx, cancel: cancel}
-	done := make(chan struct{})
-	go s.heartbeat(done)
+	s := &session{e: e, current: work}
+	ctx, stop := worker.Heartbeat(ctx, work.Handle.Claim.ExpiresAt, e.clock.Now, func(c context.Context) (time.Time, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		updated, err := e.repo.RenewDispatch(c, s.current.Handle)
+		if err == nil {
+			s.current.Handle = updated
+		}
+		return updated.Claim.ExpiresAt, err
+	})
+	s.ctx = ctx
 	defer func() {
+		resultErr = worker.HeartbeatError(resultErr, stop())
 		cancel()
-		<-done
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
 		w := s.work()
@@ -138,9 +146,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if len(w.Handle.Claim.Fence) > 0 {
 			delay += time.Duration(w.Handle.Claim.Fence[0]%4) * delay / 10
 		}
-		if yieldErr := e.repo.YieldDispatch(cleanup, w.Handle, delay); yieldErr != nil && resultErr == nil {
-			resultErr = yieldErr
-		}
+		resultErr = errors.Join(resultErr, e.repo.YieldDispatch(cleanup, w.Handle, delay))
 	}()
 	// Expiry prohibits a future start; it cannot establish that possible execution
 	// stopped. Submitting and submitted attempts retain observation-only recovery.
@@ -367,7 +373,6 @@ type session struct {
 	e       *Engine
 	current Work
 	ctx     context.Context
-	cancel  context.CancelFunc
 	sampled time.Time
 }
 
@@ -404,6 +409,9 @@ func (s *session) prepared(p provider.Prepared) error {
 	return s.commit(Action{Kind: PreparationSeen, Prepared: &p})
 }
 func (s *session) fail(code domain.ErrorCode) error {
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
 	if err := s.commit(Action{Kind: Fault, Code: code}); err != nil {
 		return err
 	}
@@ -426,34 +434,4 @@ func (s *session) progress(completed, total int64) {
 	ctx, stop := context.WithTimeout(s.ctx, 5*time.Second)
 	defer stop()
 	_ = s.e.repo.RecordPreparationProgress(ctx, h, sample)
-}
-func (s *session) heartbeat(done chan struct{}) {
-	defer close(done)
-	for {
-		w := s.work()
-		interval := w.Handle.Claim.ExpiresAt.Sub(s.e.clock.Now()) / 3
-		if interval < 10*time.Millisecond {
-			interval = 10 * time.Millisecond
-		}
-		if interval > 5*time.Second {
-			interval = 5 * time.Second
-		}
-		timer := time.NewTimer(interval)
-		select {
-		case <-s.ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-		s.mu.Lock()
-		updated, err := s.e.repo.RenewDispatch(s.ctx, s.current.Handle)
-		if err == nil {
-			s.current.Handle = updated
-		}
-		s.mu.Unlock()
-		if err != nil {
-			s.cancel()
-			return
-		}
-	}
 }

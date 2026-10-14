@@ -69,7 +69,7 @@ func TestSchedulerProcessKillBeforeAndAfterClaimCommit(t *testing.T) {
 			if err != nil || a.Number != 1 || nonce != strings.Repeat("a", 64) || a.State.Orchestration != domain.OrchestrationPreparing {
 				t.Fatal("attempt changed across process kill", a, err)
 			}
-			if schedulerCount(t, s, "SELECT count(*) FROM attempts") != 1 || schedulerCount(t, s, "SELECT count(*) FROM scheduler_leases WHERE held=1") != 1 {
+			if schedulerCount(t, s, "SELECT count(*) FROM attempts") != 1 || schedulerCount(t, s, "SELECT count(*) FROM work_leases WHERE kind='dispatch' AND held=1") != 1 {
 				t.Fatal("duplicate attempt or claim")
 			}
 		})
@@ -116,7 +116,7 @@ func TestSchedulerCrashHelper(t *testing.T) {
 		if _, err = schedulerTransition(ctx, tx, id, a, next, domain.EventSchedulerClaimed, schedulerNow); err != nil {
 			return err
 		}
-		if _, err = tx.Exec("INSERT INTO scheduler_leases VALUES(1,1,'crashed',?,?,1)", strings.Repeat("b", 64), schedulerNow.Add(30*time.Second).UnixMilli()); err != nil {
+		if _, err = tx.Exec("INSERT INTO work_leases(kind,key,generation,owner,fence,until_ms,held) VALUES('dispatch','[1]',1,'crashed',?,?,1)", strings.Repeat("b", 64), schedulerNow.Add(30*time.Second).UnixMilli()); err != nil {
 			return err
 		}
 		if _, err = tx.Exec("UPDATE scheduler_control SET last_workspace='a',clock_ms=?", schedulerNow.UnixMilli()); err != nil {
@@ -148,7 +148,7 @@ func TestSchedulerDiskFullDoesNotAcknowledgeOrPartiallyClaim(t *testing.T) {
 	if !errors.Is(err, ErrDiskFull) || r.Claim != nil {
 		t.Fatal("disk-full claim acknowledged", r, err)
 	}
-	if schedulerCount(t, s, "SELECT count(*) FROM scheduler_leases") != 0 || schedulerCount(t, s, "SELECT count(*) FROM scheduler_control WHERE last_workspace!=''") != 0 {
+	if schedulerCount(t, s, "SELECT count(*) FROM work_leases WHERE kind='dispatch'") != 0 || schedulerCount(t, s, "SELECT count(*) FROM scheduler_control WHERE last_workspace!=''") != 0 {
 		t.Fatal("disk-full left partial claim")
 	}
 	var raw string

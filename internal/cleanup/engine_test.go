@@ -29,6 +29,10 @@ func (r *stubRepo) ClaimCleanup(context.Context, time.Duration) (*Work, error) {
 	r.work = nil
 	return w, r.claimErr
 }
+func (r *stubRepo) RenewCleanup(context.Context, Work, time.Duration) (time.Time, error) {
+	return time.Now().Add(time.Minute), nil
+}
+
 func (r *stubRepo) CompleteCleanup(_ context.Context, _ Work, o Outcome) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

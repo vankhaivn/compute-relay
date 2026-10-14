@@ -297,7 +297,7 @@ func TestCleanupStorageRejectsForgedRows(t *testing.T) {
 		"UPDATE cleanup_idempotency SET receipt=receipt",
 		"UPDATE cleanup_operations SET resource_id='res_execution_x'",
 		"UPDATE cleanup_operations SET status='succeeded',revision=2",
-		"INSERT INTO cleanup_leases VALUES('a','" + string(r.Operation.ID) + "',1,'0000000000000000000000000000000000000000000000000000000000000000',1)",
+		"INSERT INTO work_leases(kind,key,generation,owner,fence,until_ms,held) VALUES('cleanup',json_array('a','" + string(r.Operation.ID) + "'),1,'','0000000000000000000000000000000000000000000000000000000000000000',1,1)",
 	} {
 		if _, err := f.s.db.Exec(statement); err == nil {
 			t.Fatal("storage accepted a forged cleanup change", statement)

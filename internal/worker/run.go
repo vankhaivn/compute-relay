@@ -26,14 +26,15 @@ type Config struct {
 // Classify retries only identified transient failures. Unknown errors remain fatal.
 // Store adapters can expose Temporary without exporting driver diagnostics.
 func Classify(err error) Decision {
-	if err == nil {
-		return Continue
-	}
+	return classifyCauses(err, classify)
+}
+
+func classifyCauses(err error, classify func(error) Decision) Decision {
 	var joined interface{ Unwrap() []error }
 	if errors.As(err, &joined) {
 		decision := Continue
 		for _, cause := range joined.Unwrap() {
-			classified := Classify(cause)
+			classified := classifyCauses(cause, classify)
 			if classified == Stop {
 				return Stop
 			}
@@ -42,6 +43,13 @@ func Classify(err error) Decision {
 			}
 		}
 		return decision
+	}
+	return classify(err)
+}
+
+func classify(err error) Decision {
+	if err == nil {
+		return Continue
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return Retry
@@ -75,7 +83,7 @@ func Run(ctx context.Context, cfg Config, step func(context.Context, int) (bool,
 				if run.Err() != nil {
 					return
 				}
-				decision := classify(err)
+				decision := classifyCauses(err, classify)
 				if decision == Stop {
 					failures <- err
 					cancel()

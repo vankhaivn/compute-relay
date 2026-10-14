@@ -45,7 +45,7 @@ func (p *collectionProvider) ListArtifacts(ctx context.Context, remote provider.
 	check, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	var n int
-	if err := p.store.db.QueryRowContext(check, "SELECT count(*) FROM collection_leases WHERE held=1").Scan(&n); err != nil || n == 0 {
+	if err := p.store.db.QueryRowContext(check, "SELECT count(*) FROM work_leases WHERE kind='collection' AND held=1").Scan(&n); err != nil || n == 0 {
 		return provider.ArtifactPage{}, errors.New("transfer called without committed collection ownership")
 	}
 	if p.mode == "cycle" {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"math"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
@@ -42,7 +41,7 @@ func (s *Store) ClaimRecovery(ctx context.Context, owner string) (*scheduler.Cla
  JOIN dispatch_journals d ON d.queue_seq=q.queue_seq
  JOIN jobs j ON j.workspace_id=q.workspace_id AND j.job_id=q.job_id AND j.active_attempt_id=q.attempt_id
  JOIN attempts a ON a.workspace_id=q.workspace_id AND a.job_id=q.job_id AND a.attempt_id=q.attempt_id
- LEFT JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
+ LEFT JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
  LEFT JOIN preparation_authorizations g ON g.workspace_id=q.workspace_id AND g.job_id=q.job_id AND g.attempt_id=q.attempt_id
  LEFT JOIN start_authorizations x ON x.workspace_id=q.workspace_id AND x.job_id=q.job_id AND x.attempt_id=q.attempt_id
  WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=q.workspace_id AND r.job_id=q.job_id AND r.attempt_id=q.attempt_id)
@@ -75,27 +74,11 @@ func (s *Store) ClaimRecovery(ctx context.Context, owner string) (*scheduler.Cla
 		if now.Before(a.UpdatedAt) {
 			return ErrCorrupt
 		}
-		var generation int64
-		err = tx.QueryRowContext(ctx, "SELECT generation FROM scheduler_leases WHERE queue_seq=?", sequence).Scan(&generation)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		if generation == math.MaxInt64 {
-			return ErrConflict
-		}
-		fence, err := randomID("", 32)
+		lease, err := claimWorkLease(ctx, tx, workLease{kind: dispatchWork, key: workKey(sequence), owner: owner}, now, settings.LeaseDuration)
 		if err != nil {
 			return err
 		}
-		until := time.UnixMilli(now.Add(settings.LeaseDuration).UnixMilli()).UTC()
-		if !scheduler.ValidTime(until) {
-			return scheduler.ErrInvalid
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO scheduler_leases VALUES(?,?,?,?,?,1) ON CONFLICT(queue_seq) DO UPDATE SET generation=excluded.generation,owner=excluded.owner,fence=excluded.fence,until_ms=excluded.until_ms,held=1`, sequence, generation+1, owner, fence, until.UnixMilli())
-		if err != nil {
-			return dbError(err)
-		}
-		c := scheduler.Claim{Identity: row.Identity, Sequence: sequence, Owner: owner, Generation: generation + 1, Fence: fence, ExpiresAt: until, AttemptRevision: a.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
+		c := scheduler.Claim{Identity: row.Identity, Sequence: sequence, Owner: owner, Generation: lease.generation, Fence: lease.fence, ExpiresAt: lease.until, AttemptRevision: a.Revision, AccountScope: row.AccountScope, ProviderInstanceID: row.ProviderInstanceID}
 		if _, err = loadDispatch(ctx, tx, c, now); err != nil {
 			return err
 		}
@@ -124,15 +107,9 @@ func (s *Store) RenewDispatch(ctx context.Context, h dispatch.Handle) (dispatch.
 		if err != nil {
 			return err
 		}
-		until := time.UnixMilli(now.Add(settings.LeaseDuration).UnixMilli()).UTC()
-		if !scheduler.ValidTime(until) {
-			return scheduler.ErrInvalid
-		}
-		if until.Before(h.Claim.ExpiresAt) {
-			until = h.Claim.ExpiresAt
-		}
-		if _, err = tx.ExecContext(ctx, "UPDATE scheduler_leases SET until_ms=? WHERE queue_seq=?", until.UnixMilli(), h.Claim.Sequence); err != nil {
-			return dbError(err)
+		until, err := renewWorkLease(ctx, tx, dispatchLease(h.Claim), now, settings.LeaseDuration)
+		if err != nil {
+			return err
 		}
 		result = h
 		result.Claim.ExpiresAt = until
@@ -165,8 +142,8 @@ func (s *Store) YieldDispatch(ctx context.Context, h dispatch.Handle, delay time
 		if _, err = schedulerTransition(ctx, tx, h.Claim.Identity, work.Job.Attempt, work.Job.Attempt.State, domain.EventSchedulerReleased, now); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "UPDATE scheduler_leases SET owner='',fence='',until_ms=0,held=0 WHERE queue_seq=?", h.Claim.Sequence); err != nil {
-			return dbError(err)
+		if err = releaseWorkLease(ctx, tx, dispatchLease(h.Claim), now); err != nil {
+			return err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE scheduler_queue SET not_before_ms=? WHERE queue_seq=?", notBefore.UnixMilli(), h.Claim.Sequence); err != nil {
 			return dbError(err)

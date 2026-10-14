@@ -60,7 +60,7 @@ func retentionReference(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, j
 	}
 	ref.State, ref.UpdatedAt = target.Attempt.State, target.Attempt.UpdatedAt
 	var busy bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduler_queue q JOIN scheduler_leases l ON l.queue_seq=q.queue_seq WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1) OR EXISTS(SELECT 1 FROM collection_leases WHERE workspace_id=? AND job_id=? AND attempt_id=? AND held=1) OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))`, string(w), string(job), string(attempt), string(w), string(job), string(attempt), string(w), string(job), string(attempt)).Scan(&busy); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduler_queue q JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq) WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1) OR EXISTS(SELECT 1 FROM work_leases WHERE kind='collection' AND key=json_array(?,?,?) AND held=1) OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))`, string(w), string(job), string(attempt), string(w), string(job), string(attempt), string(w), string(job), string(attempt)).Scan(&busy); err != nil {
 		return ref, dbError(err)
 	}
 	ref.Busy = busy

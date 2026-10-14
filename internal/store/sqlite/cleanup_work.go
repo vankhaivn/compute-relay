@@ -26,9 +26,9 @@ func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.W
 		var id domain.OperationID
 		err := tx.QueryRowContext(ctx, `SELECT c.workspace_id,c.operation_id FROM cleanup_operations c
  JOIN jobs j ON j.workspace_id=c.workspace_id AND j.job_id=c.job_id
- LEFT JOIN cleanup_leases l ON l.workspace_id=c.workspace_id AND l.operation_id=c.operation_id
+ LEFT JOIN work_leases l ON l.kind='cleanup' AND l.key=json_array(c.workspace_id,c.operation_id)
  WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=c.workspace_id AND r.job_id=c.job_id AND r.attempt_id=c.attempt_id)
- AND (c.status='accepted' OR (c.status='running' AND (l.until_ms IS NULL OR l.until_ms<=?)))
+ AND (c.status='accepted' OR (c.status='running' AND (l.until_ms IS NULL OR l.held=0 OR l.until_ms<=?)))
  ORDER BY c.cleanup_seq LIMIT 1`, now.UnixMilli()).Scan(&w, &id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -98,31 +98,12 @@ func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.W
 				return err
 			}
 		}
-		var generation int64
-		err = tx.QueryRowContext(ctx, `SELECT generation FROM cleanup_leases WHERE workspace_id=? AND operation_id=?`, string(w), string(id)).Scan(&generation)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return dbError(err)
-		}
-		if generation == math.MaxInt64 {
-			return ErrConflict
-		}
-		generation++
-		fence, err := randomID("", 32)
+		lease, err := claimWorkLease(ctx, tx, workLease{kind: cleanupWork, key: workKey(w, id)}, now, ttl)
 		if err != nil {
 			return err
 		}
-		until := time.UnixMilli(now.Add(ttl).UnixMilli()).UTC()
-		// An upsert would run the insert trigger first, so a recovery claim updates.
-		if generation == 1 {
-			_, err = tx.ExecContext(ctx, `INSERT INTO cleanup_leases VALUES(?,?,?,?,?)`, string(w), string(id), generation, fence, until.UnixMilli())
-		} else {
-			_, err = tx.ExecContext(ctx, `UPDATE cleanup_leases SET generation=?,fence=?,until_ms=? WHERE workspace_id=? AND operation_id=? AND generation=?`, generation, fence, until.UnixMilli(), string(w), string(id), generation-1)
-		}
-		if err != nil {
-			return dbError(err)
-		}
 		work := cleanup.Work{
-			Lease:                 cleanup.Lease{WorkspaceID: w, OperationID: id, Generation: generation, Fence: fence, Until: until},
+			Lease:                 cleanup.Lease{WorkspaceID: w, OperationID: id, Generation: lease.generation, Fence: lease.fence, Until: lease.until},
 			Record:                current,
 			Binding:               plan.binding,
 			Request:               provider.CleanupRequest{Remote: plan.remote, LedgerID: plan.resource, CreationOperationID: plan.creation, ResultsCollected: plan.collected, Mode: provider.CleanupApply},
@@ -139,6 +120,22 @@ func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.W
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *Store) RenewCleanup(ctx context.Context, w cleanup.Work, ttl time.Duration) (time.Time, error) {
+	if !w.Valid() || ttl < time.Second || ttl > 31*time.Minute {
+		return time.Time{}, ErrInvalid
+	}
+	var until time.Time
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		if _, err := verifyCleanupLease(ctx, tx, w, now); err != nil {
+			return err
+		}
+		var err error
+		until, err = renewWorkLease(ctx, tx, cleanupLease(w.Lease), now, ttl)
+		return err
+	})
+	return until, err
 }
 
 // failCleanup settles a request whose attempt is no longer eligible. A recovered
@@ -181,20 +178,7 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 		return ErrInvalid
 	}
 	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
-		l := w.Lease
-		var generation, until int64
-		var fence string
-		err := tx.QueryRowContext(ctx, `SELECT generation,fence,until_ms FROM cleanup_leases WHERE workspace_id=? AND operation_id=?`, string(l.WorkspaceID), string(l.OperationID)).Scan(&generation, &fence, &until)
-		if errors.Is(err, sql.ErrNoRows) {
-			return cleanup.ErrLeaseLost
-		}
-		if err != nil {
-			return dbError(err)
-		}
-		if generation != l.Generation || fence != l.Fence || until != l.Until.UnixMilli() || now.UnixMilli() >= until {
-			return cleanup.ErrLeaseLost
-		}
-		row, err := loadCleanup(ctx, tx, l.WorkspaceID, l.OperationID)
+		row, err := verifyCleanupLease(ctx, tx, w, now)
 		if err != nil {
 			return err
 		}
@@ -233,6 +217,9 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 			if err = releaseGateStorage(ctx, tx, string(before.Operation.WorkspaceID), string(before.Operation.JobID), string(before.Operation.AttemptID)); err != nil {
 				return err
 			}
+		}
+		if err = releaseWorkLease(ctx, tx, cleanupLease(w.Lease), now); err != nil {
+			return err
 		}
 		return saveCleanup(ctx, tx, before, cleanup.Record{Operation: next, Effect: o.Effect})
 	})

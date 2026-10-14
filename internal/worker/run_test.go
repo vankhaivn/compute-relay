@@ -82,3 +82,23 @@ func TestRunWaitsForSideEffectsAfterFatalFailure(t *testing.T) {
 		t.Fatal("workers not joined")
 	}
 }
+
+func TestRunJoinedErrorFatalDominatesDomainContinue(t *testing.T) {
+	lost := errors.New("domain lease lost")
+	fatal := sqliteError(11)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	calls := 0
+	err := Run(ctx, Config{Workers: 1, PollDelay: time.Millisecond}, func(context.Context, int) (bool, error) {
+		calls++
+		return true, errors.Join(lost, busyError{}, fatal)
+	}, func(err error) Decision {
+		if errors.Is(err, lost) {
+			return Continue
+		}
+		return Classify(err)
+	})
+	if !errors.Is(err, lost) || !errors.Is(err, fatal) || calls != 1 {
+		t.Fatal("domain continuation masked a concurrent invariant failure", calls, err)
+	}
+}

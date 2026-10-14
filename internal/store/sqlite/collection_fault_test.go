@@ -180,7 +180,7 @@ func TestCollectionLeaseContentionStaleFenceAndForgedProof(t *testing.T) {
 	if _, err = f.s.db.Exec("UPDATE collection_snapshots SET snapshot_sha256=?", string(provider.Digest([]byte("tamper")))); err == nil {
 		t.Fatal("immutable snapshot changed")
 	}
-	if _, err = f.s.db.Exec("UPDATE collection_leases SET generation=1"); err == nil {
+	if _, err = f.s.db.Exec("UPDATE work_leases SET generation=1 WHERE kind='collection'"); err == nil {
 		t.Fatal("generation rollback allowed")
 	}
 	if f.state(t, id).Result == domain.ResultAvailable {

@@ -63,9 +63,9 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
 	at := now.UnixMilli()
 	var busy bool
 	err := tx.QueryRowContext(ctx, `SELECT
- EXISTS(SELECT 1 FROM scheduler_queue q JOIN scheduler_leases l ON l.queue_seq=q.queue_seq
+ EXISTS(SELECT 1 FROM scheduler_queue q JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
  WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1 AND l.until_ms>?)
- OR EXISTS(SELECT 1 FROM collection_leases WHERE workspace_id=? AND job_id=? AND attempt_id=? AND held=1 AND until_ms>?)
+ OR EXISTS(SELECT 1 FROM work_leases WHERE kind='collection' AND key=json_array(?,?,?) AND held=1 AND until_ms>?)
  OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running'))
  OR EXISTS(SELECT 1 FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)`,
 		w, job, attempt, at, w, job, attempt, at, w, job, attempt, w, job, attempt, string(self)).Scan(&busy)

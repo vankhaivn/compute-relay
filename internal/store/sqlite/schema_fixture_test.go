@@ -120,7 +120,22 @@ func copyFixtureAtSchema(t *testing.T, source *Store, version int) string {
 			}
 			columns = "connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at"
 		}
-		if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT " + columns + " FROM fixture_source." + quote(name)); err != nil {
+		sourceTable := "fixture_source." + quote(name)
+		// Reconstruct the released lease layout when creating an older synthetic fixture.
+		switch name {
+		case "scheduler_leases":
+			sourceTable = "fixture_source.work_leases WHERE kind='dispatch'"
+			columns = "queue_seq,generation,CASE held WHEN 0 THEN '' ELSE owner END,CASE held WHEN 0 THEN '' ELSE fence END,CASE held WHEN 0 THEN 0 ELSE until_ms END,held"
+		case "collection_leases":
+			sourceTable = "fixture_source.work_leases WHERE kind='collection'"
+			columns = "workspace_id,job_id,attempt_id,operation_id,generation,fence,until_ms,attempt_revision,held"
+		case "cleanup_leases":
+			sourceTable = "fixture_source.work_leases WHERE kind='cleanup'"
+			columns = "workspace_id,cleanup_operation_id,generation,fence,until_ms"
+		case "collection_progress":
+			columns = "workspace_id,job_id,attempt_id,operation_id,generation,fence,stage,progress"
+		}
+		if _, err := tx.Exec("INSERT INTO " + quote(name) + " SELECT " + columns + " FROM " + sourceTable); err != nil {
 			t.Fatal("copy fixture table", name, err)
 		}
 	}
