@@ -105,6 +105,8 @@ func jobStatus(record admission.Record) map[string]any {
 }
 func jobError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, admission.ErrUnsupportedInput):
+		respondError(w, r, 422, domain.CodeUnsupportedCapability, domain.FailureStageValidation, "HTTPS input sources are unsupported; upload inputs as objects")
 	case errors.Is(err, admission.ErrSpec):
 		respondError(w, r, 400, domain.CodeInvalidJobSpec, domain.FailureStageValidation, "invalid job specification")
 	case errors.Is(err, admission.ErrKey):

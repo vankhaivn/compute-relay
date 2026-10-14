@@ -250,7 +250,7 @@ func installCancelProbe(t testing.TB, f *dispatchFixture, supported bool, outcom
 		t.Fatal(err)
 	}
 	var err error
-	f.engine, err = dispatch.New(f.s, registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(f.s, registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

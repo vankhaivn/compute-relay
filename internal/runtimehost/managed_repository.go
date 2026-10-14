@@ -123,9 +123,6 @@ func (r managedDispatchRepository) ConsumeAuthorization(ctx context.Context, han
 		return r.managedDispatchStore.ConsumeAuthorization(ctx, handle, at)
 	})
 }
-func (r managedDispatchRepository) FreezeInput(ctx context.Context, handle dispatch.Handle, index int, object domain.ObjectMetadata, now time.Time) error {
-	return retryManagedWrite(ctx, now, func(at time.Time) error { return r.managedDispatchStore.FreezeInput(ctx, handle, index, object, at) })
-}
 func (r managedDispatchRepository) CommitDispatch(ctx context.Context, handle dispatch.Handle, action dispatch.Action, now time.Time) (dispatch.Work, error) {
 	return retryManagedClock(ctx, now, func(at time.Time) (dispatch.Work, error) {
 		return r.managedDispatchStore.CommitDispatch(ctx, handle, action, at)

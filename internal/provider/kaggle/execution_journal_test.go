@@ -155,7 +155,7 @@ func (x *executionJournalFixture) attach(t *testing.T) {
 		t.Fatal(err)
 	}
 	x.repo = &executionJournalRepository{Repository: f.store}
-	f.engine, err = dispatch.New(x.repo, registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(x.repo, registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

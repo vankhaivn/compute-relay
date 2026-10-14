@@ -46,7 +46,7 @@ func attachGate(t testing.TB, f *dispatchFixture) {
 	cfg := dispatch.DefaultConfig()
 	cfg.PollDelay = time.Millisecond
 	var err error
-	f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, nil, f.clock, cfg)
+	f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, f.clock, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

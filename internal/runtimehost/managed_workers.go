@@ -135,7 +135,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 	}
 	dispatchConfig := dispatch.DefaultConfig()
 	dispatchConfig.Workers, dispatchConfig.PollDelay = config.MaxWorkers, time.Second
-	result.dispatcher, err = dispatch.New(managedDispatchRepository{h.store}, resolver, h.inputs, nil, clock{}, dispatchConfig)
+	result.dispatcher, err = dispatch.New(managedDispatchRepository{h.store}, resolver, h.inputs, clock{}, dispatchConfig)
 	if err != nil {
 		return nil, ErrState
 	}

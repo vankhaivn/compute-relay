@@ -296,7 +296,7 @@ func (f *stagingJournalFixture) attach(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.repo = &stagingJournalRepository{Repository: f.store}
-	f.engine, err = dispatch.New(f.repo, registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(f.repo, registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -279,7 +279,7 @@ func TestCollectionProcessKillAfterDurablePin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.attach(t, s, nil)
+	f.attach(t, s)
 	f.clock.advance(time.Minute)
 	runCollection(t, collectionEngine(t, f, p, blobs, f.s))
 	lists, _ := p.counts()

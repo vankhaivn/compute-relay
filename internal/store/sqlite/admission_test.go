@@ -279,27 +279,6 @@ func TestAdmissionLimitsAndNoComputeValidation(t *testing.T) {
 		t.Fatal("limit blocked replay", err)
 	}
 }
-func TestPendingHTTPSIsDurableWithoutFetching(t *testing.T) {
-	f := newAdmission(t)
-	ctx := context.Background()
-	raw := strings.Replace(admissionJSON, `"kind":"object","object_id":"data"`, `"kind":"https","url":"https://example.com/public?version=1"`, 1)
-	r, err := f.service.Submit(ctx, f.p, "a", "https-pending", []byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	record, err := f.service.Get(ctx, f.p, "a", r.JobID)
-	if err != nil || record.PendingHTTPS != 1 || len(record.Objects) != 1 || record.Attempt.State.Execution != domain.ExecutionNotSubmitted {
-		t.Fatal("pending URL made optimistic ready/compute claim", err)
-	}
-	if record.Request.Spec().Inputs[0].Source.URL != "https://example.com/public?version=1" {
-		t.Fatal("source lost")
-	}
-	again, err := f.service.Submit(ctx, f.p, "a", "https-pending", []byte(raw))
-	if err != nil || !again.Replay {
-		t.Fatal(err)
-	}
-	// There is intentionally no downloader/provider dependency in Service or Repository.
-}
 func TestMissingForeignInputsAndRevokedActorsFailClosed(t *testing.T) {
 	f := newAdmission(t)
 	ctx := context.Background()

@@ -144,7 +144,7 @@ func TestManagedPostProviderCommitRetriesClockWithoutRepeatingCallback(t *testin
 	}
 	repo := &advanceBeforeDispatchCommit{Store: f.host.store}
 	p := &rejectingManagedProvider{}
-	engine, err := dispatch.New(managedDispatchRepository{repo}, p, f.host.inputs, nil, clock{}, dispatch.DefaultConfig())
+	engine, err := dispatch.New(managedDispatchRepository{repo}, p, f.host.inputs, clock{}, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

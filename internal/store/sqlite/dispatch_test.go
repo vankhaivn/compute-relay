@@ -23,7 +23,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
-	"github.com/vankhaivn/compute-relay/internal/httpsinput"
 	"github.com/vankhaivn/compute-relay/internal/packaging"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
@@ -177,10 +176,10 @@ func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.attach(t, s, nil)
+	f.attach(t, s)
 	return f
 }
-func (f *dispatchFixture) attach(t testing.TB, s *Store, fetch dispatch.HTTPSFetcher) {
+func (f *dispatchFixture) attach(t testing.TB, s *Store) {
 	t.Helper()
 	f.s = s
 	binding := provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}
@@ -193,7 +192,7 @@ func (f *dispatchFixture) attach(t testing.TB, s *Store, fetch dispatch.HTTPSFet
 	if err = f.registry.Register(binding, f.adapter); err != nil {
 		t.Fatal(err)
 	}
-	f.engine, err = dispatch.New(s, f.registry, f.blobs, fetch, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(s, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +287,7 @@ func (f *dispatchFixture) restart(t testing.TB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.attach(t, s, nil)
+	f.attach(t, s)
 }
 func (f *dispatchFixture) claim(t testing.TB) dispatch.Work {
 	t.Helper()
@@ -483,7 +482,7 @@ func TestDispatchCommitAcknowledgementLossDoesNotRepeatMutation(t *testing.T) {
 			id := f.seed(t, "a", 1, false)
 			wrapped := &lostDispatchAck{Store: f.s, kind: kind}
 			var err error
-			f.engine, err = dispatch.New(wrapped, f.registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+			f.engine, err = dispatch.New(wrapped, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -641,60 +640,14 @@ func TestDispatchPauseAndAccountPolicyBlockNewCallsButAllowObservation(t *testin
 	}
 }
 
-type fixtureFetcher struct {
-	calls int
-	body  string
-}
-
-func (f *fixtureFetcher) Fetch(ctx context.Context, r httpsinput.Request, accept func(context.Context, int64, io.Reader) error) error {
-	f.calls++
-	return accept(ctx, -1, strings.NewReader(f.body))
-}
-func TestDispatchURLFreezeSurvivesRestartWithoutRefetch(t *testing.T) {
+func TestDispatchMalformedBundleNeverStages(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, true)
-	fetch := &fixtureFetcher{body: "original immutable bytes"}
-	f.attach(t, f.s, fetch)
-	f.adapter.validateError = true
-	if err := f.step(t); err == nil {
-		t.Fatal("fixture validation failure ignored")
-	}
-	if fetch.calls != 1 {
-		t.Fatal("input not frozen")
-	}
-	f.restart(t)
-	fetch.body = "changed remote source"
-	f.attach(t, f.s, fetch)
-	if err := f.step(t); err != nil {
-		t.Fatal(err)
-	}
-	if fetch.calls != 1 {
-		t.Fatal("frozen URL re-fetched")
-	}
-	j := f.journal(t, id)
-	if j.Plan.Job.Inputs.Inputs[0].Object.SHA256 != provider.Digest([]byte("original immutable bytes")) {
-		t.Fatal("snapshot changed")
-	}
-	raw, _ := json.Marshal(j.Plan)
-	if bytes.Contains(raw, []byte("private-source-canary")) {
-		t.Fatal("source URL leaked into remote plan")
-	}
-}
-func TestDispatchMalformedBundleAndForeignFreezeNeverStage(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, true)
-	w := f.claim(t)
-	foreign := domain.ObjectMetadata{ID: "foreign", WorkspaceID: "b", Bytes: 0, SHA256: provider.Digest(nil)}
-	if err := f.s.FreezeInput(context.Background(), w.Handle, 0, foreign, f.clock.Now()); err == nil {
-		t.Fatal("foreign input accepted")
-	}
-	_ = f.s.YieldDispatch(context.Background(), w.Handle, f.clock.Now(), 0)
-	f.attach(t, f.s, &fixtureFetcher{body: "input"})
+	id := f.seed(t, "a", 1, false)
 	// Replace only disposable fixture bytes; never a source or operator directory.
 	// The controlled BlobStore lies about bundle bytes to exercise orchestration revalidation.
 	bad := &corruptBundle{BlobStore: f.blobs}
 	var err error
-	f.engine, err = dispatch.New(f.s, f.registry, bad, &fixtureFetcher{body: "input"}, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(f.s, f.registry, bad, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

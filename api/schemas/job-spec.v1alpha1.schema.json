@@ -185,7 +185,8 @@
                 ],
                 "properties": {
                   "kind": {
-                    "const": "https"
+                    "const": "https",
+                    "description": "Historical source records only. New admission rejects HTTPS sources; upload inputs as objects."
                   },
                   "url": {
                     "type": "string",

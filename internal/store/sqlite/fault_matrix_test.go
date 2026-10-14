@@ -93,7 +93,7 @@ func installMatrixProvider(t *testing.T, f *dispatchFixture, mode string) *matri
 	if mode == "deadline" {
 		cfg.ControlTimeout = 30 * time.Millisecond
 	}
-	engine, err := dispatch.New(f.s, registry, f.blobs, nil, f.clock, cfg)
+	engine, err := dispatch.New(f.s, registry, f.blobs, f.clock, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

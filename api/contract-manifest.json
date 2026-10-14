@@ -123,34 +123,6 @@
       ]
     },
     {
-      "schema": "schemas/object-import.v1alpha1.schema.json",
-      "valid": [
-        "examples/object-import.file.valid.json",
-        "examples/object-import.bundle.valid.json"
-      ],
-      "invalid": [
-        "examples/invalid/object-import.traversal.json",
-        "examples/invalid/object-import.unknown-field.json",
-        "examples/invalid/object-import.implicit-root.json",
-        "examples/invalid/object-import.mixed.json"
-      ]
-    },
-    {
-      "schema": "schemas/object-ingest.v1alpha1.schema.json",
-      "valid": [
-        "examples/object-ingest.valid.json",
-        "examples/object-ingest.digest.valid.json"
-      ],
-      "invalid": [
-        "examples/invalid/object-ingest.http.json",
-        "examples/invalid/object-ingest.userinfo.json",
-        "examples/invalid/object-ingest.headers.json",
-        "examples/invalid/object-ingest.fragment.json",
-        "examples/invalid/object-ingest.bad-digest.json",
-        "examples/invalid/object-ingest.null.json"
-      ]
-    },
-    {
       "schema": "schemas/control-request.v1alpha1.schema.json",
       "valid": [
         "examples/control-request.valid.json",

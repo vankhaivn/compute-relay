@@ -83,7 +83,7 @@ func (h *Host) kaggleWorkers(ctx context.Context, serve KaggleServeConfig) (*dis
 	dispatchConfig.Workers = 1
 	dispatchConfig.PollDelay = time.Second
 	repo := budgetedDispatchRepository{Repository: h.store, adapter: adapter}
-	dispatcher, err := dispatch.New(repo, registry, h.inputs, nil, clock{}, dispatchConfig)
+	dispatcher, err := dispatch.New(repo, registry, h.inputs, clock{}, dispatchConfig)
 	if err != nil {
 		return nil, nil, noSettings, nil, ErrState
 	}

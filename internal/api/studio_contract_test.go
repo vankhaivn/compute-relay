@@ -572,7 +572,7 @@ func TestStudioHTTPContract(t *testing.T) {
 	}
 	dispatchConfig := dispatch.DefaultConfig()
 	dispatchConfig.PollDelay = time.Millisecond
-	engine, err := dispatch.New(studioManagedStore{f.store}, f.registry, f.blobs, nil, studioClock{}, dispatchConfig)
+	engine, err := dispatch.New(studioManagedStore{f.store}, f.registry, f.blobs, studioClock{}, dispatchConfig)
 	if err != nil {
 		t.Fatal(err)
 	}

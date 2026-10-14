@@ -57,9 +57,9 @@ func seedAuthorizationConnection(t testing.TB, f *dispatchFixture, workspace dom
 }
 func attachManaged(t testing.TB, f *dispatchFixture) {
 	t.Helper()
-	f.attach(t, f.s, nil)
+	f.attach(t, f.s)
 	var err error
-	f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

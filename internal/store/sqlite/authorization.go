@@ -19,9 +19,9 @@ import (
 var _ executionauth.Repository = (*Store)(nil)
 
 // authorizationInputs binds the immutable request and each pinned local object.
-// Unresolved HTTPS sources cannot be authorized as if their bytes were frozen.
+// Every input requires pinned bytes, including requests retained from older schemas.
 func authorizationInputs(record admission.Record) (string, error) {
-	if record.PendingHTTPS != 0 {
+	if len(record.Objects) != 1+len(record.Request.Spec().Inputs) {
 		return "", executionauth.ErrInputs
 	}
 	raw, err := json.Marshal(struct {

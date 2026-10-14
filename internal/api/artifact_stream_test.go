@@ -1,4 +1,4 @@
-package artifactwire
+package api
 
 import (
 	"bytes"
@@ -38,7 +38,7 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 func TestCopyRetainsFinalReadErrorAndExactEOF(t *testing.T) {
 	payload := []byte("verified")
 	h := sha256.Sum256(payload)
-	file := File{"art_one", "outputs/answer", "output", int64(len(payload)), hex.EncodeToString(h[:])}
+	file := artifactFile{"art_one", "outputs/answer", "output", int64(len(payload)), hex.EncodeToString(h[:])}
 	for _, test := range []struct {
 		name string
 		r    io.Reader
@@ -56,7 +56,7 @@ func TestCopyRetainsFinalReadErrorAndExactEOF(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var dst bytes.Buffer
-			err := Copy(context.Background(), &dst, test.r, file)
+			err := copyArtifact(context.Background(), &dst, test.r, file)
 			if (err == nil) != test.ok || int64(dst.Len()) > file.Bytes {
 				t.Fatal("unqualified stream", err, dst.Len())
 			}
@@ -67,18 +67,18 @@ func TestCopyRetainsFinalReadErrorAndExactEOF(t *testing.T) {
 		writerFunc(func(p []byte) (int, error) { return len(p), io.ErrClosedPipe }),
 		writerFunc(func(p []byte) (int, error) { panic("private cause") }),
 	} {
-		if Copy(context.Background(), dst, bytes.NewReader(payload), file) == nil {
+		if copyArtifact(context.Background(), dst, bytes.NewReader(payload), file) == nil {
 			t.Fatal("failed destination qualified")
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if Copy(ctx, io.Discard, bytes.NewReader(payload), file) == nil {
+	if copyArtifact(ctx, io.Discard, bytes.NewReader(payload), file) == nil {
 		t.Fatal("cancelled copy qualified")
 	}
 	empty := sha256.Sum256(nil)
 	file.Bytes, file.SHA256 = 0, hex.EncodeToString(empty[:])
-	if err := Copy(context.Background(), io.Discard, bytes.NewReader(nil), file); err != nil {
+	if err := copyArtifact(context.Background(), io.Discard, bytes.NewReader(nil), file); err != nil {
 		t.Fatal("explicitly empty artifact rejected", err)
 	}
 }

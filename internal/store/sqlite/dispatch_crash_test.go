@@ -65,7 +65,7 @@ func TestDispatchProcessKillAtMutationIntentBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.attach(t, s, nil)
+			f.attach(t, s)
 			phase := dispatch.Local
 			if submission {
 				phase = dispatch.Ready

@@ -138,7 +138,6 @@ type Repository interface {
 	ClaimRecovery(context.Context, string, time.Time) (*scheduler.Claim, error)
 	LoadDispatch(context.Context, scheduler.Claim, time.Time) (Work, error)
 	ConsumeAuthorization(context.Context, Handle, time.Time) (Work, error)
-	FreezeInput(context.Context, Handle, int, domain.ObjectMetadata, time.Time) error
 	CommitDispatch(context.Context, Handle, Action, time.Time) (Work, error)
 	RenewDispatch(context.Context, Handle, time.Time) (Handle, error)
 	YieldDispatch(context.Context, Handle, time.Time, time.Duration) error

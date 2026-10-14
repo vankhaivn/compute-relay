@@ -45,7 +45,7 @@ func TestObjectAndHTTPErrorWireShapesMatchSchemas(t *testing.T) {
 }
 
 func TestImplementationStatusTracksOfflineHandlers(t *testing.T) {
-	for _, id := range []string{"getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob", "getJobLogs", "retryJob", "cancelJob", "reconcileJob", "collectJob", "cleanupJob", "previewJobCleanup", "getOperation"} {
+	for _, id := range []string{"getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "createJob", "validateJob", "getJob", "getJobLogs", "retryJob", "cancelJob", "reconcileJob", "collectJob", "cleanupJob", "previewJobCleanup", "getOperation"} {
 		if operationStatus(id) != "implemented-offline" {
 			t.Fatal(id)
 		}

@@ -33,7 +33,6 @@ type Engine struct {
 	repo      Repository
 	providers Resolver
 	blobs     BlobStore
-	fetcher   HTTPSFetcher
 	clock     Clock
 	config    Config
 	slots     chan struct{}
@@ -42,14 +41,14 @@ type Engine struct {
 
 func (e *Engine) WithSecrets(pool *workloadsecret.Pool) *Engine { e.secrets = pool; return e }
 
-func New(repo Repository, providers Resolver, blobs BlobStore, fetcher HTTPSFetcher, clock Clock, cfg Config) (*Engine, error) {
+func New(repo Repository, providers Resolver, blobs BlobStore, clock Clock, cfg Config) (*Engine, error) {
 	if repo == nil || providers == nil || blobs == nil || !cfg.Valid() {
 		return nil, ErrInvalid
 	}
 	if clock == nil {
 		clock = systemClock{}
 	}
-	return &Engine{repo: repo, providers: providers, blobs: blobs, fetcher: fetcher, clock: clock, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
+	return &Engine{repo: repo, providers: providers, blobs: blobs, clock: clock, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
 }
 
 // RunOnce advances at most one durable phase. Recovery has priority, but never creates
@@ -399,11 +398,6 @@ func (s *session) consumeAuthorization() error {
 		s.current = work
 	}
 	return err
-}
-func (s *session) freeze(index int, m domain.ObjectMetadata) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.e.repo.FreezeInput(s.ctx, s.current.Handle, index, m, s.e.clock.Now())
 }
 func (s *session) prepared(p provider.Prepared) error {
 	w := s.work()

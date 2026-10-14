@@ -107,7 +107,7 @@ func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed 
 	} else if r.Attempt.State.Execution != domain.ExecutionNotSubmitted {
 		return result, operations.ErrUnresolved
 	}
-	if r.PendingHTTPS != 0 || len(r.Objects) != 1+len(r.Request.Spec().Inputs) {
+	if len(r.Objects) != 1+len(r.Request.Spec().Inputs) {
 		return result, operations.ErrInputs
 	}
 	for _, ref := range r.Objects {

@@ -202,7 +202,7 @@ func TestOperationalM3ManualCancellationPreservesActivityAndReceipt(t *testing.T
 		t.Fatal(err)
 	}
 	// Use the concrete store so its CancellationRepository method is available.
-	f.engine, err = dispatch.New(f.store, registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+	f.engine, err = dispatch.New(f.store, registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

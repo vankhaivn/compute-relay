@@ -68,7 +68,7 @@ func TestPreparationProgressIsFencedMonotonicAndShownOnlyWhilePreparing(t *testi
 	if err = registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, probe); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := dispatch.New(f.s, registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+	engine, err := dispatch.New(f.s, registry, f.blobs, f.clock, dispatch.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

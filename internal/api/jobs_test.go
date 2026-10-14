@@ -244,3 +244,26 @@ func TestLostHTTPReceiptReplaysCommittedIDs(t *testing.T) {
 		t.Fatal("response failure created a second job")
 	}
 }
+
+func TestHTTPSInputsFailAdmissionWithoutCreatingJobs(t *testing.T) {
+	f := setupJobHTTP(t)
+	input := `[{"name":"source","source":{"kind":"https","url":"https://example.org/input"},"target":"input"}]`
+	body := strings.Replace(jobBody, `"inputs":[]`, `"inputs":`+input, 1)
+	for _, path := range []string{"/v1/workspaces/a/jobs", "/v1/workspaces/a/jobs/validate"} {
+		_, raw := f.call(t, "POST", path, "a", "https-rejected-1", body, 422)
+		if !bytes.Contains(raw, []byte(domain.CodeUnsupportedCapability)) || !bytes.Contains(raw, []byte("upload inputs as objects")) {
+			t.Fatalf("unclear rejection: %s", raw)
+		}
+	}
+	_, receipt := f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "https-rejected-1", jobBody, 202)
+	if bytes.Contains(receipt, []byte(`"idempotency_replay":true`)) {
+		t.Fatal("rejected input created an admission receipt")
+	}
+}
+
+func TestRemovedInputRoutesAreUnavailable(t *testing.T) {
+	f := setupJobHTTP(t)
+	for _, route := range []string{"import", "ingest"} {
+		f.call(t, "POST", "/v1/workspaces/a/objects/"+route, "a", "", `{}`, 405)
+	}
+}

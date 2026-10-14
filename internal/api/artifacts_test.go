@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vankhaivn/compute-relay/internal/appclient"
-	"github.com/vankhaivn/compute-relay/internal/artifactwire"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -91,9 +89,9 @@ func (s *artifactFaultStream) Close() error {
 	return nil
 }
 
-func artifactHTTPFixture(t *testing.T, payload []byte) (*fixture, *artifactReadFixture, artifactwire.Target) {
+func artifactHTTPFixture(t *testing.T, payload []byte) (*fixture, *artifactReadFixture, artifactTarget) {
 	t.Helper()
-	target := artifactwire.Target{WorkspaceID: "a", JobID: "job_one", AttemptID: "att_one"}
+	target := artifactTarget{WorkspaceID: "a", JobID: "job_one", AttemptID: "att_one"}
 	repo := &artifactReadFixture{bytes: map[domain.ObjectID][]byte{}, result: collection.Result{
 		WorkspaceID: "a", JobID: "job_one", AttemptID: "att_one", Phase: "completed", VerifiedAt: time.Now().UTC(),
 	}}
@@ -125,20 +123,20 @@ func TestArtifactHTTPExplicitTargetsPaginationAndSafeDownload(t *testing.T) {
 	f, repo, target := artifactHTTPFixture(t, payload)
 	ctx := context.Background()
 	token := []byte(f.tokens["read"])
-	first, err := appclient.ListArtifacts(ctx, f.url, token, target, "", 1)
+	first, err := listTestArtifacts(ctx, f.url, token, target, "", 1)
 	if err != nil || first.Total != 2 || first.NextCursor == "" || len(first.Artifacts) != 1 {
 		t.Fatal(first, err)
 	}
-	last, err := appclient.ListArtifacts(ctx, f.url, token, target, first.NextCursor, 1)
+	last, err := listTestArtifacts(ctx, f.url, token, target, first.NextCursor, 1)
 	if err != nil || last.NextCursor != "" || last.Artifacts[0].ID != "art_output" {
 		t.Fatal(last, err)
 	}
-	pin, err := appclient.ArtifactMetadata(ctx, f.url, token, target, "art_output")
+	pin, err := testArtifactMetadata(ctx, f.url, token, target, "art_output")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var dst bytes.Buffer
-	if err := appclient.DownloadArtifact(ctx, f.url, token, pin, &dst); err != nil || !bytes.Equal(dst.Bytes(), payload) || repo.closed.Load() != 1 {
+	if err := downloadTestArtifact(ctx, f.url, token, pin, &dst); err != nil || !bytes.Equal(dst.Bytes(), payload) || repo.closed.Load() != 1 {
 		t.Fatal("verified download failed", err, dst.Len())
 	}
 	prefix := "/v1/workspaces/a/jobs/job_one/artifacts"
@@ -166,7 +164,7 @@ func TestArtifactHTTPExplicitTargetsPaginationAndSafeDownload(t *testing.T) {
 	resp, body = f.request(t, "GET", prefix+"/art_output/content?attempt_id=att_one", "a", nil, func(r *http.Request) { r.Header.Set("Range", "bytes=0-2") })
 	assertStatus(t, resp, body, 400)
 	resp, body = f.request(t, "GET", prefix+"/art_manifest/content?attempt_id=att_one", "a", nil, nil)
-	if resp.StatusCode != 200 || string(body) != "{}" || resp.Header.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment;") || resp.Header.Get("X-Content-Type-Options") != "nosniff" || resp.ContentLength != -1 || resp.Trailer.Get(artifactwire.VerifiedTrailer) != "true" {
+	if resp.StatusCode != 200 || string(body) != "{}" || resp.Header.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment;") || resp.Header.Get("X-Content-Type-Options") != "nosniff" || resp.ContentLength != -1 || resp.Trailer.Get(verifiedArtifactTrailer) != "true" {
 		t.Fatal("unsafe binary response", resp.Header)
 	}
 	repo.expired.Store(true)
@@ -181,7 +179,7 @@ func TestArtifactHTTPLastByteFaultsNeverReceiveSuccessAcknowledgement(t *testing
 	for _, mode := range []string{"short", "extra", "wrong", "final-read", "close", "close-panic", "revoke", "expire"} {
 		t.Run(mode, func(t *testing.T) {
 			f, repo, target := artifactHTTPFixture(t, bytes.Repeat([]byte("original"), 16384))
-			pin, err := appclient.ArtifactMetadata(context.Background(), f.url, []byte(f.tokens["a"]), target, "art_output")
+			pin, err := testArtifactMetadata(context.Background(), f.url, []byte(f.tokens["a"]), target, "art_output")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,7 +191,7 @@ func TestArtifactHTTPLastByteFaultsNeverReceiveSuccessAcknowledgement(t *testing
 				repo.onClose = func() { _ = f.access.Revoke(context.Background(), f.tokenIDs["a"]) }
 			}
 			var dst bytes.Buffer
-			err = appclient.DownloadArtifact(context.Background(), f.url, []byte(f.tokens["a"]), pin, &dst)
+			err = downloadTestArtifact(context.Background(), f.url, []byte(f.tokens["a"]), pin, &dst)
 			if err == nil || repo.closed.Load() != 1 || bytes.Contains(dst.Bytes(), []byte("PRIVATE_")) {
 				t.Fatal("failed bytes qualified or leaked diagnostics", err, repo.closed.Load())
 			}
@@ -203,8 +201,8 @@ func TestArtifactHTTPLastByteFaultsNeverReceiveSuccessAcknowledgement(t *testing
 
 func TestArtifactHTTPEmptyFileAndUncomposedRoutes(t *testing.T) {
 	f, _, target := artifactHTTPFixture(t, nil)
-	pin, err := appclient.ArtifactMetadata(context.Background(), f.url, []byte(f.tokens["a"]), target, "art_output")
-	if err != nil || appclient.DownloadArtifact(context.Background(), f.url, []byte(f.tokens["a"]), pin, io.Discard) != nil {
+	pin, err := testArtifactMetadata(context.Background(), f.url, []byte(f.tokens["a"]), target, "art_output")
+	if err != nil || downloadTestArtifact(context.Background(), f.url, []byte(f.tokens["a"]), pin, io.Discard) != nil {
 		t.Fatal("empty artifact lost final acknowledgement", err)
 	}
 	base := setupHTTP(t, nil, nil)

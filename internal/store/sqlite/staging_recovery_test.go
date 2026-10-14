@@ -57,7 +57,7 @@ func TestReconcileExhaustedStagingPreservesConsumedPermitAndNeverPreparesAgain(t
 				t.Fatal(err)
 			}
 			var err error
-			f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, nil, f.clock, dispatch.DefaultConfig())
+			f.engine, err = dispatch.New(managedDispatchRepository{f.s}, f.registry, f.blobs, f.clock, dispatch.DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}

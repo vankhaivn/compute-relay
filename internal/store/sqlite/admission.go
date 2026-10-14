@@ -105,7 +105,7 @@ func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID st
 	return workspace.AllowedProfiles, nil
 }
 
-func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed []string, req admission.Request) (admission.Profile, []admission.FrozenObject, int, error) {
+func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed []string, req admission.Request) (admission.Profile, []admission.FrozenObject, error) {
 	var profile admission.Profile
 	spec := req.Spec()
 	permitted := false
@@ -118,36 +118,35 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 	var enabled bool
 	err := tx.QueryRowContext(ctx, `SELECT r.snapshot,p.enabled FROM profiles p JOIN profile_revisions r ON p.profile=r.profile AND p.revision=r.revision WHERE p.profile=?`, spec.Profile).Scan(&raw, &enabled)
 	if errors.Is(err, sql.ErrNoRows) {
-		return profile, nil, 0, auth.ErrForbidden
+		return profile, nil, auth.ErrForbidden
 	}
 	if err != nil {
-		return profile, nil, 0, dbError(err)
+		return profile, nil, dbError(err)
 	}
 	if len(raw) > 8192 || json.Unmarshal([]byte(raw), &profile) != nil || profile.Validate() != nil || profile.Binding.Profile != spec.Profile {
-		return profile, nil, 0, ErrCorrupt
+		return profile, nil, ErrCorrupt
 	}
 	if strings.HasPrefix(profile.CredentialRef, "vault:") {
 		if err = managedProfileOwned(ctx, tx, w, profile); err != nil {
-			return profile, nil, 0, err
+			return profile, nil, err
 		}
 		var selected bool
 		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE workspace_id=? AND current_profile=? AND new_work='enabled' AND pending_operation='')`, w, spec.Profile).Scan(&selected); err != nil {
-			return profile, nil, 0, dbError(err)
+			return profile, nil, dbError(err)
 		}
 		if !selected || !enabled {
-			return profile, nil, 0, admission.ErrSelection
+			return profile, nil, admission.ErrSelection
 		}
 	} else if !permitted || !enabled {
-		return profile, nil, 0, auth.ErrForbidden
+		return profile, nil, auth.ErrForbidden
 	}
 	if spec.SeparateStart() && !strings.HasPrefix(profile.CredentialRef, "vault:") {
-		return profile, nil, 0, admission.ErrRequirements
+		return profile, nil, admission.ErrRequirements
 	}
 	if err = profile.Check(spec); err != nil {
-		return profile, nil, 0, err
+		return profile, nil, err
 	}
 	refs := []admission.FrozenObject{}
-	pending := 0
 	var total int64
 	load := func(role string, id domain.ObjectID, max int64) error {
 		var m domain.ObjectMetadata
@@ -174,18 +173,14 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, allowed [
 		return nil
 	}
 	if err = load("bundle", spec.Bundle.ObjectID, profile.MaxBundleBytes); err != nil {
-		return profile, nil, 0, err
+		return profile, nil, err
 	}
 	for i, in := range spec.Inputs {
-		if in.Source.Kind == "https" {
-			pending++
-			continue
-		}
 		if err = load("input:"+strconv.Itoa(i), in.Source.ObjectID, 2<<30); err != nil {
-			return profile, nil, 0, err
+			return profile, nil, err
 		}
 	}
-	return profile, refs, pending, nil
+	return profile, refs, nil
 }
 
 func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID string, req admission.Request) (admission.Validation, error) {
@@ -203,15 +198,12 @@ func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID s
 		if err != nil {
 			return err
 		}
-		_, _, pending, err := resolveJob(ctx, tx, w, allowed, req)
+		_, _, err = resolveJob(ctx, tx, w, allowed, req)
 		if err != nil {
 			return err
 		}
 		if req.Spec().Expired(time.Now()) {
 			return admission.ErrExpired
-		}
-		if pending > 0 {
-			result.Requirements = append(result.Requirements, admission.Requirement{Name: "https_input_snapshots", Verification: "before_dispatch", Reason: "Source records are durable; no input download occurs during admission."})
 		}
 		if req.Spec().Resources.Accelerator == "gpu" {
 			result.Requirements = append(result.Requirements, admission.Requirement{Name: "gpu_requirements", Verification: "verify_after_start"})
@@ -257,7 +249,7 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if !errors.Is(err, sql.ErrNoRows) {
 			return dbError(err)
 		}
-		profile, refs, _, err := resolveJob(ctx, tx, w, allowed, req)
+		profile, refs, err := resolveJob(ctx, tx, w, allowed, req)
 		if err != nil {
 			return err
 		}

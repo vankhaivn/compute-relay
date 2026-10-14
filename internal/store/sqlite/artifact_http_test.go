@@ -3,27 +3,24 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
+	"net/url"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/api"
-	"github.com/vankhaivn/compute-relay/internal/appcli"
-	"github.com/vankhaivn/compute-relay/internal/appclient"
-	"github.com/vankhaivn/compute-relay/internal/artifactwire"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
-	"github.com/vankhaivn/compute-relay/internal/statefs"
 )
 
 func servePublishedFixture(t *testing.T, f *dispatchFixture, blobs collection.BlobStore) (string, func()) {
@@ -75,7 +72,7 @@ func servePublishedFixture(t *testing.T, f *dispatchFixture, blobs collection.Bl
 	return "http://" + listener.Addr().String(), stop
 }
 
-func TestPublishedArtifactHTTPAndCLIReuseImmutableM3Publication(t *testing.T) {
+func TestPublishedArtifactHTTPReusesImmutablePublication(t *testing.T) {
 	ctx := context.Background()
 	f, id, provider, blobs := collectionFixture(t)
 	service, actor, token := controlService(t, f, "a", auth.Read, auth.Operate)
@@ -83,30 +80,66 @@ func TestPublishedArtifactHTTPAndCLIReuseImmutableM3Publication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := artifactwire.Target{WorkspaceID: "a", JobID: string(id.JobID), AttemptID: string(id.AttemptID)}
 	endpoint, stop := servePublishedFixture(t, f, blobs)
-	if _, err := appclient.ListArtifacts(ctx, endpoint, []byte(token), target, "", 2); err == nil {
-		t.Fatal("accepted collection ticket exposed unverified results")
+	path := "/v1/workspaces/a/jobs/" + string(id.JobID) + "/artifacts"
+	request := func(path string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
 	}
+	query := "?attempt_id=" + string(id.AttemptID)
+	response := request(path + query)
+	if response.StatusCode == http.StatusOK {
+		t.Fatal("unverified results exposed")
+	}
+	response.Body.Close()
 	stop()
 	runCollection(t, collectionEngine(t, f, provider, blobs, f.s))
 	before := f.state(t, id)
 	events := controlCount(t, f.s, "SELECT count(*) FROM events")
-	providerLists, providerFetches := provider.counts()
+	lists, fetches := provider.counts()
 	endpoint, stop = servePublishedFixture(t, f, blobs)
-	first, err := appclient.ListArtifacts(ctx, endpoint, []byte(token), target, "", 2)
-	if err != nil || first.Total != 5 || len(first.Artifacts) != 2 || first.NextCursor == "" {
-		t.Fatal(first, err)
+	type file struct {
+		ID           string `json:"artifact_id"`
+		Path, SHA256 string
+		Bytes        int64
+	}
+	type page struct {
+		SnapshotSHA256 string `json:"snapshot_sha256"`
+		NextCursor     string `json:"next_cursor"`
+		Total          int    `json:"total_artifacts"`
+		Artifacts      []file
+	}
+	readPage := func(cursor string) page {
+		t.Helper()
+		response := request(path + query + "&limit=2&cursor=" + url.QueryEscape(cursor))
+		defer response.Body.Close()
+		var result page
+		if response.StatusCode != 200 || json.NewDecoder(response.Body).Decode(&result) != nil {
+			t.Fatal("invalid artifact page", response.StatusCode)
+		}
+		return result
+	}
+	first := readPage("")
+	if first.Total != 5 || len(first.Artifacts) != 2 || first.NextCursor == "" {
+		t.Fatal(first)
 	}
 	stop()
 	f.restart(t)
 	endpoint, stop = servePublishedFixture(t, f, blobs)
-	all := append([]artifactwire.File{}, first.Artifacts...)
-	cursor := first.NextCursor
-	for cursor != "" {
-		page, err := appclient.ListArtifacts(ctx, endpoint, []byte(token), target, cursor, 2)
-		if err != nil || page.SnapshotSHA256 != first.SnapshotSHA256 {
-			t.Fatal("restart changed published cursor", err)
+	all := first.Artifacts
+	for cursor := first.NextCursor; cursor != ""; {
+		page := readPage(cursor)
+		if page.SnapshotSHA256 != first.SnapshotSHA256 {
+			t.Fatal("restart changed publication")
 		}
 		all = append(all, page.Artifacts...)
 		cursor = page.NextCursor
@@ -114,51 +147,27 @@ func TestPublishedArtifactHTTPAndCLIReuseImmutableM3Publication(t *testing.T) {
 	if len(all) != 5 {
 		t.Fatal("incomplete publication")
 	}
-	private, err := statefs.PrivateDir(filepath.Join(t.TempDir(), "client"), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tokenFile := filepath.Join(private, "token")
-	if statefs.WriteNew(tokenFile, []byte(token+"\n")) != nil {
-		t.Fatal("cannot provision fixture application token")
-	}
 	for _, file := range all {
-		output := filepath.Join(private, file.ID+".download")
-		args := []string{"artifact", "download", "--url", endpoint, "--workspace", "a", "--token-file", tokenFile, "--job", target.JobID, "--attempt", target.AttemptID, "--id", file.ID, "--output", output}
-		var out, diagnostic bytes.Buffer
-		if code := appcli.RunArtifacts(ctx, args, &out, &diagnostic); code != 0 {
-			t.Fatal("CLI download failed", code, diagnostic.String())
-		}
-		var receipt struct {
-			artifactwire.Metadata
-			Delivery string `json:"delivery"`
-		}
-		if json.Unmarshal(out.Bytes(), &receipt) != nil || receipt.Target != target || receipt.Artifact != file || receipt.Delivery != "verified-new-file" {
-			t.Fatal("receipt changed identity")
-		}
-		actual, err := os.ReadFile(output)
-		if err != nil || !bytes.Equal(actual, provider.files[file.Path]) || statefs.CheckFile(output) != nil {
-			t.Fatal("application received incorrect or unprotected bytes", err)
-		}
-		out.Reset()
-		diagnostic.Reset()
-		if code := appcli.RunArtifacts(ctx, args, &out, &diagnostic); code == 0 || out.Len() != 0 {
-			t.Fatal("download overwrote existing destination")
+		response := request(path + "/" + file.ID + "/content" + query)
+		actual, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		sum := sha256.Sum256(actual)
+		if err != nil || response.StatusCode != 200 || int64(len(actual)) != file.Bytes || hex.EncodeToString(sum[:]) != file.SHA256 || !bytes.Equal(actual, provider.files[file.Path]) {
+			t.Fatal("incorrect published bytes", err)
 		}
 	}
-	foreign := target
-	foreign.AttemptID = "att_foreign"
-	if _, err := appclient.ArtifactMetadata(ctx, endpoint, []byte(token), foreign, all[0].ID); err == nil {
-		t.Fatal("foreign attempt exposed a committed file")
+	response = request(path + "/" + all[0].ID + "?attempt_id=att_foreign")
+	response.Body.Close()
+	if response.StatusCode == 200 {
+		t.Fatal("foreign attempt exposed committed file")
 	}
-	if after := f.state(t, id); !reflect.DeepEqual(after, before) || controlCount(t, f.s, "SELECT count(*) FROM events") != events {
-		t.Fatal("read-only delivery rewrote durable outcome/events")
+	if !reflect.DeepEqual(f.state(t, id), before) || controlCount(t, f.s, "SELECT count(*) FROM events") != events {
+		t.Fatal("delivery rewrote durable outcome")
 	}
-	if l, n := provider.counts(); l != providerLists || n != providerFetches {
-		t.Fatal("local download repeated provider collection")
+	if l, n := provider.counts(); l != lists || n != fetches {
+		t.Fatal("delivery repeated provider collection")
 	}
 	stop()
-	// Recreate the service after reopen, retaining the original issued token/receipt.
 	access, _ := auth.New(f.s, f.s, nil)
 	fresh, err := access.Authenticate(ctx, token)
 	if err != nil {
@@ -167,26 +176,27 @@ func TestPublishedArtifactHTTPAndCLIReuseImmutableM3Publication(t *testing.T) {
 	service, _, _ = controlService(t, f, "a", auth.Read, auth.Operate)
 	replay, err := service.Submit(ctx, fresh, "a", id.JobID, domain.OperationCollect, "artifact-http-original", controlRequest(id.AttemptID))
 	if err != nil || !replay.Replay || !reflect.DeepEqual(replay.Operation, original.Operation) || replay.Effect != original.Effect {
-		t.Fatal("download changed original collect receipt", err)
+		t.Fatal("delivery changed receipt", err)
 	}
 	f.clock.advance(8 * 24 * time.Hour)
 	scanRetention(t, f)
 	endpoint, stop = servePublishedFixture(t, f, blobs)
-	_, err = appclient.ListArtifacts(ctx, endpoint, []byte(token), target, "", 2)
-	var failure *appclient.Failure
-	if !errors.As(err, &failure) || failure.HTTPStatus != 410 || failure.RequestMayHaveCommitted {
-		t.Fatal("expiry is not explicit read-only 410", err)
+	response = request(path + query)
+	response.Body.Close()
+	if response.StatusCode != 410 {
+		t.Fatal("expiry did not return 410", response.StatusCode)
 	}
 	if err := f.s.RevokeToken(ctx, actor.TokenID()); err != nil {
 		t.Fatal(err)
 	}
-	_, err = appclient.ListArtifacts(ctx, endpoint, []byte(token), target, "", 2)
-	if !errors.As(err, &failure) || failure.HTTPStatus != 401 {
-		t.Fatal("expired metadata bypassed current token authority", err)
+	response = request(path + query)
+	response.Body.Close()
+	if response.StatusCode != 401 {
+		t.Fatal("expiry bypassed current authority", response.StatusCode)
 	}
 	stop()
 	assertNoNewCompute(t, f)
 	if controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 5 {
-		t.Fatal("delivery/expiry changed publication history")
+		t.Fatal("delivery changed history")
 	}
 }

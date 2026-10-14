@@ -209,7 +209,7 @@ func validateOpenAPI(root, relative string) error {
 		"validateJob": {}, "createJob": {}, "getJob": {},
 		"cancelJob": {}, "retryJob": {}, "reconcileJob": {},
 		"collectJob": {}, "cleanupJob": {}, "previewJobCleanup": {}, "getOperation": {},
-		"uploadObject": {}, "getObject": {}, "importObject": {}, "ingestObject": {},
+		"uploadObject": {}, "getObject": {},
 		"listArtifacts": {}, "getArtifact": {}, "downloadArtifact": {}, "getJobLogs": {},
 		"listProviderDescriptors": {}, "listConnections": {}, "getConnection": {},
 		"createConnection": {}, "changeConnection": {}, "getConnectionOperation": {},
@@ -242,7 +242,7 @@ func validateOpenAPI(root, relative string) error {
 // published local bytes; collect POST still only accepts a durable transfer ticket.
 func operationStatus(id string) string {
 	switch id {
-	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "importObject", "ingestObject", "createJob", "validateJob", "getJob",
+	case "getHealth", "getReadiness", "getRuntimeInfo", "uploadObject", "getObject", "createJob", "validateJob", "getJob",
 		"cancelJob", "retryJob", "reconcileJob", "collectJob", "cleanupJob", "previewJobCleanup", "getOperation", "listArtifacts", "getArtifact", "downloadArtifact", "getJobLogs",
 		"listProviderDescriptors", "listConnections", "getConnection", "createConnection", "changeConnection", "getConnectionOperation",
 		"authorizeAttempt", "getAttemptAuthorization", "prepareExecutionGate", "startExecutionGate", "getExecutionReadiness", "getExecutionGateAuthorization",

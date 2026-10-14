@@ -97,7 +97,7 @@ func TestPreparedExpiryAndLostStartKeepOneShotIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.attach(t, reopened, nil)
+			f.attach(t, reopened)
 			if err := f.step(t); err != nil {
 				t.Fatal(err)
 			}

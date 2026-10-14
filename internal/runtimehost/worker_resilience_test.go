@@ -63,7 +63,7 @@ func (r resilienceCleanup) ClaimCleanup(ctx context.Context, _ time.Time, _ time
 }
 
 type resilienceResolver struct{ dispatch.Resolver }
-type resilienceBlobs struct{ dispatch.BlobStore }
+type resilienceBlobs struct{ collection.BlobStore }
 
 func resilienceEngine(t *testing.T, kind string, fault *resilienceFault) func(context.Context) error {
 	t.Helper()
@@ -72,7 +72,7 @@ func resilienceEngine(t *testing.T, kind string, fault *resilienceFault) func(co
 		cfg := dispatch.DefaultConfig()
 		cfg.Workers = 1
 		cfg.PollDelay = time.Millisecond
-		engine, err := dispatch.New(resilienceDispatch{resilienceFault: fault}, resilienceResolver{}, resilienceBlobs{}, nil, nil, cfg)
+		engine, err := dispatch.New(resilienceDispatch{resilienceFault: fault}, resilienceResolver{}, resilienceBlobs{}, nil, cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

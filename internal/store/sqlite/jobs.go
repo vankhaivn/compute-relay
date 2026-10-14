@@ -143,9 +143,7 @@ func readJobRecord(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id dom
 	}
 	for i, in := range spec.Inputs {
 		if !refs["input:"+strconv.Itoa(i)] {
-			if in.Source.Kind == "https" {
-				result.PendingHTTPS++
-			} else {
+			if in.Source.Kind != "https" {
 				return admission.Record{}, ErrCorrupt
 			}
 		}
