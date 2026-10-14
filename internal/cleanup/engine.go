@@ -3,11 +3,12 @@ package cleanup
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
 // Lease is a fenced claim on one running cleanup. A claim after expiry advances the
@@ -226,48 +227,17 @@ func failure(code domain.ErrorCode, message string, action domain.RecommendedAct
 	return Outcome{Effect: Failed, Problem: &p}
 }
 
-// Run polls until ctx ends. A lost fence only means another owner recovered the claim;
-// any other repository error stops the loop so the host can surface it.
+// Run polls until ctx ends. Lost fences continue; transient store failures back off.
 func (e *Engine) Run(ctx context.Context) error {
-	run, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
-	errs := make(chan error, e.config.Workers)
-	for i := 0; i < e.config.Workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				worked, err := e.RunOnce(run)
-				if errors.Is(err, ErrLeaseLost) {
-					worked, err = false, nil
-				}
-				if err != nil && run.Err() == nil {
-					select {
-					case errs <- err:
-					default:
-					}
-					cancel()
-					return
-				}
-				if worked && err == nil {
-					continue
-				}
-				timer := time.NewTimer(e.config.PollDelay)
-				select {
-				case <-run.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	select {
-	case err := <-errs:
-		return err
-	default:
-		return ctx.Err()
-	}
+	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay, Drain: true}, func(ctx context.Context, _ int) (bool, error) {
+		return e.RunOnce(ctx)
+	}, func(err error) worker.Decision {
+		if errors.Is(err, ErrLeaseLost) {
+			return worker.Continue
+		}
+		if errors.Is(err, scheduler.ErrClock) {
+			return worker.Retry
+		}
+		return worker.Classify(err)
+	})
 }

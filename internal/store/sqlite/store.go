@@ -24,7 +24,7 @@ var (
 	ErrCorrupt     = errors.New("state integrity check failed")
 	ErrConflict    = errors.New("state record conflicts with an existing record")
 	ErrInvalid     = errors.New("invalid state record or options")
-	ErrBusy        = errors.New("state store is busy")
+	ErrBusy        = busyError{}
 	ErrDiskFull    = errors.New("state storage is full")
 	ErrBackup      = errors.New("backup is incomplete or invalid")
 )
@@ -300,6 +300,12 @@ func withTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 	// Never replay after Commit returns an error; its outcome may be uncertain.
 	return dbError(tx.Commit())
 }
+
+// busyError retains safe diagnostics while identifying retryable contention.
+type busyError struct{}
+
+func (busyError) Error() string   { return "state store is busy" }
+func (busyError) Temporary() bool { return true }
 
 func dbError(err error) error {
 	if err == nil {

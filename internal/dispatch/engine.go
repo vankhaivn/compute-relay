@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -81,40 +82,18 @@ func (e *Engine) RunOnce(ctx context.Context, owner string) (bool, error) {
 // Cancel/Cleanup. It waits for callbacks to return rather than replacing stuck workers
 // or claiming shutdown completed while they may still perform a side effect.
 func (e *Engine) Run(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
-	failures := make(chan error, e.config.Workers)
-	for i := 0; i < e.config.Workers; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			for {
-				_, err := e.RunOnce(ctx, fmt.Sprintf("dispatch_%d", index))
-				if err != nil && ctx.Err() == nil {
-					var p *domain.Problem
-					if !errors.As(err, &p) && !errors.Is(err, ErrPolicy) && !errors.Is(err, scheduler.ErrLeaseLost) && !controlContention(err) {
-						failures <- err
-						cancel()
-						return
-					}
-				}
-				timer := time.NewTimer(e.config.PollDelay)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-		}(i)
-	}
-	wg.Wait()
-	close(failures)
-	for err := range failures {
-		return err
-	}
-	return ctx.Err()
+	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay}, func(ctx context.Context, index int) (bool, error) {
+		return e.RunOnce(ctx, fmt.Sprintf("dispatch_%d", index))
+	}, func(err error) worker.Decision {
+		var p *domain.Problem
+		if errors.As(err, &p) || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
+			return worker.Continue
+		}
+		if errors.Is(err, scheduler.ErrClock) {
+			return worker.Retry
+		}
+		return worker.Classify(err)
+	})
 }
 
 // A submitted remote run is observed at most every 15 seconds; control requests still wake it

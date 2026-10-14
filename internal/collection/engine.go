@@ -8,11 +8,12 @@ import (
 	"errors"
 	"hash"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
 // The worker sees only observational/transfer methods after exact binding resolution.
@@ -401,40 +402,16 @@ func (w *checkedWriter) matches(a provider.Artifact, r provider.TransferResult) 
 // Run supplies an explicitly composed, fixed-size transfer pool. It is never
 // started by admission, GET, migration or a production CLI fallback.
 func (e *Engine) Run(ctx context.Context) error {
-	run, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
-	errs := make(chan error, e.config.Workers)
-	for i := 0; i < e.config.Workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				_, err := e.RunOnce(run)
-				var failedAttempt Failure
-				if err != nil && !errors.As(err, &failedAttempt) {
-					select {
-					case errs <- err:
-					default:
-					}
-					cancel()
-					return
-				}
-				timer := time.NewTimer(e.config.PollDelay)
-				select {
-				case <-run.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	select {
-	case err := <-errs:
-		return err
-	default:
-		return ctx.Err()
-	}
+	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay}, func(ctx context.Context, _ int) (bool, error) {
+		return e.RunOnce(ctx)
+	}, func(err error) worker.Decision {
+		var failedAttempt Failure
+		if errors.As(err, &failedAttempt) || errors.Is(err, ErrLeaseLost) {
+			return worker.Continue
+		}
+		if errors.Is(err, scheduler.ErrClock) {
+			return worker.Retry
+		}
+		return worker.Classify(err)
+	})
 }
