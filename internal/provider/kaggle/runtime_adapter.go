@@ -94,39 +94,25 @@ func NewRuntimeAdapter(
 }
 
 func (p *RuntimeAdapter) Describe() provider.Descriptor {
-	d, err := OperationalDescriptor(p.config)
-	if err != nil {
-		return provider.Descriptor{}
+	return provider.Descriptor{Type: "kaggle", InstanceID: domain.ProviderInstanceID(p.config.InstanceID), Version: "native-api/v1",
+		Capabilities: RuntimeCapabilities(p.policy.MachineShape)}
+}
+
+// RuntimeCapabilities is shared by the runtime port and managed connection
+// descriptor so policy cannot drift between their declarations.
+func RuntimeCapabilities(shape string) provider.Capabilities {
+	c := provider.Capabilities{BatchExecution: true, Python: true, Shell: true,
+		GPU: domain.CapabilitySupportUnsupported, PrivateInputStaging: true,
+		RemoteCleanup: true, LogsWhileRunning: domain.CapabilitySupportUnknown,
+		LogsAfterCompletion: true, QuotaReporting: domain.CapabilitySupportSupported,
+		ExecutionTimeout: true, RemoteNetworkControl: true, StrongIdentity: true,
+		Accelerators: []string{"cpu"}}
+	if shape != "cpu" && shape != "" {
+		c.GPU = domain.CapabilitySupportUnknown
+		c.GPUShape = shape
+		c.Accelerators = []string{"gpu"}
 	}
-	for i := range d.Capabilities {
-		c := &d.Capabilities[i]
-		switch c.Name {
-		case domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
-			domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout,
-			domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity:
-			c.Support = domain.CapabilitySupportSupported
-			c.Evidence = domain.EvidenceImplementedOffline
-			c.Reason = "normal runtime composition uses the reviewed finite-batch Kaggle components"
-			if c.Name == domain.CapabilityExecutionTimeout {
-				c.Conditions = []string{"runner and provider-request budgets are enforced locally; exact provider timeout enforcement remains unverified"}
-			}
-			if c.Name == domain.CapabilityRemoteNetworkControl {
-				c.Conditions = []string{"maps the frozen job requirement to the provider setting; the runner is not a firewall"}
-			}
-		case domain.CapabilityGPU:
-			if p.policy.MachineShape == "" {
-				c.Support = domain.CapabilitySupportUnsupported
-				c.Evidence = domain.EvidenceImplementedOffline
-				c.Reason = "this provider instance is configured without a GPU machine shape"
-			} else {
-				c.Support = domain.CapabilitySupportUnknown
-				c.Evidence = domain.EvidenceImplementedOffline
-				c.Reason = "the requested GPU is verified after execution starts; allocation is not guaranteed"
-				c.Conditions = []string{"configured machine shape: " + p.policy.MachineShape}
-			}
-		}
-	}
-	return d
+	return c
 }
 
 func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {

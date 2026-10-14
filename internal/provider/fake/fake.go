@@ -125,42 +125,24 @@ func New(b *Backend, clock ports.Clock, instance domain.ProviderInstanceID) (*Ba
 var _ provider.Provider = (*Basic)(nil)
 
 func (p *Basic) Describe() provider.Descriptor {
-	d := provider.Descriptor{Type: "fake", InstanceID: p.instance, Version: "1"}
-	for _, name := range []domain.CapabilityName{domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell,
-		domain.CapabilityPrivateInputStaging, domain.CapabilityExecutionTimeout, domain.CapabilityRemoteNetworkControl,
-		domain.CapabilityStrongIdentity, domain.CapabilityGPU, domain.CapabilityRemoteCancellation,
-		domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets, domain.CapabilityRemoteCleanup} {
-		support := domain.CapabilitySupportSupported
-		switch name {
-		case domain.CapabilityEphemeralSecrets:
-			if !p.backend.scenario.EphemeralSecrets {
-				support = domain.CapabilitySupportUnsupported
-			}
-		case domain.CapabilitySeparateStart:
-			if !p.backend.scenario.SeparateStart {
-				support = domain.CapabilitySupportUnsupported
-			}
-		case domain.CapabilityAbsoluteDeadline:
-			if !p.backend.scenario.AbsoluteDeadline {
-				support = domain.CapabilitySupportUnsupported
-			}
-		case domain.CapabilityGPU:
-			support = p.backend.scenario.GPU
-		case domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityCustomContainer, domain.CapabilityRetainedSessions:
-			support = domain.CapabilitySupportUnsupported
-		case domain.CapabilityQuotaReporting:
-			support = domain.CapabilitySupportUnknown
-		}
-		if p.complete {
-			switch name {
-			case domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting:
-				support = domain.CapabilitySupportSupported
-			}
-		}
-		d.Capabilities = append(d.Capabilities, domain.CapabilityStatus{Name: name, Support: support, Evidence: domain.EvidenceImplementedOffline,
-			Reason: "deterministic fixture only; no real execution", ClientVersion: "fake/1"})
+	s := p.backend.scenario
+	c := provider.Capabilities{BatchExecution: true, Python: true, Shell: true,
+		GPU: s.GPU, PrivateInputStaging: true, RemoteCleanup: true,
+		LogsWhileRunning: domain.CapabilitySupportUnsupported,
+		QuotaReporting:   domain.CapabilitySupportUnknown, ExecutionTimeout: true,
+		SeparateStart: s.SeparateStart, EphemeralSecrets: s.EphemeralSecrets,
+		AbsoluteDeadline: s.AbsoluteDeadline, RemoteNetworkControl: true,
+		StrongIdentity: true, Accelerators: []string{"cpu"}}
+	if p.complete {
+		c.RemoteCancellation = true
+		c.LogsWhileRunning = domain.CapabilitySupportSupported
+		c.LogsAfterCompletion = true
+		c.QuotaReporting = domain.CapabilitySupportSupported
 	}
-	return d
+	if c.GPU != domain.CapabilitySupportUnsupported {
+		c.Accelerators = append(c.Accelerators, "gpu")
+	}
+	return provider.Descriptor{Type: "fake", InstanceID: p.instance, Version: "1", Capabilities: c}
 }
 func (p *Basic) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
 	if err := ctx.Err(); err != nil {

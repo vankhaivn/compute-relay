@@ -118,8 +118,8 @@ func TestFrozenPlanAndChangedIdentity(t *testing.T) {
 		t.Fatal("same attempt accepted changed nonce")
 	}
 	d := p.Describe()
-	d.Capabilities[0].Support = domain.CapabilitySupportUnsupported
-	if p.Describe().Capabilities[0].Support != domain.CapabilitySupportSupported {
+	d.Capabilities.BatchExecution = false
+	if !p.Describe().Capabilities.BatchExecution {
 		t.Fatal("descriptor aliases provider state")
 	}
 }

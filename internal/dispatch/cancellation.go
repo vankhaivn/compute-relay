@@ -51,13 +51,7 @@ func (s *session) cancelOnce(p provider.Provider) (bool, error) {
 	if w.Cancellation == nil || w.Cancellation.Started || w.Journal.Phase != Submitted || w.Journal.Remote == nil {
 		return false, nil
 	}
-	verified := false
-	for _, cap := range p.Describe().Capabilities {
-		if cap.Name == domain.CapabilityRemoteCancellation && cap.Validate() == nil && cap.Support == domain.CapabilitySupportSupported && len(cap.Conditions) == 0 && (cap.Evidence == domain.EvidenceImplementedOffline || cap.Evidence == domain.EvidencePassedLive) {
-			verified = true
-		}
-	}
-	if !verified {
+	if !p.Describe().Capabilities.RemoteCancellation {
 		return true, s.commitCancellation(CancellationAction{Code: domain.CodeRemoteCancelUnsupported})
 	}
 	if err := s.commitCancellation(CancellationAction{Begin: true}); err != nil {

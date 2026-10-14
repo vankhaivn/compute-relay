@@ -48,8 +48,7 @@ func (*managedSSHAdapter) Descriptor() connections.Descriptor {
 			field(sshhost.FieldCPUs, "CPU limit per job", false, 6),
 			field(sshhost.FieldMemoryMiB, "Memory limit per job (MiB)", false, 8),
 		},
-		Capabilities: connections.Capabilities{RemoteCleanup: "supported", EphemeralSecrets: "supported", Accelerators: []string{"cpu"}, RemoteCancel: "supported", Quota: "unsupported", AbsoluteDeadline: "supported", SeparateStart: "supported",
-			Concurrency: &connections.ConcurrencyCapability{Support: "supported", Scope: "resource", Minimum: 1, Maximum: 64, Default: 1}},
+		Capabilities: connections.ProjectCapabilities(sshhost.Capabilities(), "resource"),
 	}
 }
 

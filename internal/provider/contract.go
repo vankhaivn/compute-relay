@@ -93,7 +93,7 @@ type Descriptor struct {
 	Type         string
 	InstanceID   domain.ProviderInstanceID
 	Version      string
-	Capabilities []domain.CapabilityStatus
+	Capabilities Capabilities
 }
 type RemoteReference struct {
 	Identity Identity

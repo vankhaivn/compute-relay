@@ -210,17 +210,7 @@ type cancelProbe struct {
 
 func (p *cancelProbe) Describe() provider.Descriptor {
 	d := p.probeProvider.Describe()
-	caps := []domain.CapabilityStatus{}
-	for _, c := range d.Capabilities {
-		if c.Name != domain.CapabilityRemoteCancellation {
-			caps = append(caps, c)
-		}
-	}
-	support := domain.CapabilitySupportUnsupported
-	if p.supported {
-		support = domain.CapabilitySupportSupported
-	}
-	d.Capabilities = append(caps, domain.CapabilityStatus{Name: domain.CapabilityRemoteCancellation, Support: support, Evidence: domain.EvidenceImplementedOffline, Reason: "nonexecuting test fixture"})
+	d.Capabilities.RemoteCancellation = p.supported
 	return d
 }
 func (p *cancelProbe) Cancel(ctx context.Context, r provider.RemoteReference, id domain.OperationID) (provider.CancellationOutcome, error) {

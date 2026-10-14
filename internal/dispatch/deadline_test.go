@@ -58,12 +58,8 @@ func TestDeadlineIsCapabilityGatedBeforePreparation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := provider.Descriptor{Type: "fixture", InstanceID: job.Identity.InstanceID, Version: "1"}
-	for _, cap := range job.Required {
-		if cap != domain.CapabilityAbsoluteDeadline {
-			d.Capabilities = append(d.Capabilities, domain.CapabilityStatus{Name: cap, Support: domain.CapabilitySupportSupported, Evidence: domain.EvidenceImplementedOffline})
-		}
-	}
+	d := provider.Descriptor{Type: "fixture", InstanceID: job.Identity.InstanceID, Version: "1", Capabilities: fixtureCapabilities()}
+	d.Capabilities.AbsoluteDeadline = false
 	if err = ValidatedPlan(job, provider.Plan{Job: job}, d); err == nil {
 		t.Fatal("provider without absolute deadline support accepted the job")
 	}

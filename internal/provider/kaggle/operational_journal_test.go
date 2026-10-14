@@ -137,19 +137,7 @@ type operationalJournalAdapter struct {
 
 func (p *operationalJournalAdapter) Describe() provider.Descriptor {
 	d := p.Bound.Describe()
-	actual, err := OperationalDescriptor(p.config)
-	if err != nil {
-		panic(err)
-	}
-	for i := range d.Capabilities {
-		if d.Capabilities[i].Name == domain.CapabilityRemoteCancellation {
-			for _, c := range actual.Capabilities {
-				if c.Name == domain.CapabilityRemoteCancellation {
-					d.Capabilities[i] = c
-				}
-			}
-		}
-	}
+	d.Capabilities.RemoteCancellation = false
 	return d
 }
 func (p *operationalJournalAdapter) Cancel(ctx context.Context, ref provider.RemoteReference, op domain.OperationID) (provider.CancellationOutcome, error) {

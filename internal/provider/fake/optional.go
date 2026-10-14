@@ -21,16 +21,6 @@ func NewComplete(b *Backend, clock ports.Clock, instance domain.ProviderInstance
 	return &Complete{Basic: base}, nil
 }
 
-func (p *Complete) Describe() provider.Descriptor {
-	d := p.Basic.Describe()
-	for i := range d.Capabilities {
-		switch d.Capabilities[i].Name {
-		case domain.CapabilityRemoteCancellation, domain.CapabilityLogsWhileRunning, domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting:
-			d.Capabilities[i].Support = domain.CapabilitySupportSupported
-		}
-	}
-	return d
-}
 func (p *Complete) Cancel(ctx context.Context, remote provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.CancellationOutcome{}, err

@@ -27,18 +27,8 @@ func (r *Registry) Register(p Provider) error {
 	if !safeText(d.Type, 128) || !d.InstanceID.Valid() || !safeText(d.Version, 128) {
 		return errors.New("invalid provider descriptor")
 	}
-	seen := make(map[domain.CapabilityName]bool)
-	for _, cap := range d.Capabilities {
-		if err := cap.Validate(); err != nil {
-			return err
-		}
-		if seen[cap.Name] {
-			return errors.New("duplicate provider capability")
-		}
-		seen[cap.Name] = true
-	}
-	if d.Support(domain.CapabilityBatchExecution) != domain.CapabilitySupportSupported {
-		return errors.New("provider must support finite batch execution")
+	if !d.Capabilities.Valid() {
+		return errors.New("invalid provider capabilities")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -82,10 +72,5 @@ func nilProvider(p Provider) bool {
 	return false
 }
 func (d Descriptor) Support(name domain.CapabilityName) domain.CapabilitySupport {
-	for _, cap := range d.Capabilities {
-		if cap.Name == name {
-			return cap.Support
-		}
-	}
-	return domain.CapabilitySupportUnknown
+	return d.Capabilities.Support(name)
 }

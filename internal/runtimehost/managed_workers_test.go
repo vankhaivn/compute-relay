@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -273,14 +272,9 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 		if expected == current {
 			shape = "NvidiaTeslaP100"
 		}
-		found := false
-		for _, capability := range p.Describe().Capabilities {
-			if capability.Name == domain.CapabilityGPU {
-				found = strings.Contains(strings.Join(capability.Conditions, " "), shape)
-			}
-		}
-		if !found {
-			t.Fatal("restart reinterpreted frozen machine shape")
+		capabilities := p.Describe().Capabilities
+		if capabilities.GPUShape != shape || capabilities.GPU != domain.CapabilitySupportUnknown {
+			t.Fatalf("restart reinterpreted frozen machine shape: got %q (%s), want %q with unknown support", capabilities.GPUShape, capabilities.GPU, shape)
 		}
 		wrong := expected
 		wrong.AccountScope = "wrong_account"

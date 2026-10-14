@@ -48,6 +48,21 @@ type Capabilities struct {
 	Concurrency      *ConcurrencyCapability `json:"concurrency,omitempty"`
 }
 
+// ProjectCapabilities preserves the managed connection wire contract from an
+// adapter's typed behavior declaration.
+func ProjectCapabilities(c provider.Capabilities, scope string) Capabilities {
+	result := Capabilities{
+		RemoteCleanup: string(c.Support(domain.CapabilityRemoteCleanup)), EphemeralSecrets: string(c.Support(domain.CapabilityEphemeralSecrets)),
+		Accelerators: append([]string{}, c.Accelerators...), RemoteCancel: string(c.Support(domain.CapabilityRemoteCancellation)),
+		Quota: string(c.QuotaReporting), SeparateStart: string(c.Support(domain.CapabilitySeparateStart)),
+		AbsoluteDeadline: string(c.Support(domain.CapabilityAbsoluteDeadline)),
+	}
+	if scope != "" {
+		result.Concurrency = &ConcurrencyCapability{Support: "supported", Scope: scope, Minimum: 1, Maximum: 64, Default: 1}
+	}
+	return result
+}
+
 // ConcurrencyCapability describes local policy configuration, not provider quota
 // or a guarantee that the provider can allocate that many executions.
 type ConcurrencyCapability struct {

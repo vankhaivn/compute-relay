@@ -177,47 +177,19 @@ func (a *Adapter) withDocker(ctx context.Context, use func(docker, Endpoint) err
 }
 
 func (a *Adapter) Describe() provider.Descriptor {
-	d := provider.Descriptor{Type: ProviderType, InstanceID: a.config.InstanceID, Version: Version}
-	for _, name := range []domain.CapabilityName{
-		domain.CapabilityBatchExecution, domain.CapabilityPython, domain.CapabilityShell, domain.CapabilityGPU,
-		domain.CapabilityPrivateInputStaging, domain.CapabilityRemoteCancellation, domain.CapabilityRemoteCleanup, domain.CapabilityLogsWhileRunning,
-		domain.CapabilityLogsAfterCompletion, domain.CapabilityQuotaReporting, domain.CapabilityExecutionTimeout,
-		domain.CapabilityRemoteNetworkControl, domain.CapabilityStrongIdentity, domain.CapabilityCustomContainer,
-		domain.CapabilityRetainedSessions, domain.CapabilityAbsoluteDeadline, domain.CapabilitySeparateStart, domain.CapabilityEphemeralSecrets,
-	} {
-		c := domain.CapabilityStatus{Name: name, Support: domain.CapabilitySupportSupported, Evidence: domain.EvidenceImplementedOffline,
-			ClientVersion: Version, Reason: "operator-owned Docker host reached over SSH with a pinned host key"}
-		switch name {
-		case domain.CapabilityGPU:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "this adapter runs CPU containers only"
-		case domain.CapabilityQuotaReporting:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "an operator-owned host has no provider quota"
-		case domain.CapabilityCustomContainer:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "jobs run in the Relay standard image"
-		case domain.CapabilityRetainedSessions:
-			c.Support, c.Reason = domain.CapabilitySupportUnsupported, "not implemented by this finite batch adapter"
-		case domain.CapabilityPrivateInputStaging:
-			c.Reason = "inputs are copied only into the attempt's own container"
-		case domain.CapabilityExecutionTimeout:
-			c.Reason = "the runner budget and a host-side timeout bound the container without Relay connectivity"
-		case domain.CapabilityEphemeralSecrets:
-			c.Reason = "one-shot attempt-scoped material delivered through stdin to private tmpfs after explicit start"
-		case domain.CapabilitySeparateStart:
-			c.Reason = "verified stopped-container preparation requires separate finite start authority"
-		case domain.CapabilityAbsoluteDeadline:
-			c.Reason = "UTC and Linux suspend-aware deadlines independently bound payload groups and finalization"
-		case domain.CapabilityRemoteNetworkControl:
-			c.Reason = "containers have no network unless the frozen policy allows internet"
-		case domain.CapabilityRemoteCancellation:
-			c.Reason = "Docker stops the container and reports its exit"
-		case domain.CapabilityRemoteCleanup:
-			c.Reason = "explicit cleanup of the original stopped container with recorded engine identity; host files, volumes and images are preserved"
-		case domain.CapabilityStrongIdentity:
-			c.Reason = "container name, ID and labels bind the exact attempt"
-		}
-		d.Capabilities = append(d.Capabilities, c)
-	}
-	return d
+	return provider.Descriptor{Type: ProviderType, InstanceID: a.config.InstanceID, Version: Version,
+		Capabilities: Capabilities()}
+}
+
+// Capabilities describes the SSH Docker adapter independently of a connection.
+func Capabilities() provider.Capabilities {
+	return provider.Capabilities{BatchExecution: true, Python: true, Shell: true,
+		GPU: domain.CapabilitySupportUnsupported, PrivateInputStaging: true,
+		RemoteCancellation: true, RemoteCleanup: true,
+		LogsWhileRunning: domain.CapabilitySupportSupported, LogsAfterCompletion: true,
+		QuotaReporting: domain.CapabilitySupportUnsupported, ExecutionTimeout: true,
+		SeparateStart: true, EphemeralSecrets: true, AbsoluteDeadline: true,
+		RemoteNetworkControl: true, StrongIdentity: true, Accelerators: []string{"cpu"}}
 }
 
 // Verify proves the frozen binding and a reachable Docker daemon on the pinned host.

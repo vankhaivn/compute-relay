@@ -148,6 +148,11 @@ func TestManagedSSHDescriptorKeepsEveryFieldWriteOnly(t *testing.T) {
 		descriptor.Capabilities.Quota != "unsupported" || descriptor.Capabilities.AbsoluteDeadline != "supported" || strings.Join(descriptor.Capabilities.Accelerators, ",") != "cpu" {
 		t.Fatalf("descriptor = %+v", descriptor)
 	}
+	if c := descriptor.Capabilities; c.RemoteCleanup != "supported" || c.EphemeralSecrets != "supported" ||
+		c.SeparateStart != "supported" || c.Concurrency == nil ||
+		*c.Concurrency != (connections.ConcurrencyCapability{Support: "supported", Scope: "resource", Minimum: 1, Maximum: 64, Default: 1}) {
+		t.Fatal("managed capability projection changed", c)
+	}
 	for _, field := range descriptor.Fields {
 		if !field.WriteOnly || field.Required != (field.Name == "host" || field.Name == "username") {
 			t.Errorf("field %+v", field)

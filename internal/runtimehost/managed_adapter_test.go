@@ -25,6 +25,13 @@ func TestManagedKaggleDescriptorAndCredentialEncodingAreClosed(t *testing.T) {
 		descriptor.Capabilities.RemoteCleanup != "supported" || descriptor.Capabilities.RemoteCancel != "unsupported" || descriptor.Capabilities.Quota != "supported" || descriptor.Capabilities.AbsoluteDeadline != "unsupported" {
 		t.Fatal("invalid installed descriptor")
 	}
+	if c := descriptor.Capabilities; c.EphemeralSecrets != "unsupported" || c.SeparateStart != "unsupported" ||
+		c.Concurrency == nil || *c.Concurrency != (connections.ConcurrencyCapability{Support: "supported", Scope: "account", Minimum: 1, Maximum: 64, Default: 1}) {
+		t.Fatal("managed capability projection changed", c)
+	}
+	if c := (&managedKaggleAdapter{config: ManagedServeConfig{MachineShape: "NvidiaTeslaT4"}}).Descriptor().Capabilities; len(c.Accelerators) != 1 || c.Accelerators[0] != "gpu" {
+		t.Fatal("configured GPU accelerator missing", c)
+	}
 	for _, fields := range []map[string]string{
 		nil, {}, {"api_token": ""}, {"api_token": "bad token"}, {"api_token": "bad\n"},
 		{"api_token": "\xff"}, {"api_token": strings.Repeat("x", 8193)},

@@ -71,12 +71,7 @@ type optimistic struct{ provider.Provider }
 func (p optimistic) Describe() provider.Descriptor {
 	d := p.Provider.Describe()
 	d.InstanceID = "other"
-	for i := range d.Capabilities {
-		if d.Capabilities[i].Name == domain.CapabilityRemoteCancellation {
-			d.Capabilities[i].Support = domain.CapabilitySupportSupported
-			d.Capabilities[i].Evidence = domain.EvidencePlanned
-		}
-	}
+	d.Capabilities.BatchExecution = false
 	return d
 }
 
