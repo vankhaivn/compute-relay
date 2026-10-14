@@ -22,12 +22,7 @@ func (s *Store) RecordPreparationProgress(ctx context.Context, h dispatch.Handle
 	if err != nil {
 		return dispatch.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if p.ObservedAt.After(now) {
 			return dispatch.ErrInvalid
 		}

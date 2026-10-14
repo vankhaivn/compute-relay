@@ -138,13 +138,8 @@ func (s *Store) ClaimNext(ctx context.Context, owner string) (scheduler.Result, 
 	if !domain.ObjectID(owner).Valid() {
 		return scheduler.Result{}, scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return scheduler.Result{}, err
-	}
-	defer done()
 	var result scheduler.Result
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		settings, last, err := schedulerControl(ctx, tx)
 		if err != nil {
 			return err

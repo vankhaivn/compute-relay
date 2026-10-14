@@ -101,7 +101,7 @@ func TestClockSamplesAfterTransactionSlotIsAcquired(t *testing.T) {
 	result := make(chan time.Time, 1)
 	failures := make(chan error, 1)
 	go func() {
-		err := s.clockedTx(testctx, func(_ context.Context, _ *sql.Tx, now time.Time) error { result <- now; return nil })
+		err := s.write(testctx, func(_ context.Context, _ *sql.Tx, now time.Time) error { result <- now; return nil })
 		failures <- err
 	}()
 	until := time.Now().Add(5 * time.Second)
@@ -136,7 +136,7 @@ func TestClockConcurrentRollbackAndRestartKeepCommittedFloor(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := s.clockedTx(testctx, func(_ context.Context, _ *sql.Tx, now time.Time) error {
+			if err := s.write(testctx, func(_ context.Context, _ *sql.Tx, now time.Time) error {
 				mu.Lock()
 				samples = append(samples, now)
 				mu.Unlock()
@@ -164,7 +164,7 @@ func TestClockConcurrentRollbackAndRestartKeepCommittedFloor(t *testing.T) {
 	}
 	injected := errors.New("rollback after local write")
 	callbacks := 0
-	err := s.clockedTx(testctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+	err := s.write(testctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
 		callbacks++
 		if _, err := tx.ExecContext(ctx, `INSERT INTO workspaces VALUES('rolled-back-clock',1,'[]')`); err != nil {
 			return err
@@ -186,7 +186,7 @@ func TestClockConcurrentRollbackAndRestartKeepCommittedFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if err := reopened.clockedTx(testctx, func(_ context.Context, _ *sql.Tx, now time.Time) error {
+	if err := reopened.write(testctx, func(_ context.Context, _ *sql.Tx, now time.Time) error {
 		if !now.Equal(floor) {
 			t.Fatal("restart lost committed time floor", now, floor)
 		}
@@ -197,13 +197,14 @@ func TestClockConcurrentRollbackAndRestartKeepCommittedFloor(t *testing.T) {
 }
 
 func TestClockExpiredTokenCannotReturnAfterRollbackOrRestart(t *testing.T) {
-	wall := &dispatchClock{at: schedulerNow.Add(123 * time.Nanosecond)}
+	wall := &dispatchClock{at: schedulerNow}
 	opts := DefaultOptions()
 	opts.Clock = wall.Now
 	s, root := clockStore(t, opts, len(migrations))
 	if err := s.PutWorkspace(testctx, auth.Workspace{ID: "a", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
+	wall.advance(123 * time.Nanosecond)
 	access, _ := auth.New(s, s)
 	expiry := schedulerNow.Add(time.Second)
 	secret, record, err := access.Issue(testctx, "a", []auth.Scope{auth.Read}, expiry)
@@ -233,13 +234,14 @@ func TestClockExpiredTokenCannotReturnAfterRollbackOrRestart(t *testing.T) {
 }
 
 func TestClockObjectInventoryUsesSameSampleAndRollsBackWithMetadata(t *testing.T) {
-	now := schedulerNow.Add(123 * time.Nanosecond)
+	now := schedulerNow
 	opts := DefaultOptions()
 	opts.Clock = func() time.Time { return now }
 	s, _ := clockStore(t, opts, len(migrations))
 	if err := s.PutWorkspace(testctx, auth.Workspace{ID: "a", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
+	now = now.Add(123 * time.Nanosecond)
 	m := object("clock-object")
 	m.WorkspaceID = "a"
 	if err := s.CommitObject(testctx, m); err != nil {
@@ -265,7 +267,7 @@ func TestClockObjectInventoryUsesSameSampleAndRollsBackWithMetadata(t *testing.T
 	}
 }
 
-// A successful claim must not truncate the ceiling persisted by clockedTx.
+// A successful claim must not truncate the ceiling persisted by write.
 func TestClockNewClaimSurvivesWallRollbackAndRestart(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	f.seed(t, "a", 1, false)

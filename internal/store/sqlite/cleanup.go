@@ -240,13 +240,8 @@ func (s *Store) ReplayCleanup(ctx context.Context, w domain.WorkspaceID, token, 
 	if !w.Valid() || !domain.SHA256Digest(key).Valid() || !domain.SHA256Digest(hash).Valid() {
 		return nil, operations.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
 	var result *cleanup.Record
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Operate); err != nil {
 			return err
 		}
@@ -264,13 +259,8 @@ func (s *Store) ReadCleanup(ctx context.Context, w domain.WorkspaceID, token str
 	if !w.Valid() || !id.Valid() {
 		return cleanup.Record{}, operations.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return cleanup.Record{}, err
-	}
-	defer done()
 	var result cleanup.Record
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}
@@ -297,13 +287,8 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 	if c.Validate() != nil {
 		return cleanup.Record{}, operations.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return cleanup.Record{}, err
-	}
-	defer done()
 	var result cleanup.Record
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Operate); err != nil {
 			return err
 		}

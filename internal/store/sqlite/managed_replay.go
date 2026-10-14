@@ -19,13 +19,8 @@ func (s *Store) ReplayConnection(ctx context.Context, in connections.Accept) (co
 	if !in.Workspace.Valid() || !validID(in.TokenID) || !domain.SHA256Digest(in.KeyHash).Valid() || !domain.SHA256Digest(in.Fingerprint).Valid() {
 		return result, false, connections.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return result, false, err
-	}
-	defer done()
 	found := false
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, in.Workspace, in.TokenID, auth.Manage); err != nil {
 			return err
 		}

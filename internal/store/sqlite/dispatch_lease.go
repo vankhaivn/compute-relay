@@ -18,13 +18,8 @@ func (s *Store) ClaimRecovery(ctx context.Context, owner string) (*scheduler.Cla
 	if !domain.ObjectID(owner).Valid() {
 		return nil, scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
 	var result *scheduler.Claim
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		settings, last, err := schedulerControl(ctx, tx)
 		if err != nil {
 			return err
@@ -116,13 +111,8 @@ func (s *Store) ClaimRecovery(ctx context.Context, owner string) (*scheduler.Cla
 	return result, nil
 }
 func (s *Store) RenewDispatch(ctx context.Context, h dispatch.Handle) (dispatch.Handle, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Handle{}, err
-	}
-	defer done()
 	var result dispatch.Handle
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -160,12 +150,7 @@ func (s *Store) YieldDispatch(ctx context.Context, h dispatch.Handle, delay time
 	if delay < 0 || delay > time.Hour {
 		return scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err

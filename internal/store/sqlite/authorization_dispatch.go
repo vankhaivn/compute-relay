@@ -60,13 +60,8 @@ func dispatchAuthorization(ctx context.Context, tx *sql.Tx, work dispatch.Work, 
 // transaction. Its durable result survives a crash before the preparation intent;
 // a later owner may continue only this same attempt's one-shot journal.
 func (s *Store) ConsumeAuthorization(ctx context.Context, h dispatch.Handle) (dispatch.Work, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Work{}, err
-	}
-	defer done()
 	var result dispatch.Work
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err

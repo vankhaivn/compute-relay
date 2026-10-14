@@ -20,15 +20,6 @@ import (
 
 var _ collection.Repository = (*Store)(nil)
 
-func (s *Store) collectionTx(ctx context.Context, fn func(context.Context, *sql.Tx, time.Time) error) error {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, fn)
-}
-
 // ensureInitialCollection creates the first transfer ticket only when a collector
 // is explicitly invoked. Migration, admission, GET and terminal dispatch do not
 // start a collector. A failed ticket is never replaced automatically.
@@ -95,7 +86,7 @@ func (s *Store) ClaimCollection(ctx context.Context, ttl time.Duration, workers 
 		return nil, ErrInvalid
 	}
 	var result *collection.Work
-	err := s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var count int
 		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM collection_leases WHERE held=1 AND until_ms>?", now.UnixMilli()).Scan(&count); err != nil {
 			return dbError(err)
@@ -283,7 +274,7 @@ func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot c
 	if err != nil || len(raw) > collection.MaxSnapshotBytes {
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, _, _, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -300,7 +291,7 @@ func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot c
 }
 
 func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof collection.Verified) error {
-	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, op, a, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -353,7 +344,7 @@ func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collect
 	default:
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, op, a, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err

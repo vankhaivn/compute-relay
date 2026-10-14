@@ -39,13 +39,8 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		return executionauth.Receipt{}, executionauth.ErrRequest
 	}
 	hash, _ := c.Request.Digest(c.JobID)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.Receipt{}, err
-	}
-	defer done()
 	var receipt executionauth.Receipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -174,13 +169,8 @@ func (s *Store) ReadExecutionAuthorization(ctx context.Context, w domain.Workspa
 	if !w.Valid() || !job.Valid() || !id.Valid() {
 		return executionauth.Receipt{}, executionauth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.Receipt{}, err
-	}
-	defer done()
 	var r executionauth.Receipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Execute); err != nil {
 			return err
 		}

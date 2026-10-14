@@ -230,14 +230,31 @@ func (s *Store) Close() error {
 
 // operation pins the store lifetime and always applies a finite timeout, including
 // connection-pool wait. No exported transaction callback can hold a lock over a transfer.
-func (s *Store) operation(ctx context.Context, timeout time.Duration) (context.Context, func(), error) {
+func (s *Store) operation(ctx context.Context) (context.Context, func(), error) {
 	s.life.RLock()
 	if s.closed {
 		s.life.RUnlock()
 		return nil, nil, ErrClosed
 	}
-	bounded, cancel := context.WithTimeout(ctx, timeout)
+	bounded, cancel := context.WithTimeout(ctx, s.options.OperationTimeout)
 	return bounded, func() { cancel(); s.life.RUnlock() }, nil
+}
+
+// read bounds a query's lifetime and discards incomplete results on failure.
+// Reads that depend on logical time or a consistent transaction use write instead.
+func read[T any](ctx context.Context, s *Store, fn func(context.Context) (T, error)) (T, error) {
+	ctx, done, err := s.operation(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	defer done()
+	value, err := fn(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return value, nil
 }
 
 type Info struct {
@@ -250,27 +267,24 @@ type Info struct {
 }
 
 func (s *Store) Info(ctx context.Context) (Info, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return Info{}, err
-	}
-	defer done()
-	var info Info
-	var fk int
-	for _, query := range []struct {
-		sql  string
-		dest any
-	}{
-		{"SELECT installation_id FROM runtime_installation WHERE singleton=1", &info.InstallationID},
-		{"PRAGMA user_version", &info.SchemaVersion}, {"SELECT sqlite_version()", &info.SQLiteVersion},
-		{"PRAGMA journal_mode", &info.JournalMode}, {"PRAGMA synchronous", &info.Synchronous}, {"PRAGMA foreign_keys", &fk},
-	} {
-		if err := s.db.QueryRowContext(ctx, query.sql).Scan(query.dest); err != nil {
-			return Info{}, dbError(err)
+	return read(ctx, s, func(ctx context.Context) (Info, error) {
+		var info Info
+		var fk int
+		for _, query := range []struct {
+			sql  string
+			dest any
+		}{
+			{"SELECT installation_id FROM runtime_installation WHERE singleton=1", &info.InstallationID},
+			{"PRAGMA user_version", &info.SchemaVersion}, {"SELECT sqlite_version()", &info.SQLiteVersion},
+			{"PRAGMA journal_mode", &info.JournalMode}, {"PRAGMA synchronous", &info.Synchronous}, {"PRAGMA foreign_keys", &fk},
+		} {
+			if err := s.db.QueryRowContext(ctx, query.sql).Scan(query.dest); err != nil {
+				return Info{}, dbError(err)
+			}
 		}
-	}
-	info.ForeignKeys = fk == 1
-	return info, nil
+		info.ForeignKeys = fk == 1
+		return info, nil
+	})
 }
 
 func (s *Store) Ready(ctx context.Context) error {

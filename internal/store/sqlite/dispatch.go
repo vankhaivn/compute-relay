@@ -185,13 +185,8 @@ func matchesFrozenPlan(work dispatch.Work, plan provider.Plan, operation domain.
 	return nil
 }
 func (s *Store) LoadDispatch(ctx context.Context, c scheduler.Claim) (dispatch.Work, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Work{}, err
-	}
-	defer done()
 	var work dispatch.Work
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var err error
 		work, err = loadDispatch(ctx, tx, c, now)
 		return err
@@ -249,13 +244,8 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 	if action.Kind == dispatch.PreventDispatch || action.Kind == dispatch.RequestReconciliation {
 		return dispatch.Work{}, dispatch.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Work{}, err
-	}
-	defer done()
 	var result dispatch.Work
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err

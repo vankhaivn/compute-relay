@@ -16,12 +16,7 @@ func (s *Store) BindRetentionStores(ctx context.Context, inputID, resultID strin
 	if inputID == resultID || !domain.ObjectID(inputID).Valid() || !domain.ObjectID(resultID).Valid() {
 		return retention.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		for kind, id := range map[string]string{"input": inputID, "result": resultID} {
 			var existing string
 			err := tx.QueryRowContext(ctx, `SELECT blob_identity FROM retention_roots WHERE kind=?`, kind).Scan(&existing)
@@ -49,37 +44,34 @@ func (s *Store) PendingRetention(ctx context.Context, after int64, limit int) (r
 	if after < 0 || limit < 1 || limit > 100 {
 		return page, retention.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return page, err
-	}
-	defer done()
-	rows, err := s.db.QueryContext(ctx, `SELECT inventory_seq,kind,workspace_id,object_id,bytes,sha256 FROM retention_inventory WHERE inventory_seq>? AND expired_at IS NOT NULL AND deleted_at IS NULL ORDER BY inventory_seq LIMIT ?`, after, limit)
-	if err != nil {
-		return page, dbError(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var d retention.Deletion
-		if err := rows.Scan(&page.NextAfter, &d.Kind, &d.Object.WorkspaceID, &d.Object.ID, &d.Object.Bytes, &d.Object.SHA256); err != nil {
+	return read(ctx, s, func(ctx context.Context) (retention.DeletionPage, error) {
+		rows, err := s.db.QueryContext(ctx, `SELECT inventory_seq,kind,workspace_id,object_id,bytes,sha256 FROM retention_inventory WHERE inventory_seq>? AND expired_at IS NOT NULL AND deleted_at IS NULL ORDER BY inventory_seq LIMIT ?`, after, limit)
+		if err != nil {
+			return page, dbError(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d retention.Deletion
+			if err := rows.Scan(&page.NextAfter, &d.Kind, &d.Object.WorkspaceID, &d.Object.ID, &d.Object.Bytes, &d.Object.SHA256); err != nil {
+				return retention.DeletionPage{}, dbError(err)
+			}
+			if !d.Valid() || page.NextAfter <= after {
+				return retention.DeletionPage{}, ErrCorrupt
+			}
+			page.Items = append(page.Items, d)
+		}
+		if err := rows.Err(); err != nil {
 			return retention.DeletionPage{}, dbError(err)
 		}
-		if !d.Valid() || page.NextAfter <= after {
-			return retention.DeletionPage{}, ErrCorrupt
-		}
-		page.Items = append(page.Items, d)
-	}
-	if err := rows.Err(); err != nil {
-		return retention.DeletionPage{}, dbError(err)
-	}
-	return page, nil
+		return page, nil
+	})
 }
 
 func (s *Store) CompleteRetention(ctx context.Context, d retention.Deletion) error {
 	if !d.Valid() {
 		return retention.ErrInvalid
 	}
-	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		item, err := readRetentionItem(ctx, tx, d.Kind, d.Object.WorkspaceID, d.Object.ID)
 		if err != nil {
 			return err

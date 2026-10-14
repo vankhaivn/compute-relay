@@ -19,26 +19,20 @@ func (s *Store) ConfigureScheduler(ctx context.Context, settings scheduler.Setti
 		return scheduler.ErrInvalid
 	}
 	raw, _ := json.Marshal(settings)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	_, err = s.db.ExecContext(ctx, "UPDATE scheduler_control SET settings=? WHERE singleton=1", string(raw))
-	return dbError(err)
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		_, err := tx.ExecContext(ctx, "UPDATE scheduler_control SET settings=? WHERE singleton=1", string(raw))
+		return dbError(err)
+	})
 }
 func (s *Store) ConfigureAccount(ctx context.Context, scope string, policy scheduler.AccountPolicy) error {
 	if !domain.ObjectID(scope).Valid() || !policy.Valid() {
 		return scheduler.ErrInvalid
 	}
 	raw, _ := json.Marshal(policy)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO scheduler_accounts VALUES(?,?) ON CONFLICT(account_scope) DO UPDATE SET policy=excluded.policy`, scope, string(raw))
-	return dbError(err)
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO scheduler_accounts VALUES(?,?) ON CONFLICT(account_scope) DO UPDATE SET policy=excluded.policy`, scope, string(raw))
+		return dbError(err)
+	})
 }
 
 func schedulerControl(ctx context.Context, tx *sql.Tx) (scheduler.Settings, string, error) {
@@ -67,12 +61,7 @@ func (s *Store) RecordQuota(ctx context.Context, scope string, resource string, 
 	if err != nil || len(raw) > 4096 {
 		return scheduler.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		return recordQuota(ctx, tx, scope, resource, q, now)
 	})
 }

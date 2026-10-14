@@ -142,13 +142,8 @@ func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID s
 	if !req.Valid() {
 		return admission.Validation{}, admission.ErrSpec
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return admission.Validation{}, err
-	}
-	defer done()
 	result := admission.Validation{Valid: true, Warnings: []string{"Offline admission checks only; provider capability and bundle validation are still required before dispatch."}, Requirements: []admission.Requirement{{Name: "provider_validation", Verification: "before_dispatch"}, {Name: "bundle_integrity_and_layout", Verification: "before_dispatch"}}}
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, w, tokenID, auth.Read)
 		if err != nil {
 			return err
@@ -175,13 +170,8 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 	if !req.Valid() || !domain.SHA256Digest(keyHash).Valid() || !limits.Valid() {
 		return admission.Receipt{}, admission.ErrSpec
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return admission.Receipt{}, err
-	}
-	defer done()
 	var receipt admission.Receipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, w, tokenID, auth.Write)
 		if err != nil {
 			return err

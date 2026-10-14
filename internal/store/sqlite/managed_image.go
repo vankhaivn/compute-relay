@@ -14,13 +14,8 @@ func (s *Store) BeginConnectionInstall(ctx context.Context, id domain.OperationI
 	if !id.Valid() {
 		return false, ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return false, err
-	}
-	defer done()
 	var consumed bool
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		result, err := tx.ExecContext(ctx, `UPDATE managed_connection_operations SET stage='installing',updated_at=? WHERE operation_id=? AND action='install_image' AND stage='ready'`, now.Format(time.RFC3339Nano), id)
 		if err != nil {
 			return dbError(err)

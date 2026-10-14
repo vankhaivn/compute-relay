@@ -115,13 +115,8 @@ func (s *Store) PrepareExecution(ctx context.Context, c executionauth.GateComman
 	if c.Validate() != nil || req.Validate() != nil {
 		return executionauth.GateReceipt{}, executionauth.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.GateReceipt{}, err
-	}
-	defer done()
 	var receipt executionauth.GateReceipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -292,13 +287,8 @@ func (s *Store) StartExecution(ctx context.Context, c executionauth.GateCommand,
 	if c.Validate() != nil || req.Validate() != nil {
 		return executionauth.GateReceipt{}, executionauth.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.GateReceipt{}, err
-	}
-	defer done()
 	var receipt executionauth.GateReceipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -370,13 +360,8 @@ func (s *Store) ReadGateAuthorization(ctx context.Context, w domain.WorkspaceID,
 	if !w.Valid() || !job.Valid() || !id.Valid() {
 		return executionauth.GateReceipt{}, executionauth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.GateReceipt{}, err
-	}
-	defer done()
 	var receipt executionauth.GateReceipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Execute); err != nil {
 			return err
 		}
@@ -408,13 +393,8 @@ func (s *Store) ReadReadiness(ctx context.Context, w domain.WorkspaceID, token s
 	if !w.Valid() || !job.Valid() {
 		return executionauth.Readiness{}, executionauth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return executionauth.Readiness{}, err
-	}
-	defer done()
 	var result executionauth.Readiness
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}

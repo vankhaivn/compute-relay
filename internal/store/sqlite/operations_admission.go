@@ -118,13 +118,8 @@ func (s *Store) RetryInputs(ctx context.Context, w domain.WorkspaceID, token str
 	if !w.Valid() || !job.Valid() || !attempt.Valid() {
 		return operations.RetryInputs{}, operations.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return operations.RetryInputs{}, err
-	}
-	defer done()
 	var result operations.RetryInputs
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, w, token, auth.Operate)
 		if err != nil {
 			return err
@@ -142,13 +137,8 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 	if c.Validate() != nil {
 		return operations.Record{}, operations.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return operations.Record{}, err
-	}
-	defer done()
 	var result operations.Record
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Operate)
 		if err != nil {
 			return err

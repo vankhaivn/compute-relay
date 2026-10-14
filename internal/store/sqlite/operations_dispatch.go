@@ -34,13 +34,8 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 	if !id.Valid() || (action.Begin && (action.Outcome != nil || action.Code != "")) || (!action.Begin && (action.Outcome == nil) == (action.Code == "")) {
 		return dispatch.Work{}, dispatch.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return dispatch.Work{}, err
-	}
-	defer done()
 	var result dispatch.Work
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err

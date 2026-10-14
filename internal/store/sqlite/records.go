@@ -58,37 +58,31 @@ func (s *Store) PutWorkspace(ctx context.Context, w auth.Workspace) error {
 	profiles := append([]string{}, w.AllowedProfiles...)
 	sort.Strings(profiles)
 	encoded, _ := json.Marshal(profiles)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO workspaces(workspace_id,enabled,allowed_profiles) VALUES(?,?,?)
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO workspaces(workspace_id,enabled,allowed_profiles) VALUES(?,?,?)
  ON CONFLICT(workspace_id) DO UPDATE SET enabled=excluded.enabled,allowed_profiles=excluded.allowed_profiles`, string(w.ID), w.Enabled, string(encoded))
-	return dbError(err)
+		return dbError(err)
+	})
 }
 func (s *Store) LookupWorkspace(ctx context.Context, id domain.WorkspaceID) (auth.Workspace, error) {
 	if !id.Valid() {
 		return auth.Workspace{}, auth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return auth.Workspace{}, err
-	}
-	defer done()
-	var w auth.Workspace
-	var encoded string
-	err = s.db.QueryRowContext(ctx, "SELECT workspace_id,enabled,allowed_profiles FROM workspaces WHERE workspace_id=?", string(id)).Scan(&w.ID, &w.Enabled, &encoded)
-	if errors.Is(err, sql.ErrNoRows) {
-		return w, auth.ErrNotFound
-	}
-	if err != nil {
-		return w, dbError(err)
-	}
-	if len(encoded) > 20000 || json.Unmarshal([]byte(encoded), &w.AllowedProfiles) != nil || !validWorkspace(w) {
-		return auth.Workspace{}, ErrCorrupt
-	}
-	return w, nil
+	return read(ctx, s, func(ctx context.Context) (auth.Workspace, error) {
+		var w auth.Workspace
+		var encoded string
+		err := s.db.QueryRowContext(ctx, "SELECT workspace_id,enabled,allowed_profiles FROM workspaces WHERE workspace_id=?", string(id)).Scan(&w.ID, &w.Enabled, &encoded)
+		if errors.Is(err, sql.ErrNoRows) {
+			return w, auth.ErrNotFound
+		}
+		if err != nil {
+			return w, dbError(err)
+		}
+		if len(encoded) > 20000 || json.Unmarshal([]byte(encoded), &w.AllowedProfiles) != nil || !validWorkspace(w) {
+			return auth.Workspace{}, ErrCorrupt
+		}
+		return w, nil
+	})
 }
 func (s *Store) CreateToken(ctx context.Context, issuance auth.TokenIssuance) (auth.TokenRecord, error) {
 	t := issuance.Record
@@ -98,12 +92,7 @@ func (s *Store) CreateToken(ctx context.Context, issuance auth.TokenIssuance) (a
 	scopes := append([]auth.Scope(nil), t.Scopes...)
 	sort.Slice(scopes, func(i, j int) bool { return scopes[i] < scopes[j] })
 	encoded, _ := json.Marshal(scopes)
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return auth.TokenRecord{}, err
-	}
-	defer done()
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		t.CreatedAt = now
 		if issuance.Lifetime > 0 {
 			t.ExpiresAt = now.Add(issuance.Lifetime)
@@ -128,14 +117,9 @@ func (s *Store) CreateToken(ctx context.Context, issuance auth.TokenIssuance) (a
 	return t, nil
 }
 func (s *Store) LookupToken(ctx context.Context, digest [sha256.Size]byte) (auth.TokenRecord, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return auth.TokenRecord{}, err
-	}
-	defer done()
 	var t auth.TokenRecord
 	var found bool
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var raw []byte
 		var scopes, created string
 		var expires sql.NullString
@@ -178,23 +162,20 @@ func (s *Store) RevokeToken(ctx context.Context, id string) error {
 	if !validID(id) {
 		return auth.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	result, err := s.db.ExecContext(ctx, "UPDATE api_token_hashes SET revoked=1 WHERE token_id=?", id)
-	if err != nil {
-		return dbError(err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return dbError(err)
-	}
-	if n == 0 {
-		return auth.ErrNotFound
-	}
-	return nil
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		result, err := tx.ExecContext(ctx, "UPDATE api_token_hashes SET revoked=1 WHERE token_id=?", id)
+		if err != nil {
+			return dbError(err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return dbError(err)
+		}
+		if n == 0 {
+			return auth.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // CommitObject acknowledges metadata only; its caller must have already verified and
@@ -204,12 +185,7 @@ func (s *Store) CommitObject(ctx context.Context, m domain.ObjectMetadata) error
 	if !m.Valid() {
 		return objects.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if err := registerRetention(ctx, tx, retention.Input, m, now); err != nil {
 			return err
 		}
@@ -221,21 +197,18 @@ func (s *Store) GetObject(ctx context.Context, w domain.WorkspaceID, id domain.O
 	if !w.Valid() || !id.Valid() {
 		return domain.ObjectMetadata{}, objects.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return domain.ObjectMetadata{}, err
-	}
-	defer done()
-	var m domain.ObjectMetadata
-	err = s.db.QueryRowContext(ctx, "SELECT workspace_id,object_id,bytes,sha256 FROM objects WHERE workspace_id=? AND object_id=?", string(w), string(id)).Scan(&m.WorkspaceID, &m.ID, &m.Bytes, &m.SHA256)
-	if errors.Is(err, sql.ErrNoRows) {
-		return m, objects.ErrNotFound
-	}
-	if err != nil {
-		return m, dbError(err)
-	}
-	if !m.Valid() {
-		return domain.ObjectMetadata{}, ErrCorrupt
-	}
-	return m, nil
+	return read(ctx, s, func(ctx context.Context) (domain.ObjectMetadata, error) {
+		var m domain.ObjectMetadata
+		err := s.db.QueryRowContext(ctx, "SELECT workspace_id,object_id,bytes,sha256 FROM objects WHERE workspace_id=? AND object_id=?", string(w), string(id)).Scan(&m.WorkspaceID, &m.ID, &m.Bytes, &m.SHA256)
+		if errors.Is(err, sql.ErrNoRows) {
+			return m, objects.ErrNotFound
+		}
+		if err != nil {
+			return m, dbError(err)
+		}
+		if !m.Valid() {
+			return domain.ObjectMetadata{}, ErrCorrupt
+		}
+		return m, nil
+	})
 }

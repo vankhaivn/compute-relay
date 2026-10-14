@@ -149,13 +149,8 @@ func (s *Store) PlanCleanup(ctx context.Context, w domain.WorkspaceID, token str
 	if !w.Valid() || !job.Valid() || !attempt.Valid() {
 		return cleanup.PreviewPlan{}, operations.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return cleanup.PreviewPlan{}, err
-	}
-	defer done()
 	var result cleanup.PreviewPlan
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Operate); err != nil {
 			return err
 		}

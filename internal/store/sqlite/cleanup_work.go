@@ -16,21 +16,12 @@ import (
 
 var _ cleanup.WorkRepository = (*Store)(nil)
 
-func (s *Store) cleanupTx(ctx context.Context, fn func(context.Context, *sql.Tx, time.Time) error) error {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, fn)
-}
-
 func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.Work, error) {
 	if ttl < time.Second || ttl > 31*time.Minute {
 		return nil, ErrInvalid
 	}
 	var result *cleanup.Work
-	err := s.cleanupTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var w domain.WorkspaceID
 		var id domain.OperationID
 		err := tx.QueryRowContext(ctx, `SELECT c.workspace_id,c.operation_id FROM cleanup_operations c
@@ -189,7 +180,7 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 	if !w.Valid() || !o.Valid() {
 		return ErrInvalid
 	}
-	return s.cleanupTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		l := w.Lease
 		var generation, until int64
 		var fence string

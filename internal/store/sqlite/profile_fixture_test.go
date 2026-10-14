@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
+
 	"github.com/vankhaivn/compute-relay/internal/admission"
 )
 
@@ -18,12 +20,7 @@ func (s *Store) PutProfile(ctx context.Context, p admission.Profile, enabled boo
 	if err != nil || len(b) > 8192 {
 		return ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
 		var prior string
 		err := tx.QueryRowContext(ctx, "SELECT snapshot FROM profile_revisions WHERE profile=? AND revision=?", p.Binding.Profile, p.Binding.ConfigurationRevision).Scan(&prior)
 		switch {

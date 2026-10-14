@@ -165,8 +165,8 @@ func TestConstraintsAndIndependentSnapshots(t *testing.T) {
 func TestTransactionsRollbackAndPoolWaitIsBounded(t *testing.T) {
 	s, _ := newStore(t)
 	injected := errors.New("fault after first write")
-	err := withTx(testctx, s.db, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(testctx, "INSERT INTO workspaces VALUES('rolled-back',1,'[]')"); err != nil {
+	err := s.write(testctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workspaces VALUES('rolled-back',1,'[]')"); err != nil {
 			return err
 		}
 		return injected
@@ -186,6 +186,14 @@ func TestTransactionsRollbackAndPoolWaitIsBounded(t *testing.T) {
 	defer cancel()
 	if _, err := s.LookupWorkspace(ctx, "a"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("pool wait not cancelled", err)
+	}
+	s.options.OperationTimeout = 20 * time.Millisecond
+	calls := 0
+	if err := s.write(testctx, func(context.Context, *sql.Tx, time.Time) error { calls++; return nil }); !errors.Is(err, context.DeadlineExceeded) || calls != 0 {
+		t.Fatalf("write pool wait result=%v calls=%d", err, calls)
+	}
+	if _, err := s.LookupWorkspace(testctx, "a"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("read ignored operation timeout", err)
 	}
 }
 
@@ -207,6 +215,9 @@ func TestConcurrentWritesAndClosedStore(t *testing.T) {
 	}
 	if err := s.Ready(testctx); !errors.Is(err, ErrClosed) {
 		t.Fatal("closed store answered", err)
+	}
+	if err := s.PutWorkspace(testctx, auth.Workspace{ID: "closed"}); !errors.Is(err, ErrClosed) {
+		t.Fatal("closed store accepted write", err)
 	}
 	next, err := Open(testctx, root, DefaultOptions())
 	if err != nil {
@@ -230,12 +241,12 @@ func TestSQLiteDiskFullRollsBackWithoutReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	err := withTx(testctx, s.db, func(tx *sql.Tx) error {
+	err := s.write(testctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
 		calls++
-		if _, err := tx.Exec("INSERT INTO workspaces VALUES('must-rollback',1,'[]')"); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO workspaces VALUES('must-rollback',1,'[]')"); err != nil {
 			return dbError(err)
 		}
-		_, err := tx.Exec("CREATE TABLE disk_fault AS SELECT zeroblob(1048576) AS data")
+		_, err := tx.ExecContext(ctx, "CREATE TABLE disk_fault AS SELECT zeroblob(1048576) AS data")
 		return dbError(err)
 	})
 	if !errors.Is(err, ErrDiskFull) || calls != 1 {

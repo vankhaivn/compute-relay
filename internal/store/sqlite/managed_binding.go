@@ -25,12 +25,7 @@ func (s *Store) ReadManagedBinding(ctx context.Context, expected provider.Bindin
 	if !expected.Valid() || !ok || expected.Binding.ProviderInstanceID != domain.ProviderInstanceID(id) {
 		return result, ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return result, err
-	}
-	defer done()
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var raw string
 		var runtimeConfig []byte
 		err := tx.QueryRowContext(ctx, `SELECT p.snapshot,c.config FROM profile_revisions p

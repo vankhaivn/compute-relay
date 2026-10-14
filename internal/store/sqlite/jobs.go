@@ -18,13 +18,8 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 	if !w.Valid() || !id.Valid() {
 		return admission.Record{}, admission.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return admission.Record{}, err
-	}
-	defer done()
 	var result admission.Record
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, tokenID, auth.Read); err != nil {
 			return err
 		}

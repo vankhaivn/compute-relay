@@ -100,13 +100,8 @@ func (s *Store) ReplayOperation(ctx context.Context, w domain.WorkspaceID, token
 	if !operations.Supported(kind) || !domain.SHA256Digest(key).Valid() || !domain.SHA256Digest(hash).Valid() {
 		return nil, operations.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
 	var result *operations.Record
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Operate); err != nil {
 			return err
 		}
@@ -124,13 +119,8 @@ func (s *Store) ReadOperation(ctx context.Context, w domain.WorkspaceID, token s
 	if !w.Valid() || !id.Valid() {
 		return operations.Record{}, operations.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return operations.Record{}, err
-	}
-	defer done()
 	var result operations.Record
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}

@@ -18,13 +18,8 @@ func (s *Store) ReadLogAttempt(ctx context.Context, w domain.WorkspaceID, token 
 	if !w.Valid() || !job.Valid() || !attempt.Valid() {
 		return joblogs.Attempt{}, joblogs.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return joblogs.Attempt{}, err
-	}
-	defer done()
 	var result joblogs.Attempt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}

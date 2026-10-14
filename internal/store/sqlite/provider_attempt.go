@@ -19,15 +19,10 @@ func (s *Store) LoadProviderAttempt(ctx context.Context, id provider.Identity) (
 	if id.Validate() != nil {
 		return noPlan, noPrepared, ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return noPlan, noPrepared, err
-	}
-	defer done()
 
 	var plan provider.Plan
 	var prepared provider.Prepared
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		record, err := readJobRecord(ctx, tx, id.WorkspaceID, id.JobID)
 		if err != nil {
 			return err

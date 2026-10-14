@@ -19,13 +19,8 @@ func (s *Store) ReadCollection(ctx context.Context, w domain.WorkspaceID, token 
 	if !w.Valid() || !job.Valid() || !attempt.Valid() {
 		return collection.Result{}, collection.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return collection.Result{}, err
-	}
-	defer done()
 	result := collection.Result{WorkspaceID: w, JobID: job, AttemptID: attempt}
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}

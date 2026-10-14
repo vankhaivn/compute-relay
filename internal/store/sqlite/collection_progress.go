@@ -54,7 +54,7 @@ func (s *Store) RecordCollectionProgress(ctx context.Context, w collection.Work,
 	if stage != "discovering" && stage != "transferring" && stage != "verifying" {
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if p.ObservedAt.After(now) {
 			return collection.ErrInvalid
 		}

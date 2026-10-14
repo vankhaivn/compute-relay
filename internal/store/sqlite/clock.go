@@ -10,10 +10,16 @@ import (
 
 type transactionClockKey struct{}
 
-// clockedTx samples time after BEGIN IMMEDIATE acquires the single writer slot.
+// write bounds the operation lifetime and samples time after BEGIN IMMEDIATE
+// acquires the single writer slot.
 // The persisted millisecond floor survives wall-clock rollback and process restart.
 // Failed and uncertain transactions are never retried here.
-func (s *Store) clockedTx(ctx context.Context, fn func(context.Context, *sql.Tx, time.Time) error) error {
+func (s *Store) write(ctx context.Context, fn func(context.Context, *sql.Tx, time.Time) error) error {
+	ctx, done, err := s.operation(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	return withTx(ctx, s.db, func(tx *sql.Tx) error {
 		wall := time.Now
 		if s.options.Clock != nil {

@@ -81,7 +81,9 @@ func TestSchedulerCrashHelper(t *testing.T) {
 		return
 	}
 	ctx := context.Background()
-	s, err := Open(ctx, path, DefaultOptions())
+	opts := DefaultOptions()
+	opts.Clock = func() time.Time { return schedulerNow }
+	s, err := Open(ctx, path, opts)
 	if err != nil {
 		t.Fatal(err)
 	}

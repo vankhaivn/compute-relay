@@ -101,7 +101,7 @@ func (s *Store) BeginCleanupResource(ctx context.Context, w cleanup.Work, resour
 	if !w.Valid() || !resource.Resource.Request.Valid() || !resource.Result.Valid() {
 		return ErrInvalid
 	}
-	return s.cleanupTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		row, err := verifyCleanupLease(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -154,7 +154,7 @@ func (s *Store) CompleteCleanupResource(ctx context.Context, w cleanup.Work, res
 	if !w.Valid() || !result.Valid() || result.State == cleanup.ResourcePending || result.State == cleanup.ResourceRunning {
 		return ErrInvalid
 	}
-	return s.cleanupTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := verifyCleanupLease(ctx, tx, w, now); err != nil {
 			return err
 		}

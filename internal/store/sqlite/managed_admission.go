@@ -23,12 +23,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 	if (in.Action == "install_image") != (in.Installation != nil) || in.Installation != nil && in.Installation.Validate() != nil {
 		return result, connections.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return result, err
-	}
-	defer done()
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, in.Workspace, in.TokenID, auth.Manage); err != nil {
 			return err
 		}
@@ -181,12 +176,7 @@ func managedRemovalAllowed(ctx context.Context, tx *sql.Tx, id string) error {
 	return nil
 }
 func (s *Store) ReadyConnection(ctx context.Context, w domain.WorkspaceID, token string, id domain.OperationID) error {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Manage); err != nil {
 			return err
 		}

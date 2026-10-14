@@ -120,12 +120,7 @@ func managedReadActor(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tok
 }
 func (s *Store) ReadConnection(ctx context.Context, w domain.WorkspaceID, token string, id string) (connections.Connection, error) {
 	var v connections.Connection
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return v, err
-	}
-	defer done()
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if err := managedReadActor(ctx, tx, w, token); err != nil {
 			return err
 		}
@@ -140,12 +135,7 @@ func (s *Store) ReadConnection(ctx context.Context, w domain.WorkspaceID, token 
 }
 func (s *Store) ListConnections(ctx context.Context, w domain.WorkspaceID, token string) ([]connections.Connection, error) {
 	result := []connections.Connection{}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}
@@ -236,12 +226,7 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 }
 func (s *Store) ReadConnectionOperation(ctx context.Context, w domain.WorkspaceID, token string, id domain.OperationID) (connections.Operation, error) {
 	var op connections.Operation
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return op, err
-	}
-	defer done()
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Manage); err != nil {
 			return err
 		}
@@ -261,34 +246,25 @@ func (s *Store) ResolveConnectionCredential(ctx context.Context, id string) (str
 	if _, ok := credentials.VaultReference(ports.CredentialRef("vault:" + id)); !ok {
 		return "", credentials.ErrInvalid
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return "", err
-	}
-	defer done()
-	var key string
-	err = s.db.QueryRowContext(ctx, `SELECT active_credential_key FROM managed_connections WHERE connection_id=? AND new_work!='removed' AND active_credential_key!=''`, id).Scan(&key)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", credentials.ErrUnconfigured
-	}
-	return key, dbError(err)
+	return read(ctx, s, func(ctx context.Context) (string, error) {
+		var key string
+		err := s.db.QueryRowContext(ctx, `SELECT active_credential_key FROM managed_connections WHERE connection_id=? AND new_work!='removed' AND active_credential_key!=''`, id).Scan(&key)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", credentials.ErrUnconfigured
+		}
+		return key, dbError(err)
+	})
 }
 func (s *Store) FingerprintInitialized(ctx context.Context) (bool, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return false, err
-	}
-	defer done()
-	var initialized bool
-	err = s.db.QueryRowContext(ctx, `SELECT fingerprint_initialized FROM managed_config WHERE singleton=1`).Scan(&initialized)
-	return initialized, dbError(err)
+	return read(ctx, s, func(ctx context.Context) (bool, error) {
+		var initialized bool
+		err := s.db.QueryRowContext(ctx, `SELECT fingerprint_initialized FROM managed_config WHERE singleton=1`).Scan(&initialized)
+		return initialized, dbError(err)
+	})
 }
 func (s *Store) MarkFingerprintInitialized(ctx context.Context) error {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return err
-	}
-	defer done()
-	_, err = s.db.ExecContext(ctx, `UPDATE managed_config SET fingerprint_initialized=1 WHERE singleton=1`)
-	return dbError(err)
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+		_, err := tx.ExecContext(ctx, `UPDATE managed_config SET fingerprint_initialized=1 WHERE singleton=1`)
+		return dbError(err)
+	})
 }

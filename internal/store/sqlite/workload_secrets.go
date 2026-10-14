@@ -132,14 +132,9 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	if c.Validate() != nil || metadata.Validate() != nil || !domain.SHA256Digest(fingerprint).Valid() {
 		return workloadsecret.Receipt{}, false, workloadsecret.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return workloadsecret.Receipt{}, false, err
-	}
-	defer done()
 	var receipt workloadsecret.Receipt
 	usable := false
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -216,13 +211,8 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	if c.Validate() != nil || !attempt.Valid() || !id.Valid() {
 		return workloadsecret.Receipt{}, workloadsecret.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return workloadsecret.Receipt{}, err
-	}
-	defer done()
 	var receipt workloadsecret.Receipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -273,13 +263,8 @@ func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.Worksp
 	if !workspace.Valid() || !job.Valid() || !id.Valid() {
 		return workloadsecret.Receipt{}, workloadsecret.ErrNotFound
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return workloadsecret.Receipt{}, err
-	}
-	defer done()
 	var receipt workloadsecret.Receipt
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, workspace, token, auth.Execute); err != nil {
 			return err
 		}
@@ -302,13 +287,8 @@ func (s *Store) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Ke
 	if !key.Valid() || !id.Valid() {
 		return false, workloadsecret.ErrRequest
 	}
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return false, err
-	}
-	defer done()
 	var usable bool
-	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var err error
 		usable, err = secretUsable(ctx, tx, key, id, now)
 		return err
@@ -317,14 +297,11 @@ func (s *Store) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Ke
 }
 
 func (s *Store) HasWorkloadSecretAuthorizations(ctx context.Context) (bool, error) {
-	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
-	if err != nil {
-		return false, err
-	}
-	defer done()
-	var exists bool
-	err = s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workload_secret_authorizations)`).Scan(&exists)
-	return exists, dbError(err)
+	return read(ctx, s, func(ctx context.Context) (bool, error) {
+		var exists bool
+		err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workload_secret_authorizations)`).Scan(&exists)
+		return exists, dbError(err)
+	})
 }
 
 func secretForStart(ctx context.Context, tx *sql.Tx, r admission.Record, id domain.OperationID, revision domain.SHA256Digest, deadline string, now time.Time) (*workloadsecret.Receipt, error) {

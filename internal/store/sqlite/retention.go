@@ -143,7 +143,7 @@ func (s *Store) ExpireRetention(ctx context.Context, p retention.Policy, limit i
 	if !p.Valid() || limit < 1 || limit > 100 {
 		return report, retention.ErrInvalid
 	}
-	err := s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+	err := s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var cursor int64
 		if err := tx.QueryRowContext(ctx, `SELECT inventory_seq FROM retention_cursor WHERE singleton=1`).Scan(&cursor); err != nil {
 			return dbError(err)
