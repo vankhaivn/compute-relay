@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "runtime_version",
+    "implementation_status",
+    "features",
+    "job_admission"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "compute-connector/v1alpha1"
+    },
+    "runtime_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "implementation_status": {
+      "const": "implemented-offline"
+    },
+    "features": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "workspace_auth",
+          "object_upload",
+          "object_metadata",
+          "job_admission",
+          "job_validation",
+          "job_status",
+          "job_cancel",
+          "job_retry",
+          "job_reconcile",
+          "job_collect",
+          "operation_status",
+          "artifact_list",
+          "artifact_metadata",
+          "artifact_download",
+          "managed_connections",
+          "attempt_authorization",
+          "manual_result_collection",
+          "connection_configuration",
+          "job_logs",
+          "job_cleanup",
+          "separate_prepare_start",
+          "ephemeral_workload_secrets",
+          "job_cleanup_preview"
+        ]
+      }
+    },
+    "job_admission": {
+      "enum": [
+        "not_implemented",
+        "implemented-offline"
+      ]
+    }
+  }
+}

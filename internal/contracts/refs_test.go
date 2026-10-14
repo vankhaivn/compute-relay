@@ -1,10 +1,7 @@
 package contracts
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -19,7 +16,7 @@ func validateLocalRefs(apiRoot string) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || filepath.Ext(path) != ".json" || entry.Name() == filepath.Base(lockPath) {
+		if entry.IsDir() || filepath.Ext(path) != ".json" {
 			return nil
 		}
 		value, err := readJSONValue(path)
@@ -96,27 +93,6 @@ func validateRef(apiRoot, containingDirectory, ref string) error {
 	return nil
 }
 
-func resolveContractPath(root, base, relative string) (string, error) {
-	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, `\`) {
-		return "", fmt.Errorf("unsafe relative path %q", relative)
-	}
-	clean := filepath.Clean(filepath.FromSlash(relative))
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("unsafe relative path %q", relative)
-	}
-	basePath := filepath.Join(root, base)
-	path := filepath.Join(basePath, clean)
-	if err := ensureWithin(basePath, path); err != nil {
-		return "", err
-	}
-	if info, err := os.Stat(path); err != nil {
-		return "", err
-	} else if info.IsDir() {
-		return "", fmt.Errorf("path %q is a directory", relative)
-	}
-	return path, nil
-}
-
 func ensureWithin(root, path string) error {
 	relative, err := filepath.Rel(root, path)
 	if err != nil {
@@ -135,26 +111,4 @@ func readJSONValue(path string) (any, error) {
 	}
 	defer file.Close()
 	return jsonschema.UnmarshalJSON(file)
-}
-
-func readStrictJSON(path string, destination any) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(destination); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("multiple JSON values are not allowed")
-		}
-		return err
-	}
-	return nil
 }

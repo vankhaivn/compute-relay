@@ -36,7 +36,7 @@ func TestControlHTTPResponsesSatisfyPublishedContracts(t *testing.T) {
 	job := admitControlJob(t, f)
 	operation := transportControlSchema(t, "schemas/control-operation.v1alpha1.schema.json", "")
 	errorSchema := transportControlSchema(t, "schemas/error.v1alpha1.schema.json", "")
-	info := transportControlSchema(t, "openapi.json", "/paths/~1v1~1info/get/responses/200/content/application~1json/schema")
+	info := transportControlSchema(t, "schemas/info.v1alpha1.schema.json", "")
 	validate := func(schema *jsonschema.Schema, raw []byte) {
 		t.Helper()
 		var value any
