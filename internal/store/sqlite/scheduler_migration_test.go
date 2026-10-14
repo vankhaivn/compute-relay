@@ -74,14 +74,14 @@ func TestSchedulerMigrationBackfillsStableAcceptanceOrder(t *testing.T) {
 	if err != nil || info.InstallationID != installation || info.SchemaVersion != len(migrations) {
 		t.Fatal("migration changed identity", info, err)
 	}
-	r, err := upgraded.ClaimNext(ctx, "migration", schedulerNow)
+	r, err := upgraded.ClaimNext(ctx, "migration")
 	if err != nil || r.Claim != nil {
 		t.Fatal("upgrade started work without opt-in", r, err)
 	}
 	if err = upgraded.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
-	r, err = upgraded.ClaimNext(ctx, "migration", schedulerNow)
+	r, err = upgraded.ClaimNext(ctx, "migration")
 	if err != nil || r.Claim != nil {
 		t.Fatal("retired explicit work was rearmed", r, err)
 	}

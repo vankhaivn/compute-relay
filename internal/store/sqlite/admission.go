@@ -22,6 +22,10 @@ const createJobOperation = "job.create"
 // actorInTx closes revocation/disable/scope races between HTTP auth and commit. Token IDs
 // are NOT bearer secrets; only an authenticated application service calls this store seam.
 func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID string, scope auth.Scope) ([]string, error) {
+	now := transactionTime(ctx)
+	if now.IsZero() {
+		return nil, ErrCorrupt
+	}
 	if !w.Valid() || !validID(tokenID) {
 		return nil, auth.ErrUnauthenticated
 	}
@@ -43,7 +47,7 @@ func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID st
 		if err != nil {
 			return nil, ErrCorrupt
 		}
-		if !time.Now().Before(at) {
+		if !now.Before(at) {
 			return nil, auth.ErrUnauthenticated
 		}
 	}
@@ -144,7 +148,7 @@ func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID s
 	}
 	defer done()
 	result := admission.Validation{Valid: true, Warnings: []string{"Offline admission checks only; provider capability and bundle validation are still required before dispatch."}, Requirements: []admission.Requirement{{Name: "provider_validation", Verification: "before_dispatch"}, {Name: "bundle_integrity_and_layout", Verification: "before_dispatch"}}}
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, w, tokenID, auth.Read)
 		if err != nil {
 			return err
@@ -153,7 +157,7 @@ func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID s
 		if err != nil {
 			return err
 		}
-		if req.Spec().Expired(time.Now()) {
+		if req.Spec().Expired(now) {
 			return admission.ErrExpired
 		}
 		if req.Spec().Resources.Accelerator == "gpu" {
@@ -177,7 +181,7 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 	}
 	defer done()
 	var receipt admission.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, w, tokenID, auth.Write)
 		if err != nil {
 			return err
@@ -204,7 +208,7 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err != nil {
 			return err
 		}
-		if req.Spec().Expired(time.Now()) {
+		if req.Spec().Expired(now) {
 			return admission.ErrExpired
 		}
 		var total, workspace int
@@ -231,7 +235,6 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err != nil {
 			return err
 		}
-		now := time.Now().UTC()
 		created := now.Format(time.RFC3339Nano)
 		a, err := domain.NewAttempt(domain.AttemptID(attempt), domain.JobID(job), 1, now)
 		if err != nil {

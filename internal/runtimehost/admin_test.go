@@ -154,3 +154,34 @@ func privateTokenPath(t *testing.T) string {
 	}
 	return filepath.Join(path, "token")
 }
+
+func TestTokenLifetimeUsesLogicalClockAfterLongWallRollback(t *testing.T) {
+	ctx := context.Background()
+	h, err := Open(ctx, initialized(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if _, err = h.CreateWorkspace(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	wall := &fixedClock{now: time.Now().UTC().Truncate(time.Millisecond).Add(60 * 24 * time.Hour)}
+	injectHostClock(t, h, wall.Now)
+	before, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read, auth.Write}, time.Minute, privateTokenPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wall.advance(-60 * 24 * time.Hour)
+	path := privateTokenPath(t)
+	after, err := h.IssueToken(ctx, "app", []auth.Scope{auth.Read, auth.Write}, time.Minute, path)
+	if err != nil || !after.ExpiresAt.Equal(before.ExpiresAt) {
+		t.Fatal("relative token policy used rolled-back wall time", before.ExpiresAt, after.ExpiresAt, err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.access.Authenticate(ctx, strings.TrimSpace(string(raw))); err != nil {
+		t.Fatal("new token was not usable at committed logical time", err)
+	}
+}

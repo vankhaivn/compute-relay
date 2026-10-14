@@ -20,7 +20,7 @@ func TestDispatchCachedProblemIsAuthorizedAndObservational(t *testing.T) {
 	scenario.Mode = fake.AcceptLoseResponse
 	f := newDispatchFixture(t, scenario)
 	id := f.seed(t, "a", 1, false)
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,7 +35,7 @@ func TestRetentionResultExpirySweepAndRootBinding(t *testing.T) {
 	if controlCount(t, f.s, "SELECT count(*) FROM artifacts") != len(result.Files) || controlCount(t, f.s, "SELECT count(*) FROM collection_publications") != 1 {
 		t.Fatal("expiry erased verification history")
 	}
-	sweeper, err := retention.NewSweeper(f.s, f.blobs, blobs, f.clock)
+	sweeper, err := retention.NewSweeper(f.s, f.blobs, blobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestRetentionResultExpirySweepAndRootBinding(t *testing.T) {
 			t.Fatal("expired result bytes still present")
 		}
 	}
-	swapped, err := retention.NewSweeper(f.s, blobs, f.blobs, f.clock)
+	swapped, err := retention.NewSweeper(f.s, blobs, f.blobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestRetentionResultExpirySweepAndRootBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replacement.Close()
-	changed, err := retention.NewSweeper(f.s, f.blobs, replacement, f.clock)
+	changed, err := retention.NewSweeper(f.s, f.blobs, replacement)
 	if err != nil {
 		t.Fatal(err)
 	}

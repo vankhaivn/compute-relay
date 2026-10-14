@@ -134,7 +134,7 @@ func open(ctx context.Context, path string, create bool) (_ *Host, err error) {
 		return nil, ErrState
 	}
 	h.identity = actual
-	h.access, err = auth.New(h.store, h.store, nil)
+	h.access, err = auth.New(h.store, h.store)
 	if err != nil {
 		return nil, ErrState
 	}

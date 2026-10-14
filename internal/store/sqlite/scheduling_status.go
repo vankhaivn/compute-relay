@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -16,10 +15,7 @@ func readSchedulingStatus(ctx context.Context, tx *sql.Tx, record admission.Reco
 		record.Attempt.State.Orchestration != domain.OrchestrationQueued && record.Attempt.State.Orchestration != domain.OrchestrationBlocked {
 		return nil, nil
 	}
-	settings, last, err := schedulerControl(ctx, tx, now)
-	if errors.Is(err, scheduler.ErrClock) {
-		return &admission.SchedulingStatus{Reason: "scheduler_clock_unavailable"}, nil
-	}
+	settings, last, err := schedulerControl(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

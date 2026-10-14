@@ -78,7 +78,7 @@ func TestCleanupPreviewRechecksAuthorityAfterReads(t *testing.T) {
 				}
 				if !changed {
 					changed = true
-					access, _ := auth.New(f.s, f.s, nil)
+					access, _ := auth.New(f.s, f.s)
 					if err := access.Revoke(ctx, principal.TokenID()); err != nil {
 						t.Fatal(err)
 					}
@@ -265,40 +265,40 @@ func TestCleanupResourceFencesAndAggregateEvidence(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)
 	admitCleanup(t, f, id, "resource-fence", false)
-	first, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Second)
+	first, err := f.s.ClaimCleanup(ctx, time.Second)
 	if err != nil || first == nil {
 		t.Fatal(err)
 	}
-	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[1], f.clock.Now()); !errors.Is(err, operations.ErrUnresolved) {
+	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[1]); !errors.Is(err, operations.ErrUnresolved) {
 		t.Fatal("staging deletion preceded unresolved execution", err)
 	}
-	if err := f.s.CompleteCleanup(ctx, *first, cleanup.Outcome{Effect: cleanup.RemoteDeleted}, f.clock.Now()); !errors.Is(err, ErrInvalid) {
+	if err := f.s.CompleteCleanup(ctx, *first, cleanup.Outcome{Effect: cleanup.RemoteDeleted}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("aggregate succeeded without resource outcomes", err)
 	}
 	result := first.Resources[0].Result
 	result.State, result.Reason = cleanup.ResourceDeleted, "deletion_confirmed"
-	if err := f.s.CompleteCleanupResource(ctx, *first, result, f.clock.Now()); !errors.Is(err, operations.ErrChanged) {
+	if err := f.s.CompleteCleanupResource(ctx, *first, result); !errors.Is(err, operations.ErrChanged) {
 		t.Fatal("deletion confirmed without resource intent", err)
 	}
-	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0], f.clock.Now()); err != nil {
+	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0]); err != nil {
 		t.Fatal(err)
 	}
 	f.clock.advance(2 * time.Second)
-	second, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Minute)
+	second, err := f.s.ClaimCleanup(ctx, time.Minute)
 	if err != nil || second == nil {
 		t.Fatal(err)
 	}
-	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0], f.clock.Now()); !errors.Is(err, cleanup.ErrLeaseLost) {
+	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0]); !errors.Is(err, cleanup.ErrLeaseLost) {
 		t.Fatal("stale worker obtained mutation intent", err)
 	}
-	if err := f.s.CompleteCleanupResource(ctx, *first, result, f.clock.Now()); !errors.Is(err, cleanup.ErrLeaseLost) {
+	if err := f.s.CompleteCleanupResource(ctx, *first, result); !errors.Is(err, cleanup.ErrLeaseLost) {
 		t.Fatal("stale worker recorded outcome", err)
 	}
 	finishCleanupResourceFixtures(t, f, *second)
-	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.AlreadyAbsent}, f.clock.Now()); !errors.Is(err, ErrInvalid) {
+	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.AlreadyAbsent}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("aggregate disagreed with resource evidence", err)
 	}
-	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.RemoteDeleted}, f.clock.Now()); err != nil {
+	if err := f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.RemoteDeleted}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -313,7 +313,7 @@ func TestCleanupProviderTimeoutPersistsUnknownWithoutStoppingWorker(t *testing.T
 	}
 	config := cleanup.DefaultConfig()
 	config.Timeout = time.Second
-	worker, err := cleanup.New(f.s, cleanupResolver{probe}, f.clock, config)
+	worker, err := cleanup.New(f.s, cleanupResolver{probe}, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 			f, id := collectedFixture(t)
 			_, principal, receipt := admitCleanup(t, f, id, "before-upgrade", false)
 			if running {
-				if work, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Second); err != nil || work == nil {
+				if work, err := f.s.ClaimCleanup(ctx, time.Second); err != nil || work == nil {
 					t.Fatal(err)
 				}
 			}
@@ -365,7 +365,7 @@ func TestCleanupSchemaTwentyUpgradePinsOlderPendingTargets(t *testing.T) {
 						t.Fatal("old running deletion acquired invented proof", resource)
 					}
 				}
-				plan, err := f.s.PlanCleanup(ctx, "a", principal.TokenID(), id.JobID, id.AttemptID, false, f.clock.Now())
+				plan, err := f.s.PlanCleanup(ctx, "a", principal.TokenID(), id.JobID, id.AttemptID, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -399,7 +399,7 @@ func TestCleanupLegacyUnknownEffectsBlockCollectionAfterUpgrade(t *testing.T) {
 				worker, probe := cleanupWorker(t, f)
 				probe.err = errors.New("lost legacy deletion acknowledgement")
 				runCleanup(t, worker)
-			} else if work, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Second); err != nil || work == nil {
+			} else if work, err := f.s.ClaimCleanup(ctx, time.Second); err != nil || work == nil {
 				t.Fatal(err)
 			}
 			// Released schema 20 has only the attempt-wide running/failed receipt;
@@ -477,7 +477,7 @@ func TestCleanupNameBasedAcceptanceIsDurableAndDoesNotRetarget(t *testing.T) {
 				}
 				return probe.probeProvider.CleanupResource(ctx, r)
 			}
-			worker, err := cleanup.New(f.s, cleanupResolver{probe}, f.clock, cleanup.DefaultConfig())
+			worker, err := cleanup.New(f.s, cleanupResolver{probe}, cleanup.DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -511,16 +511,16 @@ func TestCleanupNameBasedRecoveryOnlyReadsOriginalIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Second)
+	first, err := f.s.ClaimCleanup(ctx, time.Second)
 	if err != nil || first == nil || !first.AcceptNameBasedDelete {
 		t.Fatal(first, err)
 	}
 	changed := *first
 	changed.AcceptNameBasedDelete = false
-	if err := f.s.BeginCleanupResource(ctx, changed, changed.Resources[0], f.clock.Now()); !errors.Is(err, operations.ErrChanged) {
+	if err := f.s.BeginCleanupResource(ctx, changed, changed.Resources[0]); !errors.Is(err, operations.ErrChanged) {
 		t.Fatal("worker changed durable acceptance", err)
 	}
-	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0], f.clock.Now()); err != nil {
+	if err := f.s.BeginCleanupResource(ctx, *first, first.Resources[0]); err != nil {
 		t.Fatal(err)
 	}
 	f.restart(t)
@@ -534,7 +534,7 @@ func TestCleanupNameBasedRecoveryOnlyReadsOriginalIntent(t *testing.T) {
 		}
 		return provider.CleanupOutcome{}, provider.Problem(domain.CodeProviderStateUnknown, domain.FailureStageObservation, "earlier deletion remains unknown")
 	}
-	worker, err := cleanup.New(f.s, cleanupResolver{probe}, f.clock, cleanup.DefaultConfig())
+	worker, err := cleanup.New(f.s, cleanupResolver{probe}, cleanup.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

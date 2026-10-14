@@ -26,7 +26,9 @@ var schedulerNow = time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 func schedulerStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state")
-	s, err := Open(context.Background(), path, DefaultOptions())
+	opts := DefaultOptions()
+	opts.Clock = func() time.Time { return schedulerNow }
+	s, err := Open(context.Background(), path, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +44,9 @@ func schedulerStore(t *testing.T) (*Store, string) {
 func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, accelerator ...string) scheduler.Identity {
 	t.Helper()
 	ctx := context.Background()
+	if s.options.Clock == nil {
+		schedulerTime(s, schedulerNow)
+	}
 	identity := scheduler.Identity{WorkspaceID: domain.WorkspaceID(w), JobID: domain.JobID("job_" + id), AttemptID: domain.AttemptID("att_" + id)}
 	profile := admission.DefaultProfile(domain.ProviderBinding{Profile: "profile-" + instance, ProviderInstanceID: domain.ProviderInstanceID(instance), ConfigurationRevision: "r1"}, account)
 	var version int
@@ -96,7 +101,14 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, acce
 			t.Fatal(err)
 		}
 		m := domain.ObjectMetadata{WorkspaceID: identity.WorkspaceID, ID: "bundle", Bytes: 1, SHA256: domain.SHA256Digest(strings.Repeat("a", 64))}
-		if err = s.CommitObject(ctx, m); err != nil {
+		if version < 25 {
+			// Historical migration fixtures use their original automatic inventory
+			// trigger; current repositories require inventory-first insertion.
+			_, err = s.db.Exec(`INSERT INTO objects VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, m.WorkspaceID, m.ID, m.Bytes, m.SHA256)
+		} else {
+			err = s.CommitObject(ctx, m)
+		}
+		if err != nil {
 			stored, readErr := s.GetObject(ctx, m.WorkspaceID, m.ID)
 			if !errors.Is(err, ErrConflict) || readErr != nil || stored != m {
 				t.Fatal(err, readErr)
@@ -110,7 +122,7 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, acce
 		permits, actor := authorizationService(t, f, identity.WorkspaceID, auth.Execute)
 		if resource == "gpu" {
 			q := schedulerQuota(10, schedulerNow.Add(-time.Millisecond))
-			if err = s.RecordQuota(ctx, account, "gpu", q, q.ObservedAt); err != nil {
+			if err = s.RecordQuota(ctx, account, "gpu", q); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -123,7 +135,8 @@ func schedulerSeed(t *testing.T, s *Store, id, w, instance, account string, acce
 }
 func schedulerClaim(t *testing.T, s *Store, owner string, at time.Time) scheduler.Claim {
 	t.Helper()
-	r, err := s.ClaimNext(context.Background(), owner, at)
+	schedulerTime(s, at)
+	r, err := s.ClaimNext(context.Background(), owner)
 	if err != nil || r.Claim == nil {
 		t.Fatalf("claim=%+v err=%v", r, err)
 	}
@@ -132,6 +145,11 @@ func schedulerClaim(t *testing.T, s *Store, owner string, at time.Time) schedule
 	}
 	return *r.Claim
 }
+
+// schedulerTime advances only the injected wall clock; persisted time may clamp it.
+// Fixtures set it before starting any concurrent repository calls.
+func schedulerTime(s *Store, at time.Time) { s.options.Clock = func() time.Time { return at } }
+
 func schedulerCount(t *testing.T, s *Store, query string) int {
 	t.Helper()
 	var n int
@@ -170,7 +188,7 @@ func TestSchedulerFIFOAndCursorSurviveRestart(t *testing.T) {
 			t.Fatal("persisted round robin/FIFO", c, want)
 		}
 	}
-	r, err := s.ClaimNext(context.Background(), "extra", schedulerNow)
+	r, err := s.ClaimNext(context.Background(), "extra")
 	if err != nil || r.Claim != nil || r.View.LiveWorkers != 4 || r.View.AccountReservations["shared"] != 4 {
 		t.Fatal(r, err)
 	}
@@ -185,7 +203,7 @@ func TestSchedulerConcurrentClaimsShareAccountAcrossInstances(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			r, err := s.ClaimNext(context.Background(), fmt.Sprintf("worker%d", i), schedulerNow)
+			r, err := s.ClaimNext(context.Background(), fmt.Sprintf("worker%d", i))
 			if err != nil {
 				t.Error(err)
 				return
@@ -205,7 +223,7 @@ func TestSchedulerConcurrentClaimsShareAccountAcrossInstances(t *testing.T) {
 	if err := s.PutProfile(context.Background(), p, true); err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.ClaimNext(context.Background(), "remap", schedulerNow)
+	r, err := s.ClaimNext(context.Background(), "remap")
 	if err != nil || r.Claim != nil || r.View.AccountReservations["same-account"] != 1 {
 		t.Fatal("frozen binding lost", r, err)
 	}
@@ -220,11 +238,11 @@ func TestSchedulerExpiredClaimFencesDispatch(t *testing.T) {
 	}
 	for _, check := range []func() error{
 		func() error {
-			_, err := s.LoadDispatch(context.Background(), old, schedulerNow.Add(31*time.Second))
+			_, err := s.LoadDispatch(context.Background(), old)
 			return err
 		},
 		func() error {
-			return s.YieldDispatch(context.Background(), dispatch.Handle{Claim: old}, schedulerNow.Add(31*time.Second), 0)
+			return s.YieldDispatch(context.Background(), dispatch.Handle{Claim: old}, 0)
 		},
 	} {
 		if err := check(); !errors.Is(err, scheduler.ErrLeaseLost) {
@@ -244,7 +262,7 @@ func TestSchedulerClaimAndEventFailureRollBackTogether(t *testing.T) {
 	if _, err := s.db.Exec(`CREATE TRIGGER fail_scheduler_event BEFORE INSERT ON events WHEN NEW.type='scheduler.claimed' BEGIN SELECT RAISE(ABORT,'injected'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if r, err := s.ClaimNext(context.Background(), "w", schedulerNow); err == nil || r.Claim != nil {
+	if r, err := s.ClaimNext(context.Background(), "w"); err == nil || r.Claim != nil {
 		t.Fatal("failed transaction acknowledged", r, err)
 	}
 	a, _, err := loadAttempt(context.Background(), s.db, id.WorkspaceID, id.JobID, id.AttemptID)
@@ -292,13 +310,14 @@ func TestSchedulerAmbiguousCapacitySurvivesExpiryAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	r, err := s.ClaimNext(context.Background(), "new", schedulerNow.Add(time.Hour))
+	schedulerTime(s, schedulerNow.Add(time.Hour))
+	r, err := s.ClaimNext(context.Background(), "new")
 	if err != nil || r.Claim != nil || r.View.AccountReservations["shared"] != 1 {
 		t.Fatal("restart freed uncertain slot", r, err)
 	}
 	// Even an accidental reset cannot turn this old attempt into new work.
 	schedulerSetState(t, s, id, domain.InitialAttemptState())
-	r, err = s.ClaimNext(context.Background(), "reset", schedulerNow.Add(time.Hour))
+	r, err = s.ClaimNext(context.Background(), "reset")
 	if err != nil || r.Claim != nil {
 		t.Fatal("barrier forgotten", r, err)
 	}
@@ -324,12 +343,19 @@ func TestSchedulerPauseDisableAndBackwardClock(t *testing.T) {
 	if err := s.ConfigureScheduler(context.Background(), settings); err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.ClaimNext(context.Background(), "paused", schedulerNow)
+	schedulerTime(s, schedulerNow.Add(time.Second))
+	r, err := s.ClaimNext(context.Background(), "paused")
 	if err != nil || r.Claim != nil || r.View.LiveWorkers != 1 {
 		t.Fatal("pause erased work", r, err)
 	}
-	if _, err = s.ClaimNext(context.Background(), "backwards", schedulerNow.Add(-time.Second)); !errors.Is(err, scheduler.ErrClock) {
-		t.Fatal("backward clock resurrected ownership", err)
+	schedulerTime(s, schedulerNow.Add(-time.Second))
+	backward, err := s.ClaimNext(context.Background(), "backwards")
+	if err != nil || backward.Claim != nil || backward.View.LiveWorkers != r.View.LiveWorkers {
+		t.Fatal("wall rollback changed existing ownership", backward, err)
+	}
+	var floor int64
+	if err = s.db.QueryRow(`SELECT clock_ms FROM scheduler_control WHERE singleton=1`).Scan(&floor); err != nil || floor != schedulerNow.Add(time.Second).UnixMilli() {
+		t.Fatal("wall rollback regressed committed clock", floor, err)
 	}
 	settings.Paused = false
 	if err = s.ConfigureScheduler(context.Background(), settings); err != nil {
@@ -338,7 +364,8 @@ func TestSchedulerPauseDisableAndBackwardClock(t *testing.T) {
 	if err = s.ConfigureAccount(context.Background(), "shared", scheduler.AccountPolicy{Disabled: true, MaxActive: 1}); err != nil {
 		t.Fatal(err)
 	}
-	r, err = s.ClaimNext(context.Background(), "disabled", schedulerNow.Add(2*time.Second))
+	schedulerTime(s, schedulerNow.Add(2*time.Second))
+	r, err = s.ClaimNext(context.Background(), "disabled")
 	if err != nil || r.Claim == nil || r.Claim.WorkspaceID != "b" {
 		t.Fatal(r, err)
 	}
@@ -356,18 +383,20 @@ func TestSchedulerQuotaLatchAndStrictPolicy(t *testing.T) {
 	s, _ := schedulerStore(t)
 	schedulerSeed(t, s, "a", "a", "p", "account", "gpu")
 	ctx := context.Background()
-	if err := s.RecordQuota(ctx, "account", "gpu", schedulerQuota(0, schedulerNow), schedulerNow); err != nil {
+	if err := s.RecordQuota(ctx, "account", "gpu", schedulerQuota(0, schedulerNow)); err != nil {
 		t.Fatal(err)
 	}
+	schedulerTime(s, schedulerNow.Add(time.Second))
 	unavailable := provider.QuotaObservation{Status: provider.QuotaUnavailable, Resource: "gpu", ObservedAt: schedulerNow.Add(time.Second)}
-	if err := s.RecordQuota(ctx, "account", "gpu", unavailable, unavailable.ObservedAt); err != nil {
+	if err := s.RecordQuota(ctx, "account", "gpu", unavailable); err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.ClaimNext(ctx, "w", schedulerNow.Add(time.Hour))
+	schedulerTime(s, schedulerNow.Add(time.Hour))
+	r, err := s.ClaimNext(ctx, "w")
 	if err != nil || r.Claim != nil || r.View.Heads[0].Reason != scheduler.QuotaExhausted {
 		t.Fatal("unknown/aging cleared exhaustion", r, err)
 	}
-	if err = s.RecordQuota(ctx, "account", "gpu", schedulerQuota(1, schedulerNow), schedulerNow.Add(time.Hour)); !errors.Is(err, ErrConflict) {
+	if err = s.RecordQuota(ctx, "account", "gpu", schedulerQuota(1, schedulerNow)); !errors.Is(err, ErrConflict) {
 		t.Fatal("out-of-order observation accepted", err)
 	}
 	at := schedulerNow.Add(time.Hour)
@@ -376,15 +405,17 @@ func TestSchedulerQuotaLatchAndStrictPolicy(t *testing.T) {
 	}
 	q := schedulerQuota(1, at)
 	q.Precision = "rounded hours"
-	if err = s.RecordQuota(ctx, "account", "gpu", q, at); err != nil {
+	schedulerTime(s, q.ObservedAt)
+	if err = s.RecordQuota(ctx, "account", "gpu", q); err != nil {
 		t.Fatal(err)
 	}
-	r, err = s.ClaimNext(ctx, "rounded", at)
+	r, err = s.ClaimNext(ctx, "rounded")
 	if err != nil || r.Claim != nil || r.View.Heads[0].Reason != scheduler.QuotaUncertain {
 		t.Fatal("rounded quota proved strict sufficiency", r, err)
 	}
 	q = schedulerQuota(1, at.Add(time.Second))
-	if err = s.RecordQuota(ctx, "account", "gpu", q, q.ObservedAt); err != nil {
+	schedulerTime(s, q.ObservedAt)
+	if err = s.RecordQuota(ctx, "account", "gpu", q); err != nil {
 		t.Fatal(err)
 	}
 	if schedulerClaim(t, s, "fresh", q.ObservedAt).QuotaWarning != "" {
@@ -399,7 +430,7 @@ func TestSchedulerStartsPausedAndEnqueueRollsBack(t *testing.T) {
 	}
 	defer s.Close()
 	schedulerSeed(t, s, "a", "a", "p", "account")
-	r, err := s.ClaimNext(context.Background(), "w", schedulerNow)
+	r, err := s.ClaimNext(context.Background(), "w")
 	if err != nil || r.Claim != nil || r.View.Heads[0].Reason != scheduler.Paused {
 		t.Fatal("migration started work", r, err)
 	}

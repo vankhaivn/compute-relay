@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
@@ -15,6 +16,7 @@ import (
 
 type Memory struct {
 	mu     sync.Mutex
+	clock  func() time.Time
 	tokens map[[sha256.Size]byte]auth.TokenRecord
 	spaces map[domain.WorkspaceID]auth.Workspace
 	blobs  map[domain.WorkspaceID]map[domain.ObjectID]domain.ObjectMetadata
@@ -28,6 +30,15 @@ func NewMemory(workspaces ...auth.Workspace) *Memory {
 		m.SetWorkspace(w)
 	}
 	return m
+}
+
+// SetClock configures the repository clock before a test starts concurrent work.
+func (m *Memory) SetClock(clock func() time.Time) { m.mu.Lock(); defer m.mu.Unlock(); m.clock = clock }
+func (m *Memory) now() time.Time {
+	if m.clock != nil {
+		return m.clock().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (m *Memory) SetWorkspace(w auth.Workspace) {
@@ -51,23 +62,34 @@ func (m *Memory) LookupWorkspace(ctx context.Context, id domain.WorkspaceID) (au
 	return w, nil
 }
 
-func (m *Memory) CreateToken(ctx context.Context, record auth.TokenRecord) error {
+func (m *Memory) CreateToken(ctx context.Context, issuance auth.TokenIssuance) (auth.TokenRecord, error) {
+	record := issuance.Record
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return err
+		return auth.TokenRecord{}, err
+	}
+	if !record.CreatedAt.IsZero() || issuance.Lifetime < 0 || issuance.Lifetime > 0 && !record.ExpiresAt.IsZero() {
+		return auth.TokenRecord{}, auth.ErrForbidden
+	}
+	record.CreatedAt = m.now()
+	if issuance.Lifetime > 0 {
+		record.ExpiresAt = record.CreatedAt.Add(issuance.Lifetime)
+	}
+	if !record.ExpiresAt.IsZero() && !record.CreatedAt.Before(record.ExpiresAt) {
+		return auth.TokenRecord{}, auth.ErrForbidden
 	}
 	if _, ok := m.tokens[record.Digest]; ok {
-		return errors.New("duplicate token digest")
+		return auth.TokenRecord{}, errors.New("duplicate token digest")
 	}
 	for _, old := range m.tokens {
 		if old.ID == record.ID {
-			return errors.New("duplicate token ID")
+			return auth.TokenRecord{}, errors.New("duplicate token ID")
 		}
 	}
 	record.Scopes = append([]auth.Scope(nil), record.Scopes...)
 	m.tokens[record.Digest] = record
-	return nil
+	return record, nil
 }
 
 func (m *Memory) LookupToken(ctx context.Context, digest [sha256.Size]byte) (auth.TokenRecord, error) {
@@ -77,7 +99,7 @@ func (m *Memory) LookupToken(ctx context.Context, digest [sha256.Size]byte) (aut
 		return auth.TokenRecord{}, err
 	}
 	record, ok := m.tokens[digest]
-	if !ok {
+	if !ok || !record.ExpiresAt.IsZero() && !m.now().Before(record.ExpiresAt) {
 		return auth.TokenRecord{}, auth.ErrNotFound
 	}
 	record.Scopes = append([]auth.Scope(nil), record.Scopes...)

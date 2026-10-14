@@ -29,7 +29,7 @@ func TestPreparationProgressIsFencedMonotonicAndShownOnlyWhilePreparing(t *testi
 	ctx := context.Background()
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,24 +87,24 @@ func TestPreparationProgressIsFencedMonotonicAndShownOnlyWhilePreparing(t *testi
 	}
 
 	f.clock.advance(time.Minute)
-	claim, err := f.s.ClaimRecovery(ctx, "manual", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(ctx, "manual")
 	if err != nil || claim == nil {
 		t.Fatal("ready attempt was not claimable", err)
 	}
-	work, err := f.s.LoadDispatch(ctx, *claim, f.clock.Now())
+	work, err := f.s.LoadDispatch(ctx, *claim)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sample := domain.PreparationProgress{Scope: "staged_input_bytes", Generation: work.Handle.Claim.Generation, BytesTotal: 100, ObservedAt: f.clock.Now()}
-	if err = f.s.RecordPreparationProgress(ctx, work.Handle, sample, f.clock.Now()); !errors.Is(err, dispatch.ErrConflict) {
+	if err = f.s.RecordPreparationProgress(ctx, work.Handle, sample); !errors.Is(err, dispatch.ErrConflict) {
 		t.Fatalf("progress accepted outside staging: %v", err)
 	}
 	stale := work.Handle
 	stale.Claim.Generation, sample.Generation = stale.Claim.Generation+1, stale.Claim.Generation+1
-	if err = f.s.RecordPreparationProgress(ctx, stale, sample, f.clock.Now()); !errors.Is(err, scheduler.ErrLeaseLost) {
+	if err = f.s.RecordPreparationProgress(ctx, stale, sample); !errors.Is(err, scheduler.ErrLeaseLost) {
 		t.Fatalf("stale lease recorded progress: %v", err)
 	}
-	if err = f.s.YieldDispatch(ctx, work.Handle, f.clock.Now(), 0); err != nil {
+	if err = f.s.YieldDispatch(ctx, work.Handle, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.step(t); err != nil {

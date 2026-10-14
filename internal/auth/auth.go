@@ -54,6 +54,13 @@ type TokenRecord struct {
 	Revoked     bool
 }
 
+// TokenIssuance keeps an explicit absolute expiry or a relative local lifetime.
+// The repository derives a relative expiry from the same sample as CreatedAt.
+type TokenIssuance struct {
+	Record   TokenRecord
+	Lifetime time.Duration
+}
+
 type Workspace struct {
 	ID              domain.WorkspaceID
 	Enabled         bool
@@ -61,10 +68,12 @@ type Workspace struct {
 }
 
 // TokenRepository must persist digests only, enforce unique IDs/digests, and acknowledge
-// CreateToken/RevokeToken only after commit. ErrNotFound is the lookup miss sentinel.
-// LookupToken returns an independent snapshot; it must not return aliased mutable slices.
+// CreateToken/RevokeToken only after commit. CreateToken assigns CreatedAt using
+// repository time and returns the committed record. ErrNotFound is the lookup miss
+// sentinel. LookupToken checks expiry using repository time and returns an independent
+// snapshot; it must not return aliased mutable slices.
 type TokenRepository interface {
-	CreateToken(context.Context, TokenRecord) error
+	CreateToken(context.Context, TokenIssuance) (TokenRecord, error)
 	LookupToken(context.Context, [sha256.Size]byte) (TokenRecord, error)
 	RevokeToken(context.Context, string) error
 }
@@ -87,31 +96,36 @@ func (p Principal) TokenID() string                 { return p.tokenID }
 type Service struct {
 	tokens TokenRepository
 	spaces WorkspaceRepository
-	now    func() time.Time
 }
 
-func New(tokens TokenRepository, spaces WorkspaceRepository, now func() time.Time) (*Service, error) {
+func New(tokens TokenRepository, spaces WorkspaceRepository) (*Service, error) {
 	if tokens == nil || spaces == nil {
 		return nil, ErrUnavailable
 	}
-	if now == nil {
-		now = time.Now
-	}
-	return &Service{tokens: tokens, spaces: spaces, now: now}, nil
+	return &Service{tokens: tokens, spaces: spaces}, nil
 }
 
 // Issue is a LOCAL administrative operation, never an application HTTP route. The raw
 // secret is returned only after the digest and scopes have been committed successfully.
 func (s *Service) Issue(ctx context.Context, workspace domain.WorkspaceID, scopes []Scope, expires time.Time) (Secret, TokenRecord, error) {
+	return s.issue(ctx, workspace, scopes, expires, 0)
+}
+
+// IssueForLifetime is a local operator policy. Its expiry uses repository time,
+// including a persisted logical floor after a wall-clock rollback.
+func (s *Service) IssueForLifetime(ctx context.Context, workspace domain.WorkspaceID, scopes []Scope, lifetime time.Duration) (Secret, TokenRecord, error) {
+	if lifetime <= 0 {
+		return Secret{}, TokenRecord{}, ErrForbidden
+	}
+	return s.issue(ctx, workspace, scopes, time.Time{}, lifetime)
+}
+
+func (s *Service) issue(ctx context.Context, workspace domain.WorkspaceID, scopes []Scope, expires time.Time, lifetime time.Duration) (Secret, TokenRecord, error) {
 	if !workspace.Valid() || !ValidScopes(scopes) {
 		return Secret{}, TokenRecord{}, ErrForbidden
 	}
 	if err := s.enabled(ctx, workspace); err != nil {
 		return Secret{}, TokenRecord{}, err
-	}
-	now := s.now().UTC()
-	if !expires.IsZero() && !expires.After(now) {
-		return Secret{}, TokenRecord{}, ErrForbidden
 	}
 	var secretBytes [32]byte
 	var idBytes [16]byte
@@ -125,14 +139,19 @@ func (s *Service) Issue(ctx context.Context, workspace domain.WorkspaceID, scope
 	record := TokenRecord{
 		ID: "tok_" + hex.EncodeToString(idBytes[:]), WorkspaceID: workspace,
 		Digest: sha256.Sum256([]byte(secret.value)), Scopes: append([]Scope(nil), scopes...),
-		CreatedAt: now, ExpiresAt: expires.UTC(),
+		ExpiresAt: expires.UTC(),
 	}
 	// Do not allow a repository implementation to mutate the returned scope snapshot.
 	stored := record
 	stored.Scopes = append([]Scope(nil), record.Scopes...)
-	if err := s.tokens.CreateToken(ctx, stored); err != nil {
+	record, err := s.tokens.CreateToken(ctx, TokenIssuance{Record: stored, Lifetime: lifetime})
+	if err != nil {
+		if errors.Is(err, ErrForbidden) {
+			return Secret{}, TokenRecord{}, ErrForbidden
+		}
 		return Secret{}, TokenRecord{}, ErrUnavailable
 	}
+	record.Scopes = append([]Scope(nil), record.Scopes...)
 	return secret, record, nil
 }
 
@@ -188,8 +207,7 @@ func (s *Service) lookup(ctx context.Context, digest [sha256.Size]byte) (Princip
 		return Principal{}, ErrUnavailable
 	}
 	if subtle.ConstantTimeCompare(record.Digest[:], digest[:]) != 1 || record.Revoked ||
-		!record.WorkspaceID.Valid() || !ValidScopes(record.Scopes) || record.ID == "" ||
-		(!record.ExpiresAt.IsZero() && !s.now().Before(record.ExpiresAt)) {
+		!record.WorkspaceID.Valid() || !ValidScopes(record.Scopes) || record.ID == "" {
 		return Principal{}, ErrUnauthenticated
 	}
 	if err := s.enabled(ctx, record.WorkspaceID); err != nil {

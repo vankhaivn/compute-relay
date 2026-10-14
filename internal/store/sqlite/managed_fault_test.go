@@ -275,7 +275,7 @@ func (r *managedReadyLostAck) ReadyConnection(ctx context.Context, w domain.Work
 func TestManagedVaultWriteReadyCommitLostAcknowledgement(t *testing.T) {
 	f := newManagedStateFixture(t)
 	repo := &managedReadyLostAck{Store: f.s}
-	service, err := connections.New(f.access, repo, f.vault, []connections.Adapter{f.discovery}, f.clock.Now)
+	service, err := connections.New(f.access, repo, f.vault, []connections.Adapter{f.discovery})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestManagedReplaySurvivesAdapterChanges(t *testing.T) {
 					f.run(t)
 				}
 				changed := managedChangedDescriptor{stateAdapter: f.discovery, removed: change == "removed"}
-				f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{changed}, f.clock.Now)
+				f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{changed})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -378,7 +378,7 @@ func TestManagedWaitingSecretReplayRequiresInstalledAdapter(t *testing.T) {
 	}
 	f.vault.createHook = nil
 	changed := managedChangedDescriptor{stateAdapter: f.discovery, removed: true}
-	service, err := connections.New(f.access, f.s, f.vault, []connections.Adapter{changed}, f.clock.Now)
+	service, err := connections.New(f.access, f.s, f.vault, []connections.Adapter{changed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +491,7 @@ func TestManagedCredentialReadSurvivesRotationAndReleasesGuardBeforeCallback(t *
 	f.action(t, "a", initial, "read-rotation-replace", "replace_credential", managedStateRotated)
 	repo := &managedPausedResolution{Store: f.s, resolved: make(chan struct{}), resume: make(chan struct{})}
 	var err error
-	f.service, err = connections.New(f.access, repo, f.vault, []connections.Adapter{f.discovery}, f.clock.Now)
+	f.service, err = connections.New(f.access, repo, f.vault, []connections.Adapter{f.discovery})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -277,7 +277,7 @@ func newStudioHTTP(t *testing.T, override func(*sqlite.Store) admission.Reposito
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	access, err := auth.New(s, s, nil)
+	access, err := auth.New(s, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func newStudioHTTP(t *testing.T, override func(*sqlite.Store) admission.Reposito
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := connections.New(access, s, &managedVault{values: map[string][]byte{}}, []connections.Adapter{&managedAdapter{}}, nil)
+	service, err := connections.New(access, s, &managedVault{values: map[string][]byte{}}, []connections.Adapter{&managedAdapter{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func newStudioHTTP(t *testing.T, override func(*sqlite.Store) admission.Reposito
 	if err != nil {
 		t.Fatal(err)
 	}
-	controls, err := operations.New(access, s, blobs, nil, admission.DefaultLimits())
+	controls, err := operations.New(access, s, blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

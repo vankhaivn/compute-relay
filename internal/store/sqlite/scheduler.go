@@ -134,7 +134,7 @@ func schedulerSnapshot(ctx context.Context, tx *sql.Tx, settings scheduler.Setti
 }
 
 // ClaimNext requires the attempt's durable execution or preparation permit.
-func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (scheduler.Result, error) {
+func (s *Store) ClaimNext(ctx context.Context, owner string) (scheduler.Result, error) {
 	if !domain.ObjectID(owner).Valid() {
 		return scheduler.Result{}, scheduler.ErrInvalid
 	}
@@ -144,8 +144,8 @@ func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (sch
 	}
 	defer done()
 	var result scheduler.Result
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
-		settings, last, err := schedulerControl(ctx, tx, now)
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		settings, last, err := schedulerControl(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -159,7 +159,7 @@ func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (sch
 		}
 		result.View = view
 		if index < 0 {
-			return advanceSchedulerClock(ctx, tx, now)
+			return nil
 		}
 		row := rows[index]
 		if row.ResourceScope != "" {
@@ -173,7 +173,7 @@ func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (sch
 			return err
 		}
 		if now.Before(a.UpdatedAt) {
-			return scheduler.ErrClock
+			return ErrCorrupt
 		}
 		var generation int64
 		err = tx.QueryRowContext(ctx, "SELECT generation FROM scheduler_leases WHERE queue_seq=?", row.Sequence).Scan(&generation)
@@ -202,7 +202,7 @@ func (s *Store) ClaimNext(ctx context.Context, owner string, now time.Time) (sch
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE scheduler_control SET last_workspace=?,clock_ms=? WHERE singleton=1", string(row.WorkspaceID), now.UnixMilli())
+		_, err = tx.ExecContext(ctx, "UPDATE scheduler_control SET last_workspace=? WHERE singleton=1", string(row.WorkspaceID))
 		if err != nil {
 			return dbError(err)
 		}

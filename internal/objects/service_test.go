@@ -44,7 +44,7 @@ func (b blobWriter) Put(ctx context.Context, m domain.ObjectMetadata, r io.Reade
 func setup(t *testing.T) (*auth.Service, auth.Principal, *testsupport.Memory, *blobfs.Store) {
 	t.Helper()
 	mem := testsupport.NewMemory(auth.Workspace{ID: "a", Enabled: true}, auth.Workspace{ID: "b", Enabled: true})
-	access, err := auth.New(mem, mem, nil)
+	access, err := auth.New(mem, mem)
 	if err != nil {
 		t.Fatal(err)
 	}

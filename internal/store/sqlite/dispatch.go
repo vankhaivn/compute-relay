@@ -42,7 +42,7 @@ func loadJournal(ctx context.Context, tx *sql.Tx, sequence int64) (dispatch.Jour
 // latest attempt revision. Unlike the local scheduler seam it permits observation
 // behind the dispatch barrier; new side effects have additional one-shot policy gates.
 func ownedDispatchClaim(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.Time) (domain.Attempt, bool, error) {
-	if !c.Valid() || !scheduler.ValidTime(now) {
+	if !c.Valid() {
 		return domain.Attempt{}, false, scheduler.ErrInvalid
 	}
 	var owner, fence, profile string
@@ -82,13 +82,13 @@ func ownedDispatchClaim(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now 
 		return domain.Attempt{}, false, scheduler.ErrLeaseLost
 	}
 	if now.Before(a.UpdatedAt) {
-		return domain.Attempt{}, false, scheduler.ErrClock
+		return domain.Attempt{}, false, ErrCorrupt
 	}
 	return a, barrier, nil
 }
 func loadDispatch(ctx context.Context, tx *sql.Tx, c scheduler.Claim, now time.Time) (dispatch.Work, error) {
 	var work dispatch.Work
-	if _, _, err := schedulerControl(ctx, tx, now); err != nil {
+	if _, _, err := schedulerControl(ctx, tx); err != nil {
 		return work, err
 	}
 	a, barrier, err := ownedDispatchClaim(ctx, tx, c, now)
@@ -184,14 +184,18 @@ func matchesFrozenPlan(work dispatch.Work, plan provider.Plan, operation domain.
 	}
 	return nil
 }
-func (s *Store) LoadDispatch(ctx context.Context, c scheduler.Claim, now time.Time) (dispatch.Work, error) {
+func (s *Store) LoadDispatch(ctx context.Context, c scheduler.Claim) (dispatch.Work, error) {
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return dispatch.Work{}, err
 	}
 	defer done()
 	var work dispatch.Work
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error { var err error; work, err = loadDispatch(ctx, tx, c, now); return err })
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		var err error
+		work, err = loadDispatch(ctx, tx, c, now)
+		return err
+	})
 	if err != nil {
 		return dispatch.Work{}, err
 	}
@@ -208,7 +212,7 @@ func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now 
 	if work.Job.Request.Spec().Expired(now) || work.Gate != nil && work.Gate.Expired(now) {
 		return admission.ErrExpired
 	}
-	settings, last, err := schedulerControl(ctx, tx, now)
+	settings, last, err := schedulerControl(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -239,7 +243,7 @@ func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now 
 	return dispatch.ErrConflict
 }
 
-func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action, now time.Time) (dispatch.Work, error) {
+func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action) (dispatch.Work, error) {
 	// HTTP controls use their authenticated operation transaction; an ordinary worker
 	// cannot bypass its operation identity/event journal through the dispatch port.
 	if action.Kind == dispatch.PreventDispatch || action.Kind == dispatch.RequestReconciliation {
@@ -251,7 +255,7 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 	}
 	defer done()
 	var result dispatch.Work
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -340,9 +344,6 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 		}
 		if err != nil {
 			return dbError(err)
-		}
-		if err = advanceSchedulerClock(ctx, tx, now); err != nil {
-			return err
 		}
 		work.Job.Attempt = updated
 		work.Journal = next

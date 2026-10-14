@@ -14,7 +14,7 @@ type workerFaultRepo struct {
 	cancel context.CancelFunc
 }
 
-func (r *workerFaultRepo) ClaimCollection(ctx context.Context, _ time.Time, _ time.Duration, _ int) (*Work, error) {
+func (r *workerFaultRepo) ClaimCollection(ctx context.Context, _ time.Duration, _ int) (*Work, error) {
 	r.calls++
 	if len(r.faults) > 0 {
 		err := r.faults[0]

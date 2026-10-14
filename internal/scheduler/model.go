@@ -14,7 +14,6 @@ var (
 	ErrInvalid   = errors.New("invalid scheduler record or policy")
 	ErrLeaseLost = errors.New("scheduler claim is expired or no longer owned")
 	ErrPhaseGate = errors.New("remote side effects require durable orchestration")
-	ErrClock     = errors.New("scheduler clock moved backwards")
 	ErrScanLimit = errors.New("scheduler snapshot exceeds safe scan bound")
 )
 

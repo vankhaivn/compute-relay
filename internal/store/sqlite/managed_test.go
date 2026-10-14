@@ -161,11 +161,12 @@ func newManagedStateFixture(t testing.TB) *managedStateFixture {
 func (f *managedStateFixture) bind(t testing.TB) {
 	t.Helper()
 	var err error
-	f.access, err = auth.New(f.s, f.s, nil)
+	f.s.options.Clock = f.clock.Now
+	f.access, err = auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{f.discovery}, f.clock.Now)
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{f.discovery})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +490,7 @@ func TestManagedSecretsAbsentFromSQLiteAndPublicProjection(t *testing.T) {
 
 func TestManagedConcurrentChangedPayloadPreservesOneFingerprint(t *testing.T) {
 	f := newManagedStateFixture(t)
-	second, err := connections.New(f.access, f.s, f.vault, []connections.Adapter{f.discovery}, f.clock.Now)
+	second, err := connections.New(f.access, f.s, f.vault, []connections.Adapter{f.discovery})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +553,7 @@ func TestManagedQuotaPresentationPreservesUnitsFreshnessAndResetEvidence(t *test
 	limit, used, left := 2.0001, 0.2501, 1.5
 	reset := f.clock.Now().Add(24 * time.Hour)
 	observation := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Unit: "hours", Limit: &limit, Used: &used, Remaining: &left, ResetAt: &reset, ObservedAt: f.clock.Now(), Source: "synthetic", Precision: "lower_bound"}
-	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", observation, f.clock.Now()); err != nil {
+	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", observation); err != nil {
 		t.Fatal(err)
 	}
 	calls := f.discovery.count()
@@ -567,7 +568,7 @@ func TestManagedQuotaPresentationPreservesUnitsFreshnessAndResetEvidence(t *test
 	}
 	f.clock.advance(time.Second)
 	unknown := provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "gpu", Unit: "seconds", ObservedAt: f.clock.Now(), Source: "synthetic", Precision: "unknown"}
-	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", unknown, f.clock.Now()); err != nil {
+	if err := f.s.RecordQuota(context.Background(), *connection.AccountID, "gpu", unknown); err != nil {
 		t.Fatal(err)
 	}
 	quota = f.get(t, "a", connection.ID).Quotas[0]

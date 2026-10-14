@@ -60,7 +60,7 @@ func resourceFixture(t *testing.T) (*managedStateFixture, *resourceStateAdapter)
 func bindResourceFixture(t *testing.T, f *managedStateFixture, a *resourceStateAdapter) {
 	t.Helper()
 	var err error
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{a}, f.clock.Now)
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{a})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestManagedResourceSharesLANVPNAndWorkspaceCapacityAcrossRestart(t *testing
 	second := grantResourceJob(t, f, vpn, "vpn-job-key")
 	third := grantResourceJob(t, f, vpn, "third-job")
 	for _, want := range []scheduler.Identity{first, second} {
-		claim, err := f.s.ClaimNext(ctx, "worker", f.clock.Now())
+		claim, err := f.s.ClaimNext(ctx, "worker")
 		if err != nil || claim.Claim == nil || claim.Claim.Identity != want {
 			t.Fatal("two configured slots not available", claim, err)
 		}
@@ -111,7 +111,7 @@ func TestManagedResourceSharesLANVPNAndWorkspaceCapacityAcrossRestart(t *testing
 	}
 	assertWaiting := func() {
 		t.Helper()
-		result, err := f.s.ClaimNext(ctx, "third", f.clock.Now())
+		result, err := f.s.ClaimNext(ctx, "third")
 		if err != nil || result.Claim != nil || len(result.View.Heads) != 1 || result.View.Heads[0].Reason != scheduler.ResourceLimit || result.View.ResourceReservations["resource_"+strings.Repeat("a", 64)] != 2 {
 			t.Fatal("shared machine admitted a third job", result, err)
 		}
@@ -131,7 +131,7 @@ func TestManagedResourceSharesLANVPNAndWorkspaceCapacityAcrossRestart(t *testing
 	state := domain.InitialAttemptState()
 	state.Orchestration, state.Execution, state.RemoteActivity, state.Result = domain.OrchestrationCollecting, domain.ExecutionSucceeded, domain.RemoteActivityInactive, domain.ResultCollecting
 	schedulerSetState(t, f.s, first, state)
-	result, err := f.s.ClaimNext(ctx, "third-after-release", f.clock.Now())
+	result, err := f.s.ClaimNext(ctx, "third-after-release")
 	if err != nil || result.Claim == nil || result.Claim.Identity != third {
 		t.Fatal("confirmed inactivity did not release capacity before collection", result, err)
 	}
@@ -142,19 +142,19 @@ func TestManagedResourceKeepsOtherMachinesAndFrozenLowerLimits(t *testing.T) {
 	ctx := context.Background()
 	lan := f.create(t, "a", "old-lan-key", "SYNTHETIC_LAN")
 	first := grantResourceJob(t, f, lan, "old-serial-job")
-	if result, err := f.s.ClaimNext(ctx, "old-worker", f.clock.Now()); err != nil || result.Claim == nil {
+	if result, err := f.s.ClaimNext(ctx, "old-worker"); err != nil || result.Claim == nil {
 		t.Fatal(result, err)
 	}
 	lan = configureResourceLimit(t, f, lan, 2)
 	vpn := configureResourceLimit(t, f, f.create(t, "b", "new-vpn-key", "SYNTHETIC_VPN"), 2)
 	grantResourceJob(t, f, vpn, "new-parallel-job")
-	result, err := f.s.ClaimNext(ctx, "new-worker", f.clock.Now())
+	result, err := f.s.ClaimNext(ctx, "new-worker")
 	if err != nil || result.Claim != nil || result.View.Heads[0].Reason != scheduler.ResourceLimit {
 		t.Fatal("old active serial policy was widened", result, err)
 	}
 	other := configureResourceLimit(t, f, f.create(t, "a", "unrelated-host", "SYNTHETIC_OTHER_HOST"), 2)
 	independent := grantResourceJob(t, f, other, "unrelated-job")
-	result, err = f.s.ClaimNext(ctx, "other-worker", f.clock.Now())
+	result, err = f.s.ClaimNext(ctx, "other-worker")
 	if err != nil || result.Claim == nil || result.Claim.Identity != independent {
 		t.Fatal("different machine was grouped into the old host", result, err)
 	}

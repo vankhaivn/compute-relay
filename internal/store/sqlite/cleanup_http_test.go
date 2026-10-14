@@ -51,7 +51,7 @@ func cleanupWireSchema(t *testing.T, name string) *jsonschema.Schema {
 // serveCleanupFixture composes the real controls and cleanup admission over the fixture store.
 func serveCleanupFixture(t *testing.T, f *dispatchFixture) (string, string) {
 	t.Helper()
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,11 +59,11 @@ func serveCleanupFixture(t *testing.T, f *dispatchFixture) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controls, err := operations.New(access, f.s, f.blobs, f.clock, admission.DefaultLimits())
+	controls, err := operations.New(access, f.s, f.blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanups, err := cleanup.NewService(access, f.s, f.clock)
+	cleanups, err := cleanup.NewService(access, f.s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

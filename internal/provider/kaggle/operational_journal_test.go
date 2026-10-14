@@ -71,7 +71,7 @@ func TestMonitorM3QuotaLatchSurvivesUnknownStaleAndRestart(t *testing.T) {
 	}
 	record := func(q provider.QuotaObservation) {
 		t.Helper()
-		if err := f.store.RecordQuota(ctx, f.profile.AccountScope, "gpu", q, f.clock.Now()); err != nil {
+		if err := f.store.RecordQuota(ctx, f.profile.AccountScope, "gpu", q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -113,7 +113,7 @@ func TestMonitorM3QuotaLatchSurvivesUnknownStaleAndRestart(t *testing.T) {
 	if reason, _ := stored.Decide("gpu", 20, true, QuotaFreshFor, f.clock.Now()); reason != scheduler.QuotaInsufficient {
 		t.Fatal("reserved capacity ignored", reason)
 	}
-	if err := f.store.RecordQuota(ctx, f.profile.AccountScope, "gpu", zero, f.clock.Now()); err == nil {
+	if err := f.store.RecordQuota(ctx, f.profile.AccountScope, "gpu", zero); err == nil {
 		t.Fatal("old observation replaced fresh evidence")
 	}
 	if reads != 5 || f.creates != 0 {
@@ -160,7 +160,7 @@ func (p *operationalJournalAdapter) Cancel(ctx context.Context, ref provider.Rem
 func operationalService(t *testing.T, f *stagingJournalFixture) (*operations.Service, auth.Principal) {
 	t.Helper()
 	ctx := context.Background()
-	access, err := auth.New(f.store, f.store, nil)
+	access, err := auth.New(f.store, f.store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func operationalService(t *testing.T, f *stagingJournalFixture) (*operations.Ser
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := operations.New(access, f.store, f.blobs, f.clock, admission.DefaultLimits())
+	service, err := operations.New(access, f.store, f.blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

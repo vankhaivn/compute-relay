@@ -25,7 +25,7 @@ import (
 
 func controlService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scopes ...auth.Scope) (*operations.Service, auth.Principal, string) {
 	t.Helper()
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func controlService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scop
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := operations.New(access, f.s, f.blobs, f.clock, admission.DefaultLimits())
+	service, err := operations.New(access, f.s, f.blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestControlsPreventDispatchFenceOldWorkerAndReplayAfterRestart(t *testing.T
 		t.Fatal("prevention is not remote termination", accepted)
 	}
 	plan, prep := storePlan(t, work)
-	if _, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: prep}, f.clock.Now()); !errors.Is(err, scheduler.ErrLeaseLost) {
+	if _, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: prep}); !errors.Is(err, scheduler.ErrLeaseLost) {
 		t.Fatal("stale worker escaped cancellation", err)
 	}
 	if f.state(t, id).Orchestration != domain.OrchestrationCancelled || f.journal(t, id).Phase != dispatch.Prevented {
@@ -104,12 +104,12 @@ func TestControlsPreventDispatchFenceOldWorkerAndReplayAfterRestart(t *testing.T
 	}
 	before := controlCount(t, f.s, "SELECT count(*) FROM events")
 	f.restart(t)
-	access, _ := auth.New(f.s, f.s, nil)
+	access, _ := auth.New(f.s, f.s)
 	p, err := access.Authenticate(context.Background(), secret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err = operations.New(access, f.s, f.blobs, f.clock, admission.DefaultLimits())
+	service, err = operations.New(access, f.s, f.blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,20 +339,20 @@ func TestControlsCancelIntentRestartDoesNotRepeatMutation(t *testing.T) {
 	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
 	accepted := cancelControl(t, f, service, p, id)
 	f.clock.advance(time.Minute)
-	claim, err := f.s.ClaimRecovery(context.Background(), "intent-crash", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(context.Background(), "intent-crash")
 	if err != nil || claim == nil {
 		t.Fatal("claim", err)
 	}
-	work, err := f.s.LoadDispatch(context.Background(), *claim, f.clock.Now())
+	work, err := f.s.LoadDispatch(context.Background(), *claim)
 	if err != nil {
 		t.Fatal(err)
 	}
-	committed, err := f.s.CommitCancellation(context.Background(), work.Handle, accepted.Operation.ID, dispatch.CancellationAction{Begin: true}, f.clock.Now())
+	committed, err := f.s.CommitCancellation(context.Background(), work.Handle, accepted.Operation.ID, dispatch.CancellationAction{Begin: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Lose the successful acknowledgement and restart before sending Cancel.
-	if _, err = f.s.CommitCancellation(context.Background(), work.Handle, accepted.Operation.ID, dispatch.CancellationAction{Begin: true}, f.clock.Now()); err == nil {
+	if _, err = f.s.CommitCancellation(context.Background(), work.Handle, accepted.Operation.ID, dispatch.CancellationAction{Begin: true}); err == nil {
 		t.Fatal("lost acknowledgement rearmed cancel")
 	}
 	if committed.Cancellation == nil || !committed.Cancellation.Started {
@@ -466,9 +466,9 @@ func TestControlsAuthorizationRecheckedAfterRetryIO(t *testing.T) {
 	id := f.seed(t, "a", 1, false)
 	service, p, secret := controlService(t, f, "a", auth.Read, auth.Operate)
 	cancelControl(t, f, service, p, id)
-	access, _ := auth.New(f.s, f.s, nil)
+	access, _ := auth.New(f.s, f.s)
 	blocked := &blockedInputs{BlobReader: f.blobs, entered: make(chan struct{}), release: make(chan struct{})}
-	service, err := operations.New(access, f.s, blocked, f.clock, admission.DefaultLimits())
+	service, err := operations.New(access, f.s, blocked, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

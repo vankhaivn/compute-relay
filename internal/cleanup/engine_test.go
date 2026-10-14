@@ -21,7 +21,7 @@ type stubRepo struct {
 	outcomes []Outcome
 }
 
-func (r *stubRepo) ClaimCleanup(context.Context, time.Time, time.Duration) (*Work, error) {
+func (r *stubRepo) ClaimCleanup(context.Context, time.Duration) (*Work, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.claims++
@@ -29,7 +29,7 @@ func (r *stubRepo) ClaimCleanup(context.Context, time.Time, time.Duration) (*Wor
 	r.work = nil
 	return w, r.claimErr
 }
-func (r *stubRepo) CompleteCleanup(_ context.Context, _ Work, o Outcome, _ time.Time) error {
+func (r *stubRepo) CompleteCleanup(_ context.Context, _ Work, o Outcome) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.outcomes = append(r.outcomes, o)
@@ -63,10 +63,10 @@ func (s *stubTarget) CleanupResource(ctx context.Context, r provider.CleanupReso
 func (s *stubTarget) DescribeCleanup(provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
 	return provider.CleanupDescription{Kind: "fake_resource", ID: "resource", Name: "resource", Version: "1", Scope: "fake_attempt", Support: domain.CapabilitySupportSupported, Reason: "offline_fixture"}, nil
 }
-func (r *stubRepo) BeginCleanupResource(context.Context, Work, ResourceWork, time.Time) error {
+func (r *stubRepo) BeginCleanupResource(context.Context, Work, ResourceWork) error {
 	return nil
 }
-func (r *stubRepo) CompleteCleanupResource(context.Context, Work, ResourceResult, time.Time) error {
+func (r *stubRepo) CompleteCleanupResource(context.Context, Work, ResourceResult) error {
 	return nil
 }
 
@@ -127,7 +127,7 @@ func TestEngineMapsEveryOutcome(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			repo := &stubRepo{work: stubWork(t)}
-			engine, err := New(repo, stubResolver{c.target, c.resolver}, nil, DefaultConfig())
+			engine, err := New(repo, stubResolver{c.target, c.resolver}, DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +149,7 @@ func TestEngineMapsEveryOutcome(t *testing.T) {
 func TestEngineShutdownLeavesClaimForRecovery(t *testing.T) {
 	repo := &stubRepo{work: stubWork(t)}
 	target := &stubTarget{block: true}
-	engine, err := New(repo, stubResolver{target, nil}, nil, DefaultConfig())
+	engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestEngineRejectsInvalidWorkAndConfig(t *testing.T) {
 	w.Request.Mode = provider.CleanupDryRun
 	repo := &stubRepo{work: w}
 	target := &stubTarget{}
-	engine, err := New(repo, stubResolver{target, nil}, nil, DefaultConfig())
+	engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,11 +173,11 @@ func TestEngineRejectsInvalidWorkAndConfig(t *testing.T) {
 		t.Fatal("invalid work reached the provider", worked, err)
 	}
 	for _, cfg := range []Config{{}, {Workers: 1, Timeout: time.Hour, PollDelay: time.Second}, {Workers: 1, Timeout: time.Minute}} {
-		if _, err := New(repo, stubResolver{target, nil}, nil, cfg); !errors.Is(err, ErrInvalid) {
+		if _, err := New(repo, stubResolver{target, nil}, cfg); !errors.Is(err, ErrInvalid) {
 			t.Fatal("invalid config accepted", cfg)
 		}
 	}
-	if _, err := New(nil, stubResolver{target, nil}, nil, DefaultConfig()); !errors.Is(err, ErrInvalid) {
+	if _, err := New(nil, stubResolver{target, nil}, DefaultConfig()); !errors.Is(err, ErrInvalid) {
 		t.Fatal("missing repository accepted")
 	}
 }
@@ -186,7 +186,7 @@ func TestRunSurvivesLostFenceAndStopsOnStoreErrors(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.PollDelay = time.Millisecond
 	repo := &stubRepo{work: stubWork(t), complete: ErrLeaseLost}
-	engine, err := New(repo, stubResolver{&stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil}, nil, cfg)
+	engine, err := New(repo, stubResolver{&stubTarget{result: provider.CleanupOutcome{Deleted: true}}, nil}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestRunSurvivesLostFenceAndStopsOnStoreErrors(t *testing.T) {
 	}
 	broken := errors.New("store unavailable")
 	repo = &stubRepo{claimErr: broken}
-	if engine, err = New(repo, stubResolver{&stubTarget{}, nil}, nil, cfg); err != nil {
+	if engine, err = New(repo, stubResolver{&stubTarget{}, nil}, cfg); err != nil {
 		t.Fatal(err)
 	}
 	if err = engine.Run(context.Background()); !errors.Is(err, broken) {
@@ -210,7 +210,7 @@ func TestEngineEmptyInventorySettlesWithoutProviderCall(t *testing.T) {
 	w.Resources = nil
 	repo := &stubRepo{work: w}
 	target := &stubTarget{panics: true}
-	engine, err := New(repo, stubResolver{target, nil}, nil, DefaultConfig())
+	engine, err := New(repo, stubResolver{target, nil}, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

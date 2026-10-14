@@ -14,7 +14,7 @@ import (
 func scanRetention(t *testing.T, f *dispatchFixture) {
 	t.Helper()
 	for i := 0; i < 3; i++ {
-		if _, err := f.s.ExpireRetention(context.Background(), f.clock.Now(), retention.DefaultPolicy(), 100); err != nil {
+		if _, err := f.s.ExpireRetention(context.Background(), retention.DefaultPolicy(), 100); err != nil {
 			t.Fatal(err)
 		}
 	}

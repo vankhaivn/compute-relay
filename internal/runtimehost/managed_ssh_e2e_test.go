@@ -151,7 +151,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 		t.Fatalf("attempt state %+v problem %v", state, record.Problem)
 	}
 
-	cleanups, err := cleanup.NewService(f.host.access, f.host.store, clock{})
+	cleanups, err := cleanup.NewService(f.host.access, f.host.store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestManagedSSHDockerPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleaner, err := cleanupEngine(managedCleanupRepository{f.host.store}, f.services.resolver)
+	cleaner, err := cleanupEngine(f.host.store, f.services.resolver)
 	if err != nil {
 		t.Fatal(err)
 	}

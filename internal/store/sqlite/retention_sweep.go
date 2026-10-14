@@ -21,7 +21,7 @@ func (s *Store) BindRetentionStores(ctx context.Context, inputID, resultID strin
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		for kind, id := range map[string]string{"input": inputID, "result": resultID} {
 			var existing string
 			err := tx.QueryRowContext(ctx, `SELECT blob_identity FROM retention_roots WHERE kind=?`, kind).Scan(&existing)
@@ -75,11 +75,11 @@ func (s *Store) PendingRetention(ctx context.Context, after int64, limit int) (r
 	return page, nil
 }
 
-func (s *Store) CompleteRetention(ctx context.Context, d retention.Deletion, now time.Time) error {
+func (s *Store) CompleteRetention(ctx context.Context, d retention.Deletion) error {
 	if !d.Valid() {
 		return retention.ErrInvalid
 	}
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		item, err := readRetentionItem(ctx, tx, d.Kind, d.Object.WorkspaceID, d.Object.ID)
 		if err != nil {
 			return err

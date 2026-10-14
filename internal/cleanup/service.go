@@ -2,7 +2,6 @@ package cleanup
 
 import (
 	"context"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
@@ -18,12 +17,11 @@ type Command struct {
 	Request     Request
 	KeyDigest   string
 	RequestHash string
-	Now         time.Time
 }
 
 func (c Command) Validate() error {
 	digest, err := c.Request.Digest(c.JobID)
-	if err != nil || !c.WorkspaceID.Valid() || c.TokenID == "" || !domain.SHA256Digest(c.KeyDigest).Valid() || digest != c.RequestHash || c.Now.IsZero() {
+	if err != nil || !c.WorkspaceID.Valid() || c.TokenID == "" || !domain.SHA256Digest(c.KeyDigest).Valid() || digest != c.RequestHash {
 		return operations.ErrRequest
 	}
 	return nil
@@ -80,7 +78,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	if prior != nil {
 		return *prior, nil
 	}
-	return s.repo.AdmitCleanup(ctx, Command{WorkspaceID: w, TokenID: p.TokenID(), JobID: job, Request: req, KeyDigest: keyHash, RequestHash: hash, Now: s.clock.Now().UTC()})
+	return s.repo.AdmitCleanup(ctx, Command{WorkspaceID: w, TokenID: p.TokenID(), JobID: job, Request: req, KeyDigest: keyHash, RequestHash: hash})
 }
 
 func (s *Service) Get(ctx context.Context, p auth.Principal, w domain.WorkspaceID, id domain.OperationID) (Record, error) {

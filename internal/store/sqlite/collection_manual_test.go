@@ -248,7 +248,7 @@ func TestCollectionObservedProgressIsThrottledAndExcludesControlsAndCache(t *tes
 
 func TestCollectionProgressLeaseExpiryReclaimAndStaleFence(t *testing.T) {
 	f, id, p, blobs := collectionFixture(t)
-	w, err := f.s.ClaimCollection(context.Background(), f.clock.Now(), time.Second, 1)
+	w, err := f.s.ClaimCollection(context.Background(), time.Second, 1)
 	if err != nil || w == nil {
 		t.Fatal(err)
 	}
@@ -260,15 +260,15 @@ func TestCollectionProgressLeaseExpiryReclaimAndStaleFence(t *testing.T) {
 		t.Fatal("expired lease asserted activity", s)
 	}
 	sample := initialProgress(*w, f.clock.Now())
-	if err = f.s.RecordCollectionProgress(context.Background(), *w, "discovering", sample, f.clock.Now()); !errors.Is(err, collection.ErrLeaseLost) {
+	if err = f.s.RecordCollectionProgress(context.Background(), *w, "discovering", sample); !errors.Is(err, collection.ErrLeaseLost) {
 		t.Fatal("expired writer retained progress", err)
 	}
 	f.restart(t)
-	reclaimed, err := f.s.ClaimCollection(context.Background(), f.clock.Now(), time.Second, 1)
+	reclaimed, err := f.s.ClaimCollection(context.Background(), time.Second, 1)
 	if err != nil || reclaimed == nil || reclaimed.Lease.Generation != 2 || reclaimed.Lease.OperationID != w.Lease.OperationID {
 		t.Fatal(reclaimed, err)
 	}
-	if err = f.s.RecordCollectionProgress(context.Background(), *w, "discovering", sample, f.clock.Now()); !errors.Is(err, collection.ErrLeaseLost) {
+	if err = f.s.RecordCollectionProgress(context.Background(), *w, "discovering", sample); !errors.Is(err, collection.ErrLeaseLost) {
 		t.Fatal("stale generation wrote progress", err)
 	}
 	f.clock.advance(2 * time.Second)
@@ -328,7 +328,7 @@ func TestManagedManualCollectionRecoveryNeedsNoNewGrant(t *testing.T) {
 		}
 	}
 	f.restart(t)
-	if w, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 1); w != nil || err != nil {
+	if w, err := f.s.ClaimCollection(ctx, time.Second, 1); w != nil || err != nil {
 		t.Fatal("managed manual job auto-collected", w, err)
 	}
 	service, principal, _ := controlService(t, f, "a", auth.Operate)
@@ -336,13 +336,13 @@ func TestManagedManualCollectionRecoveryNeedsNoNewGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 1)
+	w, err := f.s.ClaimCollection(ctx, time.Second, 1)
 	if w == nil || err != nil || w.Lease.OperationID != r.Operation.ID || w.Binding.AccountScope != f.profile.AccountScope {
 		t.Fatal(w, err)
 	}
 	f.clock.advance(2 * time.Second)
 	f.restart(t)
-	w, err = f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 1)
+	w, err = f.s.ClaimCollection(ctx, time.Second, 1)
 	if w == nil || err != nil || w.Lease.Generation != 2 || w.Lease.OperationID != r.Operation.ID {
 		t.Fatal(w, err)
 	}
@@ -393,8 +393,8 @@ type progressAckFault struct {
 	fired bool
 }
 
-func (s *progressAckFault) RecordCollectionProgress(ctx context.Context, w collection.Work, stage string, p domain.CollectionProgress, now time.Time) error {
-	err := s.Store.RecordCollectionProgress(ctx, w, stage, p, now)
+func (s *progressAckFault) RecordCollectionProgress(ctx context.Context, w collection.Work, stage string, p domain.CollectionProgress) error {
+	err := s.Store.RecordCollectionProgress(ctx, w, stage, p)
 	if err == nil && !s.fired && p.BytesCompleted > 0 {
 		s.fired = true
 		return collection.ErrUnavailable

@@ -118,14 +118,14 @@ func managedReadActor(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tok
 	}
 	return err
 }
-func (s *Store) ReadConnection(ctx context.Context, w domain.WorkspaceID, token, id string, now time.Time) (connections.Connection, error) {
+func (s *Store) ReadConnection(ctx context.Context, w domain.WorkspaceID, token string, id string) (connections.Connection, error) {
 	var v connections.Connection
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return v, err
 	}
 	defer done()
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if err := managedReadActor(ctx, tx, w, token); err != nil {
 			return err
 		}
@@ -138,14 +138,14 @@ func (s *Store) ReadConnection(ctx context.Context, w domain.WorkspaceID, token,
 	})
 	return v, err
 }
-func (s *Store) ListConnections(ctx context.Context, w domain.WorkspaceID, token string, now time.Time) ([]connections.Connection, error) {
+func (s *Store) ListConnections(ctx context.Context, w domain.WorkspaceID, token string) ([]connections.Connection, error) {
 	result := []connections.Connection{}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}
@@ -241,7 +241,7 @@ func (s *Store) ReadConnectionOperation(ctx context.Context, w domain.WorkspaceI
 		return op, err
 	}
 	defer done()
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Manage); err != nil {
 			return err
 		}

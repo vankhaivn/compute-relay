@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"errors"
+
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
@@ -36,16 +37,16 @@ func TestExplicitRetirementPreservesEvidenceAndNeverClaimsProviderWork(t *testin
 						t.Fatal("source cleanup fixture", err)
 					}
 					if phase == "cleanup_running" {
-						work, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Minute)
+						work, err := f.s.ClaimCleanup(ctx, time.Minute)
 						if err != nil || work == nil || len(work.Resources) == 0 {
 							t.Fatal("claim legacy cleanup", work, err)
 						}
-						if err = f.s.BeginCleanupResource(ctx, *work, work.Resources[0], f.clock.Now()); err != nil {
+						if err = f.s.BeginCleanupResource(ctx, *work, work.Resources[0]); err != nil {
 							t.Fatal("legacy deletion intent", err)
 						}
 					}
 				} else {
-					if work, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1); err != nil || work == nil {
+					if work, err := f.s.ClaimCollection(ctx, time.Minute, 1); err != nil || work == nil {
 						t.Fatal("pending collection fixture", work, err)
 					}
 				}
@@ -191,16 +192,16 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	if err = upgraded.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
-	if claim, err := upgraded.ClaimNext(ctx, "upgrade-worker", f.clock.Now()); err != nil || claim.Claim != nil {
+	if claim, err := upgraded.ClaimNext(ctx, "upgrade-worker"); err != nil || claim.Claim != nil {
 		t.Fatal("retired dispatch claimed", claim, err)
 	}
-	if claim, err := upgraded.ClaimRecovery(ctx, "upgrade-worker", f.clock.Now()); err != nil || claim != nil {
+	if claim, err := upgraded.ClaimRecovery(ctx, "upgrade-worker"); err != nil || claim != nil {
 		t.Fatal("retired recovery claimed", claim, err)
 	}
-	if claim, err := upgraded.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1); err != nil || claim != nil {
+	if claim, err := upgraded.ClaimCollection(ctx, time.Minute, 1); err != nil || claim != nil {
 		t.Fatal("retired collection claimed", claim, err)
 	}
-	if claim, err := upgraded.ClaimCleanup(ctx, f.clock.Now(), time.Minute); err != nil || claim != nil {
+	if claim, err := upgraded.ClaimCleanup(ctx, time.Minute); err != nil || claim != nil {
 		t.Fatal("retired cleanup claimed", claim, err)
 	}
 	for _, table := range []string{"operations", "cleanup_operations"} {
@@ -228,7 +229,7 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	if err = upgraded.db.QueryRow(`SELECT enabled FROM profiles WHERE profile=?`, profile.Binding.Profile).Scan(&enabled); err != nil || enabled {
 		t.Fatal("explicit alias remains eligible", enabled, err)
 	}
-	access, err := auth.New(upgraded, upgraded, nil)
+	access, err := auth.New(upgraded, upgraded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 	if err != nil {
 		t.Fatal(err)
 	}
-	controls, err := operations.New(access, upgraded, f.blobs, f.clock, admission.DefaultLimits())
+	controls, err := operations.New(access, upgraded, f.blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +250,7 @@ func testExplicitRetirement(t *testing.T, f *dispatchFixture, id scheduler.Ident
 			t.Fatal("retired control admitted", kind, err)
 		}
 	}
-	cleanups, err := cleanup.NewService(access, upgraded, f.clock)
+	cleanups, err := cleanup.NewService(access, upgraded, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

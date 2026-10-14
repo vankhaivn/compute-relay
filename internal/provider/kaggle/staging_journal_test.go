@@ -64,7 +64,7 @@ type stagingJournalRepository struct {
 
 var errStagingCommitFixture = errors.New("synthetic staging commit acknowledgement loss")
 
-func (r *stagingJournalRepository) CommitDispatch(ctx context.Context, h dispatch.Handle, a dispatch.Action, now time.Time) (dispatch.Work, error) {
+func (r *stagingJournalRepository) CommitDispatch(ctx context.Context, h dispatch.Handle, a dispatch.Action) (dispatch.Work, error) {
 	if a.Kind == dispatch.BeginSubmission {
 		return dispatch.Work{}, errors.New("staging fixture attempted compute admission")
 	}
@@ -72,7 +72,7 @@ func (r *stagingJournalRepository) CommitDispatch(ctx context.Context, h dispatc
 		r.failBefore = false
 		return dispatch.Work{}, errStagingCommitFixture
 	}
-	w, err := r.Repository.CommitDispatch(ctx, h, a, now)
+	w, err := r.Repository.CommitDispatch(ctx, h, a)
 	if err == nil && r.lose == a.Kind {
 		r.lose = ""
 		return dispatch.Work{}, errStagingCommitFixture
@@ -131,7 +131,9 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 	ctx := context.Background()
 	f := &stagingJournalFixture{root: filepath.Join(t.TempDir(), "state"), clock: &stagingClock{at: time.Now().UTC().Add(time.Second)}}
 	var err error
-	f.store, err = sqlite.Open(ctx, f.root, sqlite.DefaultOptions())
+	options := sqlite.DefaultOptions()
+	options.Clock = f.clock.Now
+	f.store, err = sqlite.Open(ctx, f.root, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,7 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 			t.Fatal(err)
 		}
 	}
-	access, err := auth.New(f.store, f.store, nil)
+	access, err := auth.New(f.store, f.store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func newStagingJournalFixture(t *testing.T) *stagingJournalFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connectionsService, err := connections.New(access, f.store, vault, []connections.Adapter{journalConnectionAdapter{clock: f.clock}}, f.clock.Now)
+	connectionsService, err := connections.New(access, f.store, vault, []connections.Adapter{journalConnectionAdapter{clock: f.clock}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +352,9 @@ func (f *stagingJournalFixture) restart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	f.store, err = sqlite.Open(context.Background(), f.root, sqlite.DefaultOptions())
+	options := sqlite.DefaultOptions()
+	options.Clock = f.clock.Now
+	f.store, err = sqlite.Open(context.Background(), f.root, options)
 	if err != nil {
 		t.Fatal(err)
 	}

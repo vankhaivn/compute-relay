@@ -143,7 +143,10 @@ func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 	t.Helper()
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "state")
-	s, err := Open(ctx, root, DefaultOptions())
+	testClock := &dispatchClock{at: time.Now().UTC().Truncate(time.Millisecond).Add(time.Second)}
+	opts := DefaultOptions()
+	opts.Clock = testClock.Now
+	s, err := Open(ctx, root, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +154,7 @@ func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &dispatchFixture{authorizeSeed: true, extraProfiles: map[domain.WorkspaceID]admission.Profile{}, s: s, root: root, blobs: blobs, clock: &dispatchClock{at: time.Now().UTC().Truncate(time.Millisecond).Add(time.Second)}}
+	f := &dispatchFixture{authorizeSeed: true, extraProfiles: map[domain.WorkspaceID]admission.Profile{}, s: s, root: root, blobs: blobs, clock: testClock}
 	t.Cleanup(func() { _ = f.s.Close(); _ = blobs.Close() })
 	for _, w := range []domain.WorkspaceID{"a", "b"} {
 		if err = s.PutWorkspace(ctx, auth.Workspace{ID: w, Enabled: true, AllowedProfiles: []string{"fixture"}}); err != nil {
@@ -186,6 +189,7 @@ func newDispatchFixture(t testing.TB, scenario fake.Scenario) *dispatchFixture {
 func (f *dispatchFixture) attach(t testing.TB, s *Store) {
 	t.Helper()
 	f.s = s
+	s.options.Clock = f.clock.Now
 	binding := provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}
 	p, err := fake.NewBound(f.backend, f.clock, binding)
 	if err != nil {
@@ -337,15 +341,15 @@ func (f *dispatchFixture) restart(t testing.TB) {
 }
 func (f *dispatchFixture) claim(t testing.TB) dispatch.Work {
 	t.Helper()
-	r, err := f.s.ClaimNext(context.Background(), "manual", f.clock.Now())
+	r, err := f.s.ClaimNext(context.Background(), "manual")
 	if err != nil || r.Claim == nil {
 		t.Fatalf("claim: %v", err)
 	}
-	w, err := f.s.LoadDispatch(context.Background(), *r.Claim, f.clock.Now())
+	w, err := f.s.LoadDispatch(context.Background(), *r.Claim)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err = f.s.ConsumeAuthorization(context.Background(), w.Handle, f.clock.Now())
+	w, err = f.s.ConsumeAuthorization(context.Background(), w.Handle)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,8 +522,8 @@ type lostDispatchAck struct {
 	once atomic.Bool
 }
 
-func (r *lostDispatchAck) CommitDispatch(ctx context.Context, h dispatch.Handle, a dispatch.Action, now time.Time) (dispatch.Work, error) {
-	w, err := r.Store.CommitDispatch(ctx, h, a, now)
+func (r *lostDispatchAck) CommitDispatch(ctx context.Context, h dispatch.Handle, a dispatch.Action) (dispatch.Work, error) {
+	w, err := r.Store.CommitDispatch(ctx, h, a)
 	if err == nil && a.Kind == r.kind && r.once.CompareAndSwap(false, true) {
 		return dispatch.Work{}, ErrUnavailable
 	}
@@ -580,7 +584,7 @@ func TestDispatchRollbackAtLedgerJournalAndEvent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}, f.clock.Now()); err == nil {
+			if _, err = f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}); err == nil {
 				t.Fatal("injected commit succeeded")
 			}
 			if f.journal(t, id).Version != 0 || f.state(t, id) != work.Job.Attempt.State {
@@ -593,7 +597,7 @@ func TestDispatchRollbackAtLedgerJournalAndEvent(t *testing.T) {
 			if _, err = f.s.db.Exec("DROP TRIGGER inject_dispatch_failure"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}, f.clock.Now()); err != nil {
+			if _, err = f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -606,18 +610,18 @@ func TestDispatchSubmissionRollbackAndFencedConcurrentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.clock.advance(time.Minute)
-	claim, err := f.s.ClaimRecovery(context.Background(), "gate", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(context.Background(), "gate")
 	if err != nil || claim == nil {
 		t.Fatal(err)
 	}
-	work, err := f.s.LoadDispatch(context.Background(), *claim, f.clock.Now())
+	work, err := f.s.LoadDispatch(context.Background(), *claim)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.s.db.Exec("CREATE TRIGGER fail_submit BEFORE INSERT ON submission_intents BEGIN SELECT RAISE(ABORT,'no'); END;"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission}, f.clock.Now()); err == nil {
+	if _, err = f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission}); err == nil {
 		t.Fatal("partial submission accepted")
 	}
 	if f.journal(t, id).Phase != dispatch.Ready {
@@ -635,7 +639,7 @@ func TestDispatchSubmissionRollbackAndFencedConcurrentGate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, e := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission}, f.clock.Now()); e == nil {
+			if _, e := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission}); e == nil {
 				successes.Add(1)
 			}
 		}()
@@ -644,18 +648,18 @@ func TestDispatchSubmissionRollbackAndFencedConcurrentGate(t *testing.T) {
 	if successes.Load() != 1 {
 		t.Fatalf("one-shot winners: %d", successes.Load())
 	}
-	if _, err = f.s.RenewDispatch(context.Background(), work.Handle, f.clock.Now()); err == nil {
+	if _, err = f.s.RenewDispatch(context.Background(), work.Handle); err == nil {
 		t.Fatal("old handle renewed after state/version advance")
 	}
 	f.clock.advance(time.Minute)
-	newClaim, err := f.s.ClaimRecovery(context.Background(), "takeover", f.clock.Now())
+	newClaim, err := f.s.ClaimRecovery(context.Background(), "takeover")
 	if err != nil || newClaim == nil {
 		t.Fatal(err)
 	}
 	if newClaim.Generation <= claim.Generation || newClaim.AttemptID != claim.AttemptID {
 		t.Fatal("takeover changed attempt instead of ownership")
 	}
-	if _, err = f.s.LoadDispatch(context.Background(), *claim, f.clock.Now()); !errors.Is(err, scheduler.ErrLeaseLost) {
+	if _, err = f.s.LoadDispatch(context.Background(), *claim); !errors.Is(err, scheduler.ErrLeaseLost) {
 		t.Fatalf("old worker still owned: %v", err)
 	}
 }
@@ -825,7 +829,7 @@ func TestDispatchDiskFullRollsBackIntentAndBarrier(t *testing.T) {
 	if _, err := f.s.db.Exec("CREATE TRIGGER dispatch_full BEFORE INSERT ON provider_resources BEGIN INSERT INTO dispatch_fill VALUES(zeroblob(1048576)); END"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}, f.clock.Now())
+	_, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op})
 	if !errors.Is(err, ErrDiskFull) {
 		t.Fatalf("expected real SQLITE_FULL: %v", err)
 	}

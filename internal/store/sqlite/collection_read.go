@@ -25,7 +25,7 @@ func (s *Store) ReadCollection(ctx context.Context, w domain.WorkspaceID, token 
 	}
 	defer done()
 	result := collection.Result{WorkspaceID: w, JobID: job, AttemptID: attempt}
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}

@@ -26,20 +26,20 @@ type collectionFault struct {
 	fired bool
 }
 
-func (s *collectionFault) PinCollection(ctx context.Context, w collection.Work, pin collection.Snapshot, now time.Time) error {
-	err := s.Store.PinCollection(ctx, w, pin, now)
+func (s *collectionFault) PinCollection(ctx context.Context, w collection.Work, pin collection.Snapshot) error {
+	err := s.Store.PinCollection(ctx, w, pin)
 	if err == nil && s.stage == "pin-ack" && !s.fired {
 		s.fired = true
 		return collection.ErrUnavailable
 	}
 	return err
 }
-func (s *collectionFault) CompleteCollection(ctx context.Context, w collection.Work, v collection.Verified, now time.Time) error {
+func (s *collectionFault) CompleteCollection(ctx context.Context, w collection.Work, v collection.Verified) error {
 	if s.stage == "before-publication" && !s.fired {
 		s.fired = true
 		return collection.ErrUnavailable
 	}
-	err := s.Store.CompleteCollection(ctx, w, v, now)
+	err := s.Store.CompleteCollection(ctx, w, v)
 	if err == nil && s.stage == "publication-ack" && !s.fired {
 		s.fired = true
 		return collection.ErrUnavailable
@@ -138,7 +138,7 @@ func TestCollectionPublicationRollbackAndDiskFull(t *testing.T) {
 func TestCollectionLeaseContentionStaleFenceAndForgedProof(t *testing.T) {
 	ctx := context.Background()
 	f, id, p, _ := collectionFixture(t)
-	first, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 2)
+	first, err := f.s.ClaimCollection(ctx, time.Second, 2)
 	if err != nil || first == nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestCollectionLeaseContentionStaleFenceAndForgedProof(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			w, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Second, 2)
+			w, err := f.s.ClaimCollection(ctx, time.Second, 2)
 			if err != nil {
 				failures <- err
 			}
@@ -163,18 +163,18 @@ func TestCollectionLeaseContentionStaleFenceAndForgedProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	pin := collectionPin(t, *first, p)
-	if err = f.s.PinCollection(ctx, *first, pin, f.clock.Now()); err != nil {
+	if err = f.s.PinCollection(ctx, *first, pin); err != nil {
 		t.Fatal(err)
 	}
 	f.clock.advance(2 * time.Second)
-	second, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 2)
+	second, err := f.s.ClaimCollection(ctx, time.Minute, 2)
 	if err != nil || second == nil || second.Lease.Generation != first.Lease.Generation+1 || second.Lease.Fence == first.Lease.Fence {
 		t.Fatal("lease not fenced", err)
 	}
-	if err = f.s.PinCollection(ctx, *first, pin, f.clock.Now()); !errors.Is(err, collection.ErrLeaseLost) {
+	if err = f.s.PinCollection(ctx, *first, pin); !errors.Is(err, collection.ErrLeaseLost) {
 		t.Fatal("stale owner accepted", err)
 	}
-	if err = f.s.CompleteCollection(ctx, *second, collection.Verified{}, f.clock.Now()); err == nil {
+	if err = f.s.CompleteCollection(ctx, *second, collection.Verified{}); err == nil {
 		t.Fatal("caller forged byte verification")
 	}
 	if _, err = f.s.db.Exec("UPDATE collection_snapshots SET snapshot_sha256=?", string(provider.Digest([]byte("tamper")))); err == nil {
@@ -294,16 +294,18 @@ func TestCollectionCrashChild(t *testing.T) {
 		return
 	}
 	ctx := context.Background()
-	s, err := Open(ctx, root, DefaultOptions())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
 	at, err := time.Parse(time.RFC3339Nano, os.Getenv("COLLECTION_CRASH_TIME"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := s.ClaimCollection(ctx, at, 30*time.Second, 2)
+	options := DefaultOptions()
+	options.Clock = func() time.Time { return at }
+	s, err := Open(ctx, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	w, err := s.ClaimCollection(ctx, 30*time.Second, 2)
 	if err != nil || w == nil {
 		t.Fatal("claim", err)
 	}
@@ -315,7 +317,7 @@ func TestCollectionCrashChild(t *testing.T) {
 	if err = json.Unmarshal(raw, &pin); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.PinCollection(ctx, *w, pin, at); err != nil {
+	if err = s.PinCollection(ctx, *w, pin); err != nil {
 		t.Fatal(err)
 	}
 	fmt.Println("collection-pin-durable")

@@ -128,7 +128,7 @@ func TestDeadlineAuthorizationReplayCannotConsumeExpiredGrant(t *testing.T) {
 	if err != nil || !replay.Replay || replay.AuthorizationID != original.AuthorizationID {
 		t.Fatal("expired grant lost original receipt", err)
 	}
-	if _, err = f.s.ConsumeAuthorization(context.Background(), work.Handle, f.clock.Now()); !errors.Is(err, admission.ErrExpired) {
+	if _, err = f.s.ConsumeAuthorization(context.Background(), work.Handle); !errors.Is(err, admission.ErrExpired) {
 		t.Fatal("expired grant became a mutation permit", err)
 	}
 	if n := controlCount(t, f.s, "SELECT count(*) FROM execution_authorizations WHERE status='consumed'"); n != 0 {

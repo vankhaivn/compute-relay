@@ -68,7 +68,7 @@ func TestDispatchMigrationPreservesExistingQueueAndDoesNotInventIntents(t *testi
 			t.Fatal("migration fabricated external evidence", n, err)
 		}
 	}
-	c, err := upgraded.ClaimRecovery(ctx, "migration", schedulerNow)
+	c, err := upgraded.ClaimRecovery(ctx, "migration")
 	if err != nil || c != nil {
 		t.Fatal("unknown historical barrier was silently rearmed", c, err)
 	}

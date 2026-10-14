@@ -45,7 +45,7 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 	}
 	defer done()
 	var receipt executionauth.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -74,10 +74,10 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		if record.Attempt.ID != c.Request.AttemptID {
 			return executionauth.ErrConflict
 		}
-		if record.Request.Spec().Expired(c.Now) {
+		if record.Request.Spec().Expired(now) {
 			return admission.ErrExpired
 		}
-		if record.Request.Spec().SeparateStart() || !scheduler.LocalOnly(record.Attempt.State) || c.Now.Before(record.Attempt.UpdatedAt) {
+		if record.Request.Spec().SeparateStart() || !scheduler.LocalOnly(record.Attempt.State) || now.Before(record.Attempt.UpdatedAt) {
 			return executionauth.ErrState
 		}
 		if err = managedProfileOwned(ctx, tx, c.WorkspaceID, record.Profile); err != nil {
@@ -108,17 +108,17 @@ func (s *Store) AuthorizeExecution(ctx context.Context, c executionauth.Command)
 		if err != nil {
 			return err
 		}
-		if err = authorizationQuota(ctx, tx, record, c.Now); err != nil {
+		if err = authorizationQuota(ctx, tx, record, now); err != nil {
 			return err
 		}
 		id, err := randomID("grant_", 16)
 		if err != nil {
 			return err
 		}
-		receipt = executionauth.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: c.Request.AttemptID, Status: executionauth.Granted, MaxRemoteWallSeconds: c.Request.MaxRemoteWallSeconds, CreatedAt: c.Now.UTC()}
+		receipt = executionauth.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: c.Request.AttemptID, Status: executionauth.Granted, MaxRemoteWallSeconds: c.Request.MaxRemoteWallSeconds, CreatedAt: now.UTC()}
 		encoded, _ := json.Marshal(receipt)
 		binding, _ := json.Marshal(record.Profile)
-		_, err = tx.ExecContext(ctx, `INSERT INTO execution_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_sha256,binding,account_scope,inputs_sha256,attempt_nonce,max_remote_wall_seconds,granting_token_id,created_at,original_receipt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'granted')`, string(c.WorkspaceID), id, string(c.JobID), string(c.Request.AttemptID), c.KeyDigest, hash, string(binding), record.Profile.AccountScope, inputs, record.AttemptNonce, c.Request.MaxRemoteWallSeconds, c.TokenID, c.Now.UTC().Format(time.RFC3339Nano), string(encoded))
+		_, err = tx.ExecContext(ctx, `INSERT INTO execution_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_sha256,binding,account_scope,inputs_sha256,attempt_nonce,max_remote_wall_seconds,granting_token_id,created_at,original_receipt,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'granted')`, string(c.WorkspaceID), id, string(c.JobID), string(c.Request.AttemptID), c.KeyDigest, hash, string(binding), record.Profile.AccountScope, inputs, record.AttemptNonce, c.Request.MaxRemoteWallSeconds, c.TokenID, now.UTC().Format(time.RFC3339Nano), string(encoded))
 		return dbError(err)
 	})
 	if err != nil {
@@ -180,7 +180,7 @@ func (s *Store) ReadExecutionAuthorization(ctx context.Context, w domain.Workspa
 	}
 	defer done()
 	var r executionauth.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Execute); err != nil {
 			return err
 		}

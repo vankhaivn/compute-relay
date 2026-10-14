@@ -294,7 +294,7 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := cleanup.New(managedCleanupRepository{h.store}, services.resolver, clock, cleanup.DefaultConfig())
+	worker, err := cleanup.New(h.store, services.resolver, cleanup.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,12 +324,13 @@ func TestManagedSSHCleanupRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal("reopen original root", err)
 	}
+	clock.offset = 6 * time.Minute // Expire the original lease without changing its persisted intent.
+	injectHostClock(t, h, clock.Now)
 	services, err = h.composeManaged(ctx, config, vault, newManagedSSHAdapter(config))
 	if err != nil {
 		t.Fatal(err)
 	}
-	clock.offset = 6 * time.Minute // Expire the original lease without changing its persisted intent.
-	worker, err = cleanup.New(managedCleanupRepository{h.store}, services.resolver, clock, cleanup.DefaultConfig())
+	worker, err = cleanup.New(h.store, services.resolver, cleanup.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,7 +19,7 @@ func TestControlHTTPReconcilesExhaustedOriginalPreparation(t *testing.T) {
 	f, blobs := setupControlHTTP(t, nil)
 	job := admitControlJob(t, f)
 	ctx := context.Background()
-	access, err := auth.New(f.store, f.store, nil)
+	access, err := auth.New(f.store, f.store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,15 +42,15 @@ func TestControlHTTPReconcilesExhaustedOriginalPreparation(t *testing.T) {
 	if err := f.store.ConfigureScheduler(ctx, scheduler.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := f.store.ClaimNext(ctx, "staging-worker", time.Now().UTC())
+	claimed, err := f.store.ClaimNext(ctx, "staging-worker")
 	if err != nil || claimed.Claim == nil {
 		t.Fatal("fixture claim failed", err)
 	}
-	work, err := f.store.LoadDispatch(ctx, *claimed.Claim, time.Now().UTC())
+	work, err := f.store.LoadDispatch(ctx, *claimed.Claim)
 	if err != nil {
 		t.Fatal(err)
 	}
-	work, err = f.store.ConsumeAuthorization(ctx, work.Handle, time.Now().UTC())
+	work, err = f.store.ConsumeAuthorization(ctx, work.Handle)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,12 +67,12 @@ func TestControlHTTPReconcilesExhaustedOriginalPreparation(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := provider.Plan{Job: resolved}
-	work, err = f.store.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: preparation}, time.Now().UTC())
+	work, err = f.store.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: preparation})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < dispatch.MaxFailures; i++ {
-		work, err = f.store.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.Fault, Code: domain.CodeStagingFailed}, time.Now().UTC())
+		work, err = f.store.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.Fault, Code: domain.CodeStagingFailed})
 		if err != nil {
 			t.Fatal(err)
 		}

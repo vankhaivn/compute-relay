@@ -74,7 +74,7 @@ func (r cleanupResolver) Resolve(provider.BindingSnapshot) (provider.Provider, e
 func cleanupWorker(t *testing.T, f *dispatchFixture) (*cleanup.Engine, *cleanupProbe) {
 	t.Helper()
 	probe := &cleanupProbe{probeProvider: f.adapter}
-	engine, err := cleanup.New(f.s, cleanupResolver{probe}, f.clock, cleanup.DefaultConfig())
+	engine, err := cleanup.New(f.s, cleanupResolver{probe}, cleanup.DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestCleanupWorkerReportsAlreadyAbsent(t *testing.T) {
 	ctx := context.Background()
 	f, id := collectedFixture(t)
 	_, actor, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	plan, err := f.s.PlanCleanup(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID, false, f.clock.Now())
+	plan, err := f.s.PlanCleanup(ctx, "a", actor.TokenID(), id.JobID, id.AttemptID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,30 +265,30 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 	f, id := collectedFixture(t)
 	service, p, r := admitCleanup(t, f, id, "cleanup-fence", false)
 	f.clock.advance(time.Second)
-	first, err := f.s.ClaimCleanup(ctx, f.clock.Now(), 2*time.Second)
+	first, err := f.s.ClaimCleanup(ctx, 2*time.Second)
 	if err != nil || first == nil || first.Lease.Generation != 1 || first.Record.Operation.Status != domain.OperationRunning {
 		t.Fatal("claim did not commit running intent", first, err)
 	}
-	if again, err := f.s.ClaimCleanup(ctx, f.clock.Now(), 2*time.Second); again != nil || err != nil {
+	if again, err := f.s.ClaimCleanup(ctx, 2*time.Second); again != nil || err != nil {
 		t.Fatal("live claim was taken twice", again, err)
 	}
 	f.clock.advance(3 * time.Second)
-	second, err := f.s.ClaimCleanup(ctx, f.clock.Now(), 2*time.Second)
+	second, err := f.s.ClaimCleanup(ctx, 2*time.Second)
 	if err != nil || second == nil || second.Lease.Generation != 2 || second.Lease.Fence == first.Lease.Fence || second.Record.Operation != first.Record.Operation {
 		t.Fatal("expired claim was not recovered with a new fence", second, err)
 	}
 	deleted := cleanup.Outcome{Effect: cleanup.RemoteDeleted}
-	if err = f.s.CompleteCleanup(ctx, *first, deleted, f.clock.Now()); !errors.Is(err, cleanup.ErrLeaseLost) {
+	if err = f.s.CompleteCleanup(ctx, *first, deleted); !errors.Is(err, cleanup.ErrLeaseLost) {
 		t.Fatal("stale worker completed cleanup", err)
 	}
-	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.Failed}, f.clock.Now()); !errors.Is(err, ErrInvalid) {
+	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.Failed}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("failure without a problem accepted", err)
 	}
 	finishCleanupResourceFixtures(t, f, *second)
-	if err = f.s.CompleteCleanup(ctx, *second, deleted, f.clock.Now()); err != nil {
+	if err = f.s.CompleteCleanup(ctx, *second, deleted); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.AlreadyAbsent}, f.clock.Now()); !errors.Is(err, cleanup.ErrLeaseLost) {
+	if err = f.s.CompleteCleanup(ctx, *second, cleanup.Outcome{Effect: cleanup.AlreadyAbsent}); !errors.Is(err, cleanup.ErrLeaseLost) {
 		t.Fatal("terminal cleanup was rewritten", err)
 	}
 	current, err := service.Get(ctx, p, "a", r.Operation.ID)
@@ -304,12 +304,12 @@ func TestCleanupLeaseFencesStaleWorkers(t *testing.T) {
 func finishCleanupResourceFixtures(t *testing.T, f *dispatchFixture, w cleanup.Work) {
 	t.Helper()
 	for _, item := range w.Resources {
-		if err := f.s.BeginCleanupResource(context.Background(), w, item, f.clock.Now()); err != nil {
+		if err := f.s.BeginCleanupResource(context.Background(), w, item); err != nil {
 			t.Fatal(err)
 		}
 		result := item.Result
 		result.State, result.Reason = cleanup.ResourceDeleted, "fixture_deletion_confirmed"
-		if err := f.s.CompleteCleanupResource(context.Background(), w, result, f.clock.Now()); err != nil {
+		if err := f.s.CompleteCleanupResource(context.Background(), w, result); err != nil {
 			t.Fatal(err)
 		}
 	}

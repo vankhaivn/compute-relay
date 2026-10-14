@@ -21,7 +21,7 @@ type CancellationAction struct {
 	Code    domain.ErrorCode
 }
 type CancellationRepository interface {
-	CommitCancellation(context.Context, Handle, domain.OperationID, CancellationAction, time.Time) (Work, error)
+	CommitCancellation(context.Context, Handle, domain.OperationID, CancellationAction) (Work, error)
 }
 
 func (s *session) commitCancellation(action CancellationAction) error {
@@ -37,7 +37,7 @@ func (s *session) commitCancellation(action CancellationAction) error {
 	}
 	ctx, stop := context.WithTimeout(base, 5*time.Second)
 	defer stop()
-	work, err := repo.CommitCancellation(ctx, s.current.Handle, s.current.Cancellation.Operation.ID, action, s.e.clock.Now())
+	work, err := repo.CommitCancellation(ctx, s.current.Handle, s.current.Cancellation.Operation.ID, action)
 	if err == nil {
 		s.current = work
 	}

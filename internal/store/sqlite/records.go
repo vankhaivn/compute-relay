@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/objects"
+	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
 var _ auth.TokenRepository = (*Store)(nil)
@@ -89,24 +90,42 @@ func (s *Store) LookupWorkspace(ctx context.Context, id domain.WorkspaceID) (aut
 	}
 	return w, nil
 }
-func (s *Store) CreateToken(ctx context.Context, t auth.TokenRecord) error {
-	if !validToken(t) {
-		return ErrInvalid
+func (s *Store) CreateToken(ctx context.Context, issuance auth.TokenIssuance) (auth.TokenRecord, error) {
+	t := issuance.Record
+	if !t.CreatedAt.IsZero() || issuance.Lifetime < 0 || issuance.Lifetime > 0 && !t.ExpiresAt.IsZero() {
+		return auth.TokenRecord{}, ErrInvalid
 	}
 	scopes := append([]auth.Scope(nil), t.Scopes...)
 	sort.Slice(scopes, func(i, j int) bool { return scopes[i] < scopes[j] })
 	encoded, _ := json.Marshal(scopes)
-	var expires any
-	if !t.ExpiresAt.IsZero() {
-		expires = t.ExpiresAt.UTC().Format(time.RFC3339Nano)
-	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
-		return err
+		return auth.TokenRecord{}, err
 	}
 	defer done()
-	_, err = s.db.ExecContext(ctx, "INSERT INTO api_token_hashes(token_id,workspace_id,digest,scopes,created_at,expires_at,revoked) VALUES(?,?,?,?,?,?,?)", t.ID, string(t.WorkspaceID), t.Digest[:], string(encoded), t.CreatedAt.UTC().Format(time.RFC3339Nano), expires, t.Revoked)
-	return dbError(err)
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		t.CreatedAt = now
+		if issuance.Lifetime > 0 {
+			t.ExpiresAt = now.Add(issuance.Lifetime)
+		}
+		if !t.ExpiresAt.IsZero() && !now.Before(t.ExpiresAt) {
+			return auth.ErrForbidden
+		}
+		if !validToken(t) {
+			return ErrInvalid
+		}
+		var expires any
+		if !t.ExpiresAt.IsZero() {
+			expires = t.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO api_token_hashes(token_id,workspace_id,digest,scopes,created_at,expires_at,revoked) VALUES(?,?,?,?,?,?,?)", t.ID, string(t.WorkspaceID), t.Digest[:], string(encoded), now.Format(time.RFC3339Nano), expires, t.Revoked)
+		return dbError(err)
+	})
+	if err != nil {
+		return auth.TokenRecord{}, err
+	}
+	t.Scopes = append([]auth.Scope(nil), t.Scopes...)
+	return t, nil
 }
 func (s *Store) LookupToken(ctx context.Context, digest [sha256.Size]byte) (auth.TokenRecord, error) {
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -115,30 +134,43 @@ func (s *Store) LookupToken(ctx context.Context, digest [sha256.Size]byte) (auth
 	}
 	defer done()
 	var t auth.TokenRecord
-	var raw []byte
-	var scopes, created string
-	var expires sql.NullString
-	err = s.db.QueryRowContext(ctx, "SELECT token_id,workspace_id,digest,scopes,created_at,expires_at,revoked FROM api_token_hashes WHERE digest=?", digest[:]).Scan(&t.ID, &t.WorkspaceID, &raw, &scopes, &created, &expires, &t.Revoked)
-	if errors.Is(err, sql.ErrNoRows) {
-		return t, auth.ErrNotFound
-	}
-	if err != nil {
-		return t, dbError(err)
-	}
-	if len(raw) != sha256.Size || len(scopes) > 100 || json.Unmarshal([]byte(scopes), &t.Scopes) != nil {
-		return auth.TokenRecord{}, ErrCorrupt
-	}
-	copy(t.Digest[:], raw)
-	if t.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
-		return auth.TokenRecord{}, ErrCorrupt
-	}
-	if expires.Valid {
-		if t.ExpiresAt, err = time.Parse(time.RFC3339Nano, expires.String); err != nil {
-			return auth.TokenRecord{}, ErrCorrupt
+	var found bool
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		var raw []byte
+		var scopes, created string
+		var expires sql.NullString
+		err := tx.QueryRowContext(ctx, "SELECT token_id,workspace_id,digest,scopes,created_at,expires_at,revoked FROM api_token_hashes WHERE digest=?", digest[:]).Scan(&t.ID, &t.WorkspaceID, &raw, &scopes, &created, &expires, &t.Revoked)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
 		}
+		if err != nil {
+			return dbError(err)
+		}
+		if len(raw) != sha256.Size || len(scopes) > 100 || json.Unmarshal([]byte(scopes), &t.Scopes) != nil {
+			return ErrCorrupt
+		}
+		copy(t.Digest[:], raw)
+		if t.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
+			return ErrCorrupt
+		}
+		if expires.Valid {
+			if t.ExpiresAt, err = time.Parse(time.RFC3339Nano, expires.String); err != nil {
+				return ErrCorrupt
+			}
+		}
+		if !validToken(t) {
+			return ErrCorrupt
+		}
+		found = t.ExpiresAt.IsZero() || now.Before(t.ExpiresAt)
+		// Commit the sampled floor even on expiry, so a wall-clock rollback cannot
+		// make a token usable again after a completed authentication check.
+		return nil
+	})
+	if err != nil {
+		return auth.TokenRecord{}, err
 	}
-	if !validToken(t) {
-		return auth.TokenRecord{}, ErrCorrupt
+	if !found {
+		return auth.TokenRecord{}, auth.ErrNotFound
 	}
 	return t, nil
 }
@@ -177,8 +209,13 @@ func (s *Store) CommitObject(ctx context.Context, m domain.ObjectMetadata) error
 		return err
 	}
 	defer done()
-	_, err = s.db.ExecContext(ctx, "INSERT INTO objects(workspace_id,object_id,bytes,sha256) VALUES(?,?,?,?)", string(m.WorkspaceID), string(m.ID), m.Bytes, string(m.SHA256))
-	return dbError(err)
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		if err := registerRetention(ctx, tx, retention.Input, m, now); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO objects(workspace_id,object_id,bytes,sha256) VALUES(?,?,?,?)", string(m.WorkspaceID), string(m.ID), m.Bytes, string(m.SHA256))
+		return dbError(err)
+	})
 }
 func (s *Store) GetObject(ctx context.Context, w domain.WorkspaceID, id domain.ObjectID) (domain.ObjectMetadata, error) {
 	if !w.Valid() || !id.Valid() {

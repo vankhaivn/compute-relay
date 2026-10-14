@@ -24,7 +24,7 @@ func TestSchedulingStatusSkipsTerminalQueueHead(t *testing.T) {
 	if err != nil || record.Scheduling == nil || record.Scheduling.Reason != string(scheduler.Eligible) {
 		t.Fatal("terminal queue head hid eligibility", record.Scheduling, err)
 	}
-	claim, err := f.s.ClaimNext(ctx, "worker", f.clock.Now())
+	claim, err := f.s.ClaimNext(ctx, "worker")
 	if err != nil || claim.Claim == nil || claim.Claim.Identity != id {
 		t.Fatal("status did not match actual claim", claim, err)
 	}

@@ -24,7 +24,7 @@ func fixture(t *testing.T) (*auth.Service, *testsupport.Memory) {
 		auth.Workspace{ID: "a", Enabled: true, AllowedProfiles: []string{"default-gpu"}},
 		auth.Workspace{ID: "b", Enabled: true},
 	)
-	s, err := auth.New(m, m, nil)
+	s, err := auth.New(m, m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,8 @@ func TestInvalidExpiredRevokedAndDisabledTokens(t *testing.T) {
 	}
 	m.SetWorkspace(auth.Workspace{ID: "a", Enabled: true})
 	now := time.Now()
-	s, _ = auth.New(m, m, func() time.Time { return now })
+	m.SetClock(func() time.Time { return now })
+	s, _ = auth.New(m, m)
 	secret, _, err := s.Issue(ctx, "a", []auth.Scope{auth.Read}, now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +167,7 @@ func (b badTokens) LookupToken(context.Context, [32]byte) (auth.TokenRecord, err
 func TestRepositoryFailureFailsClosed(t *testing.T) {
 	s, m := fixture(t)
 	secret, _, _ := issue(t, s)
-	s, _ = auth.New(badTokens{m}, m, nil)
+	s, _ = auth.New(badTokens{m}, m)
 	if _, err := s.Authenticate(ctx, secret.Reveal()); !errors.Is(err, auth.ErrUnavailable) || strings.Contains(err.Error(), "canary") {
 		t.Fatalf("unsafe repository error: %v", err)
 	}

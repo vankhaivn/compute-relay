@@ -37,6 +37,8 @@ const (
 
 type Options struct {
 	OperationTimeout time.Duration
+	// Clock must be safe for concurrent calls; nil selects the system clock.
+	Clock func() time.Time
 }
 
 func DefaultOptions() Options {

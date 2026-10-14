@@ -71,8 +71,8 @@ type ResourceWork struct {
 // ResourceRepository commits each intent before its call and fences every outcome.
 // Begin rechecks current eligibility and the immutable target; a preview is irrelevant.
 type ResourceRepository interface {
-	BeginCleanupResource(context.Context, Work, ResourceWork, time.Time) error
-	CompleteCleanupResource(context.Context, Work, ResourceResult, time.Time) error
+	BeginCleanupResource(context.Context, Work, ResourceWork) error
+	CompleteCleanupResource(context.Context, Work, ResourceResult) error
 }
 
 type PreviewPlan struct {
@@ -92,7 +92,7 @@ func (p PreviewPlan) Fingerprint() domain.SHA256Digest {
 }
 
 type PreviewRepository interface {
-	PlanCleanup(context.Context, domain.WorkspaceID, string, domain.JobID, domain.AttemptID, bool, time.Time) (PreviewPlan, error)
+	PlanCleanup(context.Context, domain.WorkspaceID, string, domain.JobID, domain.AttemptID, bool) (PreviewPlan, error)
 }
 
 type ResourcePreview struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -26,7 +27,7 @@ func (s *Store) LoadProviderAttempt(ctx context.Context, id provider.Identity) (
 
 	var plan provider.Plan
 	var prepared provider.Prepared
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		record, err := readJobRecord(ctx, tx, id.WorkspaceID, id.JobID)
 		if err != nil {
 			return err

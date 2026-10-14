@@ -41,7 +41,7 @@ func (p *progressTracker) checkpoint(ctx context.Context, stage string, force bo
 	if p.observable {
 		sample.BytesReceived = &p.received
 	}
-	if err := p.engine.repo.RecordCollectionProgress(ctx, p.work, stage, sample, now); err != nil {
+	if err := p.engine.repo.RecordCollectionProgress(ctx, p.work, stage, sample); err != nil {
 		return progressWriteError{err}
 	}
 	p.last = now

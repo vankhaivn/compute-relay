@@ -33,7 +33,7 @@ func TestImageMigrationRetiresLegacyAdmissionButPreservesFrozenJobs(t *testing.T
 	f := newManagedStateFixture(t)
 	ctx := context.Background()
 	var err error
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{legacySSHStateAdapter{f.discovery}}, f.clock.Now)
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{legacySSHStateAdapter{f.discovery}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestImageMigrationRetiresLegacyAdmissionButPreservesFrozenJobs(t *testing.T
 		t.Fatal("upgrade", err)
 	}
 	defer upgraded.Close()
-	current, err := upgraded.ReadConnection(ctx, "a", f.principals["a"].TokenID(), connection.ID, f.clock.Now())
+	current, err := upgraded.ReadConnection(ctx, "a", f.principals["a"].TokenID(), connection.ID)
 	if err != nil || current.Selection != nil || current.Authentication != "verified" || !current.CredentialPresent {
 		t.Fatal("upgrade lost credentials or kept a legacy admission selection", current, err)
 	}

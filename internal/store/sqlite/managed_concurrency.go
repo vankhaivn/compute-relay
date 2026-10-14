@@ -26,7 +26,7 @@ func (s *managedScheduling) read(ctx context.Context, tx *sql.Tx, now time.Time)
 	}
 	s.loaded = true
 	var last string
-	s.settings, last, s.err = schedulerControl(ctx, tx, now)
+	s.settings, last, s.err = schedulerControl(ctx, tx)
 	if s.err != nil {
 		return s.err
 	}
@@ -48,11 +48,6 @@ func managedConcurrency(ctx context.Context, tx *sql.Tx, r managedRecord, select
 	}
 	result := &connections.ConcurrencyStatus{Scope: "account", ConfiguredLimit: configured}
 	err := snapshot.read(ctx, tx, now)
-	if errors.Is(err, scheduler.ErrClock) {
-		reason := "scheduler_clock_unavailable"
-		result.WaitReason = &reason
-		return result, nil
-	}
 	if err != nil {
 		return nil, err
 	}

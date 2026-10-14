@@ -56,7 +56,7 @@ func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOver
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	access, err := auth.New(store, store, nil)
+	access, err := auth.New(store, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func setupControlsHTTP(t *testing.T, override operations.Repository, cleanupOver
 		repo = override
 	}
 	blobs := &controlBlobs{}
-	controls, err := operations.New(access, repo, blobs, nil, admission.DefaultLimits())
+	controls, err := operations.New(access, repo, blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

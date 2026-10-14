@@ -24,7 +24,7 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 	}
 	defer done()
 	var result admission.Record
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, tokenID, auth.Read); err != nil {
 			return err
 		}
@@ -37,7 +37,7 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 		if err != nil {
 			return err
 		}
-		result.Collection, err = readCollectionStatus(ctx, tx, result, time.Now().UTC())
+		result.Collection, err = readCollectionStatus(ctx, tx, result, now)
 		if err != nil {
 			return err
 		}
@@ -45,7 +45,7 @@ func (s *Store) ReadJob(ctx context.Context, w domain.WorkspaceID, tokenID strin
 		if err != nil {
 			return err
 		}
-		result.Scheduling, err = readSchedulingStatus(ctx, tx, result, time.Now().UTC())
+		result.Scheduling, err = readSchedulingStatus(ctx, tx, result, now)
 		return err
 	})
 	if err != nil {

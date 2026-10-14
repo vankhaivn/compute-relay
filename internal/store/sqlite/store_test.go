@@ -54,7 +54,7 @@ func TestIdentityPragmasAndDurableRepositories(t *testing.T) {
 	if err := s.Ready(testctx); err != nil {
 		t.Fatal(err)
 	}
-	access, _ := auth.New(s, s, nil)
+	access, _ := auth.New(s, s)
 	secret, record, err := access.Issue(testctx, "a", []auth.Scope{auth.Read, auth.Write}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestIdentityPragmasAndDurableRepositories(t *testing.T) {
 	if after.InstallationID != info.InstallationID {
 		t.Fatal("restart changed installation")
 	}
-	access, _ = auth.New(s, s, nil)
+	access, _ = auth.New(s, s)
 	if _, err := access.Authenticate(testctx, secret.Reveal()); err != nil {
 		t.Fatal("persisted token rejected", err)
 	}
@@ -98,7 +98,7 @@ func TestIdentityPragmasAndDurableRepositories(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	access, _ = auth.New(s, s, nil)
+	access, _ = auth.New(s, s)
 	if _, err := access.Authenticate(testctx, secret.Reveal()); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("revocation lost", err)
 	}
@@ -119,20 +119,20 @@ func TestConstraintsAndIndependentSnapshots(t *testing.T) {
 	if again.AllowedProfiles[0] != "default-gpu" {
 		t.Fatal("aliased profiles")
 	}
-	r := auth.TokenRecord{ID: "tok_test", WorkspaceID: "a", Digest: sha256.Sum256([]byte("synthetic digest")), Scopes: []auth.Scope{auth.Read}, CreatedAt: time.Now().UTC()}
-	if err := s.CreateToken(testctx, r); err != nil {
+	r := auth.TokenRecord{ID: "tok_test", WorkspaceID: "a", Digest: sha256.Sum256([]byte("synthetic digest")), Scopes: []auth.Scope{auth.Read}}
+	if _, err := s.CreateToken(testctx, auth.TokenIssuance{Record: r}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateToken(testctx, r); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateToken(testctx, auth.TokenIssuance{Record: r}); !errors.Is(err, ErrConflict) {
 		t.Fatal("duplicate token", err)
 	}
 	r.ID = "tok_other"
-	if err := s.CreateToken(testctx, r); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateToken(testctx, auth.TokenIssuance{Record: r}); !errors.Is(err, ErrConflict) {
 		t.Fatal("duplicate digest", err)
 	}
 	r.WorkspaceID = "missing"
 	r.Digest = sha256.Sum256([]byte("new"))
-	if err := s.CreateToken(testctx, r); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateToken(testctx, auth.TokenIssuance{Record: r}); !errors.Is(err, ErrConflict) {
 		t.Fatal("foreign key disabled", err)
 	}
 	m := object("unknown-owner")
@@ -151,7 +151,7 @@ func TestConstraintsAndIndependentSnapshots(t *testing.T) {
 	}
 	r.WorkspaceID = "a"
 	r.Scopes = []auth.Scope{"admin"}
-	if err := s.CreateToken(testctx, r); !errors.Is(err, ErrInvalid) {
+	if _, err := s.CreateToken(testctx, auth.TokenIssuance{Record: r}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("unknown scope accepted")
 	}
 	if _, err := s.LookupToken(testctx, [32]byte{}); !errors.Is(err, auth.ErrNotFound) {

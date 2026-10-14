@@ -58,7 +58,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	if err != nil {
 		return ErrState
 	}
-	controls, err := operations.New(h.access, h.store, h.inputs, clock{}, admission.DefaultLimits())
+	controls, err := operations.New(h.access, h.store, h.inputs, admission.DefaultLimits())
 	if err != nil {
 		return ErrState
 	}
@@ -66,7 +66,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	if err != nil {
 		return ErrState
 	}
-	cleanups, err := cleanup.NewService(h.access, h.store, clock{})
+	cleanups, err := cleanup.NewService(h.access, h.store, nil)
 	if err != nil {
 		return ErrState
 	}
@@ -90,7 +90,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	}
 	if dispatchEnabled {
 		mode = "managed-workers"
-		cleanupRepo = managedCleanupRepository{h.store}
+		cleanupRepo = h.store
 	}
 	if dispatchEnabled {
 		defer func() {
@@ -135,7 +135,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 			return announce(listening)
 		})
 	}
-	sweeper, err := h.retentionSweeper(clock{})
+	sweeper, err := h.retentionSweeper()
 	if err != nil {
 		return err
 	}

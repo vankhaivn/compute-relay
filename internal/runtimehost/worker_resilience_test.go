@@ -40,7 +40,7 @@ type resilienceDispatch struct {
 	*resilienceFault
 }
 
-func (r resilienceDispatch) ClaimRecovery(ctx context.Context, _ string, _ time.Time) (*scheduler.Claim, error) {
+func (r resilienceDispatch) ClaimRecovery(ctx context.Context, _ string) (*scheduler.Claim, error) {
 	return nil, r.claim(ctx)
 }
 
@@ -49,7 +49,7 @@ type resilienceCollection struct {
 	*resilienceFault
 }
 
-func (r resilienceCollection) ClaimCollection(ctx context.Context, _ time.Time, _ time.Duration, _ int) (*collection.Work, error) {
+func (r resilienceCollection) ClaimCollection(ctx context.Context, _ time.Duration, _ int) (*collection.Work, error) {
 	return nil, r.claim(ctx)
 }
 
@@ -58,7 +58,7 @@ type resilienceCleanup struct {
 	*resilienceFault
 }
 
-func (r resilienceCleanup) ClaimCleanup(ctx context.Context, _ time.Time, _ time.Duration) (*cleanup.Work, error) {
+func (r resilienceCleanup) ClaimCleanup(ctx context.Context, _ time.Duration) (*cleanup.Work, error) {
 	return nil, r.claim(ctx)
 }
 
@@ -90,7 +90,7 @@ func resilienceEngine(t *testing.T, kind string, fault *resilienceFault) func(co
 		cfg := cleanup.DefaultConfig()
 		cfg.Workers = 1
 		cfg.PollDelay = time.Millisecond
-		engine, err := cleanup.New(resilienceCleanup{resilienceFault: fault}, resilienceResolver{}, nil, cfg)
+		engine, err := cleanup.New(resilienceCleanup{resilienceFault: fault}, resilienceResolver{}, cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

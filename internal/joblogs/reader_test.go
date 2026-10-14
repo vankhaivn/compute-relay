@@ -52,7 +52,7 @@ func (p *logProvider) ReadLogs(ctx context.Context, _ provider.RemoteReference, 
 func logSetup(t *testing.T) (*Reader, *auth.Service, auth.Principal, *logRepo, *logResolver) {
 	t.Helper()
 	m := testsupport.NewMemory(auth.Workspace{ID: "ws_fixture", Enabled: true})
-	access, err := auth.New(m, m, nil)
+	access, err := auth.New(m, m)
 	if err != nil {
 		t.Fatal(err)
 	}

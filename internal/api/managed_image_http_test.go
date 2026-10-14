@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/connections"
 )
@@ -81,7 +80,7 @@ func TestManagedHTTPImageInstallationReceiptsAndReplay(t *testing.T) {
 			if got := readManagedOperation(t, raw); got.Status != "accepted" || got.ID != first.ID {
 				t.Fatal("accepted installation is not readable", got)
 			}
-			if _, found, err := f.store.NextConnectionOperation(ctx, time.Now().UTC()); err != nil || !found {
+			if _, found, err := f.store.NextConnectionOperation(ctx); err != nil || !found {
 				t.Fatal("could not claim accepted installation", found, err)
 			}
 			_, raw = f.call(t, "GET", location, "manage", "", "", 200)

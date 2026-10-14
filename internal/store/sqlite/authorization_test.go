@@ -59,7 +59,7 @@ func attachManaged(t testing.TB, f *dispatchFixture) {
 }
 func authorizationService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scopes ...auth.Scope) (*executionauth.Service, auth.Principal) {
 	t.Helper()
-	a, err := auth.New(f.s, f.s, nil)
+	a, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,11 +92,11 @@ func grantAuthorization(t testing.TB, f *dispatchFixture, id scheduler.Identity)
 }
 func managedClaim(t testing.TB, f *dispatchFixture) dispatch.Work {
 	t.Helper()
-	r, err := f.s.ClaimNext(context.Background(), "managed_worker", f.clock.Now())
+	r, err := f.s.ClaimNext(context.Background(), "managed_worker")
 	if err != nil || r.Claim == nil {
 		t.Fatalf("managed claim=%+v error=%v", r, err)
 	}
-	w, err := f.s.LoadDispatch(context.Background(), *r.Claim, f.clock.Now())
+	w, err := f.s.LoadDispatch(context.Background(), *r.Claim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestAuthorizationCurrentAuthorityAndExactTarget(t *testing.T) {
 	}
 	key, _ := admission.KeyDigest("valid-grant-key")
 	req, _ := executionauth.Parse(authorizationRequest(id.AttemptID, 10))
-	if _, err = f.s.AuthorizeExecution(context.Background(), executionauth.Command{WorkspaceID: "a", TokenID: p.TokenID(), JobID: id.JobID, KeyDigest: key, Request: req, Now: f.clock.Now()}); !errors.Is(err, auth.ErrUnauthenticated) {
+	if _, err = f.s.AuthorizeExecution(context.Background(), executionauth.Command{WorkspaceID: "a", TokenID: p.TokenID(), JobID: id.JobID, KeyDigest: key, Request: req}); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatal("transaction accepted revoked replay", err)
 	}
 }
@@ -202,15 +202,15 @@ func TestAuthorizationReplayOriginalAndReadConsumedAfterRestart(t *testing.T) {
 	attachManaged(t, f)
 	work := managedClaim(t, f)
 	plan, op := storePlan(t, work)
-	if _, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}, f.clock.Now()); !errors.Is(err, dispatch.ErrPolicy) {
+	if _, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}); !errors.Is(err, dispatch.ErrPolicy) {
 		t.Fatal("preparation bypassed consume", err)
 	}
 	bad := work.Handle
 	bad.Claim.Fence = strings.Repeat("b", 64)
-	if _, err := f.s.ConsumeAuthorization(context.Background(), bad, f.clock.Now()); !errors.Is(err, scheduler.ErrLeaseLost) {
+	if _, err := f.s.ConsumeAuthorization(context.Background(), bad); !errors.Is(err, scheduler.ErrLeaseLost) {
 		t.Fatal("unfenced consumption", err)
 	}
-	if _, err := f.s.ConsumeAuthorization(context.Background(), work.Handle, f.clock.Now()); err != nil {
+	if _, err := f.s.ConsumeAuthorization(context.Background(), work.Handle); err != nil {
 		t.Fatal(err)
 	}
 	// Crash after consumption but before any remote intent. The next owner may only
@@ -232,7 +232,7 @@ func TestAuthorizationReplayOriginalAndReadConsumedAfterRestart(t *testing.T) {
 	if err != nil || current.Status != executionauth.Consumed || current.ConsumedAt == nil {
 		t.Fatal("consumption lost", current, err)
 	}
-	if _, err = f.s.ConsumeAuthorization(context.Background(), work.Handle, f.clock.Now()); !errors.Is(err, scheduler.ErrLeaseLost) {
+	if _, err = f.s.ConsumeAuthorization(context.Background(), work.Handle); !errors.Is(err, scheduler.ErrLeaseLost) {
 		t.Fatal("old claim survived restart/expiry", err)
 	}
 	if err = f.step(t); err != nil {
@@ -253,7 +253,7 @@ func TestAuthorizationReplayOriginalAndReadConsumedAfterRestart(t *testing.T) {
 func TestEveryClaimRequiresDurableAuthorization(t *testing.T) {
 	f := managedFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)
-	r, err := f.s.ClaimNext(context.Background(), "worker", f.clock.Now())
+	r, err := f.s.ClaimNext(context.Background(), "worker")
 	if err != nil || r.Claim != nil || len(r.View.Heads) != 1 || r.View.Heads[0].Reason != scheduler.AuthorizationRequired {
 		t.Fatal("ungranted attempt claimed", r, err)
 	}
@@ -265,7 +265,7 @@ func TestEveryClaimRequiresDurableAuthorization(t *testing.T) {
 		t.Fatal("authorized attempt did not prepare exactly once")
 	}
 	f.clock.advance(time.Minute)
-	recovery, err := f.s.ClaimRecovery(context.Background(), "recovery", f.clock.Now())
+	recovery, err := f.s.ClaimRecovery(context.Background(), "recovery")
 	if err != nil || recovery == nil || recovery.Identity != id {
 		t.Fatal("single recovery path lost original attempt", recovery, err)
 	}
@@ -308,7 +308,7 @@ func TestAuthorizationAmbiguousSubmissionAndRetryNeedSeparateGrant(t *testing.T)
 		if retry.Effect != operations.NewAttemptCreated {
 			t.Fatal("retry missing")
 		}
-		r, err := f.s.ClaimNext(context.Background(), "after_retry", f.clock.Now())
+		r, err := f.s.ClaimNext(context.Background(), "after_retry")
 		if err != nil || r.Claim != nil {
 			t.Fatal("retry inherited authorization", r, err)
 		}
@@ -385,7 +385,7 @@ func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
 	}
 	remaining, limit, used := 15.0, 15.0, 0.0
 	q := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "gpu", Limit: &limit, Used: &used, Remaining: &remaining, Unit: "seconds", ObservedAt: f.clock.Now(), Source: "fixture", Precision: "lower_bound"}
-	if err := f.s.RecordQuota(context.Background(), f.profile.AccountScope, "gpu", q, f.clock.Now()); err != nil {
+	if err := f.s.RecordQuota(context.Background(), f.profile.AccountScope, "gpu", q); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := grant(sa, pa, a); err != nil {
@@ -405,7 +405,7 @@ func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Its own reservation must not prevent the already-authorized attempt from starting.
-	r, err := f.s.ClaimNext(context.Background(), "quota_worker", f.clock.Now())
+	r, err := f.s.ClaimNext(context.Background(), "quota_worker")
 	if err != nil || r.Claim == nil || r.Claim.Identity != a {
 		t.Fatal("own reservation double counted", r, err)
 	}
@@ -424,7 +424,7 @@ func TestAuthorizationQuotaReservationsAndUnresolvedInputs(t *testing.T) {
 func TestCollectionRecoveryReusesOriginalPermitAndOperation(t *testing.T) {
 	f, id, _, _ := collectionFixture(t)
 	ctx := context.Background()
-	work, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1)
+	work, err := f.s.ClaimCollection(ctx, time.Minute, 1)
 	if err != nil || work == nil || work.Lease.AttemptID != id.AttemptID {
 		t.Fatal("collection claim missing", work, err)
 	}
@@ -432,12 +432,12 @@ func TestCollectionRecoveryReusesOriginalPermitAndOperation(t *testing.T) {
 	if count := controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='collect'"); count != 1 {
 		t.Fatal("collection created duplicate tickets", count)
 	}
-	if again, err := f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1); err != nil || again != nil {
+	if again, err := f.s.ClaimCollection(ctx, time.Minute, 1); err != nil || again != nil {
 		t.Fatal("live collection claimed twice", again, err)
 	}
 	f.clock.advance(2 * time.Minute)
 	f.restart(t)
-	work, err = f.s.ClaimCollection(ctx, f.clock.Now(), time.Minute, 1)
+	work, err = f.s.ClaimCollection(ctx, time.Minute, 1)
 	if err != nil || work == nil || work.Lease.OperationID != original.OperationID || work.Lease.AttemptID != original.AttemptID || work.Lease.Generation != original.Generation+1 || work.Lease.Fence == original.Fence {
 		t.Fatal("collection recovery changed identity or lost fencing", work, err)
 	}
@@ -520,7 +520,7 @@ func TestAuthorizationFrozenPermitMismatchPreventsMutation(t *testing.T) {
 	if _, err := f.s.db.Exec("UPDATE execution_authorizations SET inputs_sha256=?", strings.Repeat("b", 64)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.ConsumeAuthorization(context.Background(), work.Handle, f.clock.Now()); !errors.Is(err, ErrCorrupt) {
+	if _, err := f.s.ConsumeAuthorization(context.Background(), work.Handle); !errors.Is(err, ErrCorrupt) {
 		t.Fatal("mismatched input permit consumed", err)
 	}
 	if f.backend.Stats().PrepareCalls != 0 || controlCount(t, f.s, "SELECT count(*) FROM provider_resources") != 0 {

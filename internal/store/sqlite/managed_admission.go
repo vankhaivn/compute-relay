@@ -14,7 +14,7 @@ import (
 
 func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (connections.Record, error) {
 	var result connections.Record
-	if !in.Workspace.Valid() || !validID(in.TokenID) || !domain.SHA256Digest(in.KeyHash).Valid() || !domain.SHA256Digest(in.Fingerprint).Valid() || in.Now.IsZero() {
+	if !in.Workspace.Valid() || !validID(in.TokenID) || !domain.SHA256Digest(in.KeyHash).Valid() || !domain.SHA256Digest(in.Fingerprint).Valid() {
 		return result, connections.ErrRequest
 	}
 	if in.Configuration != nil && (in.Configuration.Validate() != nil || in.Action != "create" && in.Action != "configure") || in.Action == "configure" && in.Configuration == nil {
@@ -28,7 +28,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		return result, err
 	}
 	defer done()
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, in.Workspace, in.TokenID, auth.Manage); err != nil {
 			return err
 		}
@@ -97,7 +97,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		if err != nil {
 			return err
 		}
-		stamp := in.Now.UTC().Format(time.RFC3339Nano)
+		stamp := now.UTC().Format(time.RFC3339Nano)
 		if in.Action == "create" {
 			var wall any
 			var maxActive, maxProcesses int
@@ -125,7 +125,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		if err != nil {
 			return dbError(err)
 		}
-		op := connections.Operation{ID: domain.OperationID(operationID), Workspace: in.Workspace, ConnectionID: id, Action: in.Action, Status: "accepted", ConnectionRevision: revision, CreatedAt: in.Now.UTC(), UpdatedAt: in.Now.UTC()}
+		op := connections.Operation{ID: domain.OperationID(operationID), Workspace: in.Workspace, ConnectionID: id, Action: in.Action, Status: "accepted", ConnectionRevision: revision, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 		if in.Action == "configure" {
 			// Configuration has no remote or credential mutation. Commit its new alias,
 			// saved override and terminal receipt atomically with the revision change.
@@ -186,7 +186,7 @@ func (s *Store) ReadyConnection(ctx context.Context, w domain.WorkspaceID, token
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Manage); err != nil {
 			return err
 		}

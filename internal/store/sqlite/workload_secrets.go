@@ -46,7 +46,7 @@ func loadSecret(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, now tim
 		return record, ErrCorrupt
 	}
 	if now.Before(r.CreatedAt) {
-		return record, scheduler.ErrClock
+		return record, ErrCorrupt
 	}
 	if consumed.Valid {
 		at, err := time.Parse(time.RFC3339Nano, consumed.String)
@@ -54,7 +54,7 @@ func loadSecret(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, now tim
 			return record, ErrCorrupt
 		}
 		if now.Before(at) {
-			return record, scheduler.ErrClock
+			return record, ErrCorrupt
 		}
 		r.Status, r.ConsumedAt = "consumed", &at
 	} else if revoked.Valid {
@@ -63,7 +63,7 @@ func loadSecret(ctx context.Context, tx *sql.Tx, key workloadsecret.Key, now tim
 			return record, ErrCorrupt
 		}
 		if now.Before(at) {
-			return record, scheduler.ErrClock
+			return record, ErrCorrupt
 		}
 		r.Status, r.RevokedAt = "revoked", &at
 		expected, _ := json.Marshal(r)
@@ -139,7 +139,7 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	defer done()
 	var receipt workloadsecret.Receipt
 	usable := false
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
@@ -150,31 +150,31 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 				return workloadsecret.ErrConflict
 			}
 			key := workloadsecret.Key{WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: metadata.AttemptID}
-			prior, err := loadSecret(ctx, tx, key, c.Now)
+			prior, err := loadSecret(ctx, tx, key, now)
 			if err != nil {
 				return err
 			}
 			receipt = prior.original
 			receipt.Replay = true
-			usable, err = secretUsable(ctx, tx, key, receipt.AuthorizationID, c.Now)
+			usable, err = secretUsable(ctx, tx, key, receipt.AuthorizationID, now)
 			return err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return dbError(err)
 		}
-		gateCommand := executionauth.GateCommand{WorkspaceID: c.WorkspaceID, TokenID: c.TokenID, JobID: c.JobID, KeyDigest: c.KeyDigest, Now: c.Now}
-		r, err := gateRecord(ctx, tx, gateCommand, metadata.AttemptID)
+		gateCommand := executionauth.GateCommand{WorkspaceID: c.WorkspaceID, TokenID: c.TokenID, JobID: c.JobID, KeyDigest: c.KeyDigest}
+		r, err := gateRecord(ctx, tx, now, gateCommand, metadata.AttemptID)
 		if err != nil {
 			return err
 		}
 		if !matchSecretSlots(r.Request.Spec().WorkloadSecrets, metadata) {
 			return workloadsecret.ErrRequest
 		}
-		g, err := loadExecutionGate(ctx, tx, r, c.Now)
+		g, err := loadExecutionGate(ctx, tx, r, now)
 		if err != nil {
 			return err
 		}
-		if g == nil || g.ReadyAt == nil || g.ReadyRevision != metadata.ReadinessRevision || g.Expired(c.Now) {
+		if g == nil || g.ReadyAt == nil || g.ReadyRevision != metadata.ReadinessRevision || g.Expired(now) {
 			return workloadsecret.ErrState
 		}
 		work, err := controlWork(ctx, tx, r)
@@ -185,7 +185,7 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 			return workloadsecret.ErrState
 		}
 		until, _ := workloadsecret.CanonicalTime(metadata.ExpiresAt)
-		if !c.Now.Before(until) || until.After(c.Now.Add(workloadsecret.MaxLifetime)) {
+		if !now.Before(until) || until.After(now.Add(workloadsecret.MaxLifetime)) {
 			return workloadsecret.ErrRequest
 		}
 		var exists bool
@@ -199,7 +199,7 @@ func (s *Store) SupplyWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 		if err != nil {
 			return err
 		}
-		receipt = workloadsecret.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, Metadata: metadata, Status: "granted", CreatedAt: c.Now.UTC()}
+		receipt = workloadsecret.Receipt{AuthorizationID: domain.OperationID(id), WorkspaceID: c.WorkspaceID, JobID: c.JobID, Metadata: metadata, Status: "granted", CreatedAt: now.UTC()}
 		encoded, _ := json.Marshal(receipt)
 		meta, _ := json.Marshal(metadata)
 		_, err = tx.ExecContext(ctx, `INSERT INTO workload_secret_authorizations(workspace_id,authorization_id,job_id,attempt_id,key_sha256,request_hmac,metadata,original_receipt,expires_at_ms) VALUES(?,?,?,?,?,?,?,?,?)`, string(c.WorkspaceID), id, string(c.JobID), string(metadata.AttemptID), c.KeyDigest, fingerprint, string(meta), string(encoded), until.UnixMilli())
@@ -222,11 +222,11 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	}
 	defer done()
 	var receipt workloadsecret.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Execute); err != nil {
 			return err
 		}
-		record, err := loadSecret(ctx, tx, workloadsecret.Key{WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: attempt}, c.Now)
+		record, err := loadSecret(ctx, tx, workloadsecret.Key{WorkspaceID: c.WorkspaceID, JobID: c.JobID, AttemptID: attempt}, now)
 		if err != nil {
 			return err
 		}
@@ -248,9 +248,9 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 		if receipt.Status == "consumed" {
 			return workloadsecret.ErrState
 		}
-		receipt.Status, receipt.RevokedAt = "revoked", &c.Now
+		receipt.Status, receipt.RevokedAt = "revoked", &now
 		raw, _ := json.Marshal(receipt)
-		result, err := tx.ExecContext(ctx, `UPDATE workload_secret_authorizations SET revoked_at=?,revocation_key_sha256=?,revocation_receipt=? WHERE workspace_id=? AND authorization_id=? AND consumed_at IS NULL AND revoked_at IS NULL`, c.Now.UTC().Format(time.RFC3339Nano), c.KeyDigest, string(raw), string(c.WorkspaceID), string(id))
+		result, err := tx.ExecContext(ctx, `UPDATE workload_secret_authorizations SET revoked_at=?,revocation_key_sha256=?,revocation_receipt=? WHERE workspace_id=? AND authorization_id=? AND consumed_at IS NULL AND revoked_at IS NULL`, now.UTC().Format(time.RFC3339Nano), c.KeyDigest, string(raw), string(c.WorkspaceID), string(id))
 		if err != nil {
 			return dbError(err)
 		}
@@ -269,8 +269,8 @@ func (s *Store) RevokeWorkloadSecrets(ctx context.Context, c workloadsecret.Comm
 	return receipt, nil
 }
 
-func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.WorkspaceID, token string, job domain.JobID, id domain.OperationID, now time.Time) (workloadsecret.Receipt, error) {
-	if !workspace.Valid() || !job.Valid() || !id.Valid() || !scheduler.ValidTime(now) {
+func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.WorkspaceID, token string, job domain.JobID, id domain.OperationID) (workloadsecret.Receipt, error) {
+	if !workspace.Valid() || !job.Valid() || !id.Valid() {
 		return workloadsecret.Receipt{}, workloadsecret.ErrNotFound
 	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -279,7 +279,7 @@ func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.Worksp
 	}
 	defer done()
 	var receipt workloadsecret.Receipt
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, workspace, token, auth.Execute); err != nil {
 			return err
 		}
@@ -298,8 +298,8 @@ func (s *Store) ReadWorkloadSecrets(ctx context.Context, workspace domain.Worksp
 	return receipt, err
 }
 
-func (s *Store) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Key, id domain.OperationID, now time.Time) (bool, error) {
-	if !key.Valid() || !id.Valid() || !scheduler.ValidTime(now) {
+func (s *Store) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Key, id domain.OperationID) (bool, error) {
+	if !key.Valid() || !id.Valid() {
 		return false, workloadsecret.ErrRequest
 	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -308,7 +308,11 @@ func (s *Store) WorkloadSecretsUsable(ctx context.Context, key workloadsecret.Ke
 	}
 	defer done()
 	var usable bool
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error { var err error; usable, err = secretUsable(ctx, tx, key, id, now); return err })
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		var err error
+		usable, err = secretUsable(ctx, tx, key, id, now)
+		return err
+	})
 	return usable, err
 }
 

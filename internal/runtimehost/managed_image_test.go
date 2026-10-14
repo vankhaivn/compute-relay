@@ -66,18 +66,18 @@ func TestManagedImageInstallationRecoveryNeverRepeatsMutation(t *testing.T) {
 			if err != nil || op.Status != "accepted" {
 				t.Fatal(op, err)
 			}
-			repo := &lostImageCompletion{Repository: managedConnectionRepository{f.host.store}, lose: !beforeBuild}
+			repo := &lostImageCompletion{Repository: f.host.store, lose: !beforeBuild}
 			resetWorker := func() {
 				t.Helper()
 				var err error
-				f.services.connections, err = connections.New(f.host.access, repo, f.vault, []connections.Adapter{adapter}, time.Now)
+				f.services.connections, err = connections.New(f.host.access, repo, f.vault, []connections.Adapter{adapter})
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
 			resetWorker()
 			if beforeBuild {
-				started, err := f.host.store.BeginConnectionInstall(ctx, op.ID, time.Now().UTC())
+				started, err := f.host.store.BeginConnectionInstall(ctx, op.ID)
 				if err != nil || !started {
 					t.Fatal("could not simulate consumed permit", err)
 				}

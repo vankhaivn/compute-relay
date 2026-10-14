@@ -29,7 +29,7 @@ func TestRetentionExpiryEventIsAtomicAndSurvivesRestart(t *testing.T) {
 	if _, err := f.s.db.Exec(`CREATE TRIGGER fail_expiry_event BEFORE INSERT ON events WHEN NEW.type='result.expired' BEGIN SELECT RAISE(ABORT,'injected expiry event failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	report, err := f.s.ExpireRetention(ctx, f.clock.Now(), retention.DefaultPolicy(), 100)
+	report, err := f.s.ExpireRetention(ctx, retention.DefaultPolicy(), 100)
 	if err == nil || report != (retention.SweepReport{}) {
 		t.Fatal("failed expiry event returned a committed report", report, err)
 	}

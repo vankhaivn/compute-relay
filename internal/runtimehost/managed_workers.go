@@ -82,11 +82,11 @@ func (h *Host) managedWorkers(ctx context.Context, config ManagedServeConfig) (*
 // composeManaged provides the offline fixture seam. Neither it nor its concrete
 // constructors read a credential, verify an account, or create a compute permit.
 func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, vault credentials.Vault, adapters ...connections.Adapter) (*managedServices, error) {
-	service, err := connections.New(h.access, managedConnectionRepository{h.store}, vault, adapters, clock{}.Now)
+	service, err := connections.New(h.access, h.store, vault, adapters)
 	if err != nil {
 		return nil, ErrState
 	}
-	permits, err := executionauth.New(h.access, managedAuthorizationRepository{h.store}, clock{})
+	permits, err := executionauth.New(h.access, h.store, clock{})
 	if err != nil {
 		return nil, ErrState
 	}
@@ -99,7 +99,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return nil, err
 	}
 	permits.WithSecrets(pool)
-	result.secrets, err = workloadsecret.New(h.access, managedSecretRepository{h.store}, pool, clock{})
+	result.secrets, err = workloadsecret.New(h.access, h.store, pool, clock{})
 	if err != nil {
 		return nil, ErrState
 	}
@@ -110,14 +110,14 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 	}
 	dispatchConfig := dispatch.DefaultConfig()
 	dispatchConfig.Workers, dispatchConfig.PollDelay = config.MaxWorkers, time.Second
-	result.dispatcher, err = dispatch.New(managedDispatchRepository{h.store}, resolver, h.inputs, clock{}, dispatchConfig)
+	result.dispatcher, err = dispatch.New(h.store, resolver, h.inputs, clock{}, dispatchConfig)
 	if err != nil {
 		return nil, ErrState
 	}
 	result.dispatcher.WithSecrets(pool)
 	collectionConfig := collection.DefaultConfig()
 	collectionConfig.Workers = config.MaxWorkers
-	result.collector, err = collection.New(managedCollectionRepository{h.store}, resolver, h.results, clock{}, collectionConfig)
+	result.collector, err = collection.New(h.store, resolver, h.results, clock{}, collectionConfig)
 	if err != nil {
 		return nil, ErrState
 	}

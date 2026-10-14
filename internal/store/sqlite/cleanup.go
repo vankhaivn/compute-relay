@@ -16,7 +16,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 var _ cleanup.Repository = (*Store)(nil)
@@ -247,7 +246,7 @@ func (s *Store) ReplayCleanup(ctx context.Context, w domain.WorkspaceID, token, 
 	}
 	defer done()
 	var result *cleanup.Record
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Operate); err != nil {
 			return err
 		}
@@ -271,7 +270,7 @@ func (s *Store) ReadCleanup(ctx context.Context, w domain.WorkspaceID, token str
 	}
 	defer done()
 	var result cleanup.Record
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}
@@ -295,8 +294,7 @@ func (s *Store) ReadCleanup(ctx context.Context, w domain.WorkspaceID, token str
 // AdmitCleanup records intent only. Coalescing returns the attempt's pending or already
 // succeeded cleanup; a failed one never blocks a new explicit request.
 func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Record, error) {
-	c.Now = c.Now.UTC()
-	if c.Validate() != nil || !scheduler.ValidTime(c.Now) {
+	if c.Validate() != nil {
 		return cleanup.Record{}, operations.ErrRequest
 	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -305,7 +303,7 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 	}
 	defer done()
 	var result cleanup.Record
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Operate); err != nil {
 			return err
 		}
@@ -317,7 +315,7 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 			result = *prior
 			return nil
 		}
-		if _, _, err = schedulerControl(ctx, tx, c.Now); err != nil {
+		if _, _, err = schedulerControl(ctx, tx); err != nil {
 			return err
 		}
 		target, err := controlTarget(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID)
@@ -327,8 +325,8 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 		if err = actionableAttempt(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID); err != nil {
 			return err
 		}
-		if c.Now.Before(target.Attempt.UpdatedAt) {
-			return scheduler.ErrClock
+		if now.Before(target.Attempt.UpdatedAt) {
+			return ErrCorrupt
 		}
 		var existing string
 		err = tx.QueryRowContext(ctx, `SELECT operation_id FROM cleanup_operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running','succeeded') ORDER BY cleanup_seq DESC LIMIT 1`, string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID)).Scan(&existing)
@@ -342,12 +340,12 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 			}
 			result = row.record
 			result.Replay = true
-			return advanceSchedulerClock(ctx, tx, c.Now)
+			return nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return dbError(err)
 		}
-		plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, c.Now, "")
+		plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, now, "")
 		if err != nil {
 			return err
 		}
@@ -355,7 +353,7 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 		if err != nil {
 			return err
 		}
-		op, err := domain.NewOperation(domain.OperationID(id), c.WorkspaceID, c.JobID, c.Request.AttemptID, domain.OperationCleanup, c.Now)
+		op, err := domain.NewOperation(domain.OperationID(id), c.WorkspaceID, c.JobID, c.Request.AttemptID, domain.OperationCleanup, now)
 		if err != nil {
 			return ErrInvalid
 		}
@@ -370,7 +368,7 @@ func (s *Store) AdmitCleanup(ctx context.Context, c cleanup.Command) (cleanup.Re
 			return err
 		}
 		result = r
-		return advanceSchedulerClock(ctx, tx, c.Now)
+		return nil
 	})
 	if err != nil {
 		// No identifier or success escapes a failed or uncertain acknowledgement.

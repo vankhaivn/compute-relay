@@ -142,7 +142,7 @@ func TestSchedulerDiskFullDoesNotAcknowledgeOrPartiallyClaim(t *testing.T) {
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA max_page_count=%d", pages+1)); err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.ClaimNext(context.Background(), "w", schedulerNow)
+	r, err := s.ClaimNext(context.Background(), "w")
 	if !errors.Is(err, ErrDiskFull) || r.Claim != nil {
 		t.Fatal("disk-full claim acknowledged", r, err)
 	}

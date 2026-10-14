@@ -18,16 +18,16 @@ type retentionFaultRepository struct {
 	fired bool
 }
 
-func (r *retentionFaultRepository) ExpireRetention(ctx context.Context, now time.Time, p retention.Policy, limit int) (retention.SweepReport, error) {
-	report, err := r.Store.ExpireRetention(ctx, now, p, limit)
+func (r *retentionFaultRepository) ExpireRetention(ctx context.Context, p retention.Policy, limit int) (retention.SweepReport, error) {
+	report, err := r.Store.ExpireRetention(ctx, p, limit)
 	if err == nil && r.stage == "expiry-ack" && !r.fired {
 		r.fired = true
 		return retention.SweepReport{}, ErrUnavailable
 	}
 	return report, err
 }
-func (r *retentionFaultRepository) CompleteRetention(ctx context.Context, d retention.Deletion, now time.Time) error {
-	err := r.Store.CompleteRetention(ctx, d, now)
+func (r *retentionFaultRepository) CompleteRetention(ctx context.Context, d retention.Deletion) error {
+	err := r.Store.CompleteRetention(ctx, d)
 	if err == nil && r.stage == "completion-ack" && !r.fired {
 		r.fired = true
 		return ErrUnavailable
@@ -62,7 +62,7 @@ func TestRetentionLostAcknowledgementsRecoverWithoutCompute(t *testing.T) {
 			repo := &retentionFaultRepository{Store: f.s, stage: stage}
 			inputs := &retentionFaultBlobs{Store: f.blobs, lose: stage == "delete-ack"}
 			outputs := &retentionFaultBlobs{Store: results}
-			sweep, err := retention.NewSweeper(repo, inputs, outputs, f.clock)
+			sweep, err := retention.NewSweeper(repo, inputs, outputs)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,7 +76,7 @@ func TestRetentionLostAcknowledgementsRecoverWithoutCompute(t *testing.T) {
 				t.Fatal("delete fault did not execute")
 			}
 			f.restart(t)
-			sweep, err = retention.NewSweeper(f.s, f.blobs, results, f.clock)
+			sweep, err = retention.NewSweeper(f.s, f.blobs, results)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -122,7 +122,7 @@ func TestRetentionExpiryRollbackAndActualDiskFull(t *testing.T) {
 			}
 			inputs := &retentionFaultBlobs{Store: f.blobs}
 			outputs := &retentionFaultBlobs{Store: blobs}
-			sweep, err := retention.NewSweeper(f.s, inputs, outputs, f.clock)
+			sweep, err := retention.NewSweeper(f.s, inputs, outputs)
 			if err != nil {
 				t.Fatal(err)
 			}

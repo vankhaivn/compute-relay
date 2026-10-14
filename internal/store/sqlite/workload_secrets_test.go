@@ -60,7 +60,7 @@ func attachSecrets(t testing.TB, f *dispatchFixture, gate *executionauth.Service
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	a, err := auth.New(f.s, f.s, nil)
+	a, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,16 +268,16 @@ func TestWorkloadSecretCrashAfterConsumptionNeverRestoresOrSends(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.clock.advance(10 * time.Millisecond)
-	claim, err := f.s.ClaimRecovery(ctx, "secret_crash_worker", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(ctx, "secret_crash_worker")
 	if err != nil || claim == nil {
 		t.Fatal("missing claim", err)
 	}
-	work, err := f.s.LoadDispatch(ctx, *claim, f.clock.Now())
+	work, err := f.s.LoadDispatch(ctx, *claim)
 	if err != nil {
 		t.Fatal(err)
 	}
 	material, err := pool.Claim(receipt.Key(), receipt.AuthorizationID, f.clock.Now(), func() error {
-		_, err := f.s.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission, SecretsAvailable: true}, f.clock.Now())
+		_, err := f.s.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission, SecretsAvailable: true})
 		return err
 	})
 	if err != nil {
@@ -318,7 +318,7 @@ func TestWorkloadSecretCancellationClearsMaterialAndBlocksExactResupply(t *testi
 	control, op, _ := controlService(t, f, "a", auth.Operate)
 	cancelControl(t, f, control, op, id)
 	pool.Sweep(f.clock.Now(), func(key workloadsecret.Key, authID domain.OperationID) bool {
-		usable, err := f.s.WorkloadSecretsUsable(ctx, key, authID, f.clock.Now())
+		usable, err := f.s.WorkloadSecretsUsable(ctx, key, authID)
 		return err == nil && usable
 	})
 	if pool.Available(receipt.Key(), receipt.AuthorizationID, f.clock.Now()) {

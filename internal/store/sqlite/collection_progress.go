@@ -50,11 +50,14 @@ func saveCollectionProgress(ctx context.Context, tx *sql.Tx, l collection.Lease,
 
 // RecordCollectionProgress checks the same ownership as publication, but never
 // advances attempt revision or emits chunk events. The engine bounds checkpoints.
-func (s *Store) RecordCollectionProgress(ctx context.Context, w collection.Work, stage string, p domain.CollectionProgress, now time.Time) error {
-	if stage != "discovering" && stage != "transferring" && stage != "verifying" || !p.ObservedAt.Equal(now) {
+func (s *Store) RecordCollectionProgress(ctx context.Context, w collection.Work, stage string, p domain.CollectionProgress) error {
+	if stage != "discovering" && stage != "transferring" && stage != "verifying" {
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		if p.ObservedAt.After(now) {
+			return collection.ErrInvalid
+		}
 		current, _, _, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err

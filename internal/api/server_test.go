@@ -43,7 +43,7 @@ func setupHTTP(t *testing.T, mutate func(*Config), ready func(context.Context) e
 	cfg.GlobalRate = Rate{10000, 10000}
 	cfg.WorkspaceRate = Rate{10000, 10000}
 	m := testsupport.NewMemory(auth.Workspace{ID: "a", Enabled: true}, auth.Workspace{ID: "b", Enabled: true})
-	a, err := auth.New(m, m, nil)
+	a, err := auth.New(m, m)
 	if err != nil {
 		t.Fatal(err)
 	}

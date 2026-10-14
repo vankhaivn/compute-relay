@@ -44,11 +44,11 @@ func TestRetentionRejectsExpiredInputsBeforeReadAndCommit(t *testing.T) {
 	}
 	stream.Close()
 	probe := &retentionReadProbe{inner: f.blobs}
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err = operations.New(access, f.s, probe, f.clock, admission.DefaultLimits())
+	service, err = operations.New(access, f.s, probe, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestRetentionRejectsExpiredInputsBeforeReadAndCommit(t *testing.T) {
 	}
 	key, _ := admission.KeyDigest("stale-proof-key")
 	hash, _ := req.Digest(id.JobID, domain.OperationRetryCompute)
-	command := operations.Command{WorkspaceID: "a", TokenID: actor.TokenID(), JobID: id.JobID, Kind: domain.OperationRetryCompute, Request: req, KeyDigest: key, RequestHash: hash, Inputs: &proof, Limits: admission.DefaultLimits(), Now: f.clock.Now()}
+	command := operations.Command{WorkspaceID: "a", TokenID: actor.TokenID(), JobID: id.JobID, Kind: domain.OperationRetryCompute, Request: req, KeyDigest: key, RequestHash: hash, Inputs: &proof, Limits: admission.DefaultLimits()}
 	if _, err := f.s.AdmitOperation(ctx, command); !errors.Is(err, operations.ErrInputs) {
 		t.Fatal("commit trusted a pre-expiry input proof", err)
 	}

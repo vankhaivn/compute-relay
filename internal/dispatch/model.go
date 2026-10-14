@@ -134,15 +134,15 @@ type Work struct {
 // Repository commits journal, resource/submission intent, state and events together.
 // ClaimRecovery never returns a license to repeat an already journaled mutation.
 type Repository interface {
-	ClaimNext(context.Context, string, time.Time) (scheduler.Result, error)
-	ClaimRecovery(context.Context, string, time.Time) (*scheduler.Claim, error)
-	LoadDispatch(context.Context, scheduler.Claim, time.Time) (Work, error)
-	ConsumeAuthorization(context.Context, Handle, time.Time) (Work, error)
-	CommitDispatch(context.Context, Handle, Action, time.Time) (Work, error)
-	RenewDispatch(context.Context, Handle, time.Time) (Handle, error)
-	YieldDispatch(context.Context, Handle, time.Time, time.Duration) error
+	ClaimNext(context.Context, string) (scheduler.Result, error)
+	ClaimRecovery(context.Context, string) (*scheduler.Claim, error)
+	LoadDispatch(context.Context, scheduler.Claim) (Work, error)
+	ConsumeAuthorization(context.Context, Handle) (Work, error)
+	CommitDispatch(context.Context, Handle, Action) (Work, error)
+	RenewDispatch(context.Context, Handle) (Handle, error)
+	YieldDispatch(context.Context, Handle, time.Duration) error
 	// RecordPreparationProgress stores an observational staging sample for the lease owner.
-	RecordPreparationProgress(context.Context, Handle, domain.PreparationProgress, time.Time) error
+	RecordPreparationProgress(context.Context, Handle, domain.PreparationProgress) error
 }
 type Resolver interface {
 	Resolve(provider.BindingSnapshot) (provider.Provider, error)

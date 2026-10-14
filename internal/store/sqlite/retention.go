@@ -16,6 +16,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
+// registerRetention precedes metadata insertion in the same transaction. SQL guards
+// require matching retained identity; a later failure rolls both rows back together.
+func registerRetention(ctx context.Context, tx *sql.Tx, kind retention.Kind, m domain.ObjectMetadata, now time.Time) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO retention_inventory(kind,workspace_id,object_id,bytes,sha256,recorded_at) VALUES(?,?,?,?,?,?)`, kind, m.WorkspaceID, m.ID, m.Bytes, m.SHA256, now.Format(time.RFC3339Nano))
+	return dbError(err)
+}
+
 type retentionItem struct {
 	sequence         int64
 	deletion         retention.Deletion
@@ -131,12 +138,12 @@ func retentionInputReferences(ctx context.Context, tx *sql.Tx, w domain.Workspac
 
 // ExpireRetention scans a bounded rotating page and commits only metadata tombstones.
 // The cursor and decisions share the transaction; a failed commit authorizes no I/O.
-func (s *Store) ExpireRetention(ctx context.Context, now time.Time, p retention.Policy, limit int) (retention.SweepReport, error) {
+func (s *Store) ExpireRetention(ctx context.Context, p retention.Policy, limit int) (retention.SweepReport, error) {
 	var report retention.SweepReport
 	if !p.Valid() || limit < 1 || limit > 100 {
 		return report, retention.ErrInvalid
 	}
-	err := s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	err := s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var cursor int64
 		if err := tx.QueryRowContext(ctx, `SELECT inventory_seq FROM retention_cursor WHERE singleton=1`).Scan(&cursor); err != nil {
 			return dbError(err)

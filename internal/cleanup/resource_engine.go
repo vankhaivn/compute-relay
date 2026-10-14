@@ -48,7 +48,7 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 			default:
 				result, failed = inspectCleanupResource(call, cleaner, verifier, w, item)
 				if result.State == ResourceRunning {
-					if err := repo.BeginCleanupResource(call, w, item, e.clock.Now().UTC()); err != nil {
+					if err := repo.BeginCleanupResource(call, w, item); err != nil {
 						// No provider mutation follows a changed target or an expired fence.
 						if errors.Is(err, ErrLeaseLost) || ctx.Err() != nil {
 							return Outcome{}, err
@@ -69,7 +69,7 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 				result.State, result.Reason = ResourceUnknown, "prior_delete_outcome_unknown"
 				failed = failure(domain.CodeProviderStateUnknown, "the earlier deletion outcome remains unknown; preserve the original target for recovery", domain.RecommendedActionInspectProvider)
 			}
-			if err := repo.CompleteCleanupResource(ctx, w, result, e.clock.Now().UTC()); err != nil {
+			if err := repo.CompleteCleanupResource(ctx, w, result); err != nil {
 				return Outcome{}, err
 			}
 			if !result.State.Confirmed() && firstFailure == nil {

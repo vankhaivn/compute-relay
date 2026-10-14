@@ -14,8 +14,8 @@ import (
 
 // RecordPreparationProgress checks the same lease ownership as a journal commit but never
 // advances the journal, attempt revision or events. Samples only grow within one lease.
-func (s *Store) RecordPreparationProgress(ctx context.Context, h dispatch.Handle, p domain.PreparationProgress, now time.Time) error {
-	if !p.Valid() || p.Generation != h.Claim.Generation || !p.ObservedAt.Equal(now) {
+func (s *Store) RecordPreparationProgress(ctx context.Context, h dispatch.Handle, p domain.PreparationProgress) error {
+	if !p.Valid() || p.Generation != h.Claim.Generation {
 		return dispatch.ErrInvalid
 	}
 	raw, err := json.Marshal(p)
@@ -27,7 +27,10 @@ func (s *Store) RecordPreparationProgress(ctx context.Context, h dispatch.Handle
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		if p.ObservedAt.After(now) {
+			return dispatch.ErrInvalid
+		}
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err

@@ -103,7 +103,7 @@ func TestWriteBaselineState(t *testing.T) {
 	if _, err := f.s.db.Exec("UPDATE managed_connections SET current_profile=? WHERE connection_id='con_fixture'", f.profile.Binding.Profile); err != nil {
 		t.Fatal(err)
 	}
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestWriteBaselineState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controls, err := operations.New(access, f.s, f.blobs, f.clock, admission.DefaultLimits())
+	controls, err := operations.New(access, f.s, f.blobs, admission.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func loadStateScript(t *testing.T, script string) string {
 
 func baselineHandler(t *testing.T, s *Store) http.Handler {
 	t.Helper()
-	access, err := auth.New(s, s, nil)
+	access, err := auth.New(s, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func baselineHandler(t *testing.T, s *Store) http.Handler {
 	if cfg.Jobs, err = admission.New(access, s, admission.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Operations, err = operations.New(access, s, blobs, clock{}, admission.DefaultLimits()); err != nil {
+	if cfg.Operations, err = operations.New(access, s, blobs, admission.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Authorizations, err = executionauth.New(access, s, clock{}); err != nil {

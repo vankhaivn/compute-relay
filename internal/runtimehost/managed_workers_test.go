@@ -16,7 +16,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 type managedTestVault struct {
@@ -188,40 +187,6 @@ func TestManagedWorkerPoolsStayAvailableWhileIdle(t *testing.T) {
 		if err := <-results; !errors.Is(err, context.DeadlineExceeded) {
 			t.Error("idle worker pool exited", err)
 		}
-	}
-}
-
-func TestManagedClaimsRetryStaleClockWithoutWeakeningStoreGuard(t *testing.T) {
-	f := newManagedTestFixture(t, true)
-	ctx := context.Background()
-	now := time.Now().UTC()
-	stale := now.Add(-time.Second)
-	if _, err := f.host.store.ClaimNext(ctx, "fixture_worker", now); err != nil {
-		t.Fatal(err)
-	}
-	dispatchRepo := managedDispatchRepository{f.host.store}
-	collectionRepo := managedCollectionRepository{f.host.store}
-	if result, err := dispatchRepo.ClaimNext(ctx, "fixture_worker", stale); err != nil || result.Claim != nil {
-		t.Fatal("stale dispatch clock admitted work or stopped polling", err)
-	}
-	if result, err := dispatchRepo.ClaimRecovery(ctx, "fixture_worker", stale); err != nil || result != nil {
-		t.Fatal("stale recovery clock admitted work or stopped polling", err)
-	}
-	if result, err := collectionRepo.ClaimCollection(ctx, stale, time.Minute, 2); err != nil || result != nil {
-		t.Fatal("stale collection clock admitted work or stopped polling", err)
-	}
-	// The wrappers cannot move persisted time backwards or bypass its protection.
-	for _, claim := range []func() error{
-		func() error { _, err := f.host.store.ClaimNext(ctx, "fixture_worker", stale); return err },
-		func() error { _, err := f.host.store.ClaimRecovery(ctx, "fixture_worker", stale); return err },
-		func() error { _, err := f.host.store.ClaimCollection(ctx, stale, time.Minute, 2); return err },
-	} {
-		if err := claim(); !errors.Is(err, scheduler.ErrClock) {
-			t.Fatal("persisted monotonic guard changed", err)
-		}
-	}
-	if _, err := f.host.store.ClaimNext(ctx, "fixture_worker", now.Add(time.Second)); err != nil {
-		t.Fatal("claims cannot resume once time catches up", err)
 	}
 }
 

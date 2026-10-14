@@ -251,7 +251,7 @@ func TestCollectionPublicationReceiptAndScopedReads(t *testing.T) {
 	if err != nil || replay.Operation.Status != domain.OperationAccepted || !replay.Replay || replay.Operation.ID != original.Operation.ID {
 		t.Fatal("original receipt was rewritten", err)
 	}
-	access, _ := auth.New(f.s, f.s, nil)
+	access, _ := auth.New(f.s, f.s)
 	reader, err := collection.NewReader(access, f.s, blobs)
 	if err != nil {
 		t.Fatal(err)

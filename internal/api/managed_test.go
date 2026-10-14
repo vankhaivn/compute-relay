@@ -119,7 +119,7 @@ func setupManagedHTTP(t *testing.T, configured bool, adapters ...connections.Ada
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	access, err := auth.New(store, store, nil)
+	access, err := auth.New(store, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func setupManagedHTTP(t *testing.T, configured bool, adapters ...connections.Ada
 	if len(adapters) == 0 {
 		adapters = []connections.Adapter{f.adapter}
 	}
-	f.service, err = connections.New(access, store, f.vault, adapters, nil)
+	f.service, err = connections.New(access, store, f.vault, adapters)
 	if err != nil {
 		t.Fatal(err)
 	}

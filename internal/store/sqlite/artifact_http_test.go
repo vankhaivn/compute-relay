@@ -25,7 +25,7 @@ import (
 
 func servePublishedFixture(t *testing.T, f *dispatchFixture, blobs collection.BlobStore) (string, func()) {
 	t.Helper()
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestPublishedArtifactHTTPReusesImmutablePublication(t *testing.T) {
 		t.Fatal("delivery repeated provider collection")
 	}
 	stop()
-	access, _ := auth.New(f.s, f.s, nil)
+	access, _ := auth.New(f.s, f.s)
 	fresh, err := access.Authenticate(ctx, token)
 	if err != nil {
 		t.Fatal(err)

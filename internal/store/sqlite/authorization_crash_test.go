@@ -104,11 +104,11 @@ func TestAuthorizationCrashHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	claim, err := s.ClaimNext(context.Background(), "authorization_crash", now)
+	claim, err := s.ClaimNext(context.Background(), "authorization_crash")
 	if err != nil || claim.Claim == nil {
 		t.Fatal("missing child claim", err)
 	}
-	work, err := s.LoadDispatch(context.Background(), *claim.Claim, now)
+	work, err := s.LoadDispatch(context.Background(), *claim.Claim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,12 +123,12 @@ func TestAuthorizationCrashHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 	} else {
-		if _, err = s.ConsumeAuthorization(context.Background(), work.Handle, now); err != nil {
+		if _, err = s.ConsumeAuthorization(context.Background(), work.Handle); err != nil {
 			t.Fatal(err)
 		}
 		if mode == "prepare_after" {
 			plan, op := storePlan(t, work)
-			if _, err = s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}, now); err != nil {
+			if _, err = s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}); err != nil {
 				t.Fatal(err)
 			}
 		}

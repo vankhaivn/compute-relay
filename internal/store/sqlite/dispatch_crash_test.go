@@ -120,29 +120,31 @@ func TestDispatchCrashHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(context.Background(), root, DefaultOptions())
+	opts := DefaultOptions()
+	opts.Clock = func() time.Time { return now }
+	s, err := Open(context.Background(), root, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	c, err := s.ClaimRecovery(context.Background(), "crash_child", now)
+	c, err := s.ClaimRecovery(context.Background(), "crash_child")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c == nil {
-		r, err := s.ClaimNext(context.Background(), "crash_child", now)
+		r, err := s.ClaimNext(context.Background(), "crash_child")
 		if err != nil || r.Claim == nil {
 			t.Fatal("no child claim", err)
 		}
 		c = r.Claim
 	}
-	work, err := s.LoadDispatch(context.Background(), *c, now)
+	work, err := s.LoadDispatch(context.Background(), *c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	action := dispatch.Action{Kind: dispatch.BeginSubmission}
 	if strings.HasPrefix(mode, "prepare") {
-		work, err = s.ConsumeAuthorization(context.Background(), work.Handle, now)
+		work, err = s.ConsumeAuthorization(context.Background(), work.Handle)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,7 +152,7 @@ func TestDispatchCrashHelper(t *testing.T) {
 		action = dispatch.Action{Kind: dispatch.BeginPreparation, Plan: &plan, PreparationID: op}
 	}
 	if strings.HasSuffix(mode, "after") {
-		if _, err = s.CommitDispatch(context.Background(), work.Handle, action, now); err != nil {
+		if _, err = s.CommitDispatch(context.Background(), work.Handle, action); err != nil {
 			t.Fatal(err)
 		}
 	} else {
@@ -204,5 +206,6 @@ func uncommittedDispatchPrefix(tx *sql.Tx, work dispatch.Work, action dispatch.A
 	if err != nil {
 		return err
 	}
-	return advanceSchedulerClock(ctx, tx, now)
+	_, err = tx.ExecContext(ctx, "UPDATE scheduler_control SET clock_ms=? WHERE singleton=1", now.UnixMilli())
+	return err
 }

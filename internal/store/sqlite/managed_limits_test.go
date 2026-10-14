@@ -28,7 +28,7 @@ func TestManagedLimitsFreezeAndShareCapacityAcrossWorkspaces(t *testing.T) {
 	f := newManagedStateFixture(t)
 	ctx := context.Background()
 	var err error
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{limitedStateAdapter{f.discovery}}, f.clock.Now)
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{limitedStateAdapter{f.discovery}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,12 +99,12 @@ func TestManagedLimitsFreezeAndShareCapacityAcrossWorkspaces(t *testing.T) {
 		}
 	}
 	for i := range 2 {
-		result, err := f.s.ClaimNext(ctx, fmt.Sprintf("limited-worker-%d", i), f.clock.Now())
+		result, err := f.s.ClaimNext(ctx, fmt.Sprintf("limited-worker-%d", i))
 		if err != nil || result.Claim == nil {
 			t.Fatalf("slot %d not available: %+v %v", i, result.View, err)
 		}
 	}
-	result, err := f.s.ClaimNext(ctx, "limited-third", f.clock.Now())
+	result, err := f.s.ClaimNext(ctx, "limited-third")
 	if err != nil || result.Claim != nil || result.View.AccountReservations[*first.AccountID] != 2 {
 		t.Fatal("shared host allowed a third attempt", result, err)
 	}

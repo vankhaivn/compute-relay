@@ -145,8 +145,8 @@ func cleanupReason(err error) string {
 	}
 }
 
-func (s *Store) PlanCleanup(ctx context.Context, w domain.WorkspaceID, token string, job domain.JobID, attempt domain.AttemptID, discard bool, now time.Time) (cleanup.PreviewPlan, error) {
-	if !w.Valid() || !job.Valid() || !attempt.Valid() || now.IsZero() {
+func (s *Store) PlanCleanup(ctx context.Context, w domain.WorkspaceID, token string, job domain.JobID, attempt domain.AttemptID, discard bool) (cleanup.PreviewPlan, error) {
+	if !w.Valid() || !job.Valid() || !attempt.Valid() {
 		return cleanup.PreviewPlan{}, operations.ErrRequest
 	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -155,7 +155,7 @@ func (s *Store) PlanCleanup(ctx context.Context, w domain.WorkspaceID, token str
 	}
 	defer done()
 	var result cleanup.PreviewPlan
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Operate); err != nil {
 			return err
 		}

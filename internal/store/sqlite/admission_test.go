@@ -69,7 +69,7 @@ func newAdmission(t *testing.T) admissionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, err := auth.New(s, s, nil)
+	access, err := auth.New(s, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestAdmissionReplaySurvivesRemapDisableAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	access, _ := auth.New(s, s, nil)
+	access, _ := auth.New(s, s)
 	p, err := access.Authenticate(ctx, f.secret)
 	if err != nil {
 		t.Fatal(err)

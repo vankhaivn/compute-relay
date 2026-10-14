@@ -42,7 +42,7 @@ func dispatchAuthorization(ctx context.Context, tx *sql.Tx, work dispatch.Work, 
 		return "", ErrCorrupt
 	}
 	if now.Before(at) {
-		return "", scheduler.ErrClock
+		return "", ErrCorrupt
 	}
 	if consumed.Valid {
 		used, err := time.Parse(time.RFC3339Nano, consumed.String)
@@ -50,7 +50,7 @@ func dispatchAuthorization(ctx context.Context, tx *sql.Tx, work dispatch.Work, 
 			return "", ErrCorrupt
 		}
 		if now.Before(used) {
-			return "", scheduler.ErrClock
+			return "", ErrCorrupt
 		}
 	}
 	return executionauth.Status(status), nil
@@ -59,14 +59,14 @@ func dispatchAuthorization(ctx context.Context, tx *sql.Tx, work dispatch.Work, 
 // ConsumeAuthorization verifies the current fenced claim and frozen job in one
 // transaction. Its durable result survives a crash before the preparation intent;
 // a later owner may continue only this same attempt's one-shot journal.
-func (s *Store) ConsumeAuthorization(ctx context.Context, h dispatch.Handle, now time.Time) (dispatch.Work, error) {
+func (s *Store) ConsumeAuthorization(ctx context.Context, h dispatch.Handle) (dispatch.Work, error) {
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return dispatch.Work{}, err
 	}
 	defer done()
 	var result dispatch.Work
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -100,9 +100,6 @@ func (s *Store) ConsumeAuthorization(ctx context.Context, h dispatch.Handle, now
 			if count != 1 {
 				return dispatch.ErrConflict
 			}
-		}
-		if err = advanceSchedulerClock(ctx, tx, now); err != nil {
-			return err
 		}
 		result = work
 		return nil

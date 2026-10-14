@@ -106,7 +106,7 @@ func (s *Store) ReplayOperation(ctx context.Context, w domain.WorkspaceID, token
 	}
 	defer done()
 	var result *operations.Record
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Operate); err != nil {
 			return err
 		}
@@ -130,7 +130,7 @@ func (s *Store) ReadOperation(ctx context.Context, w domain.WorkspaceID, token s
 	}
 	defer done()
 	var result operations.Record
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		if _, err := actorInTx(ctx, tx, w, token, auth.Read); err != nil {
 			return err
 		}

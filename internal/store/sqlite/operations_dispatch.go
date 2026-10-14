@@ -10,7 +10,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 var _ dispatch.CancellationRepository = (*Store)(nil)
@@ -31,8 +30,8 @@ func pendingCancellation(ctx context.Context, tx *sql.Tx, work dispatch.Work) (*
 	return &dispatch.CancellationControl{Operation: r.Operation, Started: r.Started}, nil
 }
 
-func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id domain.OperationID, action dispatch.CancellationAction, now time.Time) (dispatch.Work, error) {
-	if !id.Valid() || !scheduler.ValidTime(now) || (action.Begin && (action.Outcome != nil || action.Code != "")) || (!action.Begin && (action.Outcome == nil) == (action.Code == "")) {
+func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id domain.OperationID, action dispatch.CancellationAction) (dispatch.Work, error) {
+	if !id.Valid() || (action.Begin && (action.Outcome != nil || action.Code != "")) || (!action.Begin && (action.Outcome == nil) == (action.Code == "")) {
 		return dispatch.Work{}, dispatch.ErrInvalid
 	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -41,7 +40,7 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 	}
 	defer done()
 	var result dispatch.Work
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		work, err := loadDispatch(ctx, tx, h.Claim, now)
 		if err != nil {
 			return err
@@ -139,9 +138,6 @@ func (s *Store) CommitCancellation(ctx context.Context, h dispatch.Handle, id do
 		}
 		work.Cancellation, err = pendingCancellation(ctx, tx, work)
 		if err != nil {
-			return err
-		}
-		if err = advanceSchedulerClock(ctx, tx, now); err != nil {
 			return err
 		}
 		result = work

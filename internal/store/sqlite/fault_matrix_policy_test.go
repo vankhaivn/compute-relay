@@ -56,7 +56,7 @@ func TestFaultMatrixQuotaConsumedAfterPositiveObservation(t *testing.T) {
 	f.clock.advance(time.Minute)
 	limit, used, remaining := 3600.0, 0.0, 3600.0
 	q := provider.QuotaObservation{Status: provider.QuotaKnown, Resource: "cpu", Unit: "seconds", Limit: &limit, Used: &used, Remaining: &remaining, ObservedAt: f.clock.Now(), Source: "synthetic previous allowance", Precision: "exact"}
-	if err := f.s.RecordQuota(ctx, f.profile.AccountScope, "cpu", q, f.clock.Now()); err != nil {
+	if err := f.s.RecordQuota(ctx, f.profile.AccountScope, "cpu", q); err != nil {
 		t.Fatal(err)
 	}
 	// External consumption is simulated by a provider-proven rejection after a

@@ -60,12 +60,12 @@ func (e *Engine) RunOnce(ctx context.Context, owner string) (bool, error) {
 		return false, ctx.Err()
 	}
 	defer func() { <-e.slots }()
-	claim, err := e.repo.ClaimRecovery(ctx, owner, e.clock.Now())
+	claim, err := e.repo.ClaimRecovery(ctx, owner)
 	if err != nil {
 		return false, err
 	}
 	if claim == nil {
-		r, err := e.repo.ClaimNext(ctx, owner, e.clock.Now())
+		r, err := e.repo.ClaimNext(ctx, owner)
 		if err != nil {
 			return false, err
 		}
@@ -87,9 +87,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		var p *domain.Problem
 		if errors.As(err, &p) || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
 			return worker.Continue
-		}
-		if errors.Is(err, scheduler.ErrClock) {
-			return worker.Retry
 		}
 		return worker.Classify(err)
 	})
@@ -119,7 +116,7 @@ func nextPassDelay(poll time.Duration, j Journal) time.Duration {
 }
 
 func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultErr error) {
-	work, err := e.repo.LoadDispatch(parent, claim, e.clock.Now())
+	work, err := e.repo.LoadDispatch(parent, claim)
 	if err != nil {
 		return err
 	}
@@ -141,7 +138,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if len(w.Handle.Claim.Fence) > 0 {
 			delay += time.Duration(w.Handle.Claim.Fence[0]%4) * delay / 10
 		}
-		if yieldErr := e.repo.YieldDispatch(cleanup, w.Handle, e.clock.Now(), delay); yieldErr != nil && resultErr == nil {
+		if yieldErr := e.repo.YieldDispatch(cleanup, w.Handle, delay); yieldErr != nil && resultErr == nil {
 			resultErr = yieldErr
 		}
 	}()
@@ -384,7 +381,7 @@ func (s *session) commit(action Action) error {
 	}
 	ctx, stop := context.WithTimeout(base, 5*time.Second)
 	defer stop()
-	work, err := s.e.repo.CommitDispatch(ctx, s.current.Handle, action, s.e.clock.Now())
+	work, err := s.e.repo.CommitDispatch(ctx, s.current.Handle, action)
 	if err == nil {
 		s.current = work
 	}
@@ -393,7 +390,7 @@ func (s *session) commit(action Action) error {
 func (s *session) consumeAuthorization() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	work, err := s.e.repo.ConsumeAuthorization(s.ctx, s.current.Handle, s.e.clock.Now())
+	work, err := s.e.repo.ConsumeAuthorization(s.ctx, s.current.Handle)
 	if err == nil {
 		s.current = work
 	}
@@ -428,7 +425,7 @@ func (s *session) progress(completed, total int64) {
 		BytesCompleted: completed, BytesTotal: total, ObservedAt: now}
 	ctx, stop := context.WithTimeout(s.ctx, 5*time.Second)
 	defer stop()
-	_ = s.e.repo.RecordPreparationProgress(ctx, h, sample, now)
+	_ = s.e.repo.RecordPreparationProgress(ctx, h, sample)
 }
 func (s *session) heartbeat(done chan struct{}) {
 	defer close(done)
@@ -449,7 +446,7 @@ func (s *session) heartbeat(done chan struct{}) {
 		case <-timer.C:
 		}
 		s.mu.Lock()
-		updated, err := s.e.repo.RenewDispatch(s.ctx, s.current.Handle, s.e.clock.Now())
+		updated, err := s.e.repo.RenewDispatch(s.ctx, s.current.Handle)
 		if err == nil {
 			s.current.Handle = updated
 		}

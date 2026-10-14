@@ -46,16 +46,16 @@ type artifactJournalRepository struct {
 
 var errArtifactAck = errors.New("synthetic collection acknowledgement loss")
 
-func (r *artifactJournalRepository) PinCollection(ctx context.Context, w collection.Work, s collection.Snapshot, now time.Time) error {
-	err := r.Repository.PinCollection(ctx, w, s, now)
+func (r *artifactJournalRepository) PinCollection(ctx context.Context, w collection.Work, s collection.Snapshot) error {
+	err := r.Repository.PinCollection(ctx, w, s)
 	if err == nil && r.lose == "pin" {
 		r.lose = ""
 		return errArtifactAck
 	}
 	return err
 }
-func (r *artifactJournalRepository) CompleteCollection(ctx context.Context, w collection.Work, v collection.Verified, now time.Time) error {
-	err := r.Repository.CompleteCollection(ctx, w, v, now)
+func (r *artifactJournalRepository) CompleteCollection(ctx context.Context, w collection.Work, v collection.Verified) error {
+	err := r.Repository.CompleteCollection(ctx, w, v)
 	if err == nil && r.lose == "publication" {
 		r.lose = ""
 		return errArtifactAck
@@ -250,7 +250,7 @@ func TestArtifactsM3PublicationUsesScopedVerifiedBytesAndOriginalReceipt(t *test
 	if err != nil || !replay.Replay || !reflect.DeepEqual(replay.Operation, original.Operation) || replay.Effect != original.Effect {
 		t.Fatal("original receipt was rewritten", err)
 	}
-	access, _ := auth.New(f.x.f.store, f.x.f.store, nil)
+	access, _ := auth.New(f.x.f.store, f.x.f.store)
 	reader, err := collection.NewReader(access, f.x.f.store, f.results)
 	if err != nil {
 		t.Fatal(err)

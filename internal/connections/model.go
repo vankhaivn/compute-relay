@@ -275,14 +275,12 @@ type Accept struct {
 	Secret           bool
 	Configuration    *Configuration
 	Installation     *ImageInstallation
-	Now              time.Time
 }
 type Completion struct {
 	RuntimeConfig []byte
 	Verification  Verification
 	Profile       admission.Profile
 	Problem       string
-	Now           time.Time
 }
 type Repository interface {
 	FingerprintInitialized(context.Context) (bool, error)
@@ -290,13 +288,13 @@ type Repository interface {
 	ReplayConnection(context.Context, Accept) (Record, bool, error)
 	AcceptConnection(context.Context, Accept) (Record, error)
 	ReadyConnection(context.Context, domain.WorkspaceID, string, domain.OperationID) error
-	DeferConnectionSecret(context.Context, domain.OperationID, time.Time) error
-	FailConnection(context.Context, domain.OperationID, string, time.Time) error
-	NextConnectionOperation(context.Context, time.Time) (Record, bool, error)
-	BeginConnectionInstall(context.Context, domain.OperationID, time.Time) (bool, error)
+	DeferConnectionSecret(context.Context, domain.OperationID) error
+	FailConnection(context.Context, domain.OperationID, string) error
+	NextConnectionOperation(context.Context) (Record, bool, error)
+	BeginConnectionInstall(context.Context, domain.OperationID) (bool, error)
 	FinishConnection(context.Context, Record, Completion) error
-	ReadConnection(context.Context, domain.WorkspaceID, string, string, time.Time) (Connection, error)
-	ListConnections(context.Context, domain.WorkspaceID, string, time.Time) ([]Connection, error)
+	ReadConnection(context.Context, domain.WorkspaceID, string, string) (Connection, error)
+	ListConnections(context.Context, domain.WorkspaceID, string) ([]Connection, error)
 	ReadConnectionOperation(context.Context, domain.WorkspaceID, string, domain.OperationID) (Operation, error)
 	ResolveConnectionCredential(context.Context, string) (string, error)
 	ConnectionSecrets(context.Context, domain.OperationID) ([]string, error)

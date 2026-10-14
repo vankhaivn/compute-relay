@@ -13,7 +13,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 var _ operations.Repository = (*Store)(nil)
@@ -125,7 +124,7 @@ func (s *Store) RetryInputs(ctx context.Context, w domain.WorkspaceID, token str
 	}
 	defer done()
 	var result operations.RetryInputs
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, w, token, auth.Operate)
 		if err != nil {
 			return err
@@ -140,8 +139,7 @@ func (s *Store) RetryInputs(ctx context.Context, w domain.WorkspaceID, token str
 }
 
 func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (operations.Record, error) {
-	c.Now = c.Now.UTC()
-	if c.Validate() != nil || !scheduler.ValidTime(c.Now) {
+	if c.Validate() != nil {
 		return operations.Record{}, operations.ErrRequest
 	}
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -150,7 +148,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 	}
 	defer done()
 	var result operations.Record
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		_, err := actorInTx(ctx, tx, c.WorkspaceID, c.TokenID, auth.Operate)
 		if err != nil {
 			return err
@@ -163,7 +161,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 			result = *prior
 			return nil
 		}
-		if _, _, err = schedulerControl(ctx, tx, c.Now); err != nil {
+		if _, _, err = schedulerControl(ctx, tx); err != nil {
 			return err
 		}
 		target, err := controlTarget(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID)
@@ -173,8 +171,8 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if err = actionableAttempt(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID); err != nil {
 			return err
 		}
-		if c.Now.Before(target.Attempt.UpdatedAt) {
-			return scheduler.ErrClock
+		if now.Before(target.Attempt.UpdatedAt) {
+			return ErrCorrupt
 		}
 		// Coalesce an attempt's cancellation intent (including terminal/manual
 		// outcomes), and an already-pending read/collection request. Distinct HTTP
@@ -195,7 +193,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 			}
 			result = r.Record
 			result.Replay = true
-			return advanceSchedulerClock(ctx, tx, c.Now)
+			return nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return dbError(err)
@@ -209,7 +207,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 			return operations.ErrBusy
 		}
 		if c.Kind == domain.OperationRetryCompute {
-			if target.Request.Spec().Expired(c.Now) {
+			if target.Request.Spec().Expired(now) {
 				return admission.ErrExpired
 			}
 			proof, err := retryInputs(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID)
@@ -236,7 +234,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if err != nil {
 			return err
 		}
-		op, err := domain.NewOperation(domain.OperationID(id), c.WorkspaceID, c.JobID, c.Request.AttemptID, c.Kind, c.Now)
+		op, err := domain.NewOperation(domain.OperationID(id), c.WorkspaceID, c.JobID, c.Request.AttemptID, c.Kind, now)
 		if err != nil {
 			return ErrInvalid
 		}
@@ -247,26 +245,23 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if err = insertControl(ctx, tx, c, r.Record); err != nil {
 			return err
 		}
-		if err = controlEvent(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID, op.ID, domain.EventOperationAccepted, c.Now); err != nil {
+		if err = controlEvent(ctx, tx, c.WorkspaceID, c.JobID, c.Request.AttemptID, op.ID, domain.EventOperationAccepted, now); err != nil {
 			return err
 		}
 		switch c.Kind {
 		case domain.OperationCancel:
-			r, err = admitCancellation(ctx, tx, target, r, c.Now)
+			r, err = admitCancellation(ctx, tx, target, r, now)
 		case domain.OperationRetryCompute:
-			r, err = createRetry(ctx, tx, target, r, c.Now)
+			r, err = createRetry(ctx, tx, target, r, now)
 		case domain.OperationReconcile:
-			r, err = admitReconciliation(ctx, tx, target, r, c.Now)
+			r, err = admitReconciliation(ctx, tx, target, r, now)
 		case domain.OperationCollect:
-			r, err = admitCollection(ctx, tx, target, r, c.Now)
+			r, err = admitCollection(ctx, tx, target, r, now)
 		}
 		if err != nil {
 			return err
 		}
 		if err = saveControlReceipt(ctx, tx, c, r.Record); err != nil {
-			return err
-		}
-		if err = advanceSchedulerClock(ctx, tx, c.Now); err != nil {
 			return err
 		}
 		result = r.Record

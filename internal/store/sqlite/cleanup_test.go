@@ -19,7 +19,7 @@ import (
 
 func cleanupService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scopes ...auth.Scope) (*cleanup.Service, auth.Principal) {
 	t.Helper()
-	access, err := auth.New(f.s, f.s, nil)
+	access, err := auth.New(f.s, f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func cleanupService(t testing.TB, f *dispatchFixture, w domain.WorkspaceID, scop
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := cleanup.NewService(access, f.s, f.clock)
+	service, err := cleanup.NewService(access, f.s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

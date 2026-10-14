@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
@@ -125,9 +124,10 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 			}
 			handler := baselineHandler(t, s)
 			for _, want := range requests.Requests {
-				// Schema v14 predates the additive scheduling status field.
+				// v14 predates scheduling status; v22 exposed a caller-clock error.
+				// Store-owned time now resolves both historical queue positions.
 				reason := map[string]string{"granted status": "account_capacity", "queued status": "workspace_fifo"}[want.Name]
-				if fixture.version == 14 && reason != "" {
+				if reason != "" {
 					var response map[string]any
 					if err := json.Unmarshal(want.Response, &response); err != nil {
 						t.Fatal(err)
@@ -143,7 +143,7 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 					t.Errorf("%s changed: status %d want %d\ngot %s\nwant %s", want.Name, status, want.Status, got, want.Response)
 				}
 			}
-			access, err := auth.New(s, s, nil)
+			access, err := auth.New(s, s)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,7 +155,7 @@ func TestSimplificationUpgradePreservesStateAndArtifactBytes(t *testing.T) {
 			if err := s.db.QueryRow("SELECT clock_ms FROM scheduler_control WHERE singleton=1").Scan(&clockMillis); err != nil {
 				t.Fatal(err)
 			}
-			connections, err := s.ListConnections(ctx, "a", principal.TokenID(), time.UnixMilli(clockMillis))
+			connections, err := s.ListConnections(ctx, "a", principal.TokenID())
 			if err != nil || len(connections) != len(before[2]) {
 				t.Fatalf("connections unreadable: %v %v", connections, err)
 			}

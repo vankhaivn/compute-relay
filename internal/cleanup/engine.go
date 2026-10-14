@@ -7,7 +7,6 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
@@ -77,17 +76,12 @@ func (o Outcome) Valid() bool {
 // WorkRepository claims accepted cleanups and records exactly one terminal outcome.
 // ClaimCleanup commits the running status and lease before any provider call.
 type WorkRepository interface {
-	ClaimCleanup(context.Context, time.Time, time.Duration) (*Work, error)
-	CompleteCleanup(context.Context, Work, Outcome, time.Time) error
+	ClaimCleanup(context.Context, time.Duration) (*Work, error)
+	CompleteCleanup(context.Context, Work, Outcome) error
 }
 type Resolver interface {
 	Resolve(provider.BindingSnapshot) (provider.Provider, error)
 }
-type Clock interface{ Now() time.Time }
-type wallClock struct{}
-
-func (wallClock) Now() time.Time { return time.Now().UTC() }
-
 type Config struct {
 	Workers   int
 	Timeout   time.Duration
@@ -105,19 +99,15 @@ func (c Config) Valid() bool {
 type Engine struct {
 	repo     WorkRepository
 	resolver Resolver
-	clock    Clock
 	config   Config
 	slots    chan struct{}
 }
 
-func New(repo WorkRepository, resolver Resolver, clock Clock, cfg Config) (*Engine, error) {
+func New(repo WorkRepository, resolver Resolver, cfg Config) (*Engine, error) {
 	if repo == nil || resolver == nil || !cfg.Valid() {
 		return nil, ErrInvalid
 	}
-	if clock == nil {
-		clock = wallClock{}
-	}
-	return &Engine{repo: repo, resolver: resolver, clock: clock, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
+	return &Engine{repo: repo, resolver: resolver, config: cfg, slots: make(chan struct{}, cfg.Workers)}, nil
 }
 
 // RunOnce processes one bounded attempt inventory. If the process stops after a call
@@ -130,7 +120,7 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	w, err := e.repo.ClaimCleanup(ctx, e.clock.Now().UTC(), e.config.Timeout+30*time.Second)
+	w, err := e.repo.ClaimCleanup(ctx, e.config.Timeout+30*time.Second)
 	if err != nil || w == nil {
 		return false, err
 	}
@@ -152,7 +142,7 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 		// Shutdown leaves the running claim for lease-expiry recovery.
 		return true, ctx.Err()
 	}
-	return true, e.repo.CompleteCleanup(ctx, *w, outcome, e.clock.Now().UTC())
+	return true, e.repo.CompleteCleanup(ctx, *w, outcome)
 }
 
 func failure(code domain.ErrorCode, message string, action domain.RecommendedAction) Outcome {
@@ -183,9 +173,6 @@ func (e *Engine) Run(ctx context.Context) error {
 	}, func(err error) worker.Decision {
 		if errors.Is(err, ErrLeaseLost) {
 			return worker.Continue
-		}
-		if errors.Is(err, scheduler.ErrClock) {
-			return worker.Retry
 		}
 		return worker.Classify(err)
 	})

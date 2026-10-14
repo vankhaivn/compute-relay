@@ -131,7 +131,7 @@ func TestFaultMatrixUnknownAndModifiedObservations(t *testing.T) {
 			}
 			f.restart(t)
 			f.seed(t, "b", 2, false)
-			claim, err := f.s.ClaimNext(context.Background(), "other", f.clock.Now())
+			claim, err := f.s.ClaimNext(context.Background(), "other")
 			if err != nil || claim.Claim != nil {
 				t.Fatal("uncertain remote activity released account capacity", err)
 			}
@@ -177,11 +177,11 @@ func TestFaultMatrixStalePollCannotRewriteTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.clock.advance(time.Minute)
-	claim, err := f.s.ClaimRecovery(context.Background(), "observer", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(context.Background(), "observer")
 	if err != nil || claim == nil {
 		t.Fatal("missing observation lease", err)
 	}
-	work, err := f.s.LoadDispatch(context.Background(), *claim, f.clock.Now())
+	work, err := f.s.LoadDispatch(context.Background(), *claim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,14 +197,14 @@ func TestFaultMatrixStalePollCannotRewriteTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.ObservationSeen, Observation: &terminal}, f.clock.Now())
+	current, err := f.s.CommitDispatch(context.Background(), work.Handle, dispatch.Action{Kind: dispatch.ObservationSeen, Observation: &terminal})
 	if err != nil {
 		t.Fatal(err)
 	}
 	events := controlCount(t, f.s, "SELECT count(*) FROM events")
 	// Both the old owner version and a current handle must reject the late poll.
 	for _, handle := range []dispatch.Handle{work.Handle, current.Handle} {
-		if _, err := f.s.CommitDispatch(context.Background(), handle, dispatch.Action{Kind: dispatch.ObservationSeen, Observation: &stale}, f.clock.Now()); err == nil {
+		if _, err := f.s.CommitDispatch(context.Background(), handle, dispatch.Action{Kind: dispatch.ObservationSeen, Observation: &stale}); err == nil {
 			t.Fatal("late poll regressed terminal state")
 		}
 	}
@@ -238,7 +238,7 @@ func TestFaultMatrixLocalDeadlineKeepsUnknownExecution(t *testing.T) {
 		t.Fatal("local invocation deadline fabricated remote termination", state)
 	}
 	f.seed(t, "b", 2, false)
-	claim, err := f.s.ClaimNext(context.Background(), "other", f.clock.Now())
+	claim, err := f.s.ClaimNext(context.Background(), "other")
 	if err != nil || claim.Claim != nil || f.backend.Stats().SubmitCalls != 1 {
 		t.Fatal("deadline/restart permitted replacement compute", err)
 	}

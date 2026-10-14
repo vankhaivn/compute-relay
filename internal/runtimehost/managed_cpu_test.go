@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
@@ -56,7 +55,7 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 			if err != nil {
 				t.Fatal("CPU admission failed", err)
 			}
-			claim, err := f.host.store.ClaimNext(ctx, "cpu_worker", time.Now().UTC())
+			claim, err := f.host.store.ClaimNext(ctx, "cpu_worker")
 			if err != nil || claim.Claim != nil {
 				t.Fatal("CPU skipped finite consent", err)
 			}
@@ -64,11 +63,11 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 			if _, err := f.services.authorizations.Authorize(ctx, f.actor, "app", job.JobID, "cpu-grant-key", []byte(grant)); err != nil {
 				t.Fatal("exhausted GPU quota blocked CPU grant", err)
 			}
-			claim, err = f.host.store.ClaimNext(ctx, "cpu_worker", time.Now().UTC())
+			claim, err = f.host.store.ClaimNext(ctx, "cpu_worker")
 			if err != nil || claim.Claim == nil || claim.Claim.JobID != job.JobID {
 				t.Fatal("CPU dispatch claim blocked", claim, err)
 			}
-			work, err := f.host.store.LoadDispatch(ctx, *claim.Claim, time.Now().UTC())
+			work, err := f.host.store.LoadDispatch(ctx, *claim.Claim)
 			if err != nil || work.Job.Profile.Accelerator != "cpu" {
 				t.Fatal("dispatch lost CPU policy", err)
 			}
@@ -100,7 +99,7 @@ func TestManagedCPUSelectionAdmitsOnlyCPUAndIgnoresGPUAllowance(t *testing.T) {
 			if _, err := f.services.authorizations.Authorize(ctx, f.actor, "app", second.JobID, "same-account-second-grant", []byte(grant)); err != nil {
 				t.Fatal(err)
 			}
-			next, err := f.host.store.ClaimNext(ctx, "second_worker", time.Now().UTC())
+			next, err := f.host.store.ClaimNext(ctx, "second_worker")
 			if err != nil || next.Claim != nil {
 				t.Fatal("CPU ignored shared account concurrency", next, err)
 			}

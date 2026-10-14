@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
@@ -39,13 +38,13 @@ type executionJournalRepository struct {
 	last       dispatch.Handle
 }
 
-func (r *executionJournalRepository) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action, now time.Time) (dispatch.Work, error) {
+func (r *executionJournalRepository) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action) (dispatch.Work, error) {
 	r.last = h
 	if action.Kind == dispatch.BeginSubmission && r.failBefore {
 		r.failBefore = false
 		return dispatch.Work{}, errStagingCommitFixture
 	}
-	work, err := r.Repository.CommitDispatch(ctx, h, action, now)
+	work, err := r.Repository.CommitDispatch(ctx, h, action)
 	if err == nil && action.Kind == r.lose {
 		r.lose = ""
 		return dispatch.Work{}, errStagingCommitFixture
@@ -304,7 +303,7 @@ func TestExecutionM3ReplacementAndLatePollCannotRewriteTerminalEvidence(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := x.f.store.CommitDispatch(context.Background(), x.repo.last, dispatch.Action{Kind: dispatch.ObservationSeen, Observation: &late}, x.f.clock.Now()); err == nil {
+	if _, err := x.f.store.CommitDispatch(context.Background(), x.repo.last, dispatch.Action{Kind: dispatch.ObservationSeen, Observation: &late}); err == nil {
 		t.Fatal("stale publisher rewrote terminal evidence")
 	}
 	after := x.f.journal(t)

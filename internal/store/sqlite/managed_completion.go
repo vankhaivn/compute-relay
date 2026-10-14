@@ -9,9 +9,10 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-func (s *Store) NextConnectionOperation(ctx context.Context, now time.Time) (connections.Record, bool, error) {
+func (s *Store) NextConnectionOperation(ctx context.Context) (connections.Record, bool, error) {
 	var record connections.Record
 	found := false
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
@@ -19,7 +20,7 @@ func (s *Store) NextConnectionOperation(ctx context.Context, now time.Time) (con
 		return record, false, err
 	}
 	defer done()
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var id string
 		cutoff := now.Add(-30 * time.Second).UTC().Format(time.RFC3339Nano)
 		err := tx.QueryRowContext(ctx, `SELECT operation_id FROM managed_connection_operations WHERE (stage IN ('ready','installing') AND (status!='failed' OR updated_at<?)) OR (stage='waiting_secret' AND updated_at<?) ORDER BY CASE stage WHEN 'ready' THEN 0 ELSE 1 END,created_at,operation_id LIMIT 1`, cutoff, cutoff).Scan(&id)
@@ -47,7 +48,7 @@ func (s *Store) NextConnectionOperation(ctx context.Context, now time.Time) (con
 	})
 	return record, found, err
 }
-func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, problem string, now time.Time) error {
+func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, problem string) error {
 	switch problem {
 	case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "resource_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
 	default:
@@ -58,7 +59,7 @@ func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, probl
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		record, err := loadManagedOperation(ctx, tx, id)
 		if err != nil {
 			return err
@@ -72,7 +73,7 @@ func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, probl
 			_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET status='failed',problem=?,updated_at=? WHERE operation_id=?`, problem, now.UTC().Format(time.RFC3339Nano), id)
 			return dbError(err)
 		}
-		return finishManaged(ctx, tx, record, connections.Completion{Problem: problem, Now: now})
+		return finishManaged(ctx, tx, record, connections.Completion{Problem: problem}, now)
 	})
 }
 func (s *Store) FinishConnection(ctx context.Context, record connections.Record, completion connections.Completion) error {
@@ -81,9 +82,11 @@ func (s *Store) FinishConnection(ctx context.Context, record connections.Record,
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error { return finishManaged(ctx, tx, record, completion) })
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		return finishManaged(ctx, tx, record, completion, now)
+	})
 }
-func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, result connections.Completion) error {
+func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, result connections.Completion, now time.Time) error {
 	current, err := loadManagedOperation(ctx, tx, record.Operation.ID)
 	if err != nil {
 		return err
@@ -92,7 +95,7 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 		return nil
 	}
 	op := current.Operation
-	if record.Operation.ConnectionRevision != op.ConnectionRevision || record.Operation.ConnectionID != op.ConnectionID || result.Now.IsZero() {
+	if record.Operation.ConnectionRevision != op.ConnectionRevision || record.Operation.ConnectionID != op.ConnectionID {
 		return connections.ErrConflict
 	}
 	target, err := loadManaged(ctx, tx, op.Workspace, op.ConnectionID)
@@ -102,7 +105,7 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 	if target.pending != string(op.ID) || target.view.Revision != op.ConnectionRevision {
 		return connections.ErrConflict
 	}
-	stamp := result.Now.UTC().Format(time.RFC3339Nano)
+	stamp := now.UTC().Format(time.RFC3339Nano)
 	authState, newWork, credential, profile, account, scope := target.view.Authentication, target.view.NewWork, target.credential, "", target.account, target.accountScope
 	var problem any
 	status := "succeeded"
@@ -204,13 +207,14 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 				}
 			}
 			quota := result.Verification.Quota
-			if quota.ObservedAt.IsZero() {
-				quota.ObservedAt = result.Now.UTC()
+			// Unsupported quota has no observation timestamp. Preserve that absence
+			// and any previous account evidence instead of manufacturing a sample.
+			if quota.Status != provider.QuotaUnknown || !quota.ObservedAt.IsZero() {
+				if err = recordQuota(ctx, tx, scope, quota.Resource, quota, now); err != nil && !errors.Is(err, ErrConflict) {
+					return err
+				}
 			}
-			if err = recordQuota(ctx, tx, scope, quota.Resource, quota, result.Now); err != nil && !errors.Is(err, ErrConflict) {
-				return err
-			}
-			// Another credential for the same account may have a newer observation. Keep it.
+			// Another credential for the same account may have newer evidence. Keep it.
 		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE managed_connections SET authentication=?,new_work=?,canonical_account=?,account_scope=?,active_credential_key=?,current_profile=?,pending_operation='',updated_at=? WHERE connection_id=?`, authState, newWork, account, scope, credential, profile, stamp, op.ConnectionID)
@@ -230,7 +234,7 @@ func (s *Store) ConnectionSecrets(ctx context.Context, id domain.OperationID) ([
 		return nil, err
 	}
 	defer done()
-	err = withTx(ctx, s.db, func(tx *sql.Tx) error {
+	err = s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		r, err := loadManagedOperation(ctx, tx, id)
 		if err != nil {
 			return err
@@ -286,7 +290,7 @@ func (s *Store) CompleteSecretDeletion(ctx context.Context, key string) error {
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var active bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE active_credential_key=?)`, key).Scan(&active); err != nil {
 			return dbError(err)
@@ -304,12 +308,14 @@ func (s *Store) CompleteSecretDeletion(ctx context.Context, key string) error {
 
 // DeferConnectionSecret retains the unacknowledged reserved write across missing or
 // temporarily inaccessible vault bytes. Exact replay can finish the original intent.
-func (s *Store) DeferConnectionSecret(ctx context.Context, id domain.OperationID, now time.Time) error {
+func (s *Store) DeferConnectionSecret(ctx context.Context, id domain.OperationID) error {
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return err
 	}
 	defer done()
-	_, err = s.db.ExecContext(ctx, `UPDATE managed_connection_operations SET updated_at=? WHERE operation_id=? AND stage='waiting_secret'`, now.UTC().Format(time.RFC3339Nano), id)
-	return dbError(err)
+	return s.clockedTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		_, err := tx.ExecContext(ctx, `UPDATE managed_connection_operations SET updated_at=? WHERE operation_id=? AND stage='waiting_secret'`, now.Format(time.RFC3339Nano), id)
+		return dbError(err)
+	})
 }

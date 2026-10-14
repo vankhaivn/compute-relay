@@ -12,39 +12,25 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 var _ cleanup.WorkRepository = (*Store)(nil)
 
-func (s *Store) cleanupTx(ctx context.Context, now time.Time, fn func(context.Context, *sql.Tx) error) error {
-	if !scheduler.ValidTime(now) {
-		return ErrInvalid
-	}
+func (s *Store) cleanupTx(ctx context.Context, fn func(context.Context, *sql.Tx, time.Time) error) error {
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		if _, _, err := schedulerControl(ctx, tx, now); err != nil {
-			return err
-		}
-		if err := fn(ctx, tx); err != nil {
-			return err
-		}
-		return advanceSchedulerClock(ctx, tx, now)
-	})
+	return s.clockedTx(ctx, fn)
 }
 
-// ClaimCleanup commits a fresh fence before provider I/O and rechecks eligibility.
-func (s *Store) ClaimCleanup(ctx context.Context, now time.Time, ttl time.Duration) (*cleanup.Work, error) {
-	now = now.UTC()
+func (s *Store) ClaimCleanup(ctx context.Context, ttl time.Duration) (*cleanup.Work, error) {
 	if ttl < time.Second || ttl > 31*time.Minute {
 		return nil, ErrInvalid
 	}
 	var result *cleanup.Work
-	err := s.cleanupTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	err := s.cleanupTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var w domain.WorkspaceID
 		var id domain.OperationID
 		err := tx.QueryRowContext(ctx, `SELECT c.workspace_id,c.operation_id FROM cleanup_operations c
@@ -69,7 +55,7 @@ func (s *Store) ClaimCleanup(ctx context.Context, now time.Time, ttl time.Durati
 			return err
 		}
 		if now.Before(target.Attempt.UpdatedAt) || now.Before(op.UpdatedAt) {
-			return scheduler.ErrClock
+			return ErrCorrupt
 		}
 		plan, err := eligibleCleanup(ctx, tx, target, row.request.DiscardUncollected, now, op.ID)
 		if errors.Is(err, operations.ErrBusy) || errors.Is(err, operations.ErrState) || errors.Is(err, operations.ErrUnresolved) || errors.Is(err, cleanup.ErrUncollected) {
@@ -199,12 +185,11 @@ func failCleanup(ctx context.Context, tx *sql.Tx, before cleanup.Record, now tim
 }
 
 // CompleteCleanup records the aggregate of the resource outcomes under w's fence.
-func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.Outcome, now time.Time) error {
-	now = now.UTC()
+func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.Outcome) error {
 	if !w.Valid() || !o.Valid() {
 		return ErrInvalid
 	}
-	return s.cleanupTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	return s.cleanupTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		l := w.Lease
 		var generation, until int64
 		var fence string
@@ -227,7 +212,7 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 			return cleanup.ErrLeaseLost
 		}
 		if now.Before(before.Operation.UpdatedAt) {
-			return scheduler.ErrClock
+			return ErrCorrupt
 		}
 		resources, err := loadCleanupResources(ctx, tx, before.Operation)
 		if err != nil {

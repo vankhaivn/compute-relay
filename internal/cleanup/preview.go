@@ -34,7 +34,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	plan, err := repo.PlanCleanup(ctx, w, p.TokenID(), job, attempt, discard, s.clock.Now().UTC())
+	plan, err := repo.PlanCleanup(ctx, w, p.TokenID(), job, attempt, discard)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -62,7 +62,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	}
 	// A fresh transaction rechecks scope, token revocation, active/held work and the
 	// complete resource inventory after the remote reads. No preview receipt can apply.
-	again, err := repo.PlanCleanup(ctx, w, p.TokenID(), job, attempt, discard, s.clock.Now().UTC())
+	again, err := repo.PlanCleanup(ctx, w, p.TokenID(), job, attempt, discard)
 	if err != nil {
 		return Preview{}, err
 	}

@@ -19,8 +19,8 @@ type retentionPass interface {
 	SweepOnce(context.Context, retention.Policy, int64, int) (retention.SweepReport, int64, error)
 }
 
-func (h *Host) retentionSweeper(now retention.Clock) (*retention.Sweeper, error) {
-	sweeper, err := retention.NewSweeper(h.store, h.inputs, h.results, now)
+func (h *Host) retentionSweeper() (*retention.Sweeper, error) {
+	sweeper, err := retention.NewSweeper(h.store, h.inputs, h.results)
 	if err != nil {
 		return nil, ErrState
 	}

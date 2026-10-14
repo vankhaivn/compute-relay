@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,9 +18,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
-type fixedClock struct{ now time.Time }
+type fixedClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
 
-func (c *fixedClock) Now() time.Time { return c.now }
+func (c *fixedClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
+func (c *fixedClock) advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.now = c.now.Add(d) }
 
 type sweepStep struct {
 	examined int
@@ -118,7 +123,8 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 	stop()
 
 	clock := &fixedClock{now: time.Now().UTC().Add(time.Hour)}
-	sweeper, err := h.retentionSweeper(clock)
+	injectHostClock(t, h, clock.Now)
+	sweeper, err := h.retentionSweeper()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +141,7 @@ func TestRetentionServiceDeletesOnlyEligibleInputs(t *testing.T) {
 	if !present(referenced) || !present(unreferenced) {
 		t.Fatal("an object younger than the unreferenced window was deleted")
 	}
-	clock.now = clock.now.Add(24 * time.Hour)
+	clock.advance(24 * time.Hour)
 	pass()
 	if !present(referenced) || present(unreferenced) {
 		t.Fatal("expected only the unreferenced object past its window to be deleted", present(referenced), present(unreferenced))

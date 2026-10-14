@@ -203,7 +203,7 @@ func createLocalManagedProfile(t *testing.T, h *Host) string {
 		t.Fatal(err)
 	}
 	adapter := &localManagedAdapter{&managedTestAdapter{managedKaggleAdapter: &managedKaggleAdapter{config: DefaultManagedServeConfig()}}}
-	service, err := connections.New(h.access, managedConnectionRepository{h.store}, &managedTestVault{entries: map[string][]byte{}}, []connections.Adapter{adapter}, clock{}.Now)
+	service, err := connections.New(h.access, h.store, &managedTestVault{entries: map[string][]byte{}}, []connections.Adapter{adapter})
 	if err != nil {
 		t.Fatal(err)
 	}

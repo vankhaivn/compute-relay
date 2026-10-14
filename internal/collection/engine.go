@@ -12,7 +12,6 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
@@ -50,7 +49,7 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
-	w, err := e.repo.ClaimCollection(ctx, e.clock.Now().UTC(), e.config.Timeout+30*time.Second, e.config.Workers)
+	w, err := e.repo.ClaimCollection(ctx, e.config.Timeout+30*time.Second, e.config.Workers)
 	if err != nil || w == nil {
 		return false, err
 	}
@@ -68,7 +67,7 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 		if err != nil {
 			return true, e.recordFailure(ctx, *w, err)
 		}
-		if err = e.repo.PinCollection(ctx, *w, snapshot, e.clock.Now().UTC()); err != nil {
+		if err = e.repo.PinCollection(ctx, *w, snapshot); err != nil {
 			return true, err
 		}
 		w.Snapshot = &snapshot
@@ -82,7 +81,7 @@ func (e *Engine) RunOnce(ctx context.Context) (bool, error) {
 		return true, e.recordFailure(ctx, *w, err)
 	}
 	// No failure write follows a possibly committed publication acknowledgement.
-	return true, e.repo.CompleteCollection(ctx, *w, proof, e.clock.Now().UTC())
+	return true, e.repo.CompleteCollection(ctx, *w, proof)
 }
 func (e *Engine) recordFailure(ctx context.Context, w Work, err error) error {
 	if ctx.Err() != nil {
@@ -93,7 +92,7 @@ func (e *Engine) recordFailure(ctx context.Context, w Work, err error) error {
 	if errors.As(err, &known) {
 		f = known
 	}
-	if commitErr := e.repo.FailCollection(ctx, w, f, e.clock.Now().UTC()); commitErr != nil {
+	if commitErr := e.repo.FailCollection(ctx, w, f); commitErr != nil {
 		return commitErr
 	}
 	return f
@@ -408,9 +407,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		var failedAttempt Failure
 		if errors.As(err, &failedAttempt) || errors.Is(err, ErrLeaseLost) {
 			return worker.Continue
-		}
-		if errors.Is(err, scheduler.ErrClock) {
-			return worker.Retry
 		}
 		return worker.Classify(err)
 	})

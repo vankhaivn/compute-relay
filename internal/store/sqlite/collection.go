@@ -15,29 +15,18 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
-	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/retention"
 )
 
 var _ collection.Repository = (*Store)(nil)
 
-func (s *Store) collectionTx(ctx context.Context, now time.Time, fn func(context.Context, *sql.Tx) error) error {
-	if !scheduler.ValidTime(now) {
-		return ErrInvalid
-	}
+func (s *Store) collectionTx(ctx context.Context, fn func(context.Context, *sql.Tx, time.Time) error) error {
 	ctx, done, err := s.operation(ctx, s.options.OperationTimeout)
 	if err != nil {
 		return err
 	}
 	defer done()
-	return withTx(ctx, s.db, func(tx *sql.Tx) error {
-		if _, _, err := schedulerControl(ctx, tx, now); err != nil {
-			return err
-		}
-		if err := fn(ctx, tx); err != nil {
-			return err
-		}
-		return advanceSchedulerClock(ctx, tx, now)
-	})
+	return s.clockedTx(ctx, fn)
 }
 
 // ensureInitialCollection creates the first transfer ticket only when a collector
@@ -74,7 +63,7 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time) err
 		return collection.ErrInvalid
 	}
 	if now.Before(target.Attempt.UpdatedAt) {
-		return scheduler.ErrClock
+		return ErrCorrupt
 	}
 	id, err := randomID("op_", 16)
 	if err != nil {
@@ -89,7 +78,7 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time) err
 	if err != nil {
 		return err
 	}
-	c := operations.Command{WorkspaceID: w, JobID: job, Kind: domain.OperationCollect, Request: req, RequestHash: hash, Now: now}
+	c := operations.Command{WorkspaceID: w, JobID: job, Kind: domain.OperationCollect, Request: req, RequestHash: hash}
 	r := operations.Record{Operation: op, Effect: operations.CollectionRequested}
 	if err = insertControl(ctx, tx, c, r); err != nil {
 		return err
@@ -101,13 +90,12 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time) err
 }
 
 // ClaimCollection observes retained attempts through their frozen binding.
-func (s *Store) ClaimCollection(ctx context.Context, now time.Time, ttl time.Duration, workers int) (*collection.Work, error) {
-	now = now.UTC()
+func (s *Store) ClaimCollection(ctx context.Context, ttl time.Duration, workers int) (*collection.Work, error) {
 	if ttl < time.Second || ttl > 31*time.Minute || workers < 1 || workers > 16 {
 		return nil, ErrInvalid
 	}
 	var result *collection.Work
-	err := s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	err := s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		var count int
 		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM collection_leases WHERE held=1 AND until_ms>?", now.UnixMilli()).Scan(&count); err != nil {
 			return dbError(err)
@@ -146,7 +134,7 @@ func (s *Store) ClaimCollection(ctx context.Context, now time.Time, ttl time.Dur
 		}
 		a := target.Attempt
 		if now.Before(a.UpdatedAt) || now.Before(op.Operation.UpdatedAt) {
-			return scheduler.ErrClock
+			return ErrCorrupt
 		}
 		if a.State.Orchestration.Terminal() || !a.State.Execution.Terminal() || work.Journal.Phase != dispatch.Collectible || work.Journal.Observation == nil || work.Journal.Observation.Execution != a.State.Execution {
 			return collection.ErrInvalid
@@ -274,7 +262,7 @@ func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now t
 		return empty, zero, noAttempt, collection.ErrLeaseLost
 	}
 	if now.Before(a.UpdatedAt) || now.Before(op.Operation.UpdatedAt) {
-		return empty, zero, noAttempt, scheduler.ErrClock
+		return empty, zero, noAttempt, ErrCorrupt
 	}
 	current, err := collectionWork(ctx, tx, l)
 	if err != nil {
@@ -286,7 +274,7 @@ func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now t
 	return current, op, a, nil
 }
 
-func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot collection.Snapshot, now time.Time) error {
+func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot collection.Snapshot) error {
 	// All decoding/hash checks are over bounded in-memory evidence; no byte/network I/O.
 	if collection.ValidateSnapshot(w, snapshot) != nil {
 		return collection.ErrInvalid
@@ -295,7 +283,7 @@ func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot c
 	if err != nil || len(raw) > collection.MaxSnapshotBytes {
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, _, _, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -311,8 +299,8 @@ func (s *Store) PinCollection(ctx context.Context, w collection.Work, snapshot c
 	})
 }
 
-func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof collection.Verified, now time.Time) error {
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof collection.Verified) error {
+	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, op, a, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err
@@ -331,6 +319,9 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 			return dbError(err)
 		}
 		for _, f := range snapshot.Files {
+			if err = registerRetention(ctx, tx, retention.Result, f.Object, now); err != nil {
+				return err
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO artifacts VALUES(?,?,?,?,?,?,?,?,?,?)`, string(l.WorkspaceID), string(l.JobID), string(l.AttemptID), string(f.ID), string(f.Object.ID), f.Path, f.Role, f.Object.Bytes, string(f.Object.SHA256), f.MediaType)
 			if err != nil {
 				return dbError(err)
@@ -356,13 +347,13 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 		return releaseCollection(ctx, tx, l)
 	})
 }
-func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collection.Failure, now time.Time) error {
+func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collection.Failure) error {
 	switch f.Code {
 	case domain.CodeArtifactCollectionFailed, domain.CodeArtifactMissing, domain.CodeArtifactDigestMismatch, domain.CodeResultManifestMissing, domain.CodeRemoteIdentityMismatch:
 	default:
 		return collection.ErrInvalid
 	}
-	return s.collectionTx(ctx, now, func(ctx context.Context, tx *sql.Tx) error {
+	return s.collectionTx(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		current, op, a, err := checkedCollection(ctx, tx, w, now)
 		if err != nil {
 			return err

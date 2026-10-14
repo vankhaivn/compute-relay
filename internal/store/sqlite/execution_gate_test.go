@@ -315,7 +315,7 @@ func TestExecutionGateCrashAtDurableBoundaries(t *testing.T) {
 	id := gateSeed(t, f, 1)
 	_, _, original, _ := prepareGrant(t, f, id)
 	work := managedClaim(t, f)
-	if _, err := f.s.ConsumeAuthorization(ctx, work.Handle, f.clock.Now()); err != nil {
+	if _, err := f.s.ConsumeAuthorization(ctx, work.Handle); err != nil {
 		t.Fatal(err)
 	}
 	// Consumption survived but no preparation intent or provider mutation existed.
@@ -340,15 +340,15 @@ func TestExecutionGateCrashAtDurableBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.clock.advance(10 * time.Millisecond)
-	claim, err := f.s.ClaimRecovery(ctx, "crash_start_worker", f.clock.Now())
+	claim, err := f.s.ClaimRecovery(ctx, "crash_start_worker")
 	if err != nil || claim == nil {
 		t.Fatal("start claim", err)
 	}
-	work, err = f.s.LoadDispatch(ctx, *claim, f.clock.Now())
+	work, err = f.s.LoadDispatch(ctx, *claim)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission}, f.clock.Now()); err != nil {
+	if _, err = f.s.CommitDispatch(ctx, work.Handle, dispatch.Action{Kind: dispatch.BeginSubmission}); err != nil {
 		t.Fatal(err)
 	}
 	// The process died after committing intent and before it could call Start.
@@ -390,7 +390,7 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 	}
 	service, p, receipt := admitCleanup(t, f, id, "expired-gate-cleanup", false)
 	ctx := context.Background()
-	w, err := f.s.ClaimCleanup(ctx, f.clock.Now(), time.Minute)
+	w, err := f.s.ClaimCleanup(ctx, time.Minute)
 	if err != nil || w == nil || w.Request.Remote.Resource != j.Prepared.Resource || w.Request.ResultsCollected || w.Request.Remote.Version != "prepared" {
 		t.Fatal("never-started cleanup required a result or changed identity", w, err)
 	}
@@ -398,7 +398,7 @@ func TestExecutionGateExpiredLostPreparationRetainsExactCleanup(t *testing.T) {
 		t.Fatal("cleanup request guessed released storage")
 	}
 	finishCleanupResourceFixtures(t, f, *w)
-	if err = f.s.CompleteCleanup(ctx, *w, cleanup.Outcome{Effect: cleanup.RemoteDeleted}, f.clock.Now()); err != nil {
+	if err = f.s.CompleteCleanup(ctx, *w, cleanup.Outcome{Effect: cleanup.RemoteDeleted}); err != nil {
 		t.Fatal(err)
 	}
 	if current, err := service.Get(ctx, p, "a", receipt.Operation.ID); err != nil || current.Effect != cleanup.RemoteDeleted || controlCount(t, f.s, "SELECT count(*) FROM preparation_authorizations WHERE storage_released=0") != 0 {

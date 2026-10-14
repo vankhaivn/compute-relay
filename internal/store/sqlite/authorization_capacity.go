@@ -34,7 +34,7 @@ func managedReserved(row scheduler.Candidate) bool {
 // It never refreshes the provider or treats stale/rounded observations as capacity.
 func managedCapacity(ctx context.Context, tx *sql.Tx, account string, now time.Time) (managedCapacityView, error) {
 	result := managedCapacityView{Status: "unknown"}
-	settings, _, err := schedulerControl(ctx, tx, now)
+	settings, _, err := schedulerControl(ctx, tx)
 	if err != nil {
 		return result, err
 	}

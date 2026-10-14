@@ -37,7 +37,7 @@ func (runtimeStateAdapter) RuntimeConfig() []byte {
 func TestManagedConfigurationPreservesFrozenJobsGrantsAndRuntime(t *testing.T) {
 	f := newManagedStateFixture(t)
 	var err error
-	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{runtimeStateAdapter{f.discovery}}, f.clock.Now)
+	f.service, err = connections.New(f.access, f.s, f.vault, []connections.Adapter{runtimeStateAdapter{f.discovery}})
 	if err != nil {
 		t.Fatal(err)
 	}

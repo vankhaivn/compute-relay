@@ -117,11 +117,11 @@ func (v Verified) Matches(w Work) bool {
 }
 
 type Repository interface {
-	ClaimCollection(context.Context, time.Time, time.Duration, int) (*Work, error)
-	PinCollection(context.Context, Work, Snapshot, time.Time) error
-	CompleteCollection(context.Context, Work, Verified, time.Time) error
-	FailCollection(context.Context, Work, Failure, time.Time) error
-	RecordCollectionProgress(context.Context, Work, string, domain.CollectionProgress, time.Time) error
+	ClaimCollection(context.Context, time.Duration, int) (*Work, error)
+	PinCollection(context.Context, Work, Snapshot) error
+	CompleteCollection(context.Context, Work, Verified) error
+	FailCollection(context.Context, Work, Failure) error
+	RecordCollectionProgress(context.Context, Work, string, domain.CollectionProgress) error
 }
 type BlobStore interface {
 	Put(context.Context, domain.ObjectMetadata, io.Reader) (domain.ObjectMetadata, error)

@@ -51,7 +51,7 @@ func setupJobHTTP(t *testing.T) *jobHTTP {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	access, err := auth.New(store, store, nil)
+	access, err := auth.New(store, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func setupJobHTTP(t *testing.T) *jobHTTP {
 func configureJobProfiles(t *testing.T, store *sqlite.Store, access *auth.Service) map[string]string {
 	t.Helper()
 	ctx := context.Background()
-	service, err := connections.New(access, store, &managedVault{values: map[string][]byte{}}, []connections.Adapter{&managedAdapter{}}, nil)
+	service, err := connections.New(access, store, &managedVault{values: map[string][]byte{}}, []connections.Adapter{&managedAdapter{}})
 	if err != nil {
 		t.Fatal(err)
 	}
