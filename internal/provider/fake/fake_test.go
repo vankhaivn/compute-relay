@@ -37,7 +37,7 @@ func start(t *testing.T, p provider.Provider, job provider.ResolvedJob) (provide
 	must(t, err)
 	prepared, err := p.Prepare(context.Background(), plan, "prepare_fixture")
 	must(t, err)
-	out := p.Submit(context.Background(), prepared)
+	out := p.Start(context.Background(), prepared, nil, nil)
 	must(t, out.Validate(prepared.Identity))
 	if out.Status != provider.SubmissionAccepted {
 		t.Fatalf("unexpected submission: %+v", out)
@@ -62,7 +62,7 @@ func TestProviderContract(t *testing.T) {
 			s.Mode = fake.Reject
 		}
 		p, b := basic(t, s)
-		return providertest.Harness{Provider: p, Job: fake.ExampleJob("fixture"), Advance: p.Advance, Executions: func() int { return b.Stats().Executions }, Reconnect: func() provider.Provider {
+		return providertest.Harness{Provider: p, Binding: provider.BindingSnapshot{Binding: fake.ExampleJob("fixture").Binding, AccountScope: "account_fixture"}, Job: fake.ExampleJob("fixture"), Advance: p.Advance, Preparations: func() int { return b.Stats().PrepareCalls }, Executions: func() int { return b.Stats().Executions }, Reconnect: func() provider.Provider {
 			fresh, err := fake.New(b, fixedClock{}, "fixture")
 			must(t, err)
 			return fresh
@@ -81,7 +81,7 @@ func TestDelayedPreparationAndDuplicateSubmission(t *testing.T) {
 	if prepared.Ready {
 		t.Fatal("upload treated as ready")
 	}
-	out := p.Submit(context.Background(), prepared)
+	out := p.Start(context.Background(), prepared, nil, nil)
 	must(t, out.Validate(prepared.Identity))
 	if out.Status != provider.SubmissionRejected || b.Stats().Executions != 0 {
 		t.Fatal("unready staging submitted")
@@ -89,12 +89,12 @@ func TestDelayedPreparationAndDuplicateSubmission(t *testing.T) {
 	must(t, p.MarkReady(job.Identity))
 	prepared, err = p.Prepare(context.Background(), plan, "prepare_fixture")
 	must(t, err)
-	out = p.Submit(context.Background(), prepared)
+	out = p.Start(context.Background(), prepared, nil, nil)
 	must(t, out.Validate(prepared.Identity))
 	if out.Status != provider.SubmissionAccepted {
 		t.Fatal("ready fixture rejected")
 	}
-	repeat := p.Submit(context.Background(), prepared)
+	repeat := p.Start(context.Background(), prepared, nil, nil)
 	must(t, repeat.Validate(prepared.Identity))
 	if repeat.Status != provider.SubmissionUnknown || b.Stats().Executions != 1 {
 		t.Fatal("repeated submission created compute")
@@ -151,12 +151,12 @@ func TestRequiredGPUIsNeverSilentlyDowngraded(t *testing.T) {
 			if obs.Execution != domain.ExecutionFailed {
 				t.Fatal("unverified GPU became success")
 			}
-			page, err := p.ListArtifacts(context.Background(), remote, provider.PageRequest{Limit: 100})
+			page, err := p.ListArtifacts(context.Background(), remote)
 			must(t, err)
-			for _, a := range page.Artifacts {
+			for _, a := range page {
 				if a.Path == "execution-result.json" {
 					var dst bytes.Buffer
-					_, err := p.FetchArtifact(context.Background(), remote, a, &dst, 1<<20)
+					_, err := p.Fetch(context.Background(), remote, a, &dst, 1<<20, nil)
 					must(t, err)
 					var m map[string]any
 					must(t, json.Unmarshal(dst.Bytes(), &m))
@@ -168,7 +168,7 @@ func TestRequiredGPUIsNeverSilentlyDowngraded(t *testing.T) {
 		})
 	}
 }
-func TestReferenceCursorAndCleanupIsolation(t *testing.T) {
+func TestCompleteCatalogAndCleanupIsolation(t *testing.T) {
 	p, _ := basic(t, fake.DefaultScenario())
 	prepared, remote := start(t, p, fake.ExampleJob("fixture"))
 	bad := remote
@@ -178,10 +178,10 @@ func TestReferenceCursorAndCleanupIsolation(t *testing.T) {
 	}
 	must(t, p.Advance(remote))
 	must(t, p.Advance(remote))
-	page, err := p.ListArtifacts(context.Background(), remote, provider.PageRequest{Limit: 1})
+	page, err := p.ListArtifacts(context.Background(), remote)
 	must(t, err)
-	if page.NextCursor == "" {
-		t.Fatal("pagination not exercised")
+	if len(page) != 2 {
+		t.Fatal("complete fixture catalog was truncated")
 	}
 	job := fake.ExampleJob("fixture")
 	job.Identity.AttemptID = "att_second"
@@ -191,8 +191,12 @@ func TestReferenceCursorAndCleanupIsolation(t *testing.T) {
 	_, second := start(t, p, job)
 	must(t, p.Advance(second))
 	must(t, p.Advance(second))
-	if _, err := p.ListArtifacts(context.Background(), second, provider.PageRequest{Cursor: page.NextCursor, Limit: 1}); err == nil {
-		t.Fatal("cursor crossed attempts")
+	other, err := p.ListArtifacts(context.Background(), second)
+	must(t, err)
+	for _, artifact := range other {
+		if artifact.Remote != second {
+			t.Fatal("catalog crossed attempts")
+		}
 	}
 	request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "wrong_prepare", ResultsCollected: true, Mode: provider.CleanupApply}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: prepared.PlanSHA256}
 	if _, err := p.CleanupResource(context.Background(), request); err == nil {
@@ -210,7 +214,7 @@ func TestOptionalCancellationRequiresTerminalObservation(t *testing.T) {
 	p, err := fake.NewComplete(b, fixedClock{}, "fixture")
 	must(t, err)
 	_, remote := start(t, p, fake.ExampleJob("fixture"))
-	cancel, err := provider.RequestCancellation(context.Background(), p, remote, "cancel_fixture")
+	cancel, err := p.Cancel(context.Background(), remote, "cancel_fixture")
 	must(t, err)
 	if cancel.Status != domain.CancellationAccepted || cancel.TerminationConfirmed {
 		t.Fatal("request was treated as termination")
@@ -231,16 +235,12 @@ func TestOptionalCancellationRequiresTerminalObservation(t *testing.T) {
 	if late.Status != domain.CancellationTooLate {
 		t.Fatal("terminal history rewritten")
 	}
-	logs, err := provider.ReadAvailableLogs(context.Background(), p, remote, provider.PageRequest{Limit: 1})
+	logs, err := p.Logs(context.Background(), remote, provider.PageRequest{Limit: 1})
 	must(t, err)
 	if logs.Availability != "after_completion" || logs.NextCursor == "" {
 		t.Fatal("log availability/pagination missing")
 	}
-	quota, err := provider.ReadAvailableQuota(context.Background(), p)
-	must(t, err)
-	if quota.Status != provider.QuotaKnown || quota.Remaining == nil || quota.Source != "fake fixture" {
-		t.Fatal("invalid synthetic quota")
-	}
+
 }
 func TestConcurrentInstancesAndExplicitAttempts(t *testing.T) {
 	p, b := basic(t, fake.DefaultScenario())
@@ -262,7 +262,7 @@ func TestConcurrentInstancesAndExplicitAttempts(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			out := p.Submit(context.Background(), prepared)
+			out := p.Start(context.Background(), prepared, nil, nil)
 			if err := out.Validate(prepared.Identity); err != nil {
 				t.Error(err)
 			}
@@ -294,11 +294,11 @@ func TestWorkloadCommandsAndCredentialsAreNotUsed(t *testing.T) {
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Fatal("workload executed locally")
 	}
-	page, err := p.ListArtifacts(context.Background(), remote, provider.PageRequest{Limit: 100})
+	page, err := p.ListArtifacts(context.Background(), remote)
 	must(t, err)
-	for _, a := range page.Artifacts {
+	for _, a := range page {
 		var dst bytes.Buffer
-		_, err := p.FetchArtifact(context.Background(), remote, a, &dst, 1<<20)
+		_, err := p.Fetch(context.Background(), remote, a, &dst, 1<<20, nil)
 		must(t, err)
 		if strings.Contains(dst.String(), "never-read-canary") {
 			t.Fatal("credential leaked into fixture")
@@ -310,14 +310,14 @@ func TestPartialCollectionRetryNeverResubmits(t *testing.T) {
 	_, remote := start(t, p, fake.ExampleJob("fixture"))
 	must(t, p.Advance(remote))
 	must(t, p.Advance(remote))
-	page, err := p.ListArtifacts(context.Background(), remote, provider.PageRequest{Limit: 100})
+	page, err := p.ListArtifacts(context.Background(), remote)
 	must(t, err)
-	a := page.Artifacts[0]
-	if _, err := p.FetchArtifact(context.Background(), remote, a, brokenWriter{}, 1<<20); err == nil {
+	a := page[0]
+	if _, err := p.Fetch(context.Background(), remote, a, brokenWriter{}, 1<<20, nil); err == nil {
 		t.Fatal("failed writer was reported successful")
 	}
 	var dst bytes.Buffer
-	_, err = p.FetchArtifact(context.Background(), remote, a, &dst, 1<<20)
+	_, err = p.Fetch(context.Background(), remote, a, &dst, 1<<20, nil)
 	must(t, err)
 	if b.Stats().Executions != 1 || b.Stats().SubmitCalls != 1 {
 		t.Fatal("collection reran compute")
@@ -437,4 +437,61 @@ func TestResourceCleanupRecoveryOnlyConfirmsAbsence(t *testing.T) {
 	if !out.AlreadyAbsent {
 		t.Fatal("absence not confirmed", out)
 	}
+}
+
+func TestUnresolvedStartStaysUnknownWithoutReplayingEffects(t *testing.T) {
+	scenario := fake.DefaultScenario()
+	scenario.Mode = fake.Unresolved
+	p, backend := basic(t, scenario)
+	job := fake.ExampleJob("fixture")
+	plan, err := p.Validate(context.Background(), job)
+	must(t, err)
+	prepared, err := p.Prepare(context.Background(), plan, "prepare_fixture")
+	must(t, err)
+	out := p.Start(context.Background(), prepared, nil, nil)
+	must(t, out.Validate(job.Identity))
+	if out.Status != provider.SubmissionUnknown {
+		t.Fatal("unresolved fixture lost uncertainty")
+	}
+	fresh, err := fake.New(backend, fixedClock{}, "fixture")
+	must(t, err)
+	for i := 0; i < 3; i++ {
+		seen, err := fresh.Reconcile(context.Background(), job.Identity)
+		must(t, err)
+		if seen.Status != provider.ReconciliationUnknown || seen.Remote != nil {
+			t.Fatal("unresolved fixture was normalized", seen)
+		}
+	}
+	if backend.Stats().SubmitCalls != 1 || backend.Stats().Executions != 0 || backend.Stats().PrepareCalls != 1 {
+		t.Fatal("recovery replayed a mutation", backend.Stats())
+	}
+}
+
+func TestEmptyArtifactUsesZeroByteBudgetAndReportsNoInventedBytes(t *testing.T) {
+	scenario := fake.DefaultScenario()
+	scenario.Files = []fake.File{{Path: "empty.txt"}}
+	p, _ := basic(t, scenario)
+	_, remote := start(t, p, fake.ExampleJob("fixture"))
+	must(t, p.Advance(remote))
+	must(t, p.Advance(remote))
+	files, err := p.ListArtifacts(context.Background(), remote)
+	must(t, err)
+	for _, file := range files {
+		if file.Path != "empty.txt" {
+			continue
+		}
+		var dst bytes.Buffer
+		receipt, err := p.Fetch(context.Background(), remote, file, &dst, 0, func(n int64) error {
+			if n != 0 {
+				t.Fatal("empty file reported received bytes")
+			}
+			return nil
+		})
+		must(t, err)
+		if receipt.Bytes != 0 || receipt.SHA256 != provider.Digest(nil) || dst.Len() != 0 {
+			t.Fatal("invalid empty transfer", receipt)
+		}
+		return
+	}
+	t.Fatal("empty artifact missing from full catalog")
 }

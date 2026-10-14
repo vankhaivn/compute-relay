@@ -26,7 +26,7 @@ func NewBound(b *Backend, clock ports.Clock, binding provider.BindingSnapshot) (
 	}
 	return &Bound{p, binding}, nil
 }
-func (p *Bound) VerifyBinding(ctx context.Context, s provider.BindingSnapshot) error {
+func (p *Bound) Verify(ctx context.Context, s provider.BindingSnapshot) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -35,7 +35,7 @@ func (p *Bound) VerifyBinding(ctx context.Context, s provider.BindingSnapshot) e
 	}
 	return nil
 }
-func (p *Basic) ReconcilePreparation(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+func (p *Basic) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.PreparationObservation{}, err
 	}
@@ -53,4 +53,14 @@ func (p *Basic) ReconcilePreparation(ctx context.Context, plan provider.Plan, op
 	}
 	prepared := r.prepared
 	return provider.PreparationObservation{Status: provider.ReconciliationFound, Prepared: &prepared}, nil
+}
+
+func (p *Basic) Verify(ctx context.Context, s provider.BindingSnapshot) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s != (provider.BindingSnapshot{Binding: domain.ProviderBinding{Profile: "fixture", ProviderInstanceID: p.instance, ConfigurationRevision: "fixture-1"}, AccountScope: "account_fixture"}) {
+		return identityError()
+	}
+	return nil
 }

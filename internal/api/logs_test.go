@@ -120,8 +120,8 @@ type cursorLogProvider struct {
 func (p cursorLogProvider) Describe() provider.Descriptor {
 	return provider.Descriptor{InstanceID: "fixture"}
 }
-func (p cursorLogProvider) VerifyBinding(context.Context, provider.BindingSnapshot) error { return nil }
-func (p cursorLogProvider) ReadLogs(context.Context, provider.RemoteReference, provider.PageRequest) (provider.LogPage, error) {
+func (p cursorLogProvider) Verify(context.Context, provider.BindingSnapshot) error { return nil }
+func (p cursorLogProvider) Logs(context.Context, provider.RemoteReference, provider.PageRequest) (provider.LogPage, error) {
 	return provider.LogPage{}, p.err
 }
 func TestJobLogsCursorErrorsAreStableAndSanitized(t *testing.T) {

@@ -171,24 +171,24 @@ func systemBundle(t *testing.T) []byte {
 // Keep the fake's synthetic manifest and transfer verification; only map logical paths.
 type systemProvider struct{ *fake.Bound }
 
-func (p *systemProvider) ListArtifacts(ctx context.Context, remote provider.RemoteReference, query provider.PageRequest) (provider.ArtifactPage, error) {
-	page, err := p.Bound.ListArtifacts(ctx, remote, query)
-	for i := range page.Artifacts {
-		if page.Artifacts[i].Path == "execution-result.json" {
-			page.Artifacts[i].Path = collection.ManifestPath
+func (p *systemProvider) ListArtifacts(ctx context.Context, remote provider.RemoteReference) ([]provider.Artifact, error) {
+	page, err := p.Bound.ListArtifacts(ctx, remote)
+	for i := range page {
+		if page[i].Path == "execution-result.json" {
+			page[i].Path = collection.ManifestPath
 		} else {
-			page.Artifacts[i].Path = "outputs/" + page.Artifacts[i].Path
+			page[i].Path = "outputs/" + page[i].Path
 		}
 	}
 	return page, err
 }
-func (p *systemProvider) FetchArtifact(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
+func (p *systemProvider) Fetch(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	if artifact.Path == collection.ManifestPath {
 		artifact.Path = "execution-result.json"
 	} else {
 		artifact.Path = strings.TrimPrefix(artifact.Path, "outputs/")
 	}
-	return p.Bound.FetchArtifact(ctx, remote, artifact, dst, limit)
+	return p.Bound.Fetch(ctx, remote, artifact, dst, limit, progress)
 }
 
 // The callback sees a real committed result and may withhold its acknowledgement.
@@ -414,7 +414,7 @@ func TestManagedSystemFixtureHTTPProviderAndRestart(t *testing.T) {
 	}
 	changed := binding
 	changed.AccountScope += "_different"
-	if err := adapter.(provider.BindingVerifier).VerifyBinding(ctx, changed); err == nil {
+	if err := adapter.Verify(ctx, changed); err == nil {
 		t.Fatal("fake accepted another account binding")
 	}
 	f.startHTTP(t)

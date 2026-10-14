@@ -52,7 +52,7 @@ type stubTarget struct {
 	applied int
 }
 
-func (s *stubTarget) VerifyBinding(context.Context, provider.BindingSnapshot) error { return s.verify }
+func (s *stubTarget) Verify(context.Context, provider.BindingSnapshot) error { return s.verify }
 func (s *stubTarget) CleanupResource(ctx context.Context, r provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 	s.applied++
 	if s.panics {

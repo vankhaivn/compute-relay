@@ -113,11 +113,7 @@ type Adapter struct {
 }
 
 var (
-	_ provider.Provider            = (*Adapter)(nil)
-	_ provider.BindingVerifier     = (*Adapter)(nil)
-	_ provider.PreparationObserver = (*Adapter)(nil)
-	_ provider.Canceller           = (*Adapter)(nil)
-	_ provider.LogReader           = (*Adapter)(nil)
+	_ provider.Provider = (*Adapter)(nil)
 )
 
 func NewAdapter(config Config, binding provider.BindingSnapshot, creds ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock) (*Adapter, error) {
@@ -224,19 +220,12 @@ func (a *Adapter) Describe() provider.Descriptor {
 	return d
 }
 
-// VerifyBinding proves the frozen binding and a reachable Docker daemon on the pinned host.
-func (a *Adapter) VerifyBinding(ctx context.Context, expected provider.BindingSnapshot) error {
+// Verify proves the frozen binding and a reachable Docker daemon on the pinned host.
+func (a *Adapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if a == nil || expected != a.binding {
 		return ErrBinding
 	}
 	return a.withDocker(ctx, func(d docker, _ Endpoint) error { return d.ping(ctx) })
-}
-
-func (a *Adapter) Check(ctx context.Context) (provider.DiagnosticReport, error) {
-	if err := a.VerifyBinding(ctx, a.binding); err != nil {
-		return provider.DiagnosticReport{}, err
-	}
-	return provider.DiagnosticReport{Evidence: domain.EvidenceImplementedOffline, CheckedAt: a.clock.Now().UTC(), Ready: true}, nil
 }
 
 func (a *Adapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
@@ -578,9 +567,9 @@ func singleFile(name string, data []byte) io.Reader {
 	return &b
 }
 
-// ReconcilePreparation is read-only: only a labelled container whose completion
+// ReconcilePrepare is read-only: only a labelled container whose completion
 // marker matches is found; a container without one is not ready.
-func (a *Adapter) ReconcilePreparation(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+func (a *Adapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if err := a.validPlan(ctx, plan); err != nil {
 		return provider.PreparationObservation{}, err
 	}
@@ -635,18 +624,12 @@ func unknownSubmission() provider.SubmissionOutcome {
 	return provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: &p}
 }
 
-// Submit starts the prepared container exactly once. A failure before the start
-// command is sent is a rejection; any failure after it leaves acceptance unknown.
-func (a *Adapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	return a.submit(ctx, prepared, nil, nil)
-}
-
 func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
-	if a == nil || !prepared.Ready || !prepared.Private || prepared.Identity.InstanceID != a.config.InstanceID {
+	if a == nil || prepared.Identity.Validate() != nil || !prepared.PlanSHA256.Valid() || !prepared.PreparationID.Valid() || !prepared.Ready || !prepared.Private || prepared.Identity.InstanceID != a.config.InstanceID {
 		return rejected("preparation_mismatch")
 	}
 	ref, err := decodeRef(prepared.Resource, prepared.Identity)
-	if err != nil {
+	if err != nil || ref.EngineID == "" {
 		return rejected("preparation_mismatch")
 	}
 	if ctx.Err() != nil {
@@ -670,6 +653,11 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 		case info.Started():
 			// An earlier start reached Docker; only reconciliation may claim it.
 			outcome = unknownSubmission()
+			return nil
+		}
+		labels := info.Config.Labels
+		if labels[labelPrefix+"engine"] != ref.EngineID || labels[labelPrefix+"workspace"] != string(prepared.Identity.WorkspaceID) || labels[labelPrefix+"job"] != string(prepared.Identity.JobID) || labels[labelPrefix+"nonce"] != prepared.Identity.Nonce || labels[labelPrefix+"plan"] != string(prepared.PlanSHA256) {
+			outcome = rejected("preparation_mismatch")
 			return nil
 		}
 		controlled := info.Config.Labels[labelPrefix+"execution-control"] == "prepare_then_start"
@@ -754,8 +742,8 @@ func deadlineRejected() provider.SubmissionOutcome {
 	return provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &p}
 }
 
-// ReconcileSubmission finds the container only when Docker reports it was started.
-func (a *Adapter) ReconcileSubmission(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
+// Reconcile finds the container only when Docker reports it was started.
+func (a *Adapter) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
 	result := provider.Reconciliation{Status: provider.ReconciliationNotFound}
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
 		name := containerName(id)
@@ -848,6 +836,15 @@ func (a *Adapter) Observe(ctx context.Context, remote provider.RemoteReference) 
 // Cancel records the request inside the container, stops it and confirms termination
 // only from Docker's own state.
 func (a *Adapter) Cancel(ctx context.Context, remote provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
+	if err := ctx.Err(); err != nil {
+		return provider.CancellationOutcome{}, err
+	}
+	if !operation.Valid() {
+		return provider.CancellationOutcome{}, ErrRequest
+	}
+	if a == nil || remote.Validate() != nil || remote.Identity.InstanceID != a.config.InstanceID {
+		return provider.CancellationOutcome{}, ErrIdentity
+	}
 	var outcome provider.CancellationOutcome
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
 		info, err := inspectRemote(ctx, d, remote)
@@ -1004,50 +1001,54 @@ func (a *Adapter) catalog(ctx context.Context, d docker, remote provider.RemoteR
 		}
 	}
 	slices.SortFunc(artifacts, func(x, y provider.Artifact) int { return strings.Compare(x.Path, y.Path) })
-	return slices.CompactFunc(artifacts, func(x, y provider.Artifact) bool { return x.Path == y.Path }), nil
+	var total int64
+	seen := map[string]bool{}
+	if len(artifacts) > provider.MaxArtifactFiles {
+		return nil, ErrArtifact
+	}
+	for _, artifact := range artifacts {
+		if artifact.Validate(remote) != nil || artifact.Bytes > provider.MaxArtifactBytes-total {
+			return nil, ErrArtifact
+		}
+		key := strings.ToLower(artifact.Path)
+		if seen[key] {
+			return nil, ErrArtifact
+		}
+		seen[key] = true
+		total += artifact.Bytes
+	}
+	for key := range seen {
+		parts := strings.Split(key, "/")
+		for i := 1; i < len(parts); i++ {
+			if seen[strings.Join(parts[:i], "/")] {
+				return nil, ErrArtifact
+			}
+		}
+	}
+	return artifacts, nil
 }
 
-func (a *Adapter) ListArtifacts(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
-	if page.Validate() != nil {
-		return provider.ArtifactPage{}, ErrRequest
-	}
-	offset := 0
-	if page.Cursor != "" {
-		n, err := strconv.Atoi(page.Cursor)
-		if err != nil || n < 1 || strconv.Itoa(n) != page.Cursor {
-			return provider.ArtifactPage{}, ErrRequest
-		}
-		offset = n
-	}
-	var result provider.ArtifactPage
+func (a *Adapter) ListArtifacts(ctx context.Context, remote provider.RemoteReference) ([]provider.Artifact, error) {
+	var result []provider.Artifact
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
-		artifacts, err := a.catalog(ctx, d, remote)
-		if err != nil {
-			return err
-		}
-		if offset > len(artifacts) {
-			return ErrRequest
-		}
-		end := min(offset+page.Limit, len(artifacts))
-		result.Artifacts = artifacts[offset:end]
-		if end < len(artifacts) {
-			result.NextCursor = strconv.Itoa(end)
-		}
-		return nil
+		var err error
+		result, err = a.catalog(ctx, d, remote)
+		return err
 	})
 	if err != nil {
-		return provider.ArtifactPage{}, err
+		return nil, err
 	}
 	return result, nil
 }
 
-// FetchArtifact copies one listed file out of the stopped container. Bytes reach w
+// Fetch copies one listed file out of the stopped container. Bytes reach w
 // only within the listed length; the digest is verified before success.
-func (a *Adapter) FetchArtifact(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, w io.Writer, limit int64) (provider.TransferResult, error) {
-	if artifact.Validate(remote) != nil || artifact.Bytes > limit ||
+func (a *Adapter) Fetch(ctx context.Context, remote provider.RemoteReference, artifact provider.Artifact, w io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+	if w == nil || artifact.Validate(remote) != nil || artifact.Bytes > limit || artifact.Bytes > provider.MaxArtifactBytes ||
 		!strings.HasPrefix(artifact.Path, "outputs/") && !strings.HasPrefix(artifact.Path, "control/") {
 		return provider.TransferResult{}, ErrArtifact
 	}
+	w = provider.WithTransferProgress(w, progress)
 	var result provider.TransferResult
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
 		info, err := inspectRemote(ctx, d, remote)
@@ -1086,9 +1087,15 @@ type logCursor struct {
 	Line      int                 `json:"line"`
 }
 
-// ReadLogs pages the container's stdout stream, which carries the runner's mirrored
+// Logs pages the container's stdout stream, which carries the runner's mirrored
 // payload output. Standard error is collected as the control/stderr.log artifact.
-func (a *Adapter) ReadLogs(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+func (a *Adapter) Logs(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+	if err := ctx.Err(); err != nil {
+		return provider.LogPage{}, err
+	}
+	if a == nil || remote.Validate() != nil || remote.Identity.InstanceID != a.config.InstanceID {
+		return provider.LogPage{}, ErrIdentity
+	}
 	if page.Validate() != nil {
 		return provider.LogPage{}, provider.ErrLogCursorInvalid
 	}

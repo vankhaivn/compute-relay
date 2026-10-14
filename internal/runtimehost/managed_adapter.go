@@ -103,9 +103,9 @@ type managedKaggleProvider struct {
 	outer, inner provider.BindingSnapshot
 }
 
-func (p *managedKaggleProvider) VerifyBinding(ctx context.Context, expected provider.BindingSnapshot) error {
+func (p *managedKaggleProvider) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if expected != p.outer {
 		return kaggle.ErrRuntimeBinding
 	}
-	return p.RuntimeAdapter.VerifyBinding(ctx, p.inner)
+	return p.RuntimeAdapter.Verify(ctx, p.inner)
 }

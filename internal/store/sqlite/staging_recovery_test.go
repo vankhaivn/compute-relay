@@ -23,7 +23,7 @@ type stagingRecoveryProbe struct {
 	preparationID domain.OperationID
 }
 
-func (p *stagingRecoveryProbe) ReconcilePreparation(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.PreparationObservation, error) {
+func (p *stagingRecoveryProbe) ReconcilePrepare(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.PreparationObservation, error) {
 	p.observeCalls++
 	if plan.Digest() != p.planDigest || id != p.preparationID {
 		return provider.PreparationObservation{}, errors.New("original staging identity changed")
@@ -31,7 +31,7 @@ func (p *stagingRecoveryProbe) ReconcilePreparation(ctx context.Context, plan pr
 	if p.unavailable {
 		return provider.PreparationObservation{}, errors.New("synthetic staging observation failure")
 	}
-	return p.probeProvider.ReconcilePreparation(ctx, plan, id)
+	return p.probeProvider.ReconcilePrepare(ctx, plan, id)
 }
 
 func TestReconcileExhaustedStagingPreservesConsumedPermitAndNeverPreparesAgain(t *testing.T) {

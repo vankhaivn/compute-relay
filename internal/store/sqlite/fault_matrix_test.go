@@ -16,6 +16,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // The backend represents synthetic remote state. This wrapper injects transport,
@@ -27,11 +28,11 @@ type matrixProvider struct {
 	childExit    int
 }
 
-func (p *matrixProvider) VerifyBinding(ctx context.Context, binding provider.BindingSnapshot) error {
+func (p *matrixProvider) Verify(ctx context.Context, binding provider.BindingSnapshot) error {
 	if p.wrongAccount {
 		return errors.New("private-account-canary")
 	}
-	return p.probeProvider.VerifyBinding(ctx, binding)
+	return p.probeProvider.Verify(ctx, binding)
 }
 func (p *matrixProvider) Observe(ctx context.Context, remote provider.RemoteReference) (provider.Observation, error) {
 	obs, err := p.probeProvider.Observe(ctx, remote)
@@ -51,15 +52,15 @@ func (p *matrixProvider) Observe(ctx context.Context, remote provider.RemoteRefe
 	}
 	return obs, nil
 }
-func (p *matrixProvider) ReconcileSubmission(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
+func (p *matrixProvider) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
 	if p.mode == "deadline" {
 		<-ctx.Done()
 		return provider.Reconciliation{}, ctx.Err()
 	}
-	return p.probeProvider.ReconcileSubmission(ctx, id)
+	return p.probeProvider.Reconcile(ctx, id)
 }
-func (p *matrixProvider) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	outcome := p.probeProvider.Submit(ctx, prepared)
+func (p *matrixProvider) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
+	outcome := p.probeProvider.Start(ctx, prepared, authorization, material)
 	if p.mode != "cli-exit" {
 		return outcome
 	}

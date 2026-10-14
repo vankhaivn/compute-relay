@@ -34,7 +34,7 @@ func reference() provider.RemoteReference {
 	return provider.RemoteReference{Identity: fake.ExampleJob("fixture").Identity, Resource: "resource_fixture", Version: "fixture-1"}
 }
 
-func TestRegistryRejectsDuplicateMissingNilAndOptimisticProvider(t *testing.T) {
+func TestRegistryRejectsDuplicateMissingNilAndInvalidCapabilityClaims(t *testing.T) {
 	r := provider.NewRegistry()
 	p := base(t)
 	if err := r.Register(p); err != nil {
@@ -62,7 +62,7 @@ func TestRegistryRejectsDuplicateMissingNilAndOptimisticProvider(t *testing.T) {
 		t.Fatal("registry aliases list")
 	}
 	if err := r.Register(optimistic{p}); err == nil {
-		t.Fatal("missing cancellation implementation registered")
+		t.Fatal("contradictory capability claim registered")
 	}
 }
 
@@ -74,6 +74,7 @@ func (p optimistic) Describe() provider.Descriptor {
 	for i := range d.Capabilities {
 		if d.Capabilities[i].Name == domain.CapabilityRemoteCancellation {
 			d.Capabilities[i].Support = domain.CapabilitySupportSupported
+			d.Capabilities[i].Evidence = domain.EvidencePlanned
 		}
 	}
 	return d
@@ -151,7 +152,7 @@ func TestCopyVerifiedEnforcesBoundsDigestAndCancellation(t *testing.T) {
 	empty := artifact
 	empty.Bytes = 0
 	empty.SHA256 = provider.Digest(nil)
-	if _, err := provider.CopyVerified(context.Background(), strings.NewReader(""), io.Discard, empty, 100); err != nil {
+	if _, err := provider.CopyVerified(context.Background(), strings.NewReader(""), io.Discard, empty, 0); err != nil {
 		t.Fatal(err)
 	}
 }

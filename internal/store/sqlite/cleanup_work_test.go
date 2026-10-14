@@ -30,14 +30,14 @@ type cleanupProbe struct {
 	resourceHook func(context.Context, provider.CleanupResourceRequest) (provider.CleanupOutcome, error)
 }
 
-func (p *cleanupProbe) VerifyBinding(ctx context.Context, b provider.BindingSnapshot) error {
+func (p *cleanupProbe) Verify(ctx context.Context, b provider.BindingSnapshot) error {
 	if p.verifyHook != nil {
 		p.verifyHook()
 	}
 	if p.verifyErr != nil {
 		return p.verifyErr
 	}
-	return p.probeProvider.VerifyBinding(ctx, b)
+	return p.probeProvider.Verify(ctx, b)
 }
 func (p *cleanupProbe) CleanupResource(ctx context.Context, request provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
 	if request.Mode == provider.CleanupDryRun {

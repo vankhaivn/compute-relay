@@ -8,7 +8,6 @@ import (
 	"io"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,7 +35,7 @@ type collectionProvider struct {
 	hook    func() error
 }
 
-func (p *collectionProvider) ListArtifacts(ctx context.Context, remote provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
+func (p *collectionProvider) ListArtifacts(ctx context.Context, remote provider.RemoteReference) ([]provider.Artifact, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.lists++
@@ -46,43 +45,29 @@ func (p *collectionProvider) ListArtifacts(ctx context.Context, remote provider.
 	defer cancel()
 	var n int
 	if err := p.store.db.QueryRowContext(check, "SELECT count(*) FROM work_leases WHERE kind='collection' AND held=1").Scan(&n); err != nil || n == 0 {
-		return provider.ArtifactPage{}, errors.New("transfer called without committed collection ownership")
+		return nil, errors.New("transfer called without committed collection ownership")
 	}
-	if p.mode == "cycle" {
-		return provider.ArtifactPage{NextCursor: "repeat"}, nil
+	if p.mode == "overbound" {
+		return make([]provider.Artifact, provider.MaxArtifactFiles+1), nil
 	}
 	keys := make([]string, 0, len(p.files))
-	for path := range p.files {
-		keys = append(keys, path)
+	for key := range p.files {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	start := 0
-	if page.Cursor != "" {
-		var err error
-		start, err = strconv.Atoi(page.Cursor)
-		if err != nil || start < 0 || start > len(keys) {
-			return provider.ArtifactPage{}, errors.New("bad cursor")
-		}
-	}
-	result := provider.ArtifactPage{}
-	end := start + 2 // Force pagination even when the caller requests 100.
-	if end > len(keys) {
-		end = len(keys)
-	}
-	for _, path := range keys[start:end] {
+	result := make([]provider.Artifact, 0, len(keys))
+	for _, path := range keys {
 		data := p.files[path]
-		a := provider.Artifact{Remote: remote, Path: path, Bytes: int64(len(data)), SHA256: provider.Digest(data)}
+		artifact := provider.Artifact{Remote: remote, Path: path, Bytes: int64(len(data)), SHA256: provider.Digest(data)}
 		if p.mode == "foreign" {
-			a.Remote.Version = "another-run"
+			artifact.Remote.Version = "another-run"
 		}
-		result.Artifacts = append(result.Artifacts, a)
-	}
-	if end < len(keys) {
-		result.NextCursor = strconv.Itoa(end)
+		result = append(result, artifact)
 	}
 	return result, nil
 }
-func (p *collectionProvider) FetchArtifact(ctx context.Context, remote provider.RemoteReference, a provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
+func (p *collectionProvider) Fetch(ctx context.Context, remote provider.RemoteReference, a provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+	dst = provider.WithTransferProgress(dst, progress)
 	p.mu.Lock()
 	p.fetches[a.Path]++
 	data, ok := p.files[a.Path]
@@ -287,14 +272,14 @@ func TestCollectionPublicationReceiptAndScopedReads(t *testing.T) {
 		t.Fatal("revoked token read results", err)
 	}
 	lists, _ := p.counts()
-	if lists < 3 || p.fetches["scratch/not-selected"] != 0 || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 5 {
-		t.Fatal("pagination or selected-output boundary failed")
+	if lists != 1 || p.fetches["scratch/not-selected"] != 0 || controlCount(t, f.s, "SELECT count(*) FROM artifacts") != 5 {
+		t.Fatal("full catalog or selected-output boundary failed")
 	}
 	assertNoNewCompute(t, f)
 }
 
 func TestCollectionBadTransfersRequireExplicitRecovery(t *testing.T) {
-	for _, mode := range []string{"partial", "ack", "corrupt", "long", "panic", "cycle", "foreign", "missing-output", "missing-manifest", "wrong-nonce"} {
+	for _, mode := range []string{"partial", "ack", "corrupt", "long", "panic", "overbound", "foreign", "missing-output", "missing-manifest", "wrong-nonce"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			f, id, p, blobs := collectionFixture(t)

@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // Closed reasons for a stop before SaveKernel is sent. They name where the attempt
@@ -52,8 +53,8 @@ type executionInvocation func(context.Context, Config, string, []byte, execution
 // Executor is bound to ONE immutable attempt. Reconstruct it on recovery from the
 // original M3 plan/preparation and frozen configuration, never a current alias.
 // It is not a full Provider, queue or durable mutation authority. Only a caller
-// receiving a successful NEW BeginSubmission commit may invoke Submit. All other
-// paths use ReconcileSubmission/Observe; even a genuine miss cannot rearm Submit.
+// receiving a successful NEW BeginSubmission commit may invoke Start. All other
+// paths use Reconcile/Observe; even a genuine miss cannot rearm Start.
 type Executor struct {
 	stager      *Stager
 	plan        provider.Plan
@@ -92,7 +93,10 @@ func unknownExecution() provider.SubmissionOutcome {
 	return provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: &p}
 }
 
-func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (out provider.SubmissionOutcome) {
+func (e *Executor) Start(parent context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) (out provider.SubmissionOutcome) {
+	if authorization != nil || material != nil {
+		return rejectedExecution(reasonSubmissionDisabled)
+	}
 	out = unknownExecution()
 	defer func() {
 		if recover() != nil {
@@ -112,7 +116,7 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 	// charge it to the shorter API-call timeout before submission can begin.
 	// Recheck complete remote staging without creating anything. Equality includes
 	// the first-pinned numeric dataset ID, version, marker, privacy and readiness.
-	stage, err := e.stager.ReconcilePreparation(parent, e.plan, e.prepared.PreparationID)
+	stage, err := e.stager.ReconcilePrepare(parent, e.plan, e.prepared.PreparationID)
 	if err != nil {
 		return rejectedExecution(reasonStagingRecheck)
 	}
@@ -139,7 +143,7 @@ func (e *Executor) Submit(parent context.Context, prepared provider.Prepared) (o
 	return provider.SubmissionOutcome{Status: provider.SubmissionAccepted, Remote: &remote}
 }
 
-func (e *Executor) ReconcileSubmission(ctx context.Context, identity provider.Identity) (provider.Reconciliation, error) {
+func (e *Executor) Reconcile(ctx context.Context, identity provider.Identity) (provider.Reconciliation, error) {
 	if e == nil || identity != e.plan.Job.Identity {
 		return provider.Reconciliation{}, ErrExecutionIdentity
 	}

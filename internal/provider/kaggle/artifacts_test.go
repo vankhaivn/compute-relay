@@ -43,7 +43,7 @@ func artifactFor(ref provider.RemoteReference, path string, raw []byte) provider
 	return provider.Artifact{Remote: ref, Path: path, Bytes: int64(len(raw)), SHA256: provider.Digest(raw)}
 }
 
-func TestArtifactCatalogPaginationKeepsOneCompleteSnapshot(t *testing.T) {
+func TestArtifactCatalogReturnsCompleteIndependentLists(t *testing.T) {
 	a, ref, data := artifactFixture(t)
 	reads := 0
 	a.run = func(_ context.Context, c Config, mode string, token []byte, r artifactRequest, dst io.Writer) ([]byte, error) {
@@ -53,43 +53,25 @@ func TestArtifactCatalogPaginationKeepsOneCompleteSnapshot(t *testing.T) {
 		}
 		return artifactCatalog(data), nil
 	}
-	cursor := ""
-	got := []provider.Artifact{}
-	for {
-		page, err := a.ListArtifacts(context.Background(), ref, provider.PageRequest{Cursor: cursor, Limit: 1})
-		if err != nil || len(page.Artifacts) != 1 {
-			t.Fatal(page, err)
-		}
-		f := page.Artifacts[0]
-		if f != artifactFor(ref, f.Path, data[f.Path]) {
+	catalog, err := a.ListArtifacts(context.Background(), ref)
+	if err != nil || len(catalog) != len(data) || reads != 1 {
+		t.Fatal("partial catalog or hidden pagination", len(catalog), reads, err)
+	}
+	for _, file := range catalog {
+		if file != artifactFor(ref, file.Path, data[file.Path]) {
 			t.Fatal("catalog altered file identity")
 		}
-		got = append(got, f)
-		page.Artifacts[0].Path = "caller change"
-		cursor = page.NextCursor
-		if cursor == "" {
-			break
-		}
 	}
-	if reads != 1 || len(got) != len(data) {
-		t.Fatal("partial catalog or hidden remote pagination", reads, len(got))
-	}
-	first, _ := a.ListArtifacts(context.Background(), ref, provider.PageRequest{Limit: 1})
-	old := first.NextCursor
+	catalog[0].Path = "caller change"
 	data["control/stdout.log"] = []byte("changed log")
-	if _, err := a.ListArtifacts(context.Background(), ref, provider.PageRequest{Limit: 1}); err != nil {
-		t.Fatal(err)
+	fresh, err := a.ListArtifacts(context.Background(), ref)
+	if err != nil || len(fresh) != len(data) || reads != 2 {
+		t.Fatal("fresh catalog not read", err)
 	}
-	if _, err := a.ListArtifacts(context.Background(), ref, provider.PageRequest{Cursor: old, Limit: 1}); err != ErrArtifactCursor {
-		t.Fatal("mixed different catalogs", err)
-	}
-	fresh, _ := NewArtifactReader(a.executor, DefaultArtifactPolicy())
-	fresh.run = func(context.Context, Config, string, []byte, artifactRequest, io.Writer) ([]byte, error) {
-		t.Fatal("expired cursor triggered a remote read")
-		return nil, nil
-	}
-	if _, err := fresh.ListArtifacts(context.Background(), ref, provider.PageRequest{Cursor: old, Limit: 1}); err != ErrArtifactCursor {
-		t.Fatal("in-memory cursor survived reconstruction", err)
+	for _, file := range fresh {
+		if file != artifactFor(ref, file.Path, data[file.Path]) {
+			t.Fatal("catalog retained stale/caller-owned metadata")
+		}
 	}
 }
 
@@ -101,26 +83,23 @@ func TestArtifactReferenceAndUnselectedFilesFailBeforeCredentialIO(t *testing.T)
 	})
 	foreign := ref
 	foreign.Identity.WorkspaceID = "foreign"
-	if _, err := a.ListArtifacts(context.Background(), foreign, provider.PageRequest{Limit: 1}); err == nil {
+	if _, err := a.ListArtifacts(context.Background(), foreign); err == nil {
 		t.Fatal("foreign catalog accepted")
-	}
-	if _, err := a.ListArtifacts(context.Background(), ref, provider.PageRequest{Cursor: "malformed", Limit: 1}); err == nil {
-		t.Fatal("invalid cursor accepted")
 	}
 	for _, path := range []string{"code/main.py", "inputs/input.bin", "scratch/private", "outputs/undeclared", "outputs/../secret"} {
 		file := artifactFor(ref, path, []byte("x"))
-		if _, err := a.FetchArtifact(context.Background(), ref, file, io.Discard, file.Bytes); err == nil {
+		if _, err := a.Fetch(context.Background(), ref, file, io.Discard, file.Bytes, nil); err == nil {
 			t.Fatal("unselected bytes accepted", path)
 		}
 	}
 	file := artifactFor(ref, "outputs/answer.txt", data["outputs/answer.txt"])
-	if _, err := a.FetchArtifact(context.Background(), ref, file, io.Discard, file.Bytes-1); err == nil {
+	if _, err := a.Fetch(context.Background(), ref, file, io.Discard, file.Bytes-1, nil); err == nil {
 		t.Fatal("destination limit ignored")
 	}
 }
 
 func TestArtifactCatalogRejectsMalformedConflictingAndOversizedEvidence(t *testing.T) {
-	for _, fault := range []string{"missing", "unselected", "duplicate", "control-limit", "total", "unknown-field", "null", "duplicate-key", "case-key", "trailing"} {
+	for _, fault := range []string{"missing", "unselected", "duplicate", "control-limit", "total", "file-count", "unknown-field", "null", "duplicate-key", "case-key", "trailing"} {
 		t.Run(fault, func(t *testing.T) {
 			a, ref, data := artifactFixture(t)
 			switch fault {
@@ -130,6 +109,8 @@ func TestArtifactCatalogRejectsMalformedConflictingAndOversizedEvidence(t *testi
 				data["scratch/private"] = []byte("x")
 			case "total":
 				a.policy.MaxBytes = 1
+			case "file-count":
+				a.policy.MaxFiles = 2
 			}
 			raw := artifactCatalog(data)
 			switch fault {
@@ -155,7 +136,7 @@ func TestArtifactCatalogRejectsMalformedConflictingAndOversizedEvidence(t *testi
 			a.run = func(context.Context, Config, string, []byte, artifactRequest, io.Writer) ([]byte, error) {
 				return raw, nil
 			}
-			if page, err := a.ListArtifacts(context.Background(), ref, provider.PageRequest{Limit: 100}); err == nil || len(page.Artifacts) != 0 || len(a.catalog) != 0 {
+			if page, err := a.ListArtifacts(context.Background(), ref); err == nil || len(page) != 0 {
 				t.Fatal("invalid catalog exposed", fault, err)
 			}
 		})
@@ -194,7 +175,7 @@ func TestArtifactTransferIndependentlyChecksBytesAndLateFailure(t *testing.T) {
 				return nil, nil
 			}
 			var dst bytes.Buffer
-			result, err := a.FetchArtifact(context.Background(), ref, file, &dst, file.Bytes)
+			result, err := a.Fetch(context.Background(), ref, file, &dst, file.Bytes, nil)
 			if fault == "none" {
 				if err != nil || result.Bytes != file.Bytes || result.SHA256 != file.SHA256 || dst.String() != "yes" {
 					t.Fatal(result, err)
@@ -231,7 +212,7 @@ func TestArtifactDestinationFailureCancelsWithoutPublishing(t *testing.T) {
 			}
 			return nil, nil
 		}
-		if result, err := a.FetchArtifact(context.Background(), ref, file, brokenArtifactWriter{mode}, file.Bytes); err == nil || result != (provider.TransferResult{}) {
+		if result, err := a.Fetch(context.Background(), ref, file, brokenArtifactWriter{mode}, file.Bytes, nil); err == nil || result != (provider.TransferResult{}) {
 			t.Fatal("failed destination reported success", mode)
 		}
 	}
@@ -245,7 +226,7 @@ func TestArtifactManifestFetchRejectsInvalidResultEvenWithMatchingDigest(t *test
 		return nil, err
 	}
 	var dst bytes.Buffer
-	if _, err := a.FetchArtifact(context.Background(), ref, artifactFor(ref, artifactManifest, raw), &dst, int64(len(raw))); !errors.Is(err, ErrArtifactTransfer) {
+	if _, err := a.Fetch(context.Background(), ref, artifactFor(ref, artifactManifest, raw), &dst, int64(len(raw)), nil); !errors.Is(err, ErrArtifactTransfer) {
 		t.Fatalf("invalid result accepted: %v", err)
 	}
 }

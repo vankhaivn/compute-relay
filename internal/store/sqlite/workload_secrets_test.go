@@ -24,7 +24,7 @@ import (
 
 const workloadCanary = "synthetic-workload-canary/with+url?characters=only"
 
-func (p *probeProvider) StartWithSecrets(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization, material workloadsecret.Material) provider.SubmissionOutcome {
+func (p *probeProvider) startWithSecrets(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization, material workloadsecret.Material) provider.SubmissionOutcome {
 	var count int
 	err := p.store.db.QueryRowContext(ctx, `SELECT count(*) FROM attempt_grants m JOIN attempt_grants a ON a.kind='start' AND a.workspace_id=m.workspace_id AND a.job_id=m.job_id AND a.attempt_id=m.attempt_id JOIN scheduler_queue q ON q.workspace_id=m.workspace_id AND q.job_id=m.job_id AND q.attempt_id=m.attempt_id JOIN submission_intents i ON i.queue_seq=q.queue_seq WHERE m.kind='secret' AND m.authorization_id=? AND m.consumed_at=a.consumed_at AND i.status='started'`, string(material.AuthorizationID)).Scan(&count)
 	if err != nil || count != 1 {
@@ -33,7 +33,7 @@ func (p *probeProvider) StartWithSecrets(ctx context.Context, prepared provider.
 	if string(material.Values["ingest"]) != workloadCanary {
 		panic("wrong synthetic material")
 	}
-	outcome := p.Bound.StartWithSecrets(ctx, prepared, start, material)
+	outcome := p.Bound.Start(ctx, prepared, &start, &material)
 	if p.panicSubmit {
 		panic("uncertain secret start")
 	}

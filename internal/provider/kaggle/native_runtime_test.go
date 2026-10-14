@@ -63,7 +63,7 @@ func (f *nativeFixture) result(id provider.Identity) {
 func TestNativeRuntimePrivateBatchRestartLogsArtifactsAndCleanup(t *testing.T) {
 	p, plan, saved, blobs, f := nativeRuntime(t, false)
 	ctx := context.Background()
-	if err := p.VerifyBinding(ctx, p.binding); err != nil {
+	if err := p.Verify(ctx, p.binding); err != nil {
 		t.Fatal(err)
 	}
 	validated, err := p.Validate(ctx, plan.Job)
@@ -81,11 +81,11 @@ func TestNativeRuntimePrivateBatchRestartLogsArtifactsAndCleanup(t *testing.T) {
 	if len(progress) == 0 || progress[len(progress)-1] != [2]int64{17, 17} {
 		t.Fatal("input upload progress lost", progress)
 	}
-	out := p.Submit(ctx, prepared)
+	out := p.Start(ctx, prepared, nil, nil)
 	if out.Status != provider.SubmissionAccepted || out.Remote == nil || out.Validate(plan.Job.Identity) != nil || f.count("SaveKernel") != 1 {
 		t.Fatal("native one-shot save was not accepted", out)
 	}
-	if retry := p.Submit(ctx, prepared); retry.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
+	if retry := p.Start(ctx, prepared, nil, nil); retry.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
 		t.Fatal("submission was repeated")
 	}
 	// Reconstruct all provider components from the original durable plan and
@@ -96,7 +96,7 @@ func TestNativeRuntimePrivateBatchRestartLogsArtifactsAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.bind(restarted)
-	reconciled, err := restarted.ReconcileSubmission(ctx, plan.Job.Identity)
+	reconciled, err := restarted.Reconcile(ctx, plan.Job.Identity)
 	if err != nil || reconciled.Status != provider.ReconciliationFound || *reconciled.Remote != *out.Remote || f.count("SaveKernel") != 1 || f.count("CreateDataset") != 1 {
 		t.Fatal("restart changed or resubmitted original attempt", reconciled, err)
 	}
@@ -104,23 +104,23 @@ func TestNativeRuntimePrivateBatchRestartLogsArtifactsAndCleanup(t *testing.T) {
 	if err != nil || observation.Execution != domain.ExecutionRunning || observation.ReleaseEvidence != domain.ReleaseEvidenceNotObservable {
 		t.Fatal("execution or release evidence invented", observation, err)
 	}
-	first, err := restarted.ReadLogs(ctx, *out.Remote, provider.PageRequest{Limit: 1})
+	first, err := restarted.Logs(ctx, *out.Remote, provider.PageRequest{Limit: 1})
 	if err != nil || strings.Join(first.Lines, "") != "first" || first.NextCursor == "" {
 		t.Fatal("first native replay page missing", first, err)
 	}
-	second, err := restarted.ReadLogs(ctx, *out.Remote, provider.PageRequest{Limit: 1, Cursor: first.NextCursor})
+	second, err := restarted.Logs(ctx, *out.Remote, provider.PageRequest{Limit: 1, Cursor: first.NextCursor})
 	if err != nil || strings.Join(second.Lines, "") != "second" {
 		t.Fatal("original replay cursor skipped or repeated lines", second, err)
 	}
 	f.state = "COMPLETE"
 	f.result(plan.Job.Identity)
-	page, err := restarted.ListArtifacts(ctx, *out.Remote, provider.PageRequest{Limit: 100})
-	if err != nil || len(page.Artifacts) != 3 || page.NextCursor != "" {
+	page, err := restarted.ListArtifacts(ctx, *out.Remote)
+	if err != nil || len(page) != 3 {
 		t.Fatal("full verified catalog missing", page, err)
 	}
-	for _, file := range page.Artifacts {
+	for _, file := range page {
 		var dst bytes.Buffer
-		receipt, err := restarted.FetchArtifact(ctx, *out.Remote, file, &dst, file.Bytes)
+		receipt, err := restarted.Fetch(ctx, *out.Remote, file, &dst, file.Bytes, nil)
 		if err != nil || receipt.Bytes != file.Bytes || receipt.SHA256 != file.SHA256 || !bytes.Equal(dst.Bytes(), f.outputs[file.Path]) {
 			t.Fatal("artifact download did not verify final bytes", file.Path, err)
 		}
@@ -151,13 +151,13 @@ func TestNativeSubmissionLostAcknowledgementReconcilesWithoutSave(t *testing.T) 
 		t.Fatal(err)
 	}
 	*saved, f.fault = prepared, "lost-save-ack"
-	if out := p.Submit(context.Background(), prepared); out.Status != provider.SubmissionUnknown || !out.Problem.ComputeMayHaveStarted || out.Problem.SafeOperationRetry {
+	if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || !out.Problem.ComputeMayHaveStarted || out.Problem.SafeOperationRetry {
 		t.Fatal("lost save acknowledgement became rejection or retry permission", out)
 	}
-	if out := p.Submit(context.Background(), prepared); out.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
+	if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
 		t.Fatal("ambiguous save was repeated")
 	}
-	seen, err := p.ReconcileSubmission(context.Background(), plan.Job.Identity)
+	seen, err := p.Reconcile(context.Background(), plan.Job.Identity)
 	if err != nil || seen.Status != provider.ReconciliationFound || f.count("SaveKernel") != 1 {
 		t.Fatal("original save could not be recovered by reads", seen, err)
 	}
@@ -175,7 +175,7 @@ func TestNativeGPUQuotaCheckedImmediatelyBeforeSave(t *testing.T) {
 			if !free {
 				f.quota = `{"gpuQuota":{"isPayToScaleEnabled":true}}`
 			}
-			out := p.Submit(context.Background(), prepared)
+			out := p.Start(context.Background(), prepared, nil, nil)
 			if !free {
 				if out.Status != provider.SubmissionRejected || out.Problem.ComputeMayHaveStarted || f.count("SaveKernel") != 0 {
 					t.Fatal("paid quota reached save", out)
@@ -202,7 +202,7 @@ func TestNativeStagingLostCreateAckAndObservationNeverUpload(t *testing.T) {
 	}
 	blobs.mode = "missing"
 	before := blobs.reads
-	seen, err := p.ReconcilePreparation(context.Background(), plan, "prep")
+	seen, err := p.ReconcilePrepare(context.Background(), plan, "prep")
 	if err != nil || seen.Status != provider.ReconciliationFound || seen.Prepared == nil || !seen.Prepared.Ready || f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 || blobs.reads != before {
 		t.Fatal("recovery repeated staging or lost original identity", seen, err)
 	}
@@ -259,23 +259,23 @@ func TestNativeArtifactFinalIdentityAndPinnedManifestMustHold(t *testing.T) {
 				t.Fatal(err)
 			}
 			*saved = prepared
-			out := p.Submit(context.Background(), prepared)
+			out := p.Start(context.Background(), prepared, nil, nil)
 			if out.Status != provider.SubmissionAccepted {
 				t.Fatal(out)
 			}
 			f.state = "COMPLETE"
 			f.result(plan.Job.Identity)
-			page, err := p.ListArtifacts(context.Background(), *out.Remote, provider.PageRequest{Limit: 100})
+			page, err := p.ListArtifacts(context.Background(), *out.Remote)
 			if err != nil {
 				t.Fatal(err)
 			}
-			file := page.Artifacts[len(page.Artifacts)-1]
+			file := page[len(page)-1]
 			switch fault {
 			case "kernel-replaced":
 				f.getKernel = 0
 				f.fault = fault
 			case "manifest-changed":
-				file = page.Artifacts[0]
+				file = page[0]
 				f.outputs[artifactManifest] = append(f.outputs[artifactManifest], ' ')
 			case "payload-changed":
 				f.outputs[file.Path] = []byte("bad")
@@ -291,7 +291,7 @@ func TestNativeArtifactFinalIdentityAndPinnedManifestMustHold(t *testing.T) {
 				}
 				f.outputs[artifactManifest], _ = json.Marshal(manifest)
 			}
-			if _, err := p.FetchArtifact(context.Background(), *out.Remote, file, io.Discard, file.Bytes); err == nil {
+			if _, err := p.Fetch(context.Background(), *out.Remote, file, io.Discard, file.Bytes, nil); err == nil {
 				t.Fatal("changed artifact or final identity accepted")
 			}
 		})

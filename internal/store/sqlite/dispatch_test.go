@@ -27,6 +27,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 const dispatchJSON = `{"api_version":"compute-connector/v1alpha1","name":"dispatch-fixture","profile":"fixture","bundle":{"object_id":"code"},"execution":{"kind":"python","command":["python","never-executed.py"]},"inputs":[{"name":"data","source":{"kind":"object","object_id":"data"},"target":"data.txt"}],"outputs":[{"path":"answer.json","required":true}],"resources":{"accelerator":"cpu"},"network":{"remote_internet":"disabled"},"timeouts":{"remote_wall_seconds":10,"setup_seconds":2,"finalization_grace_seconds":2}}`
@@ -93,12 +94,18 @@ func (p *probeProvider) Validate(ctx context.Context, j provider.ResolvedJob) (p
 	}
 	return p.Bound.Validate(ctx, j)
 }
-func (p *probeProvider) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
+func (p *probeProvider) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
 	var n int
 	if err := p.store.db.QueryRowContext(ctx, "SELECT count(*) FROM submission_intents WHERE intent_id=? AND status='started'", string(prepared.Identity.IntentID)).Scan(&n); err != nil || n != 1 {
 		panic("submit called without committed intent")
 	}
-	outcome := p.Bound.Submit(ctx, prepared)
+	if authorization != nil {
+		if material != nil {
+			return p.startWithSecrets(ctx, prepared, *authorization, *material)
+		}
+		return p.startControlled(ctx, prepared, *authorization)
+	}
+	outcome := p.Bound.Start(ctx, prepared, authorization, material)
 	if p.rejectQuota && outcome.Status == provider.SubmissionRejected {
 		problem := provider.Problem(domain.CodeQuotaExhausted, domain.FailureStageSubmission, "fixture exhausted")
 		outcome.Problem = &problem

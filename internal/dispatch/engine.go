@@ -163,11 +163,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	if err != nil {
 		return s.fail(domain.CodeConfigurationInvalid)
 	}
-	checker, ok := p.(provider.BindingVerifier)
-	if !ok {
-		return s.fail(domain.CodeConfigurationInvalid)
-	}
-	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, checker.VerifyBinding(c, binding) })
+	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, p.Verify(c, binding) })
 	if err != nil || p.Describe().InstanceID != binding.Binding.ProviderInstanceID {
 		return s.fail(domain.CodeProviderAuthFailed)
 	}
@@ -222,13 +218,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		return s.prepared(prepared)
 	case Staging:
-		observer, ok := p.(provider.PreparationObserver)
-		if !ok {
-			return s.fail(domain.CodeConfigurationInvalid)
-		}
 		journal := work.Journal
 		seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
-			return observer.ReconcilePreparation(c, journal.Plan.Clone(), journal.PreparationID)
+			return p.ReconcilePrepare(c, journal.Plan.Clone(), journal.PreparationID)
 		})
 		if err != nil {
 			if expired && work.Gate != nil {
@@ -253,24 +245,14 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			if work.Gate.Start == nil {
 				return nil
 			}
-			if _, ok := p.(provider.ControlledStarter); !ok {
-				return s.fail(domain.CodeUnsupportedCapability)
-			}
 			if secret := work.Gate.Start.Secrets; secret != nil {
-				if _, ok := p.(provider.SecretStarter); !ok {
-					return s.fail(domain.CodeUnsupportedCapability)
-				}
 				key := workloadsecret.Key{WorkspaceID: work.Job.Job.WorkspaceID, JobID: work.Job.Job.ID, AttemptID: work.Job.Attempt.ID}
 				if !e.secrets.Available(key, secret.AuthorizationID, e.clock.Now()) {
 					return nil
 				}
 			}
-			observer, ok := p.(provider.PreparationObserver)
-			if !ok {
-				return s.fail(domain.CodeConfigurationInvalid)
-			}
 			seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
-				return observer.ReconcilePreparation(c, work.Journal.Plan.Clone(), work.Journal.PreparationID)
+				return p.ReconcilePrepare(c, work.Journal.Plan.Clone(), work.Journal.PreparationID)
 			})
 			if err != nil {
 				return s.fail(errorCode(err, domain.CodeStagingNotReady))
@@ -296,13 +278,16 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		prepared := *s.work().Journal.Prepared
 		outcome, callErr := control(ctx, preparationLimit, func(c context.Context) (provider.SubmissionOutcome, error) {
+			var authorization *provider.StartAuthorization
+			var secrets *workloadsecret.Material
 			if start := s.work().Journal.StartAuthorization; start != nil {
+				copy := start.Clone()
+				authorization = &copy
 				if start.Secrets != nil {
-					return p.(provider.SecretStarter).StartWithSecrets(c, prepared, start.Clone(), material), nil
+					secrets = &material
 				}
-				return p.(provider.ControlledStarter).Start(c, prepared, start.Clone()), nil
 			}
-			return p.Submit(c, prepared), nil
+			return p.Start(c, prepared, authorization, secrets), nil
 		})
 		if callErr != nil || outcome.Validate(prepared.Identity) != nil {
 			outcome = provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: problem(domain.CodeProviderSubmissionUnknown, true)}
@@ -310,7 +295,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.commit(Action{Kind: SubmissionSeen, Submission: &outcome})
 	case Submitting:
 		identity := work.Journal.Plan.Job.Identity
-		seen, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Reconciliation, error) { return p.ReconcileSubmission(c, identity) })
+		seen, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Reconciliation, error) { return p.Reconcile(c, identity) })
 		if err != nil {
 			return s.fail(domain.CodeProviderSubmissionUnknown)
 		}

@@ -5,10 +5,13 @@ package providertest
 import (
 	"bytes"
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 type Mode string
@@ -21,25 +24,24 @@ const (
 )
 
 type Harness struct {
-	Provider   provider.Provider
-	Job        provider.ResolvedJob
-	Advance    func(provider.RemoteReference) error
-	Reconnect  func() provider.Provider
-	Executions func() int
+	Provider     provider.Provider
+	Binding      provider.BindingSnapshot
+	Job          provider.ResolvedJob
+	Advance      func(provider.RemoteReference) error
+	Reconnect    func() provider.Provider
+	BeforeStart  func()
+	Executions   func() int
+	Preparations func() int
 }
 type Factory func(*testing.T, Mode) Harness
 
-// Run tests the mandatory port without importing a concrete provider or its SDK.
+// Run checks the mandatory port through controlled provider transports.
 func Run(t *testing.T, factory Factory) {
 	t.Helper()
 	t.Run("lifecycle_and_artifacts", func(t *testing.T) {
 		h := factory(t, Normal)
 		ctx := context.Background()
-		check, err := h.Provider.Check(ctx)
-		must(t, err)
-		if !check.Ready || check.Evidence != domain.EvidenceImplementedOffline {
-			t.Fatal("invalid offline diagnostic")
-		}
+		must(t, h.Provider.Verify(ctx, h.Binding))
 		remote := submit(t, h)
 		before, err := h.Provider.Observe(ctx, remote)
 		must(t, err)
@@ -48,58 +50,77 @@ func Run(t *testing.T, factory Factory) {
 		if before != again {
 			t.Fatal("ordinary observation advanced fixture state")
 		}
-		if _, err := h.Provider.ListArtifacts(ctx, remote, provider.PageRequest{Limit: 1}); err == nil {
+		if _, err := h.Provider.ListArtifacts(ctx, remote); err == nil {
 			t.Fatal("active outputs were accepted as stable")
 		}
 		finish(t, h, remote)
+		catalog, err := h.Provider.ListArtifacts(ctx, remote)
+		must(t, err)
+		if len(catalog) > provider.MaxArtifactFiles {
+			t.Fatal("catalog exceeds the full-list bound")
+		}
 		seen := map[string]bool{}
-		page := provider.PageRequest{Limit: 1}
 		manifestFound := false
-		for pages := 0; ; pages++ {
-			if pages > 100 {
-				t.Fatal("pagination did not terminate")
+		var total int64
+		for _, artifact := range catalog {
+			must(t, artifact.Validate(remote))
+			if seen[artifact.Path] {
+				t.Fatal("duplicate output")
 			}
-			result, err := h.Provider.ListArtifacts(ctx, remote, page)
+			seen[artifact.Path] = true
+			total += artifact.Bytes
+			if total > provider.MaxArtifactBytes {
+				t.Fatal("catalog exceeds byte bound")
+			}
+			var dst bytes.Buffer
+			var received int64
+			receipt, err := h.Provider.Fetch(ctx, remote, artifact, &dst, artifact.Bytes, func(n int64) error {
+				if n < received || n > artifact.Bytes {
+					t.Fatal("invalid transfer progress")
+				}
+				received = n
+				return nil
+			})
 			must(t, err)
-			if len(result.Artifacts) > page.Limit {
-				t.Fatal("page bound exceeded")
+			if receipt.Bytes != artifact.Bytes || receipt.SHA256 != artifact.SHA256 || provider.Digest(dst.Bytes()) != artifact.SHA256 || received != artifact.Bytes {
+				t.Fatal("unverified transfer or incomplete progress")
 			}
-			for _, artifact := range result.Artifacts {
-				must(t, artifact.Validate(remote))
-				if seen[artifact.Path] {
-					t.Fatal("duplicate output")
-				}
-				seen[artifact.Path] = true
-				var dst bytes.Buffer
-				receipt, err := h.Provider.FetchArtifact(ctx, remote, artifact, &dst, 1<<20)
-				must(t, err)
-				if receipt.Bytes != artifact.Bytes || receipt.SHA256 != artifact.SHA256 || provider.Digest(dst.Bytes()) != artifact.SHA256 {
-					t.Fatal("unverified transfer")
-				}
-				if artifact.Path == "execution-result.json" {
-					manifestFound = true
-					must(t, provider.ValidateManifestIdentity(remote.Identity, dst.Bytes()))
-				}
-				bad := artifact
-				bad.Remote.Identity.Nonce = "another-fixture-nonce"
-				var rejected bytes.Buffer
-				if _, err := h.Provider.FetchArtifact(ctx, remote, bad, &rejected, 1<<20); err == nil || rejected.Len() != 0 {
-					t.Fatal("wrong-attempt artifact was written")
-				}
+			if artifact.Path == "execution-result.json" || artifact.Path == "control/execution-result.json" {
+				manifestFound = true
+				must(t, provider.ValidateManifestIdentity(remote.Identity, dst.Bytes()))
 			}
-			if result.NextCursor == "" {
-				break
+			if _, err := h.Provider.Fetch(ctx, remote, artifact, nil, artifact.Bytes, func(int64) error { t.Fatal("nil destination reported transferred bytes"); return nil }); err == nil {
+				t.Fatal("nil destination accepted")
 			}
-			page.Cursor = result.NextCursor
+			bad := artifact
+			bad.Remote.Identity.Nonce = "another-fixture-nonce"
+			var rejected bytes.Buffer
+			if _, err := h.Provider.Fetch(ctx, remote, bad, &rejected, artifact.Bytes, nil); err == nil || rejected.Len() != 0 {
+				t.Fatal("wrong-attempt artifact was written")
+			}
+			if strings.Contains(artifact.Path, "result.json") || artifact.Bytes == 0 {
+				continue
+			}
+			stop := errors.New("stop transfer fixture")
+			if _, err := h.Provider.Fetch(ctx, remote, artifact, &bytes.Buffer{}, artifact.Bytes, func(int64) error { return stop }); err == nil {
+				t.Fatal("callback error did not stop transfer")
+			}
 		}
 		if !manifestFound || len(seen) < 2 {
 			t.Fatal("manifest and multi-file result required")
 		}
-		plan, err := h.Provider.Validate(ctx, h.Job)
+		request := cleanupRequest(t, h, remote, provider.CleanupDryRun)
+		description, err := h.Provider.DescribeCleanup(request)
 		must(t, err)
-		cleaner := h.Provider.(provider.ResourceCleaner)
-		request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "prepare_fixture", ResultsCollected: true, Mode: provider.CleanupDryRun}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: plan.Digest()}
-		dry, err := cleaner.CleanupResource(ctx, request)
+		if !description.Valid() || description.Version != remote.Version {
+			t.Fatal("cleanup descriptor lost the original target")
+		}
+		same, err := h.Reconnect().DescribeCleanup(request)
+		must(t, err)
+		if same.ID != description.ID || same.Name != description.Name || same.Version != description.Version || same.Scope != description.Scope {
+			t.Fatal("cleanup descriptor changed after reconnect")
+		}
+		dry, err := h.Provider.CleanupResource(ctx, request)
 		must(t, err)
 		if !dry.WouldDelete || dry.Deleted {
 			t.Fatal("dry-run mutated provider")
@@ -107,55 +128,99 @@ func Run(t *testing.T, factory Factory) {
 		_, err = h.Provider.Observe(ctx, remote)
 		must(t, err)
 		request.Mode = provider.CleanupApply
-		applied, err := cleaner.CleanupResource(ctx, request)
+		request.RecoverOnly = true
+		recovered, err := h.Provider.CleanupResource(ctx, request)
+		if err == nil || recovered.Deleted {
+			t.Fatal("observation-only cleanup replayed deletion")
+		}
+		request.RecoverOnly = false
+		applied, err := h.Provider.CleanupResource(ctx, request)
 		must(t, err)
 		if !applied.Deleted {
 			t.Fatal("apply did not delete owned fixture")
 		}
-		repeat, err := cleaner.CleanupResource(ctx, request)
+		request.RecoverOnly = true
+		repeat, err := h.Provider.CleanupResource(ctx, request)
 		must(t, err)
 		if !repeat.AlreadyAbsent {
-			t.Fatal("cleanup is not idempotent")
+			t.Fatal("cleanup absence was not confirmed")
 		}
 		if h.Executions() != 1 {
 			t.Fatal("collection/cleanup created compute")
 		}
 	})
+	t.Run("preparation_recovery_is_read_only", func(t *testing.T) {
+		h := factory(t, Normal)
+		ctx := context.Background()
+		prepared := prepare(t, h)
+		plan, err := h.Provider.Validate(ctx, h.Job)
+		must(t, err)
+		before := h.Preparations()
+		fresh := h.Reconnect()
+		must(t, fresh.Verify(ctx, h.Binding))
+		for i := 0; i < 2; i++ {
+			seen, err := fresh.ReconcilePrepare(ctx, plan, "prepare_fixture")
+			must(t, err)
+			must(t, seen.Validate(plan, "prepare_fixture"))
+			if seen.Status != provider.ReconciliationFound || seen.Prepared == nil || *seen.Prepared != prepared {
+				t.Fatal("original preparation was not rediscovered")
+			}
+		}
+		changed := plan.Clone()
+		changed.Job.Identity.Nonce = "another-fixture-nonce"
+		for _, query := range []struct {
+			plan      provider.Plan
+			operation domain.OperationID
+		}{{plan, "another_preparation"}, {changed, "prepare_fixture"}} {
+			seen, err := fresh.ReconcilePrepare(ctx, query.plan, query.operation)
+			if seen.Prepared != nil || err == nil && seen.Status == provider.ReconciliationFound {
+				t.Fatal("changed preparation identity was accepted")
+			}
+		}
+		if h.Preparations() != before || h.Executions() != 0 {
+			t.Fatal("preparation recovery repeated mutation")
+		}
+	})
 	t.Run("lost_response_reconnect_without_resubmit", func(t *testing.T) {
 		h := factory(t, LostResponse)
-		prepared := prepare(t, h)
-		out := h.Provider.Submit(context.Background(), prepared)
+		out := h.Provider.Start(context.Background(), prepare(t, h), nil, nil)
 		must(t, out.Validate(h.Job.Identity))
 		if out.Status != provider.SubmissionUnknown {
 			t.Fatal("lost response was not ambiguous")
 		}
 		reconnected := h.Reconnect()
-		reconciled, err := reconnected.ReconcileSubmission(context.Background(), h.Job.Identity)
+		must(t, reconnected.Verify(context.Background(), h.Binding))
+		seen, err := reconnected.Reconcile(context.Background(), h.Job.Identity)
 		must(t, err)
-		must(t, reconciled.Validate(h.Job.Identity))
-		if reconciled.Status != provider.ReconciliationFound || reconciled.Remote == nil || reconciled.Remote.Identity != h.Job.Identity {
+		must(t, seen.Validate(h.Job.Identity))
+		if seen.Status != provider.ReconciliationFound || seen.Remote == nil {
 			t.Fatal("original execution not rediscovered")
 		}
 		for i := 0; i < 3; i++ {
-			_, err := reconnected.Observe(context.Background(), *reconciled.Remote)
+			_, err := reconnected.Observe(context.Background(), *seen.Remote)
 			must(t, err)
 		}
 		if h.Executions() != 1 {
 			t.Fatal("reconnect or observation duplicated execution")
 		}
 	})
-	t.Run("unresolved_stays_unknown", func(t *testing.T) {
+	t.Run("unresolved_does_not_invent_an_execution", func(t *testing.T) {
 		h := factory(t, Unresolved)
-		out := h.Provider.Submit(context.Background(), prepare(t, h))
+		out := h.Provider.Start(context.Background(), prepare(t, h), nil, nil)
 		must(t, out.Validate(h.Job.Identity))
 		if out.Status != provider.SubmissionUnknown {
 			t.Fatal("uncertainty hidden")
 		}
 		for i := 0; i < 3; i++ {
-			r, err := h.Provider.ReconcileSubmission(context.Background(), h.Job.Identity)
-			must(t, err)
-			if r.Status != provider.ReconciliationUnknown || r.Remote != nil {
+			seen, err := h.Provider.Reconcile(context.Background(), h.Job.Identity)
+			if seen.Remote != nil {
 				t.Fatal("invented remote identity")
+			}
+			if err == nil {
+				must(t, seen.Validate(h.Job.Identity))
+				if seen.Status == provider.ReconciliationFound {
+					t.Fatal("invented acceptance")
+				}
 			}
 		}
 		if h.Executions() != 0 {
@@ -164,49 +229,64 @@ func Run(t *testing.T, factory Factory) {
 	})
 	t.Run("proven_rejection", func(t *testing.T) {
 		h := factory(t, Rejected)
-		out := h.Provider.Submit(context.Background(), prepare(t, h))
+		out := h.Provider.Start(context.Background(), prepare(t, h), nil, nil)
 		must(t, out.Validate(h.Job.Identity))
 		if out.Status != provider.SubmissionRejected || h.Executions() != 0 {
 			t.Fatal("invalid rejection")
 		}
 	})
-	t.Run("missing_optional_capabilities", func(t *testing.T) {
+	t.Run("cancellation_logs_and_active_cleanup_are_truthful", func(t *testing.T) {
 		h := factory(t, Normal)
 		ctx := context.Background()
 		remote := submit(t, h)
-		if _, ok := h.Provider.(provider.Canceller); ok {
-			t.Fatal("minimal fixture implements cancellation")
-		}
-		if _, ok := h.Provider.(provider.LogReader); ok {
-			t.Fatal("minimal fixture implements logs")
-		}
-		if _, ok := h.Provider.(provider.QuotaReader); ok {
-			t.Fatal("minimal fixture implements quota")
-		}
-		cancel, err := provider.RequestCancellation(ctx, h.Provider, remote, "cancel_fixture")
-		must(t, err)
-		if cancel.Status != domain.CancellationManual || cancel.TerminationConfirmed {
-			t.Fatal("unsupported cancellation reported success")
-		}
-		logs, err := provider.ReadAvailableLogs(ctx, h.Provider, remote, provider.PageRequest{Limit: 1})
-		must(t, err)
-		if logs.Availability != "unavailable" || len(logs.Lines) != 0 {
-			t.Fatal("invented live logs")
-		}
-		quota, err := provider.ReadAvailableQuota(ctx, h.Provider)
-		must(t, err)
-		if quota.Status != provider.QuotaUnknown || quota.Remaining != nil || quota.Limit != nil || quota.ResetAt != nil {
-			t.Fatal("unknown quota became a fabricated number")
-		}
-		plan, err := h.Provider.Validate(ctx, h.Job)
-		must(t, err)
-		cleaner := h.Provider.(provider.ResourceCleaner)
-		request := provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "prepare_fixture", ResultsCollected: true, Mode: provider.CleanupApply}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: plan.Digest()}
-		if _, err := cleaner.CleanupResource(ctx, request); err == nil {
+		if _, err := h.Provider.CleanupResource(ctx, cleanupRequest(t, h, remote, provider.CleanupApply)); err == nil {
 			t.Fatal("cleanup cancelled active execution")
 		}
+		logs, err := h.Provider.Logs(ctx, remote, provider.PageRequest{Limit: 1})
+		must(t, err)
+		must(t, logs.Validate(provider.PageRequest{Limit: 1}))
+		if h.Provider.Describe().Support(domain.CapabilityLogsWhileRunning) == domain.CapabilitySupportUnsupported && (logs.Availability != "unavailable" || len(logs.Lines) != 0) {
+			t.Fatal("unsupported logs invented evidence")
+		}
+		if _, err := h.Provider.Cancel(ctx, remote, ""); err == nil {
+			t.Fatal("invalid cancellation operation accepted")
+		}
+		outcome, err := h.Provider.Cancel(ctx, remote, "cancel_fixture")
+		must(t, err)
+		must(t, outcome.Validate())
+		if h.Provider.Describe().Support(domain.CapabilityRemoteCancellation) != domain.CapabilitySupportSupported && (outcome.Status != domain.CancellationManual || outcome.TerminationConfirmed) {
+			t.Fatal("unsupported cancellation reported termination")
+		}
+		if outcome.TerminationConfirmed {
+			observed, err := h.Provider.Observe(ctx, remote)
+			must(t, err)
+			if !observed.Execution.Terminal() {
+				t.Fatal("cancellation confirmation lacks terminal evidence")
+			}
+		}
 		if h.Executions() != 1 {
-			t.Fatal("optional capability lookup created execution")
+			t.Fatal("logs/cancellation created execution")
+		}
+	})
+	t.Run("authority_and_identity_fail_before_start", func(t *testing.T) {
+		h := factory(t, Normal)
+		prepared := prepare(t, h)
+		material := &workloadsecret.Material{}
+		out := h.Provider.Start(context.Background(), prepared, nil, material)
+		must(t, out.Validate(h.Job.Identity))
+		if out.Status != provider.SubmissionRejected || h.Executions() != 0 {
+			t.Fatal("material without authority started compute")
+		}
+		changed := prepared
+		changed.Identity.Nonce = "another-fixture-nonce"
+		out = h.Provider.Start(context.Background(), changed, nil, nil)
+		if out.Status != provider.SubmissionRejected || h.Executions() != 0 {
+			t.Fatal("changed preparation started compute")
+		}
+		binding := h.Binding
+		binding.AccountScope = "another_account"
+		if err := h.Provider.Verify(context.Background(), binding); err == nil {
+			t.Fatal("changed account binding accepted")
 		}
 	})
 	t.Run("cancelled_context_has_no_mutations", func(t *testing.T) {
@@ -214,12 +294,18 @@ func Run(t *testing.T, factory Factory) {
 		prepared := prepare(t, h)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		out := h.Provider.Submit(ctx, prepared)
+		out := h.Provider.Start(ctx, prepared, nil, nil)
 		must(t, out.Validate(h.Job.Identity))
 		if out.Status != provider.SubmissionRejected || h.Executions() != 0 {
-			t.Fatal("cancelled preflight created execution")
+			t.Fatal("cancelled start created execution")
 		}
 	})
+}
+func cleanupRequest(t *testing.T, h Harness, remote provider.RemoteReference, mode provider.CleanupMode) provider.CleanupResourceRequest {
+	t.Helper()
+	plan, err := h.Provider.Validate(context.Background(), h.Job)
+	must(t, err)
+	return provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: remote, LedgerID: "ledger_fixture", CreationOperationID: "prepare_fixture", ResultsCollected: true, Mode: mode}, Purpose: "execution", OwnershipOperationID: domain.OperationID(remote.Identity.IntentID), PlanSHA256: plan.Digest()}
 }
 func prepare(t *testing.T, h Harness) provider.Prepared {
 	t.Helper()
@@ -230,11 +316,14 @@ func prepare(t *testing.T, h Harness) provider.Prepared {
 	if !prepared.Ready {
 		t.Fatal("fixture not ready")
 	}
+	if h.BeforeStart != nil {
+		h.BeforeStart()
+	}
 	return prepared
 }
 func submit(t *testing.T, h Harness) provider.RemoteReference {
 	t.Helper()
-	out := h.Provider.Submit(context.Background(), prepare(t, h))
+	out := h.Provider.Start(context.Background(), prepare(t, h), nil, nil)
 	must(t, out.Validate(h.Job.Identity))
 	if out.Status != provider.SubmissionAccepted || out.Remote == nil {
 		t.Fatal("expected accepted fixture")
@@ -244,10 +333,10 @@ func submit(t *testing.T, h Harness) provider.RemoteReference {
 func finish(t *testing.T, h Harness, remote provider.RemoteReference) {
 	t.Helper()
 	for i := 0; i < 100; i++ {
-		obs, err := h.Provider.Observe(context.Background(), remote)
+		observed, err := h.Provider.Observe(context.Background(), remote)
 		must(t, err)
-		must(t, obs.Validate(remote))
-		if obs.Execution.Terminal() {
+		must(t, observed.Validate(remote))
+		if observed.Execution.Terminal() {
 			return
 		}
 		must(t, h.Advance(remote))

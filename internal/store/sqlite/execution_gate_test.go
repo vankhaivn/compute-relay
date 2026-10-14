@@ -21,21 +21,21 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
-func (p *probeProvider) Start(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
+func (p *probeProvider) startControlled(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
 	var count int
 	err := p.store.db.QueryRowContext(ctx, `SELECT count(*) FROM attempt_grants g JOIN scheduler_queue q ON q.workspace_id=g.workspace_id AND q.job_id=g.job_id AND q.attempt_id=g.attempt_id JOIN submission_intents s ON s.queue_seq=q.queue_seq WHERE g.kind='start' AND g.authorization_id=? AND g.consumed_at IS NOT NULL AND s.intent_id=? AND s.status='started'`, string(start.AuthorizationID), string(prepared.Identity.IntentID)).Scan(&count)
 	if err != nil || count != 1 {
 		panic("controlled start lacks atomic consumed authority and intent")
 	}
-	outcome := p.Bound.Start(ctx, prepared, start)
+	outcome := p.Bound.Start(ctx, prepared, &start, nil)
 	if p.panicSubmit {
 		panic("uncertain controlled-start response")
 	}
 	return outcome
 }
 
-func (p *probeProvider) ReconcilePreparation(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.PreparationObservation, error) {
-	seen, err := p.Bound.ReconcilePreparation(ctx, plan, op)
+func (p *probeProvider) ReconcilePrepare(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.PreparationObservation, error) {
+	seen, err := p.Bound.ReconcilePrepare(ctx, plan, op)
 	if p.afterPreparationRead != nil {
 		p.afterPreparationRead()
 	}

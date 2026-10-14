@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // Test-only composition of the concrete per-attempt execution component and the
@@ -21,11 +22,11 @@ type executionJournalAdapter struct {
 	executor *Executor
 }
 
-func (p *executionJournalAdapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	return p.executor.Submit(ctx, prepared)
+func (p *executionJournalAdapter) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
+	return p.executor.Start(ctx, prepared, authorization, material)
 }
-func (p *executionJournalAdapter) ReconcileSubmission(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
-	return p.executor.ReconcileSubmission(ctx, id)
+func (p *executionJournalAdapter) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
+	return p.executor.Reconcile(ctx, id)
 }
 func (p *executionJournalAdapter) Observe(ctx context.Context, ref provider.RemoteReference) (provider.Observation, error) {
 	return p.executor.Observe(ctx, ref)

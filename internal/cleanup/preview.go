@@ -34,16 +34,12 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 		return Preview{}, ErrInvalid
 	}
 	result := Preview{WorkspaceID: w, JobID: job, AttemptID: attempt, ObservedAt: s.clock.Now().UTC(), Eligible: plan.Eligible, Reason: plan.Reason, Resources: make([]ResourcePreview, 0, len(plan.Resources))}
-	var cleaner provider.ResourceCleaner
-	var verifier provider.BindingVerifier
+	var adapter provider.Provider
 	if s.previewResolver != nil {
-		if adapter, err := s.previewResolver.Resolve(plan.Binding); err == nil && adapter != nil {
-			cleaner, _ = adapter.(provider.ResourceCleaner)
-			verifier, _ = adapter.(provider.BindingVerifier)
-		}
+		adapter, _ = s.previewResolver.Resolve(plan.Binding)
 	}
 	for _, resource := range plan.Resources {
-		view := previewResource(ctx, plan, resource, cleaner, verifier, acceptNameBasedDelete)
+		view := previewResource(ctx, plan, resource, adapter, acceptNameBasedDelete)
 		result.Resources = append(result.Resources, view)
 		if !view.Eligible {
 			if result.Eligible {
@@ -64,7 +60,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	return result, nil
 }
 
-func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, cleaner provider.ResourceCleaner, verifier provider.BindingVerifier, acceptNameBasedDelete bool) (view ResourcePreview) {
+func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, adapter provider.Provider, acceptNameBasedDelete bool) (view ResourcePreview) {
 	request := resource.Request
 	view = ResourcePreview{ResourceID: request.LedgerID, Purpose: request.Purpose, Fingerprint: resource.Fingerprint(), Observation: "not_checked", Reason: plan.Reason}
 	defer func() {
@@ -75,13 +71,13 @@ func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, c
 	if resource.Reason != "" {
 		view.Reason = resource.Reason
 	}
-	if cleaner == nil || verifier == nil {
+	if adapter == nil {
 		if resource.Reason == "" {
 			view.Reason = "provider_not_configured"
 		}
 		return view
 	}
-	description, err := cleaner.DescribeCleanup(request)
+	description, err := adapter.DescribeCleanup(request)
 	if err != nil || !description.Valid() {
 		if resource.Reason == "" {
 			view.Reason = "identity_unverified"
@@ -96,12 +92,12 @@ func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, c
 		view.Reason = description.Reason
 		return view
 	}
-	if verifier.VerifyBinding(ctx, plan.Binding) != nil {
+	if adapter.Verify(ctx, plan.Binding) != nil {
 		view.Observation, view.Reason = "unknown", "binding_unverified"
 		return view
 	}
 	request.Mode = provider.CleanupDryRun
-	outcome, err := cleaner.CleanupResource(ctx, request)
+	outcome, err := adapter.CleanupResource(ctx, request)
 	if err != nil || outcome.Deleted || outcome.WouldDelete && outcome.AlreadyAbsent {
 		view.Observation, view.Reason = "unknown", "remote_state_unverified"
 		return view

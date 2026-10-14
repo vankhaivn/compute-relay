@@ -29,6 +29,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // Only this test composes a fake batch provider around the concrete Stager. No
@@ -41,10 +42,10 @@ type journalStagingAdapter struct {
 func (p *journalStagingAdapter) Prepare(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.Prepared, error) {
 	return p.stage.Prepare(ctx, plan, op)
 }
-func (p *journalStagingAdapter) ReconcilePreparation(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.PreparationObservation, error) {
-	return p.stage.ReconcilePreparation(ctx, plan, op)
+func (p *journalStagingAdapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.PreparationObservation, error) {
+	return p.stage.ReconcilePrepare(ctx, plan, op)
 }
-func (p *journalStagingAdapter) Submit(context.Context, provider.Prepared) provider.SubmissionOutcome {
+func (p *journalStagingAdapter) Start(context.Context, provider.Prepared, *provider.StartAuthorization, *workloadsecret.Material) provider.SubmissionOutcome {
 	panic("staging-only fixture must never submit compute")
 }
 

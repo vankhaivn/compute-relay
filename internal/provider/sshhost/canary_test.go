@@ -87,15 +87,15 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 					returned = append(returned, v)
 				}
 			}
-			check, err := adapter.Check(ctx)
-			record(check, err)
+			err = adapter.Verify(ctx, binding)
+			record(err)
 			plan, err := adapter.Validate(ctx, job)
 			record(plan, err)
 			prepared, err := adapter.Prepare(ctx, plan, testOperation)
 			if err != nil {
 				t.Fatal(err)
 			}
-			out := adapter.Submit(ctx, prepared)
+			out := adapter.Start(ctx, prepared, nil, nil)
 			if out.Status != provider.SubmissionAccepted {
 				t.Fatalf("submit = %+v", out)
 			}
@@ -105,13 +105,13 @@ func TestCredentialsNeverLeaveTheLogin(t *testing.T) {
 				"control/execution-result.json": resultManifest(job.Identity, map[string]string{"answer.txt": "42"}), "outputs/answer.txt": "42"})
 			observation, err := adapter.Observe(ctx, ref)
 			record(observation, err)
-			logs, err := adapter.ReadLogs(ctx, ref, provider.PageRequest{Limit: 10})
+			logs, err := adapter.Logs(ctx, ref, provider.PageRequest{Limit: 10})
 			record(logs, err)
-			listed, err := adapter.ListArtifacts(ctx, ref, provider.PageRequest{Limit: 10})
+			listed, err := adapter.ListArtifacts(ctx, ref)
 			record(listed, err)
-			for _, artifact := range listed.Artifacts {
+			for _, artifact := range listed {
 				var data bytes.Buffer
-				receipt, err := adapter.FetchArtifact(ctx, ref, artifact, &data, 1<<20)
+				receipt, err := adapter.Fetch(ctx, ref, artifact, &data, 1<<20, nil)
 				record(receipt, err, data.String())
 			}
 			cleaned, err := adapter.CleanupResource(ctx, resourceRequest(provider.CleanupRequest{Remote: ref, LedgerID: "ledger_fixture", CreationOperationID: testOperation,

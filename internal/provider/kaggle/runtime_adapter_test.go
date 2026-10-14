@@ -33,7 +33,5 @@ func TestRuntimePreparePlanCheckDoesNotRepeatGPUQuotaRead(t *testing.T) {
 	if err := p.validPlan(context.Background(), changed); !errors.Is(err, ErrRuntimeBinding) {
 		t.Fatal("changed binding accepted", err)
 	}
-	if _, ok := any(p).(provider.Canceller); ok {
-		t.Fatal("Kaggle exposes a manual-only cancellation port")
-	}
+
 }

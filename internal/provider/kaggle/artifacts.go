@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,9 +23,8 @@ import (
 
 const artifactManifest = "control/execution-result.json"
 const artifactCatalogBytes = 8 << 20
-const artifactFileLimit = 10004
+const artifactFileLimit = provider.MaxArtifactFiles
 
-var ErrArtifactCursor = errors.New("invalid or expired artifact catalog cursor; restart listing")
 var ErrArtifactTransfer = errors.New("artifact verification failed; retain the original attempt and result pin")
 
 // ArtifactPolicy bounds this read-only component; it does not alter a frozen job.
@@ -67,17 +65,13 @@ type artifactInvocation func(context.Context, Config, string, []byte, artifactRe
 
 // ArtifactReader is one attempt's read-only output port. It never calls Submit,
 // Prepare, Cancel or Cleanup. Only M3 can pin/publish verified local artifacts.
-// One complete bounded catalog is held in memory for pagination; a fresh empty
-// cursor explicitly rediscovers it. Recovery uses M3's durable pin, not this cache.
+// Every listing returns a complete bounded catalog. Recovery uses the durable result pin.
 type ArtifactReader struct {
-	executor      *Executor
-	policy        ArtifactPolicy
-	request       artifactRequest
-	slot          chan struct{}
-	run           artifactInvocation
-	catalog       []artifactEntry
-	catalogRef    provider.RemoteReference
-	catalogDigest domain.SHA256Digest
+	executor *Executor
+	policy   ArtifactPolicy
+	request  artifactRequest
+	slot     chan struct{}
+	run      artifactInvocation
 }
 
 func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, error) {
@@ -170,21 +164,10 @@ func (a *ArtifactReader) enter(parent context.Context) (context.Context, context
 	}
 }
 
-type artifactCursor struct {
-	Reference domain.SHA256Digest `json:"reference"`
-	Catalog   domain.SHA256Digest `json:"catalog"`
-	Offset    int                 `json:"offset"`
-}
-
-func artifactReferenceDigest(ref provider.RemoteReference) domain.SHA256Digest {
-	raw, _ := json.Marshal(ref)
-	return provider.Digest(raw)
-}
-
-func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
-	var none provider.ArtifactPage
-	if a == nil || page.Validate() != nil {
-		return none, ErrArtifactCursor
+func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.RemoteReference) ([]provider.Artifact, error) {
+	var none []provider.Artifact
+	if a == nil {
+		return none, ErrConfig
 	}
 	if err := a.executor.checkOperationalReference(ref); err != nil {
 		return none, err
@@ -194,79 +177,58 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 		return none, err
 	}
 	defer leave()
-	if ctx.Err() != nil {
-		return none, ctx.Err()
+	raw, err := a.call(ctx, "catalog", ref, nil, nil)
+	if err != nil {
+		return none, err
 	}
-	offset := 0
-	if page.Cursor == "" {
-		a.catalog = nil
-		a.catalogDigest = ""
-		raw, err := a.call(ctx, "catalog", ref, nil, nil)
-		if err != nil {
-			return none, err
-		}
-		files, err := decodeArtifactCatalog(raw)
-		if err != nil {
-			return none, err
-		}
-		var total int64
-		seen := map[string]bool{}
-		hasManifest := false
-		if len(files) > a.policy.MaxFiles {
+	files, err := decodeArtifactCatalog(raw)
+	if err != nil {
+		return none, err
+	}
+	var total int64
+	seen := map[string]bool{}
+	hasManifest := false
+	if len(files) > a.policy.MaxFiles {
+		return none, ErrArtifactTransfer
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	for _, f := range files {
+		if !a.allowed(f.Path) || f.Bytes < 0 || !f.SHA256.Valid() || f.Bytes > a.policy.MaxBytes-total {
 			return none, ErrArtifactTransfer
 		}
-		sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-		for _, f := range files {
-			if !a.allowed(f.Path) || f.Bytes < 0 || !f.SHA256.Valid() || f.Bytes > a.policy.MaxBytes-total {
-				return none, ErrArtifactTransfer
-			}
-			if limit, ok := artifactControlLimit(f.Path); ok && f.Bytes > limit {
-				return none, ErrArtifactTransfer
-			}
-			key := strings.ToLower(f.Path)
-			parts := strings.Split(key, "/")
-			if seen[key] {
-				return none, ErrArtifactTransfer
-			}
-			for i := 1; i < len(parts); i++ {
-				if seen[strings.Join(parts[:i], "/")] {
-					return none, ErrArtifactTransfer
-				}
-			}
-			seen[key] = true
-			total += f.Bytes
-			hasManifest = hasManifest || f.Path == artifactManifest
-		}
-		// Check prefixes independently of original mixed-case ordering.
-		for key := range seen {
-			parts := strings.Split(key, "/")
-			for i := 1; i < len(parts); i++ {
-				if seen[strings.Join(parts[:i], "/")] {
-					return none, ErrArtifactTransfer
-				}
-			}
-		}
-		if !hasManifest {
+		if limit, ok := artifactControlLimit(f.Path); ok && f.Bytes > limit {
 			return none, ErrArtifactTransfer
 		}
-		encoded, _ := json.Marshal(files)
-		a.catalog, a.catalogRef, a.catalogDigest = files, ref, provider.Digest(encoded)
-	} else {
-		raw, err := base64.RawURLEncoding.Strict().DecodeString(page.Cursor)
-		var cursor artifactCursor
-		if err != nil || base64.RawURLEncoding.EncodeToString(raw) != page.Cursor || closedObject(raw, &cursor) != nil || cursor.Reference != artifactReferenceDigest(ref) || cursor.Catalog != a.catalogDigest || !cursor.Catalog.Valid() || a.catalogRef != ref || cursor.Offset <= 0 || cursor.Offset >= len(a.catalog) {
-			return none, ErrArtifactCursor
+		key := strings.ToLower(f.Path)
+		parts := strings.Split(key, "/")
+		if seen[key] {
+			return none, ErrArtifactTransfer
 		}
-		offset = cursor.Offset
+		for i := 1; i < len(parts); i++ {
+			if seen[strings.Join(parts[:i], "/")] {
+				return none, ErrArtifactTransfer
+			}
+		}
+		seen[key] = true
+		total += f.Bytes
+		hasManifest = hasManifest || f.Path == artifactManifest
 	}
-	end := min(offset+page.Limit, len(a.catalog))
-	result := provider.ArtifactPage{Artifacts: make([]provider.Artifact, 0, end-offset)}
-	for _, f := range a.catalog[offset:end] {
-		result.Artifacts = append(result.Artifacts, provider.Artifact{Remote: ref, Path: f.Path, Bytes: f.Bytes, SHA256: f.SHA256})
+	// Check prefixes independently of original mixed-case ordering.
+	for key := range seen {
+		parts := strings.Split(key, "/")
+		for i := 1; i < len(parts); i++ {
+			if seen[strings.Join(parts[:i], "/")] {
+				return none, ErrArtifactTransfer
+			}
+		}
 	}
-	if end < len(a.catalog) {
-		raw, _ := json.Marshal(artifactCursor{artifactReferenceDigest(ref), a.catalogDigest, end})
-		result.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+	if !hasManifest {
+		return none, ErrArtifactTransfer
+	}
+
+	result := make([]provider.Artifact, 0, len(files))
+	for _, f := range files {
+		result = append(result, provider.Artifact{Remote: ref, Path: f.Path, Bytes: f.Bytes, SHA256: f.SHA256})
 	}
 	return result, nil
 }
@@ -274,11 +236,7 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 // Destination MUST be temporary/unpublished. A full payload followed by failed
 // EOF/Close, digest or final identity check is still an error. M3's
 // transfer pipe sends successful EOF only after this entire method succeeds.
-func (a *ArtifactReader) FetchArtifact(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
-	return a.FetchArtifactWithProgress(parent, ref, file, dst, limit, nil)
-}
-
-func (a *ArtifactReader) FetchArtifactWithProgress(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+func (a *ArtifactReader) Fetch(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	var none provider.TransferResult
 	if a == nil || dst == nil || file.Validate(ref) != nil || !a.allowed(file.Path) || limit < file.Bytes || file.Bytes > a.policy.MaxBytes {
 		return none, ErrArtifactTransfer

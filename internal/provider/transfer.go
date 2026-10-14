@@ -20,7 +20,7 @@ func CopyVerified(ctx context.Context, source io.Reader, destination io.Writer, 
 	if err := artifact.Validate(artifact.Remote); err != nil {
 		return TransferResult{}, err
 	}
-	if source == nil || destination == nil || maxBytes <= 0 || artifact.Bytes > maxBytes {
+	if source == nil || destination == nil || maxBytes < 0 || artifact.Bytes > maxBytes {
 		return TransferResult{}, errors.New("invalid transfer endpoint or byte budget")
 	}
 	hash := sha256.New()
@@ -60,4 +60,38 @@ func (r *contextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.source.Read(p)
+}
+
+// WithTransferProgress reports absolute bytes only after successful destination writes.
+// The returned writer stops immediately when the callback fails.
+func WithTransferProgress(dst io.Writer, report func(int64) error) io.Writer {
+	if dst == nil || report == nil {
+		return dst
+	}
+	return &progressWriter{dst: dst, report: report}
+}
+
+type progressWriter struct {
+	dst    io.Writer
+	report func(int64) error
+	n      int64
+	err    error
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.dst.Write(p)
+	if n < 0 || n > len(p) {
+		return 0, io.ErrShortWrite
+	}
+	w.n += int64(n)
+	if err == nil && n == len(p) {
+		w.err = w.report(w.n)
+		if w.err != nil {
+			return n, w.err
+		}
+	}
+	return n, err
 }

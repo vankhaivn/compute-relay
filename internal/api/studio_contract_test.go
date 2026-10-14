@@ -35,6 +35,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // Frozen consumer projections from Studio's compute/{client,contracts}.py and
@@ -230,35 +231,35 @@ type studioProvider struct {
 	remote  *provider.RemoteReference
 }
 
-func (p *studioProvider) VerifyBinding(_ context.Context, b provider.BindingSnapshot) error {
+func (p *studioProvider) Verify(_ context.Context, b provider.BindingSnapshot) error {
 	if b != p.binding {
 		return fmt.Errorf("fixture binding changed")
 	}
 	return nil
 }
-func (p *studioProvider) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	out := p.Complete.Submit(ctx, prepared)
+func (p *studioProvider) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
+	out := p.Complete.Start(ctx, prepared, authorization, material)
 	p.remote = out.Remote
 	return out
 }
-func (p *studioProvider) ListArtifacts(ctx context.Context, r provider.RemoteReference, q provider.PageRequest) (provider.ArtifactPage, error) {
-	page, err := p.Complete.ListArtifacts(ctx, r, q)
-	for i := range page.Artifacts {
-		if page.Artifacts[i].Path == "execution-result.json" {
-			page.Artifacts[i].Path = collection.ManifestPath
+func (p *studioProvider) ListArtifacts(ctx context.Context, r provider.RemoteReference) ([]provider.Artifact, error) {
+	page, err := p.Complete.ListArtifacts(ctx, r)
+	for i := range page {
+		if page[i].Path == "execution-result.json" {
+			page[i].Path = collection.ManifestPath
 		} else {
-			page.Artifacts[i].Path = "outputs/" + page.Artifacts[i].Path
+			page[i].Path = "outputs/" + page[i].Path
 		}
 	}
 	return page, err
 }
-func (p *studioProvider) FetchArtifact(ctx context.Context, r provider.RemoteReference, a provider.Artifact, w io.Writer, max int64) (provider.TransferResult, error) {
+func (p *studioProvider) Fetch(ctx context.Context, r provider.RemoteReference, a provider.Artifact, w io.Writer, max int64, progress func(int64) error) (provider.TransferResult, error) {
 	if a.Path == collection.ManifestPath {
 		a.Path = "execution-result.json"
 	} else {
 		a.Path = strings.TrimPrefix(a.Path, "outputs/")
 	}
-	return p.Complete.FetchArtifact(ctx, r, a, w, max)
+	return p.Complete.Fetch(ctx, r, a, w, max, progress)
 }
 
 type studioHTTP struct {

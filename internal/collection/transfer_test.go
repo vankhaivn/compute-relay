@@ -16,12 +16,12 @@ import (
 // These fakes test the byte/acknowledgement seam only; they are not adapters or
 // persistence fallbacks. Unused methods are inherited and never invoked.
 type transferSource struct {
-	source
+	provider.Provider
 	fetch func(io.Writer) (provider.TransferResult, error)
 }
 
-func (s transferSource) FetchArtifact(_ context.Context, _ provider.RemoteReference, _ provider.Artifact, dst io.Writer, _ int64) (provider.TransferResult, error) {
-	return s.fetch(dst)
+func (s transferSource) Fetch(_ context.Context, _ provider.RemoteReference, _ provider.Artifact, dst io.Writer, _ int64, progress func(int64) error) (provider.TransferResult, error) {
+	return s.fetch(provider.WithTransferProgress(dst, progress))
 }
 
 type transferBlobs struct {
@@ -72,7 +72,7 @@ func TestTransferEOFRequiresCompleteAcknowledgedBytes(t *testing.T) {
 				return m, nil
 			}}
 			engine := &Engine{blobs: blobs}
-			err := engine.transfer(ctx, src, w.Observation.Remote, file)
+			err := engine.transfer(ctx, src, w.Observation.Remote, file, nil)
 			if (err == nil) != (mode == "success") || published.Load() != (mode == "success") {
 				t.Fatal("unacknowledged or invalid bytes reached EOF/publication", mode, err)
 			}
@@ -99,7 +99,7 @@ func TestTransferJoinsProviderAfterBlobFailureOrPanic(t *testing.T) {
 			return domain.ObjectMetadata{}, errors.New("disk unavailable")
 		}}}
 		finished := make(chan error, 1)
-		go func() { finished <- engine.transfer(ctx, src, w.Observation.Remote, file) }()
+		go func() { finished <- engine.transfer(ctx, src, w.Observation.Remote, file, nil) }()
 		select {
 		case err := <-finished:
 			if err == nil {
@@ -114,5 +114,40 @@ func TestTransferJoinsProviderAfterBlobFailureOrPanic(t *testing.T) {
 			t.Fatal("worker returned before provider callback ended")
 		}
 		cancel()
+	}
+}
+
+type catalogSource struct {
+	transferSource
+	catalog []provider.Artifact
+}
+
+func (s catalogSource) ListArtifacts(context.Context, provider.RemoteReference) ([]provider.Artifact, error) {
+	return s.catalog, nil
+}
+
+func TestFullCatalogBoundsKeepTheSelectedTransferBudget(t *testing.T) {
+	w, manifest, files := manifestFixture(t)
+	raw, catalog := snapshotFixture(t, w, manifest, files)
+	var selected int64
+	for _, file := range catalog {
+		selected += file.Bytes
+	}
+	catalog = append(catalog, provider.Artifact{Remote: w.Observation.Remote, Path: "scratch/unselected", Bytes: 1 << 20, SHA256: provider.Digest([]byte("unselected metadata"))})
+	var fetches int
+	src := catalogSource{transferSource: transferSource{fetch: func(dst io.Writer) (provider.TransferResult, error) {
+		fetches++
+		return provider.CopyVerified(context.Background(), bytes.NewReader(raw), dst, catalog[0], int64(len(raw)))
+	}}, catalog: catalog}
+	cfg := DefaultConfig()
+	cfg.MaxBytes = selected
+	engine := &Engine{config: cfg}
+	snapshot, err := engine.discover(context.Background(), src, w)
+	if err != nil || len(snapshot.Files) != 3 || fetches != 1 {
+		t.Fatal("unselected catalog bytes changed the selected transfer budget", snapshot, err, fetches)
+	}
+	src.catalog[len(src.catalog)-1].Bytes = provider.MaxArtifactBytes
+	if _, err := engine.discover(context.Background(), src, w); err == nil || fetches != 1 {
+		t.Fatal("overbound full catalog reached byte transfer", err, fetches)
 	}
 }

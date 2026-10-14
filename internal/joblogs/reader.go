@@ -81,31 +81,31 @@ func (r *Reader) Read(ctx context.Context, p auth.Principal, w domain.WorkspaceI
 			}
 			return provider.LogPage{}, ErrUnavailable
 		}
-		if _, supported := adapter.(provider.LogReader); supported {
-			verifier, ok := adapter.(provider.BindingVerifier)
-			if !ok || verifier.VerifyBinding(ctx, target.Binding) != nil {
-				if ctx.Err() != nil {
-					return provider.LogPage{}, ctx.Err()
-				}
-				return provider.LogPage{}, ErrUnavailable
+		if adapter.Describe().InstanceID != remote.Identity.InstanceID || adapter.Verify(ctx, target.Binding) != nil {
+			if ctx.Err() != nil {
+				return provider.LogPage{}, ctx.Err()
 			}
-			page, err = provider.ReadAvailableLogs(ctx, adapter, remote, request)
-			if err != nil {
-				if ctx.Err() != nil {
-					return provider.LogPage{}, ctx.Err()
-				}
-				if errors.Is(err, provider.ErrLogCursorInvalid) {
-					return provider.LogPage{}, provider.ErrLogCursorInvalid
-				}
-				if errors.Is(err, provider.ErrLogCursorReset) {
-					return provider.LogPage{}, provider.ErrLogCursorReset
-				}
-				var failure provider.LogReadFailure
-				if errors.As(err, &failure) && failure.Valid() {
-					return provider.LogPage{}, failure
-				}
-				return provider.LogPage{}, ErrUnavailable
+			return provider.LogPage{}, ErrUnavailable
+		}
+		page, err = adapter.Logs(ctx, remote, request)
+		if err == nil {
+			err = page.Validate(request)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return provider.LogPage{}, ctx.Err()
 			}
+			if errors.Is(err, provider.ErrLogCursorInvalid) {
+				return provider.LogPage{}, provider.ErrLogCursorInvalid
+			}
+			if errors.Is(err, provider.ErrLogCursorReset) {
+				return provider.LogPage{}, provider.ErrLogCursorReset
+			}
+			var failure provider.LogReadFailure
+			if errors.As(err, &failure) && failure.Valid() {
+				return provider.LogPage{}, failure
+			}
+			return provider.LogPage{}, ErrUnavailable
 		}
 	}
 	if err = ctx.Err(); err != nil {

@@ -284,7 +284,7 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 		}
 		wrong := expected
 		wrong.AccountScope = "wrong_account"
-		if err := wrapped.VerifyBinding(context.Background(), wrong); err == nil {
+		if err := wrapped.Verify(context.Background(), wrong); err == nil {
 			t.Fatal("wrong outer snapshot reached canonical account")
 		}
 	}

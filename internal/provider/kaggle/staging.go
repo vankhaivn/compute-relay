@@ -46,7 +46,7 @@ type stagingInvocation func(context.Context, Config, string, []byte, stagingPlan
 
 // Stager is a preparation-only component, NOT a Provider or a scheduler. Only a
 // caller that just committed a NEW M3 BeginPreparation may invoke Prepare with
-// creation enabled. Recovery must use ReconcilePreparation. No registration or
+// creation enabled. Recovery must use ReconcilePrepare. No registration or
 // executable mutation command is installed by NewStager.
 type Stager struct {
 	config      Config
@@ -57,8 +57,6 @@ type Stager struct {
 	slot        chan struct{}
 	run         stagingInvocation
 }
-
-var _ provider.PreparationObserver = (*Stager)(nil)
 
 func NewStager(c Config, policy StagingPolicy, resolver ports.CredentialResolver, blobs StagingBlobs, allowCreate bool) (*Stager, error) {
 	if c.Validate() != nil || !policy.valid() || resolver == nil || blobs == nil {
@@ -110,7 +108,7 @@ func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan,
 
 // A miss is not permission to create/upload/version anything. This path does not
 // read local payload bytes; it verifies remote bytes against the original pins.
-func (s *Stager) ReconcilePreparation(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig
 	}

@@ -9,8 +9,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-var _ provider.ResourceCleaner = (*RuntimeAdapter)(nil)
-
 const nameBasedDeleteWarning = "Kaggle deletes by owner/name. Renaming may leave the original undeleted. If someone replaces it after Relay checks it, the replacement may be deleted, including its versions and outputs."
 
 func (p *RuntimeAdapter) DescribeCleanup(request provider.CleanupResourceRequest) (provider.CleanupDescription, error) {

@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 // RuntimeLoader reloads the original durable plan/preparation for one attempt.
@@ -44,12 +45,7 @@ type runtimeComponents struct {
 }
 
 var (
-	_ provider.Provider               = (*RuntimeAdapter)(nil)
-	_ provider.ArtifactProgressReader = (*RuntimeAdapter)(nil)
-	_ provider.BindingVerifier        = (*RuntimeAdapter)(nil)
-	_ provider.PreparationObserver    = (*RuntimeAdapter)(nil)
-	_ provider.QuotaReader            = (*RuntimeAdapter)(nil)
-	_ provider.LogReader              = (*RuntimeAdapter)(nil)
+	_ provider.Provider = (*RuntimeAdapter)(nil)
 
 	ErrRuntimeBinding = errors.New("runtime provider binding does not match the configured immutable profile")
 )
@@ -133,7 +129,7 @@ func (p *RuntimeAdapter) Describe() provider.Descriptor {
 	return d
 }
 
-func (p *RuntimeAdapter) VerifyBinding(ctx context.Context, expected provider.BindingSnapshot) error {
+func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if p == nil || expected != p.binding {
 		return ErrRuntimeBinding
 	}
@@ -144,22 +140,13 @@ func (p *RuntimeAdapter) VerifyBinding(ctx context.Context, expected provider.Bi
 	return nil
 }
 
-func (p *RuntimeAdapter) Check(ctx context.Context) (provider.DiagnosticReport, error) {
-	if err := p.VerifyBinding(ctx, p.binding); err != nil {
-		return provider.DiagnosticReport{}, err
-	}
-	return provider.DiagnosticReport{
-		Evidence: domain.EvidenceImplementedOffline, CheckedAt: p.clock.Now().UTC(), Ready: true,
-	}, nil
-}
-
 func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
 	plan, err := p.localPlan(ctx, job)
 	if err != nil {
 		return provider.Plan{}, err
 	}
 	if p.policy.MachineShape != "" {
-		q, err := provider.ReadAvailableQuota(ctx, p)
+		q, err := p.monitor.ReadQuota(ctx)
 		if err != nil || q.Status != provider.QuotaKnown || q.Remaining == nil || *q.Remaining < float64(job.WallSeconds) {
 			return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch")
 		}
@@ -220,11 +207,11 @@ func (p *RuntimeAdapter) Prepare(ctx context.Context, plan provider.Plan, operat
 	return p.stager.Prepare(ctx, plan, operation)
 }
 
-func (p *RuntimeAdapter) ReconcilePreparation(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+func (p *RuntimeAdapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if p == nil || plan.Job.Validate() != nil || plan.Job.Binding != p.binding.Binding {
 		return provider.PreparationObservation{}, ErrRuntimeBinding
 	}
-	return p.stager.ReconcilePreparation(ctx, plan, operation)
+	return p.stager.ReconcilePrepare(ctx, plan, operation)
 }
 
 func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*runtimeComponents, error) {
@@ -259,8 +246,8 @@ func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*ru
 	return c, nil
 }
 
-func (p *RuntimeAdapter) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	if p == nil {
+func (p *RuntimeAdapter) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
+	if p == nil || authorization != nil || material != nil {
 		return rejectedExecution(reasonSubmissionDisabled)
 	}
 	if prepared.Identity.Validate() != nil {
@@ -270,15 +257,15 @@ func (p *RuntimeAdapter) Submit(ctx context.Context, prepared provider.Prepared)
 	if err != nil || c.prepared != prepared {
 		return unknownExecution()
 	}
-	return c.executor.Submit(ctx, prepared)
+	return c.executor.Start(ctx, prepared, nil, nil)
 }
 
-func (p *RuntimeAdapter) ReconcileSubmission(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
+func (p *RuntimeAdapter) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
 	c, err := p.attempt(ctx, id)
 	if err != nil {
 		return provider.Reconciliation{}, err
 	}
-	return c.executor.ReconcileSubmission(ctx, id)
+	return c.executor.Reconcile(ctx, id)
 }
 
 func (p *RuntimeAdapter) Observe(ctx context.Context, ref provider.RemoteReference) (provider.Observation, error) {
@@ -289,35 +276,30 @@ func (p *RuntimeAdapter) Observe(ctx context.Context, ref provider.RemoteReferen
 	return c.executor.Observe(ctx, ref)
 }
 
-func (p *RuntimeAdapter) ListArtifacts(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
+func (p *RuntimeAdapter) ListArtifacts(ctx context.Context, ref provider.RemoteReference) ([]provider.Artifact, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
-		return provider.ArtifactPage{}, err
+		return nil, err
 	}
-	return c.artifacts.ListArtifacts(ctx, ref, page)
+	return c.artifacts.ListArtifacts(ctx, ref)
 }
-
-func (p *RuntimeAdapter) FetchArtifact(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
-	c, err := p.attempt(ctx, ref.Identity)
-	if err != nil {
-		return provider.TransferResult{}, err
-	}
-	return c.artifacts.FetchArtifact(ctx, ref, file, dst, limit)
-}
-
-func (p *RuntimeAdapter) FetchArtifactWithProgress(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+func (p *RuntimeAdapter) Fetch(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
 		return provider.TransferResult{}, err
 	}
-	return c.artifacts.FetchArtifactWithProgress(ctx, ref, file, dst, limit, progress)
+	return c.artifacts.Fetch(ctx, ref, file, dst, limit, progress)
 }
-
-func (p *RuntimeAdapter) ReadQuota(ctx context.Context) (provider.QuotaObservation, error) {
-	return p.monitor.ReadQuota(ctx)
+func (p *RuntimeAdapter) Cancel(ctx context.Context, ref provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
+	if err := ctx.Err(); err != nil {
+		return provider.CancellationOutcome{}, err
+	}
+	if p == nil || ref.Validate() != nil || !operation.Valid() || ref.Identity.InstanceID != domain.ProviderInstanceID(p.config.InstanceID) {
+		return provider.CancellationOutcome{}, ErrRuntimeBinding
+	}
+	return provider.CancellationOutcome{Status: domain.CancellationManual}, nil
 }
-
-func (p *RuntimeAdapter) ReadLogs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+func (p *RuntimeAdapter) Logs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
 		return provider.LogPage{}, err
@@ -326,5 +308,5 @@ func (p *RuntimeAdapter) ReadLogs(ctx context.Context, ref provider.RemoteRefere
 	if err != nil {
 		return provider.LogPage{}, err
 	}
-	return logs.ReadLogs(ctx, ref, page)
+	return logs.Logs(ctx, ref, page)
 }

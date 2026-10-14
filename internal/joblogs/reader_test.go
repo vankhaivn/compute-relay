@@ -42,11 +42,11 @@ type logProvider struct {
 func (p *logProvider) Describe() provider.Descriptor {
 	return provider.Descriptor{InstanceID: "fixture"}
 }
-func (p *logProvider) VerifyBinding(context.Context, provider.BindingSnapshot) error {
+func (p *logProvider) Verify(context.Context, provider.BindingSnapshot) error {
 	p.verified++
 	return nil
 }
-func (p *logProvider) ReadLogs(ctx context.Context, _ provider.RemoteReference, _ provider.PageRequest) (provider.LogPage, error) {
+func (p *logProvider) Logs(ctx context.Context, _ provider.RemoteReference, _ provider.PageRequest) (provider.LogPage, error) {
 	return p.read(ctx)
 }
 func logSetup(t *testing.T) (*Reader, *auth.Service, auth.Principal, *logRepo, *logResolver) {
@@ -104,7 +104,9 @@ func TestReadUnavailableAndOriginalIdentity(t *testing.T) {
 			case "no-resolver":
 				r.resolver = nil
 			case "no-logs":
-				resolver.adapter = &struct{ provider.Provider }{nil}
+				resolver.adapter = &logProvider{read: func(context.Context) (provider.LogPage, error) {
+					return provider.LogPage{Source: "provider", Availability: "unavailable"}, nil
+				}}
 			case "wrong-job":
 				repo.target.Remote.Identity.JobID = "another-job"
 			case "wrong-attempt":

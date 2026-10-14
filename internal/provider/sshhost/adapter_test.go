@@ -136,7 +136,7 @@ func (h *harness) prepare(t *testing.T) (provider.Plan, provider.Prepared) {
 func (h *harness) submit(t *testing.T) provider.RemoteReference {
 	t.Helper()
 	_, prepared := h.prepare(t)
-	out := h.adapter.Submit(context.Background(), prepared)
+	out := h.adapter.Start(context.Background(), prepared, nil, nil)
 	if err := out.Validate(h.job.Identity); err != nil || out.Status != provider.SubmissionAccepted {
 		t.Fatalf("submit = %+v, %v", out, err)
 	}
@@ -155,9 +155,8 @@ func resultManifest(id provider.Identity, outputs map[string]string) string {
 func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	check, err := h.adapter.Check(ctx)
-	if err != nil || !check.Ready || check.Evidence != domain.EvidenceImplementedOffline {
-		t.Fatalf("check = %+v, %v", check, err)
+	if err := h.adapter.Verify(ctx, h.adapter.binding); err != nil {
+		t.Fatal(err)
 	}
 	plan, err := h.adapter.Validate(ctx, h.job)
 	if err != nil {
@@ -203,20 +202,20 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 		t.Fatal("staged bytes differ from frozen objects")
 	}
 
-	found, err := h.adapter.ReconcilePreparation(ctx, plan, testOperation)
+	found, err := h.adapter.ReconcilePrepare(ctx, plan, testOperation)
 	if err != nil || found.Validate(plan, testOperation) != nil || found.Status != provider.ReconciliationFound || *found.Prepared != prepared {
 		t.Fatalf("reconcile preparation = %+v, %v", found, err)
 	}
-	if lookup, err := h.adapter.ReconcileSubmission(ctx, h.job.Identity); err != nil || lookup.Status != provider.ReconciliationNotFound {
+	if lookup, err := h.adapter.Reconcile(ctx, h.job.Identity); err != nil || lookup.Status != provider.ReconciliationNotFound {
 		t.Fatalf("unstarted container was found: %+v, %v", lookup, err)
 	}
 
-	out := h.adapter.Submit(ctx, prepared)
+	out := h.adapter.Start(ctx, prepared, nil, nil)
 	if err = out.Validate(h.job.Identity); err != nil || out.Status != provider.SubmissionAccepted || out.Remote.Version != c.id {
 		t.Fatalf("submit = %+v, %v", out, err)
 	}
 	remote := *out.Remote
-	lookup, err := h.adapter.ReconcileSubmission(ctx, h.job.Identity)
+	lookup, err := h.adapter.Reconcile(ctx, h.job.Identity)
 	if err != nil || lookup.Validate(h.job.Identity) != nil || lookup.Status != provider.ReconciliationFound || *lookup.Remote != remote {
 		t.Fatalf("reconcile = %+v, %v", lookup, err)
 	}
@@ -224,7 +223,7 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 	if err != nil || running.Execution != domain.ExecutionRunning || running.RemoteActivity != domain.RemoteActivityActive {
 		t.Fatalf("observe = %+v, %v", running, err)
 	}
-	if _, err = h.adapter.ListArtifacts(ctx, remote, provider.PageRequest{Limit: 10}); !errors.Is(err, ErrNotDone) {
+	if _, err = h.adapter.ListArtifacts(ctx, remote); !errors.Is(err, ErrNotDone) {
 		t.Fatalf("running artifacts: %v", err)
 	}
 
@@ -237,24 +236,15 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 		t.Fatalf("observe = %+v, %v", done, err)
 	}
 
-	var listed []provider.Artifact
-	page := provider.PageRequest{Limit: 2}
-	for pages := 0; ; pages++ {
-		result, err := h.adapter.ListArtifacts(ctx, remote, page)
-		if err != nil || len(result.Artifacts) > 2 || pages > 5 {
-			t.Fatalf("list = %+v, %v", result, err)
-		}
-		listed = append(listed, result.Artifacts...)
-		if result.NextCursor == "" {
-			break
-		}
-		page.Cursor = result.NextCursor
+	listed, err := h.adapter.ListArtifacts(ctx, remote)
+	if err != nil {
+		t.Fatal(err)
 	}
 	var paths []string
 	for _, artifact := range listed {
 		paths = append(paths, artifact.Path)
 		var dst bytes.Buffer
-		receipt, err := h.adapter.FetchArtifact(ctx, remote, artifact, &dst, 1<<20)
+		receipt, err := h.adapter.Fetch(ctx, remote, artifact, &dst, 1<<20, nil)
 		if err != nil || receipt.Bytes != artifact.Bytes || receipt.SHA256 != artifact.SHA256 || provider.Digest(dst.Bytes()) != artifact.SHA256 {
 			t.Fatalf("fetch %s = %+v, %v", artifact.Path, receipt, err)
 		}
@@ -264,12 +254,12 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 	}
 	tampered := listed[4]
 	tampered.SHA256 = provider.Digest([]byte("43"))
-	if _, err = h.adapter.FetchArtifact(ctx, remote, tampered, io.Discard, 1<<20); !errors.Is(err, ErrArtifact) {
+	if _, err = h.adapter.Fetch(ctx, remote, tampered, io.Discard, 1<<20, nil); !errors.Is(err, ErrArtifact) {
 		t.Fatalf("tampered fetch: %v", err)
 	}
 	foreign := listed[4]
 	foreign.Remote.Identity.Nonce = strings.Repeat("b", 32)
-	if _, err = h.adapter.FetchArtifact(ctx, remote, foreign, io.Discard, 1<<20); !errors.Is(err, ErrArtifact) {
+	if _, err = h.adapter.Fetch(ctx, remote, foreign, io.Discard, 1<<20, nil); !errors.Is(err, ErrArtifact) {
 		t.Fatalf("foreign fetch: %v", err)
 	}
 
@@ -284,7 +274,7 @@ func TestLifecycleRunsOneHardenedContainerAndCollectsVerifiedFiles(t *testing.T)
 	if repeat, err := h.adapter.CleanupResource(ctx, resourceRequest(request, mustPlan(t, h).Digest())); err != nil || !repeat.AlreadyAbsent {
 		t.Fatalf("repeat = %+v, %v", repeat, err)
 	}
-	if h.host.starts != 1 || h.host.created != 1 || h.host.closed != h.dials {
+	if h.host.starts != 1 || h.host.created != 1 || h.host.commands("rm") != 1 || h.host.closed != h.dials {
 		t.Fatalf("starts=%d created=%d closed=%d dials=%d", h.host.starts, h.host.created, h.host.closed, h.dials)
 	}
 }
@@ -295,7 +285,7 @@ func TestSubmitRejectsOnlyBeforeStartAndOtherwiseStaysUnknown(t *testing.T) {
 		h := newHarness(t)
 		_, prepared := h.prepare(t)
 		h.host.containers = map[string]*fakeContainer{}
-		out := h.adapter.Submit(ctx, prepared)
+		out := h.adapter.Start(ctx, prepared, nil, nil)
 		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || out.Problem.PublicDetails()["reason"] != "container_missing" {
 			t.Fatalf("submit = %+v", out)
 		}
@@ -304,7 +294,7 @@ func TestSubmitRejectsOnlyBeforeStartAndOtherwiseStaysUnknown(t *testing.T) {
 		h := newHarness(t)
 		_, prepared := h.prepare(t)
 		h.dialErr = ErrUnavailable
-		out := h.adapter.Submit(ctx, prepared)
+		out := h.adapter.Start(ctx, prepared, nil, nil)
 		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || h.host.starts != 0 {
 			t.Fatalf("submit = %+v", out)
 		}
@@ -315,7 +305,7 @@ func TestSubmitRejectsOnlyBeforeStartAndOtherwiseStaysUnknown(t *testing.T) {
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
 		dials := h.dials
-		out := h.adapter.Submit(cancelled, prepared)
+		out := h.adapter.Start(cancelled, prepared, nil, nil)
 		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || h.dials != dials {
 			t.Fatalf("submit = %+v", out)
 		}
@@ -324,7 +314,7 @@ func TestSubmitRejectsOnlyBeforeStartAndOtherwiseStaysUnknown(t *testing.T) {
 		h := newHarness(t)
 		_, prepared := h.prepare(t)
 		h.host.fail = func(args []string) (Result, bool) { return Result{ExitCode: 1}, args[1] == "start" }
-		out := h.adapter.Submit(ctx, prepared)
+		out := h.adapter.Start(ctx, prepared, nil, nil)
 		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionUnknown {
 			t.Fatalf("submit = %+v", out)
 		}
@@ -332,10 +322,10 @@ func TestSubmitRejectsOnlyBeforeStartAndOtherwiseStaysUnknown(t *testing.T) {
 	t.Run("already started", func(t *testing.T) {
 		h := newHarness(t)
 		_, prepared := h.prepare(t)
-		if out := h.adapter.Submit(ctx, prepared); out.Status != provider.SubmissionAccepted {
+		if out := h.adapter.Start(ctx, prepared, nil, nil); out.Status != provider.SubmissionAccepted {
 			t.Fatalf("first submit = %+v", out)
 		}
-		out := h.adapter.Submit(ctx, prepared)
+		out := h.adapter.Start(ctx, prepared, nil, nil)
 		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionUnknown || h.host.starts != 1 {
 			t.Fatalf("second submit = %+v", out)
 		}
@@ -344,7 +334,7 @@ func TestSubmitRejectsOnlyBeforeStartAndOtherwiseStaysUnknown(t *testing.T) {
 		h := newHarness(t)
 		_, prepared := h.prepare(t)
 		prepared.PreparationID = "prep_other"
-		out := h.adapter.Submit(ctx, prepared)
+		out := h.adapter.Start(ctx, prepared, nil, nil)
 		if out.Validate(h.job.Identity) != nil || out.Status != provider.SubmissionRejected || h.host.starts != 0 {
 			t.Fatalf("submit = %+v", out)
 		}
@@ -377,11 +367,11 @@ func TestPrepareRemovesItsOwnContainerWhenStagingFails(t *testing.T) {
 	if _, err = h.adapter.Prepare(ctx, plan, testOperation); !errors.Is(err, ErrIdentity) || h.host.created != 2 {
 		t.Fatalf("second prepare: %v", err)
 	}
-	if found, err := h.adapter.ReconcilePreparation(ctx, plan, "prep_other"); !errors.Is(err, ErrIdentity) {
+	if found, err := h.adapter.ReconcilePrepare(ctx, plan, "prep_other"); !errors.Is(err, ErrIdentity) {
 		t.Fatalf("foreign preparation: %+v, %v", found, err)
 	}
 	delete(h.host.container(t).files, "relay/staged.json")
-	if found, err := h.adapter.ReconcilePreparation(ctx, plan, testOperation); err != nil || found.Status != provider.ReconciliationNotFound {
+	if found, err := h.adapter.ReconcilePrepare(ctx, plan, testOperation); err != nil || found.Status != provider.ReconciliationNotFound {
 		t.Fatalf("incomplete staging: %+v, %v", found, err)
 	}
 }
@@ -477,15 +467,15 @@ func TestChangedHostKeyStopsBeforeLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.vault.raw = raw
-	if _, err = h.adapter.Check(context.Background()); !errors.Is(err, ErrHostKeyMismatch) || h.dials != 0 {
+	if err = h.adapter.Verify(context.Background(), h.adapter.binding); !errors.Is(err, ErrHostKeyMismatch) || h.dials != 0 {
 		t.Fatalf("check = %v, dials %d", err, h.dials)
 	}
 	raw, _ = EncodeFields(map[string]string{FieldHost: "100.64.0.8", FieldUsername: "kenji", FieldPassword: "secret"})
 	h.vault.raw = raw
-	if _, err = h.adapter.Check(context.Background()); !errors.Is(err, ErrHostKeyMismatch) || h.dials != 0 {
+	if err = h.adapter.Verify(context.Background(), h.adapter.binding); !errors.Is(err, ErrHostKeyMismatch) || h.dials != 0 {
 		t.Fatalf("moved host = %v, dials %d", err, h.dials)
 	}
-	if err = h.adapter.VerifyBinding(context.Background(), provider.BindingSnapshot{}); !errors.Is(err, ErrBinding) {
+	if err = h.adapter.Verify(context.Background(), provider.BindingSnapshot{}); !errors.Is(err, ErrBinding) {
 		t.Fatalf("other binding: %v", err)
 	}
 }
@@ -495,28 +485,28 @@ func TestReadLogsPagesCompleteStdoutLines(t *testing.T) {
 	h := newHarness(t)
 	remote := h.submit(t)
 	h.host.container(t).logs = "a\nb\nc\npart"
-	first, err := h.adapter.ReadLogs(ctx, remote, provider.PageRequest{Limit: 2})
+	first, err := h.adapter.Logs(ctx, remote, provider.PageRequest{Limit: 2})
 	if err != nil || !slices.Equal(first.Lines, []string{"a", "b"}) || first.Availability != "live" || first.Source != "provider" || first.NextCursor == "" {
 		t.Fatalf("first = %+v, %v", first, err)
 	}
-	second, err := h.adapter.ReadLogs(ctx, remote, provider.PageRequest{Limit: 2, Cursor: first.NextCursor})
+	second, err := h.adapter.Logs(ctx, remote, provider.PageRequest{Limit: 2, Cursor: first.NextCursor})
 	if err != nil || !slices.Equal(second.Lines, []string{"c"}) || second.NextCursor == "" {
 		t.Fatalf("second = %+v, %v", second, err)
 	}
 	h.host.container(t).logs = "a\nb\nc\npartial line\n" + strings.Repeat("é", maxLogLineBytes) + "\n"
 	h.host.finish(0, nil)
-	third, err := h.adapter.ReadLogs(ctx, remote, provider.PageRequest{Limit: 5, Cursor: second.NextCursor})
+	third, err := h.adapter.Logs(ctx, remote, provider.PageRequest{Limit: 5, Cursor: second.NextCursor})
 	if err != nil || len(third.Lines) != 2 || third.Lines[0] != "partial line" || !third.Truncated || len(third.Lines[1]) > maxLogLineBytes ||
 		third.Availability != "after_completion" || third.NextCursor != "" {
 		t.Fatalf("third = %+v, %v", third, err)
 	}
 	for _, cursor := range []string{"bad", strings.Replace(second.NextCursor, "e", "f", 1)} {
-		if _, err = h.adapter.ReadLogs(ctx, remote, provider.PageRequest{Limit: 1, Cursor: cursor}); !errors.Is(err, provider.ErrLogCursorInvalid) {
+		if _, err = h.adapter.Logs(ctx, remote, provider.PageRequest{Limit: 1, Cursor: cursor}); !errors.Is(err, provider.ErrLogCursorInvalid) {
 			t.Errorf("cursor %q: %v", cursor, err)
 		}
 	}
 	h.host.container(t).logs = ""
-	if _, err = h.adapter.ReadLogs(ctx, remote, provider.PageRequest{Limit: 1, Cursor: second.NextCursor}); !errors.Is(err, provider.ErrLogCursorReset) {
+	if _, err = h.adapter.Logs(ctx, remote, provider.PageRequest{Limit: 1, Cursor: second.NextCursor}); !errors.Is(err, provider.ErrLogCursorReset) {
 		t.Fatalf("truncated stream: %v", err)
 	}
 }
@@ -549,21 +539,21 @@ func TestReadTarRefusesLinksAndOversizedFiles(t *testing.T) {
 		"control/execution-result.json": resultManifest(h.job.Identity, map[string]string{"answer.txt": "42"})})
 	c := h.host.container(t)
 	c.files["relay/work/control/stderr.log"] = fakeFile{link: true}
-	if _, err := h.adapter.ListArtifacts(ctx, remote, provider.PageRequest{Limit: 10}); !errors.Is(err, ErrArtifact) {
+	if _, err := h.adapter.ListArtifacts(ctx, remote); !errors.Is(err, ErrArtifact) {
 		t.Fatalf("symlink control file: %v", err)
 	}
 	delete(c.files, "relay/work/control/stderr.log")
-	page, err := h.adapter.ListArtifacts(ctx, remote, provider.PageRequest{Limit: 10})
+	page, err := h.adapter.ListArtifacts(ctx, remote)
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer := page.Artifacts[len(page.Artifacts)-1]
+	answer := page[len(page)-1]
 	c.files["relay/work/outputs/answer.txt"] = fakeFile{data: []byte("420")}
 	var dst bytes.Buffer
-	if _, err = h.adapter.FetchArtifact(ctx, remote, answer, &dst, 1<<20); !errors.Is(err, ErrArtifact) || dst.Len() != 0 {
+	if _, err = h.adapter.Fetch(ctx, remote, answer, &dst, 1<<20, nil); !errors.Is(err, ErrArtifact) || dst.Len() != 0 {
 		t.Fatalf("grown output: %v, wrote %d", err, dst.Len())
 	}
-	if _, err = h.adapter.FetchArtifact(ctx, remote, answer, &dst, 1); !errors.Is(err, ErrArtifact) {
+	if _, err = h.adapter.Fetch(ctx, remote, answer, &dst, 1, nil); !errors.Is(err, ErrArtifact) {
 		t.Fatalf("over caller limit: %v", err)
 	}
 }
@@ -603,15 +593,25 @@ func TestCatalogDoesNotTrustInvalidResultOutputs(t *testing.T) {
 				raw = resultManifest(id, map[string]string{"answer.txt": "42"})
 			}
 			h.host.finish(0, map[string]string{"control/execution-result.json": raw, "outputs/answer.txt": "42"})
-			page, err := h.adapter.ListArtifacts(context.Background(), remote, provider.PageRequest{Limit: 10})
+			page, err := h.adapter.ListArtifacts(context.Background(), remote)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, artifact := range page.Artifacts {
+			for _, artifact := range page {
 				if strings.HasPrefix(artifact.Path, "outputs/") {
 					t.Fatal("untrusted output listed", artifact.Path)
 				}
 			}
 		})
+	}
+}
+
+func TestInvalidCancellationOperationNeverCopiesOrStops(t *testing.T) {
+	h := newHarness(t)
+	remote := h.submit(t)
+	copies, stops, dials := h.host.commands("cp"), h.host.commands("stop"), h.dials
+	outcome, err := h.adapter.Cancel(context.Background(), remote, "")
+	if !errors.Is(err, ErrRequest) || outcome != (provider.CancellationOutcome{}) || h.host.commands("cp") != copies || h.host.commands("stop") != stops || h.dials != dials {
+		t.Fatal("invalid cancellation caused effects", outcome, err)
 	}
 }

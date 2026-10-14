@@ -68,7 +68,7 @@ func TestExecutorConcurrentSubmitHasOneInvocationAndNoAutomaticRetry(t *testing.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out := e.Submit(context.Background(), e.prepared)
+			out := e.Start(context.Background(), e.prepared, nil, nil)
 			if err := out.Validate(e.plan.Job.Identity); err != nil {
 				t.Error(err)
 			}
@@ -109,14 +109,14 @@ func TestExecutorAmbiguityReconcilesWithoutAnotherSubmit(t *testing.T) {
 					return executionResponse{Protocol: 1, Status: "unknown"}, nil
 				}
 			}
-			out := e.Submit(context.Background(), e.prepared)
+			out := e.Start(context.Background(), e.prepared, nil, nil)
 			if out.Validate(e.plan.Job.Identity) != nil || out.Status != provider.SubmissionUnknown || strings.Contains(out.Problem.Message, "SYNTHETIC_TOKEN") {
 				t.Fatal("ambiguous result escaped", out)
 			}
-			if e.Submit(context.Background(), e.prepared).Status != provider.SubmissionUnknown || calls != 1 {
+			if e.Start(context.Background(), e.prepared, nil, nil).Status != provider.SubmissionUnknown || calls != 1 {
 				t.Fatal("blind resubmission")
 			}
-			recovered, err := e.ReconcileSubmission(context.Background(), e.plan.Job.Identity)
+			recovered, err := e.Reconcile(context.Background(), e.plan.Job.Identity)
 			if err != nil || recovered.Status != provider.ReconciliationFound || calls != 2 {
 				t.Fatal("failed same-identity recovery", err)
 			}
@@ -191,7 +191,7 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 			case "cancelled":
 				cancel()
 			}
-			out := e.Submit(ctx, prepared)
+			out := e.Start(ctx, prepared, nil, nil)
 			if out.Validate(e.plan.Job.Identity) != nil || out.Status != provider.SubmissionRejected || out.Problem.ComputeMayHaveStarted || out.Problem.Details[domain.ReasonDetail] != want {
 				t.Fatal("unattempted request was not rejected safely with its reason", out.Problem)
 			}
@@ -206,7 +206,7 @@ func TestExecutorCarriesOnlyClosedHelperRefusals(t *testing.T) {
 		e.run = func(context.Context, Config, string, []byte, executionRequest) (executionResponse, error) {
 			return executionResponse{Protocol: 1, Status: "rejected", Reason: reason}, nil
 		}
-		out := e.Submit(context.Background(), e.prepared)
+		out := e.Start(context.Background(), e.prepared, nil, nil)
 		if out.Validate(e.plan.Job.Identity) != nil || out.Status != want || want == provider.SubmissionRejected && out.Problem.Details[domain.ReasonDetail] != reason {
 			t.Fatal("helper refusal was misclassified", reason, out)
 		}
@@ -317,7 +317,7 @@ func TestExecutorStagesUnderPreparationBudgetBeforeBoundedSubmissionCall(t *test
 		calls++
 		return executionFound(r, "QUEUED"), nil
 	}
-	if result := e.Submit(context.Background(), e.prepared); result.Status != provider.SubmissionAccepted || calls != 1 {
+	if result := e.Start(context.Background(), e.prepared, nil, nil); result.Status != provider.SubmissionAccepted || calls != 1 {
 		t.Fatal("verified staging did not reach exactly one submission")
 	}
 }

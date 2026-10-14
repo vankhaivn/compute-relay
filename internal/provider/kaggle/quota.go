@@ -10,8 +10,6 @@ import (
 const QuotaFreshFor = 5 * time.Minute
 const quotaSource = "kaggle-api/v1:gpu_quota:reservations_included"
 
-var _ provider.QuotaReader = (*Monitor)(nil)
-
 // ReadQuota uses the original server-verified account, not a job/workspace quota.
 // The observation timestamp precedes the read so response latency cannot make old
 // evidence appear fresh. There is no secret/value cache and no inferred reset day.

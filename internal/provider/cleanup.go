@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"regexp"
 	"unicode"
 	"unicode/utf8"
@@ -40,13 +39,6 @@ func (d CleanupDescription) Valid() bool {
 	return cleanupLabel.MatchString(d.Kind) && cleanupLabel.MatchString(d.ID) && cleanupLabel.MatchString(d.Name) &&
 		cleanupLabel.MatchString(d.Version) && cleanupReason.MatchString(d.Scope) && d.Support.Valid() &&
 		cleanupReason.MatchString(d.Reason) && (d.Bytes == nil || *d.Bytes >= 0)
-}
-
-// ResourceCleaner cleans one recorded ledger resource. Name-based deletion requires
-// explicit warning and acceptance; adapters verify the original ledger identity.
-type ResourceCleaner interface {
-	DescribeCleanup(CleanupResourceRequest) (CleanupDescription, error)
-	CleanupResource(context.Context, CleanupResourceRequest) (CleanupOutcome, error)
 }
 
 type CleanupResourceRequest struct {

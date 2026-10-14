@@ -107,7 +107,7 @@ func NewBackend(s Scenario) (*Backend, error) {
 }
 func (b *Backend) Stats() Stats { b.mu.Lock(); defer b.mu.Unlock(); return b.stats }
 
-// Basic intentionally does NOT implement Canceller, LogReader or QuotaReader.
+// Basic reports unsupported optional behavior through the mandatory provider methods.
 type Basic struct {
 	backend  *Backend
 	clock    ports.Clock
@@ -161,12 +161,6 @@ func (p *Basic) Describe() provider.Descriptor {
 			Reason: "deterministic fixture only; no real execution", ClientVersion: "fake/1"})
 	}
 	return d
-}
-func (p *Basic) Check(ctx context.Context) (provider.DiagnosticReport, error) {
-	if err := ctx.Err(); err != nil {
-		return provider.DiagnosticReport{}, err
-	}
-	return provider.DiagnosticReport{Evidence: domain.EvidenceImplementedOffline, CheckedAt: p.clock.Now(), Ready: true}, nil
 }
 func (p *Basic) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
 	if err := ctx.Err(); err != nil {
@@ -225,20 +219,21 @@ func (p *Basic) Prepare(ctx context.Context, plan provider.Plan, operation domai
 	p.backend.records[key] = r
 	return prepared, nil
 }
-func (p *Basic) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
-	return p.submit(ctx, prepared, false)
-}
-func (p *Basic) Start(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
-	if start.Secrets != nil {
+func (p *Basic) Start(ctx context.Context, prepared provider.Prepared, start *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
+	if start == nil {
+		if material != nil {
+			return rejection("material requires explicit start authorization")
+		}
+		return p.submit(ctx, prepared, false)
+	}
+	if start.Secrets == nil {
+		if material != nil {
+			return rejection("unexpected workload secret material")
+		}
+	} else if material == nil || !p.backend.scenario.EphemeralSecrets || start.ValidateMaterial(prepared, *material) != nil {
 		return rejection("explicit material required")
 	}
-	return p.start(ctx, prepared, start)
-}
-func (p *Basic) StartWithSecrets(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization, material workloadsecret.Material) provider.SubmissionOutcome {
-	if !p.backend.scenario.EphemeralSecrets || start.ValidateMaterial(prepared, material) != nil {
-		return rejection("explicit material required")
-	}
-	return p.start(ctx, prepared, start)
+	return p.start(ctx, prepared, *start)
 }
 func (p *Basic) start(ctx context.Context, prepared provider.Prepared, start provider.StartAuthorization) provider.SubmissionOutcome {
 	if !p.backend.scenario.SeparateStart || start.Validate(prepared) != nil {
@@ -285,7 +280,7 @@ func (p *Basic) submit(ctx context.Context, prepared provider.Prepared, controll
 	remote := r.remote
 	return provider.SubmissionOutcome{Status: provider.SubmissionAccepted, Remote: &remote}
 }
-func (p *Basic) ReconcileSubmission(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
+func (p *Basic) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.Reconciliation{}, err
 	}

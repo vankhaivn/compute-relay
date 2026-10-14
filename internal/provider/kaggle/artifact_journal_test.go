@@ -30,13 +30,12 @@ type artifactJournalAdapter struct {
 	pages  int
 }
 
-func (p *artifactJournalAdapter) ListArtifacts(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.ArtifactPage, error) {
+func (p *artifactJournalAdapter) ListArtifacts(ctx context.Context, ref provider.RemoteReference) ([]provider.Artifact, error) {
 	p.pages++
-	page.Limit = 2 // Exercise the real snapshot cursor through the collector.
-	return p.reader.ListArtifacts(ctx, ref, page)
+	return p.reader.ListArtifacts(ctx, ref)
 }
-func (p *artifactJournalAdapter) FetchArtifact(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64) (provider.TransferResult, error) {
-	return p.reader.FetchArtifact(ctx, ref, file, dst, limit)
+func (p *artifactJournalAdapter) Fetch(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+	return p.reader.Fetch(ctx, ref, file, dst, limit, progress)
 }
 
 type artifactJournalRepository struct {
@@ -239,8 +238,8 @@ func TestArtifactsM3PublicationUsesScopedVerifiedBytesAndOriginalReceipt(t *test
 		t.Fatal(err)
 	}
 	f.run(t, false)
-	if f.adapter.pages != 3 || f.lists != 1 || f.count(t, "artifacts") != 5 || f.count(t, "collection_publications") != 1 {
-		t.Fatal("incomplete pagination/publication")
+	if f.adapter.pages != 1 || f.lists != 1 || f.count(t, "artifacts") != 5 || f.count(t, "collection_publications") != 1 {
+		t.Fatal("incomplete full catalog/publication")
 	}
 	current, err := service.Get(ctx, actor, "workspace", original.Operation.ID)
 	if err != nil || current.Effect != operations.ResultsAvailable || current.Operation.Status != domain.OperationSucceeded {

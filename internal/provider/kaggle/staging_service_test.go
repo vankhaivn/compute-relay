@@ -142,7 +142,7 @@ func TestStagingRecoveryReadsRemoteOnlyAndPreservesReadiness(t *testing.T) {
 				}
 				return stageResponse(p, status), nil
 			}
-			result, err := s.ReconcilePreparation(context.Background(), plan, "prep")
+			result, err := s.ReconcilePrepare(context.Background(), plan, "prep")
 			if *reads != 1 || b.reads != 0 || calls != 1 {
 				t.Fatal("recovery reread or repeated work")
 			}
@@ -198,7 +198,7 @@ func TestStagingRejectsFalseOrChangedHelperIdentity(t *testing.T) {
 				}
 				return r, nil
 			}
-			if result, err := s.ReconcilePreparation(context.Background(), plan, "prep"); err == nil || result.Prepared != nil {
+			if result, err := s.ReconcilePrepare(context.Background(), plan, "prep"); err == nil || result.Prepared != nil {
 				t.Fatal("invalid observation accepted", result, err)
 			}
 		})
@@ -236,7 +236,7 @@ func TestStagingCredentialAndHelperErrorsAreSanitized(t *testing.T) {
 				}
 				return stageResponse(p, "ready"), nil
 			}
-			result, err := s.ReconcilePreparation(context.Background(), plan, "prep")
+			result, err := s.ReconcilePrepare(context.Background(), plan, "prep")
 			if err == nil || strings.Contains(err.Error(), "SYNTHETIC_SECRET") || result.Prepared != nil || calls > 1 {
 				t.Fatal("unsafe error/callback", result, err, calls)
 			}

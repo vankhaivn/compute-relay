@@ -8,8 +8,6 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-var _ provider.ResourceCleaner = (*Adapter)(nil)
-
 func (a *Adapter) DescribeCleanup(request provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
 	if !request.Valid() || request.Remote.Identity.InstanceID != a.config.InstanceID {
 		return provider.CleanupDescription{}, ErrIdentity

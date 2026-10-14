@@ -78,7 +78,7 @@ func TestManualCollectionWaitsAcrossRestartAndExplicitKeysCoalesce(t *testing.T)
 	f.restart(t)
 	runCollection(t, collectionEngine(t, f, p, blobs, f.s))
 	status := collectionStatus(t, f, id)
-	if status.State != "available" || status.Progress == nil || status.Progress.BytesReceived != nil || *status.Progress.BytesTotal != int64(len(p.files["outputs/answer.json"])) || status.Progress.BytesCompleted != *status.Progress.BytesTotal {
+	if status.State != "available" || status.Progress == nil || status.Progress.BytesReceived == nil || *status.Progress.BytesReceived != *status.Progress.BytesTotal || *status.Progress.BytesTotal != int64(len(p.files["outputs/answer.json"])) || status.Progress.BytesCompleted != *status.Progress.BytesTotal {
 		t.Fatal(status)
 	}
 	service, principal, _ = controlService(t, f, "a", auth.Read, auth.Operate)
@@ -144,8 +144,11 @@ type progressCollectionProvider struct {
 	hook  func(int64) error
 }
 
-func (p *progressCollectionProvider) FetchArtifactWithProgress(ctx context.Context, remote provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
-	return p.FetchArtifact(ctx, remote, file, &sampleWriter{dst: dst, progress: progress, clock: p.clock, hook: p.hook}, limit)
+func (p *progressCollectionProvider) Fetch(ctx context.Context, remote provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
+	if progress == nil {
+		return p.collectionProvider.Fetch(ctx, remote, file, dst, limit, nil)
+	}
+	return p.collectionProvider.Fetch(ctx, remote, file, &sampleWriter{dst: dst, progress: progress, clock: p.clock, hook: p.hook}, limit, nil)
 }
 
 type sampleWriter struct {

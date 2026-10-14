@@ -9,6 +9,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
+	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
 type stagingDeadlineProbe struct {
@@ -19,9 +20,9 @@ type stagingDeadlineProbe struct {
 	submitDeadline  time.Time
 }
 
-func (p *stagingDeadlineProbe) VerifyBinding(ctx context.Context, binding provider.BindingSnapshot) error {
+func (p *stagingDeadlineProbe) Verify(ctx context.Context, binding provider.BindingSnapshot) error {
 	p.bindingDeadline, _ = ctx.Deadline()
-	return p.probeProvider.VerifyBinding(ctx, binding)
+	return p.probeProvider.Verify(ctx, binding)
 }
 
 func (p *stagingDeadlineProbe) Prepare(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.Prepared, error) {
@@ -29,14 +30,14 @@ func (p *stagingDeadlineProbe) Prepare(ctx context.Context, plan provider.Plan, 
 	return p.probeProvider.Prepare(ctx, plan, id)
 }
 
-func (p *stagingDeadlineProbe) ReconcilePreparation(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.PreparationObservation, error) {
+func (p *stagingDeadlineProbe) ReconcilePrepare(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.PreparationObservation, error) {
 	p.stagingDeadline, _ = ctx.Deadline()
-	return p.probeProvider.ReconcilePreparation(ctx, plan, id)
+	return p.probeProvider.ReconcilePrepare(ctx, plan, id)
 }
 
-func (p *stagingDeadlineProbe) Submit(ctx context.Context, prepared provider.Prepared) provider.SubmissionOutcome {
+func (p *stagingDeadlineProbe) Start(ctx context.Context, prepared provider.Prepared, authorization *provider.StartAuthorization, material *workloadsecret.Material) provider.SubmissionOutcome {
 	p.submitDeadline, _ = ctx.Deadline()
-	return p.probeProvider.Submit(ctx, prepared)
+	return p.probeProvider.Start(ctx, prepared, authorization, material)
 }
 
 func TestStagingObservationAndSubmissionKeepPreparationBudgetAndParentDeadline(t *testing.T) {

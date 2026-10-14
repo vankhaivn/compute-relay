@@ -72,7 +72,7 @@ type heartbeatProvider struct {
 	entered, canceled, release chan struct{}
 }
 
-func (p *heartbeatProvider) VerifyBinding(ctx context.Context, _ provider.BindingSnapshot) error {
+func (p *heartbeatProvider) Verify(ctx context.Context, _ provider.BindingSnapshot) error {
 	close(p.entered)
 	<-ctx.Done()
 	close(p.canceled)
@@ -80,10 +80,10 @@ func (p *heartbeatProvider) VerifyBinding(ctx context.Context, _ provider.Bindin
 	return ctx.Err()
 }
 func (p *heartbeatProvider) DescribeCleanup(q provider.CleanupResourceRequest) (provider.CleanupDescription, error) {
-	return p.Provider.(provider.ResourceCleaner).DescribeCleanup(q)
+	return p.Provider.DescribeCleanup(q)
 }
 func (p *heartbeatProvider) CleanupResource(ctx context.Context, q provider.CleanupResourceRequest) (provider.CleanupOutcome, error) {
-	return p.Provider.(provider.ResourceCleaner).CleanupResource(ctx, q)
+	return p.Provider.CleanupResource(ctx, q)
 }
 
 func TestWorkLeaseHeartbeatLossCancelsAndJoinsEveryEngine(t *testing.T) {

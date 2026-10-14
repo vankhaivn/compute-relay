@@ -45,27 +45,27 @@ func logFixture(t *testing.T, reply func() monitorResponse) (*LogReader, provide
 func TestLogSnapshotsPageWithoutMixingChangedOrForeignEvidence(t *testing.T) {
 	text := "one\nhai\n三\nfour\n"
 	reader, ref, calls := logFixture(t, func() monitorResponse { return logResponse(text, "delayed") })
-	page, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 2})
+	page, err := reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 2})
 	if err != nil || len(page.Lines) != 2 || page.Lines[0] != "one" || page.NextCursor == "" || page.Source != "provider" || page.Availability != "delayed" || page.Truncated {
 		t.Fatal(page, err)
 	}
 	request := provider.PageRequest{Limit: 2, Cursor: page.NextCursor}
-	last, err := reader.ReadLogs(context.Background(), ref, request)
+	last, err := reader.Logs(context.Background(), ref, request)
 	if err != nil || last.Validate(request) != nil || len(last.Lines) != 2 || last.Lines[0] != "三" || last.NextCursor == "" {
 		t.Fatal(last, err)
 	}
 	text += "newly appended\n"
-	if p, err := reader.ReadLogs(context.Background(), ref, request); err != nil || p.Lines[0] != "三" {
+	if p, err := reader.Logs(context.Background(), ref, request); err != nil || p.Lines[0] != "三" {
 		t.Fatal("append broke replay", p, err)
 	}
 	text = "changed\n"
-	if _, err := reader.ReadLogs(context.Background(), ref, request); !errors.Is(err, ErrLogChanged) {
+	if _, err := reader.Logs(context.Background(), ref, request); !errors.Is(err, ErrLogChanged) {
 		t.Fatal("changed replay accepted", err)
 	}
 	before := *calls
 	foreign := ref
 	foreign.Identity.WorkspaceID = "foreign"
-	if _, err := reader.ReadLogs(context.Background(), foreign, request); !errors.Is(err, ErrExecutionIdentity) || *calls != before {
+	if _, err := reader.Logs(context.Background(), foreign, request); !errors.Is(err, ErrExecutionIdentity) || *calls != before {
 		t.Fatal("foreign reference reached helper", err)
 	}
 	var cursor logCursor
@@ -74,7 +74,7 @@ func TestLogSnapshotsPageWithoutMixingChangedOrForeignEvidence(t *testing.T) {
 	cursor.Reference = provider.Digest([]byte("foreign"))
 	raw, _ = json.Marshal(cursor)
 	request.Cursor = base64.RawURLEncoding.EncodeToString(raw)
-	if _, err := reader.ReadLogs(context.Background(), ref, request); !errors.Is(err, ErrLogCursor) || *calls != before {
+	if _, err := reader.Logs(context.Background(), ref, request); !errors.Is(err, ErrLogCursor) || *calls != before {
 		t.Fatal("foreign cursor reached helper", err)
 	}
 }
@@ -82,28 +82,28 @@ func TestLogSnapshotsPageWithoutMixingChangedOrForeignEvidence(t *testing.T) {
 func TestLogSnapshotsBoundLinesAndDistinguishEmptyUnavailableAndIdentityFailure(t *testing.T) {
 	reply := logResponse(strings.Repeat("界", 6000), "after_completion")
 	reader, ref, _ := logFixture(t, func() monitorResponse { return reply })
-	page, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+	page, err := reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1})
 	if err != nil || !page.Truncated || len(page.Lines) != 1 || len(page.Lines[0]) > 16<<10 || !utf8.ValidString(page.Lines[0]) {
 		t.Fatal(page, err)
 	}
 	reply = logResponse("", "after_completion")
-	page, err = reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+	page, err = reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1})
 	if err != nil || page.Availability != "after_completion" || len(page.Lines) != 0 || page.Truncated || page.NextCursor != "" {
 		t.Fatal("empty log misrepresented", err)
 	}
 	reply = monitorResponse{Protocol: 1, Status: "unavailable", Reason: "read_unavailable"}
-	page, err = reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+	page, err = reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1})
 	var failure provider.LogReadFailure
 	if !errors.As(err, &failure) || failure.Reason != "read_unavailable" || len(page.Lines) != 0 || page.NextCursor != "" {
 		t.Fatal("lost safe diagnostic or invented fallback logs", page, err)
 	}
 	reply = monitorResponse{Protocol: 1, Status: "invalid", Reason: "identity_mismatch"}
-	if _, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1}); !errors.Is(err, ErrExecutionIdentity) {
+	if _, err := reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1}); !errors.Is(err, ErrExecutionIdentity) {
 		t.Fatal("identity failure concealed", err)
 	}
 	reply = logResponse("prefix", "delayed")
 	reply.Truncated = true
-	page, err = reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+	page, err = reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1})
 	if err != nil || !page.Truncated {
 		t.Fatal("snapshot truncation hidden", err)
 	}
@@ -112,7 +112,7 @@ func TestLogSnapshotsBoundLinesAndDistinguishEmptyUnavailableAndIdentityFailure(
 func TestLogSnapshotsValidatePageAndCursorBeforeIO(t *testing.T) {
 	reader, ref, count := logFixture(t, func() monitorResponse { t.Fatal("invalid page invoked helper"); return monitorResponse{} })
 	for _, req := range []provider.PageRequest{{Limit: 0}, {Limit: 101}, {Limit: 1, Cursor: "!bad"}, {Limit: 1, Cursor: strings.Repeat("x", 513)}, {Limit: 1, Cursor: base64.RawURLEncoding.EncodeToString([]byte(`{}`))}} {
-		if _, err := reader.ReadLogs(context.Background(), ref, req); !errors.Is(err, ErrLogCursor) {
+		if _, err := reader.Logs(context.Background(), ref, req); !errors.Is(err, ErrLogCursor) {
 			t.Fatal("invalid pagination accepted", err)
 		}
 	}
@@ -121,7 +121,7 @@ func TestLogSnapshotsValidatePageAndCursorBeforeIO(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := reader.ReadLogs(ctx, ref, provider.PageRequest{Limit: 1}); !errors.Is(err, context.Canceled) {
+	if _, err := reader.Logs(ctx, ref, provider.PageRequest{Limit: 1}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	m := monitorFixture(t)
@@ -136,17 +136,17 @@ func TestReplayCaughtUpLiveKeepsCursorAndTerminalEmptyEnds(t *testing.T) {
 	reply.Replay = true
 	reply.Prefix = string(provider.Digest(nil))
 	reader, ref, _ := logFixture(t, func() monitorResponse { return reply })
-	page, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+	page, err := reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1})
 	if err != nil || len(page.Lines) != 0 || page.NextCursor == "" {
 		t.Fatal(page, err)
 	}
 	request := provider.PageRequest{Limit: 1, Cursor: page.NextCursor}
-	page, err = reader.ReadLogs(context.Background(), ref, request)
+	page, err = reader.Logs(context.Background(), ref, request)
 	if err != nil || page.NextCursor != request.Cursor {
 		t.Fatal(page, err)
 	}
 	reply.Availability = "after_completion"
-	page, err = reader.ReadLogs(context.Background(), ref, request)
+	page, err = reader.Logs(context.Background(), ref, request)
 	if err != nil || page.NextCursor != "" || len(page.Lines) != 0 {
 		t.Fatal(page, err)
 	}
@@ -159,7 +159,7 @@ func TestLogReadFailureReasonsRemainTypedAndContainNoLines(t *testing.T) {
 	for _, reason := range reasons {
 		t.Run(reason, func(t *testing.T) {
 			reply.Reason = reason
-			page, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1})
+			page, err := reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1})
 			var failure provider.LogReadFailure
 			if !errors.As(err, &failure) || failure.Reason != reason || !failure.Valid() || len(page.Lines) != 0 || page.NextCursor != "" || page.Source != "" {
 				t.Fatal(page, err)
@@ -167,7 +167,7 @@ func TestLogReadFailureReasonsRemainTypedAndContainNoLines(t *testing.T) {
 		})
 	}
 	reply.Reason = "SYNTHETIC_TOKEN"
-	if _, err := reader.ReadLogs(context.Background(), ref, provider.PageRequest{Limit: 1}); !errors.Is(err, ErrProtocol) || strings.Contains(err.Error(), "SYNTHETIC_TOKEN") {
+	if _, err := reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1}); !errors.Is(err, ErrProtocol) || strings.Contains(err.Error(), "SYNTHETIC_TOKEN") {
 		t.Fatal("untrusted diagnostic escaped", err)
 	}
 }
