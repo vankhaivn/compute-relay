@@ -15,7 +15,7 @@ import (
 func TestRunnerGeneratedResultContracts(t *testing.T) {
 	directory := os.Getenv("CR_RUNNER_RESULTS_DIR")
 	if directory == "" {
-		t.Skip("generated runner outputs are validated by the dedicated offline runner job")
+		t.Skip("generated runner outputs are validated by scripts/check.sh on Linux")
 	}
 	paths, err := filepath.Glob(filepath.Join(directory, "*.json"))
 	if err != nil || len(paths) < 10 {
