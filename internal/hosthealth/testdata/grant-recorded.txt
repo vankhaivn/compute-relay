@@ -1,0 +1,6 @@
+Matching Defaults entries for REDACTED on REDACTED:
+    env_reset, env_keep+=BLOCKSIZE, env_keep+="COLORFGBG COLORTERM", env_keep+=__CF_USER_TEXT_ENCODING, env_keep+="CHARSET LANG LANGUAGE LC_ALL LC_COLLATE LC_CTYPE", env_keep+="LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME", env_keep+="LINES COLUMNS", env_keep+=LSCOLORS, env_keep+=SSH_AUTH_SOCK, env_keep+=TZ, env_keep+="DISPLAY XAUTHORIZATION XAUTHORITY", env_keep+="EDITOR VISUAL", env_keep+="HOME MAIL", lecture_file=/etc/sudo_lecture, !log_allowed
+
+User REDACTED may run the following commands on REDACTED:
+    (ALL) ALL
+    (root) NOPASSWD: /usr/bin/powermetrics --samplers smc -n 1 -i 1000
