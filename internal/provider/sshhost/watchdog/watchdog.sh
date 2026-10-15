@@ -305,7 +305,7 @@ while :; do
         speed=$(printf '%s\n' "$command_output" | /usr/bin/awk '
             /CPU_Speed_Limit/ {if ($0!~/^[ \t]*CPU_Speed_Limit[ \t]*=[ \t]*[0-9]+[ \t]*$/) bad=1; n++; sub(/^.*=[ \t]*/, ""); sub(/[ \t]*$/, ""); value=$0; if (value!~/^(0|[1-9][0-9]*)$/ || length(value)>3 || value+0>100) bad=1}
             END {if (bad || n!=1) exit 1; print value}') || core_known=0
-        if [ -n "$speed" ] && [ "$speed" -le "$speed_threshold" ] 2>/dev/null; then critical=1; fi
+        if [ -n "$speed" ] && /usr/bin/awk -v value="$speed" -v threshold="$speed_threshold" 'BEGIN {exit !(value<=threshold)}' ; then critical=1; fi
     else core_known=0; fi
     if capture 8192 8 "$pmset" -g batt; then
         power=$(printf '%s\n' "$command_output" | /usr/bin/awk '
@@ -321,7 +321,7 @@ while :; do
             }
             END {if (bad || sources!=1 || batteries>1 || (source=="battery" && batteries!=1)) exit 1; if (charge=="") charge="-"; print source " " charge}') || core_known=0
         case "$power" in
-            'battery '*) charge=${power#battery }; if [ "$charge" -le "$low_battery" ] 2>/dev/null; then battery_critical=1; fi;;
+            'battery '*) charge=${power#battery }; if /usr/bin/awk -v value="$charge" -v threshold="$low_battery" 'BEGIN {exit !(value<=threshold)}' ; then battery_critical=1; fi;;
         esac
     else core_known=0; fi
     if [ "$powermetrics_granted" = 1 ] && capture 8192 8 "$sudo" -n /usr/bin/powermetrics --samplers smc -n 1 -i 1000; then

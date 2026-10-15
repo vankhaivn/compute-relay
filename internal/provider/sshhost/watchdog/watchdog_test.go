@@ -816,3 +816,26 @@ case "$name" in
     *) exit 1;;
 esac
 `
+
+func TestFractionalSpeedAndBatteryThresholdsMatchGuard(t *testing.T) {
+	t.Run("speed", func(t *testing.T) {
+		s := healthy()
+		s.therm = "CPU_Speed_Limit = 20\n"
+		f := newFixture(t, s, s, s)
+		f.config.MinimumCPUSpeedPercent = 20.5
+		f.render()
+		if got := f.run().LastAction; got != "confirmed_inactive" {
+			t.Fatal(got)
+		}
+		f.assertStops(1)
+	})
+	t.Run("battery", func(t *testing.T) {
+		f := newFixture(t, lowBattery())
+		f.config.LowBatteryPercent = 10.5
+		f.render()
+		if got := f.run().LastAction; got != "confirmed_inactive" {
+			t.Fatal(got)
+		}
+		f.assertStops(1)
+	})
+}

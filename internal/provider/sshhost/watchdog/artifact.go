@@ -50,10 +50,10 @@ type Config struct {
 	DockerHost                    string
 	EngineID                      string
 	CriticalThermalLevel          int
-	MinimumCPUSpeedPercent        int
+	MinimumCPUSpeedPercent        float64
 	CriticalDieTemperatureCelsius float64
 	CriticalDurationSeconds       int
-	LowBatteryPercent             int
+	LowBatteryPercent             float64
 	SampleIntervalSeconds         int
 	PowermetricsGranted           bool
 }
@@ -116,11 +116,11 @@ func (c Config) Validate() error {
 	if !cleanAbsolute(c.Home) || !domain.RuntimeInstallationID(c.InstallationID).Valid() || !cleanAbsolute(c.DockerPath) ||
 		!unix || !cleanAbsolute(socket) || !nativeEngine.MatchString(c.EngineID) ||
 		c.CriticalThermalLevel < 0 || c.CriticalThermalLevel > 255 ||
-		c.MinimumCPUSpeedPercent < 0 || c.MinimumCPUSpeedPercent > 100 ||
+		math.IsNaN(c.MinimumCPUSpeedPercent) || math.IsInf(c.MinimumCPUSpeedPercent, 0) || c.MinimumCPUSpeedPercent < 0 || c.MinimumCPUSpeedPercent > 100 ||
 		math.IsNaN(c.CriticalDieTemperatureCelsius) || math.IsInf(c.CriticalDieTemperatureCelsius, 0) ||
-		c.CriticalDieTemperatureCelsius <= 0 || c.CriticalDieTemperatureCelsius > 150 ||
-		c.CriticalDurationSeconds < 1 || c.CriticalDurationSeconds > 3600 ||
-		c.LowBatteryPercent < 0 || c.LowBatteryPercent > 100 ||
+		c.CriticalDieTemperatureCelsius < 0 || c.CriticalDieTemperatureCelsius > 150 ||
+		c.CriticalDurationSeconds < 1 || c.CriticalDurationSeconds > 900 ||
+		math.IsNaN(c.LowBatteryPercent) || math.IsInf(c.LowBatteryPercent, 0) || c.LowBatteryPercent < 0 || c.LowBatteryPercent > 100 ||
 		c.SampleIntervalSeconds < 1 || c.SampleIntervalSeconds > 300 {
 		return ErrConfig
 	}
@@ -147,9 +147,9 @@ func render(c Config, cmd commands) (Artifact, error) {
 	replace := strings.NewReplacer(
 		"@@DIRECTORY@@", quote(dir), "@@INSTALLATION@@", quote(c.InstallationID),
 		"@@DOCKER@@", quote(c.DockerPath), "@@DOCKER_HOST@@", quote(c.DockerHost), "@@ENGINE@@", quote(c.EngineID),
-		"@@THERMAL@@", strconv.Itoa(c.CriticalThermalLevel), "@@CPU_SPEED@@", strconv.Itoa(c.MinimumCPUSpeedPercent),
+		"@@THERMAL@@", strconv.Itoa(c.CriticalThermalLevel), "@@CPU_SPEED@@", strconv.FormatFloat(c.MinimumCPUSpeedPercent, 'f', -1, 64),
 		"@@TEMPERATURE@@", strconv.FormatFloat(c.CriticalDieTemperatureCelsius, 'f', -1, 64),
-		"@@DURATION@@", strconv.Itoa(c.CriticalDurationSeconds), "@@BATTERY@@", strconv.Itoa(c.LowBatteryPercent),
+		"@@DURATION@@", strconv.Itoa(c.CriticalDurationSeconds), "@@BATTERY@@", strconv.FormatFloat(c.LowBatteryPercent, 'f', -1, 64),
 		"@@INTERVAL@@", strconv.Itoa(c.SampleIntervalSeconds), "@@POWERMETRICS@@", powermetrics,
 		"@@SOURCE_DIGEST@@", quote(a.SourceDigest),
 		"@@SYSCTL@@", quote(cmd.sysctl), "@@PMSET@@", quote(cmd.pmset), "@@SUDO@@", quote(cmd.sudo),

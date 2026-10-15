@@ -90,8 +90,8 @@ func TestConfigRejectsHostileOrUnboundedMaterial(t *testing.T) {
 		"speed excess":         func(c *Config) { c.MinimumCPUSpeedPercent = 101 },
 		"temperature nan":      func(c *Config) { c.CriticalDieTemperatureCelsius = math.NaN() },
 		"temperature infinite": func(c *Config) { c.CriticalDieTemperatureCelsius = math.Inf(1) },
-		"temperature zero":     func(c *Config) { c.CriticalDieTemperatureCelsius = 0 },
-		"duration unbounded":   func(c *Config) { c.CriticalDurationSeconds = 3601 },
+		"temperature negative": func(c *Config) { c.CriticalDieTemperatureCelsius = -1 },
+		"duration unbounded":   func(c *Config) { c.CriticalDurationSeconds = 901 },
 		"battery excess":       func(c *Config) { c.LowBatteryPercent = 101 },
 		"interval zero":        func(c *Config) { c.SampleIntervalSeconds = 0 },
 	} {
@@ -120,6 +120,23 @@ func TestStatusIsBoundedAndContainsOnlyPublicFacts(t *testing.T) {
 	} {
 		if _, err := ParseStatus([]byte(bad)); err != ErrStatus {
 			t.Fatalf("unexpected status acceptance: %q (%v)", bad, err)
+		}
+	}
+}
+
+func TestConfigPreservesFractionalGuardThresholds(t *testing.T) {
+	c := testConfig()
+	c.MinimumCPUSpeedPercent = 20.5
+	c.LowBatteryPercent = 10.5
+	c.CriticalDieTemperatureCelsius = 0
+	a, err := Render(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(a.Files[0].Content)
+	for _, want := range []string{"speed_threshold=20.5", "low_battery=10.5", "temperature_threshold=0"} {
+		if !strings.Contains(script, want) {
+			t.Fatal("threshold not preserved", want)
 		}
 	}
 }

@@ -76,6 +76,11 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			if in.Action == "install_image" && (prior.account == "" || prior.credential == "" || prior.view.Host == nil || prior.view.Host.Architecture != in.Installation.Architecture) {
 				return connections.ErrRequest
 			}
+			if in.Action == "remove" || in.Action == "replace_credential" {
+				if err = watchdogConnectionRetained(ctx, tx, prior); err != nil {
+					return err
+				}
+			}
 			if in.Action == "remove" {
 				if err = managedRemovalAllowed(ctx, tx, id); err != nil {
 					return err

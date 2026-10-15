@@ -43,17 +43,27 @@ func CollectHealth(ctx context.Context, raw []byte, account, resourceID, engineI
 type healthBoundedExecutor struct{ executor }
 
 func (e healthBoundedExecutor) Run(ctx context.Context, env map[string]string, args []string, in io.Reader, out io.Writer) (Result, error) {
+	result, err := runBoundedHealthCommand(ctx, e.executor, env, args, in, out)
+	clear(result.Stderr)
+	result.Stderr = nil
+	return result, err
+}
+
+// runBoundedHealthCommand also bounds channel creation and command startup by
+// closing the dedicated SSH client when the command context expires. Callers own
+// and clear the bounded diagnostic buffer; it is never public error text.
+func runBoundedHealthCommand(ctx context.Context, exec executor, env map[string]string, args []string, in io.Reader, out io.Writer) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, hosthealth.CommandTimeout)
 	defer cancel()
-	if closer, ok := e.executor.(io.Closer); ok {
-		// Session channel creation and Start can wait before Run reaches its
-		// cancellation select. Closing this probe's client bounds those phases too.
+	if closer, ok := exec.(io.Closer); ok {
 		stop := context.AfterFunc(ctx, func() { _ = closer.Close() })
 		defer stop()
 	}
-	result, err := e.executor.Run(ctx, env, args, in, out)
-	clear(result.Stderr)
-	result.Stderr = nil
+	result, err := exec.Run(ctx, env, args, in, out)
+	if len(result.Stderr) > maxStderrBytes {
+		clear(result.Stderr[maxStderrBytes:])
+		result.Stderr = result.Stderr[:maxStderrBytes]
+	}
 	return result, err
 }
 

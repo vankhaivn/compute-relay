@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hostwatchdog"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
@@ -55,6 +56,7 @@ func (c ManagedServeConfig) accelerator() string {
 }
 
 type managedServices struct {
+	watchdog       *hostwatchdog.Service
 	health         *hosthealth.Service
 	secrets        *workloadsecret.Service
 	connections    *connections.Service
@@ -94,6 +96,10 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 	}
 	result := &managedServices{connections: service, authorizations: permits}
 	result.health, err = hosthealth.NewService(h.access, h.store, managedHealthSampler{credentials: service, collect: sshhost.CollectHealth}, clock{})
+	if err != nil {
+		return nil, ErrState
+	}
+	result.watchdog, err = hostwatchdog.New(h.access, h.store, sshhost.NewWatchdogRemote(service))
 	if err != nil {
 		return nil, ErrState
 	}

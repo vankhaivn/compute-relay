@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "title": "Compute Relay host-watchdog-operation v1alpha1",
+  "required": [
+    "operation_id",
+    "connection_id",
+    "action",
+    "status",
+    "connection_revision",
+    "created_at",
+    "replay",
+    "problem"
+  ],
+  "properties": {
+    "operation_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/operation_id"
+    },
+    "connection_id": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/opaque_id"
+    },
+    "action": {
+      "enum": [
+        "install_host_watchdog",
+        "remove_host_watchdog"
+      ]
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "unknown",
+        "succeeded",
+        "failed"
+      ]
+    },
+    "connection_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "created_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    },
+    "replay": {
+      "type": "boolean"
+    },
+    "problem": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "stale_revision",
+            "authority_revoked"
+          ]
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "problem": {
+            "type": "string"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "problem": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}
