@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -170,21 +171,45 @@ func TestWatchdogUnsupportedPlatformsRefuseBeforeMutation(t *testing.T) {
 }
 
 type watchdogPipelineSession struct {
-	base       *healthTestExecutor
-	artifact   watchdog.Artifact
-	loaded     bool
-	bootstraps int
+	base             *healthTestExecutor
+	artifact         watchdog.Artifact
+	loaded           bool
+	bootstraps       int
+	bootouts         int
+	deletions        int
+	filesPresent     bool
+	bootoutDelay     time.Duration
+	bootoutUncertain bool
 }
 
 func (s *watchdogPipelineSession) Close() error { return nil }
 func (s *watchdogPipelineSession) Run(ctx context.Context, env map[string]string, args []string, in io.Reader, out io.Writer) (Result, error) {
 	s.base.t.Helper()
 	deadline, ok := ctx.Deadline()
-	if !ok || time.Until(deadline) > hosthealth.CommandTimeout+time.Second {
+	budget := hosthealth.CommandTimeout
+	if len(args) == 3 && args[0] == "/bin/launchctl" && args[1] == "bootout" {
+		budget = watchdogBootoutTimeout
+		if args[2] != "gui/501/"+s.artifact.Label {
+			s.base.t.Fatal("bootout target widened")
+		}
+	}
+	if !ok || time.Until(deadline) > budget+time.Second {
 		s.base.t.Fatal("watchdog command lost per-command bound")
 	}
 	write := func(value string) (Result, error) { _, err := io.WriteString(out, value); return Result{}, err }
 	switch {
+	case args[0] == "/bin/launchctl" && args[1] == "bootout":
+		s.bootouts++
+		select {
+		case <-ctx.Done():
+			if s.bootoutUncertain {
+				s.loaded = false
+			}
+			return Result{}, ctx.Err()
+		case <-time.After(s.bootoutDelay):
+		}
+		s.loaded = false
+		return Result{}, nil
 	case args[0] == "/bin/launchctl":
 		if !s.loaded {
 			return Result{ExitCode: 113, Stderr: []byte("Could not find service \"" + s.artifact.Label + "\" in domain for user gui: 501")}, nil
@@ -201,19 +226,40 @@ func (s *watchdogPipelineSession) Run(ctx context.Context, env map[string]string
 		if err != nil {
 			return Result{}, err
 		}
+		if strings.Contains(string(script), "/bin/launchctl bootout") {
+			s.base.t.Fatal("bootout was embedded in short shell command")
+		}
+		if !s.filesPresent && strings.Contains(string(script), "/bin/rm -f") {
+			return Result{}, nil
+		}
+		if !strings.Contains(string(script), "/usr/bin/shasum -a 256") && strings.Contains(string(script), "test ! -e") {
+			if s.filesPresent {
+				return Result{ExitCode: 35}, nil
+			}
+			return Result{}, nil
+		}
 		if !strings.Contains(string(script), "/usr/bin/shasum -a 256") {
 			s.base.t.Fatal("mutation skipped exact digest verification")
 		}
 		if strings.Contains(string(script), "/bin/launchctl bootstrap") {
 			s.bootstraps++
 			s.loaded = true
+			s.filesPresent = true
+		}
+		if strings.Contains(string(script), "/bin/rm -f") {
+			if s.loaded {
+				s.base.t.Fatal("deleted files before unload confirmation")
+			}
+			s.deletions++
+			s.filesPresent = false
 		}
 		return Result{}, nil
 	default:
 		return s.base.Run(ctx, env, args, in, out)
 	}
 }
-func TestWatchdogApplyBoundedPipelineRecognizesInitialAbsenceAndLoadedReplay(t *testing.T) {
+func newWatchdogPipeline(t *testing.T) (*WatchdogRemote, *watchdogPipelineSession, hostwatchdog.Target, hostwatchdog.Plan) {
+	t.Helper()
 	p, a := watchdogTestPlan(t)
 	p.UID = "501"
 	endpoint := Target{Host: "synthetic.invalid", Port: 22, User: "synthetic", HostKey: testFingerprint}
@@ -237,6 +283,10 @@ func TestWatchdogApplyBoundedPipelineRecognizesInitialAbsenceAndLoadedReplay(t *
 	fake := &watchdogPipelineSession{base: base, artifact: a}
 	remote := NewWatchdogRemote(&testVault{raw: raw})
 	remote.dial = func(context.Context, Target, Credential) (session, error) { return fake, nil }
+	return remote, fake, target, p
+}
+func TestWatchdogApplyBoundedPipelineRecognizesInitialAbsenceAndLoadedReplay(t *testing.T) {
+	remote, fake, target, p := newWatchdogPipeline(t)
 	if err := remote.Apply(context.Background(), target, p, "install_host_watchdog"); err != nil {
 		t.Fatal("bounded wrapper discarded service-absence proof", err)
 	}
@@ -270,6 +320,101 @@ func TestWatchdogBoundedDiagnosticsArePrivateAndCapped(t *testing.T) {
 			if value != 0 {
 				t.Fatal("discarded private diagnostic was not cleared")
 			}
+		}
+	}
+}
+
+func TestWatchdogDelayedBootoutUsesDedicatedBudgetAndDeletesOnce(t *testing.T) {
+	remote, fake, target, p := newWatchdogPipeline(t)
+	fake.loaded = true
+	fake.filesPresent = true
+	fake.bootoutDelay = hosthealth.CommandTimeout + 200*time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), hostwatchdog.Timeout)
+	defer cancel()
+	started := time.Now()
+	if err := remote.Apply(ctx, target, p, "remove_host_watchdog"); err != nil {
+		t.Fatal("bootout exceeding ordinary probe budget failed", err)
+	}
+	if time.Since(started) <= hosthealth.CommandTimeout || fake.bootouts != 1 || fake.deletions != 1 || fake.loaded || fake.filesPresent {
+		t.Fatal("removal did not unload and clean exactly once")
+	}
+	for range 2 {
+		confirmed, err := remote.Observe(context.Background(), target, p, "remove_host_watchdog")
+		if err != nil || !confirmed {
+			t.Fatal("read-only removal confirmation failed", confirmed, err)
+		}
+	}
+	if fake.bootouts != 1 || fake.deletions != 1 {
+		t.Fatal("observation replayed mutation")
+	}
+}
+func TestWatchdogCancelledBootoutRetainsFilesAndObservationNeverRetries(t *testing.T) {
+	remote, fake, target, p := newWatchdogPipeline(t)
+	fake.loaded = true
+	fake.filesPresent = true
+	fake.bootoutDelay = time.Second
+	fake.bootoutUncertain = true
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err := remote.Apply(ctx, target, p, "remove_host_watchdog"); err == nil {
+		t.Fatal("cancelled bootout reported success")
+	}
+	if time.Since(started) > time.Second || fake.bootouts != 1 || fake.deletions != 0 || !fake.filesPresent {
+		t.Fatal("cancellation did not preserve cleanup ambiguity")
+	}
+	for range 2 {
+		confirmed, _ := remote.Observe(context.Background(), target, p, "remove_host_watchdog")
+		if confirmed {
+			t.Fatal("files remain but removal confirmed")
+		}
+	}
+	if fake.bootouts != 1 || fake.deletions != 0 {
+		t.Fatal("ambiguous bootout or cleanup retried")
+	}
+}
+
+type blockedWatchdogBootout struct {
+	closed     chan struct{}
+	started    chan []string
+	once       sync.Once
+	diagnostic []byte
+}
+
+func (b *blockedWatchdogBootout) Close() error { b.once.Do(func() { close(b.closed) }); return nil }
+func (b *blockedWatchdogBootout) Run(_ context.Context, _ map[string]string, args []string, _ io.Reader, _ io.Writer) (Result, error) {
+	b.started <- append([]string(nil), args...)
+	<-b.closed
+	return Result{Stderr: b.diagnostic}, ErrUnavailable
+}
+func TestWatchdogBootoutCancellationClosesBlockedClientAndDiscardsDiagnostic(t *testing.T) {
+	p, a := watchdogTestPlan(t)
+	p.UID = "501"
+	blocked := &blockedWatchdogBootout{closed: make(chan struct{}), started: make(chan []string, 1), diagnostic: []byte("private host diagnostic")}
+	defer blocked.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- (watchdogBoundedExecutor{blocked}).bootout(ctx, a, p) }()
+	select {
+	case args := <-blocked.started:
+		if len(args) != 3 || args[0] != "/bin/launchctl" || args[1] != "bootout" || args[2] != "gui/501/"+a.Label {
+			t.Fatal("bootout scope widened", args)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bootout did not start")
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("blocked cancelled command succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancellation failed to close blocked client")
+	}
+	for _, value := range blocked.diagnostic {
+		if value != 0 {
+			t.Fatal("private stderr retained")
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost/watchdog"
 	"io"
 	"strings"
+	"time"
 )
 
 // Only launchctl service classification consumes private stderr. Every other
@@ -26,6 +27,29 @@ func (e watchdogBoundedExecutor) Run(ctx context.Context, env map[string]string,
 	return result, err
 }
 
+// launchd may wait for the watchdog's foreground sample sleep to finish before
+// unloading. Only this exact direct bootout gets a longer command budget; the
+// worker's enclosing 45-second action budget still applies.
+const watchdogBootoutTimeout = 35 * time.Second
+
+func (e watchdogBoundedExecutor) bootout(ctx context.Context, a watchdog.Artifact, p hostwatchdog.Plan) error {
+	if p.Validate() != nil || a.Label != "io.compute-relay.host-watchdog."+p.Config.InstallationID {
+		return ErrRequest
+	}
+	ctx, cancel := context.WithTimeout(ctx, watchdogBootoutTimeout)
+	defer cancel()
+	if closer, ok := e.executor.(io.Closer); ok {
+		stop := context.AfterFunc(ctx, func() { _ = closer.Close() })
+		defer stop()
+	}
+	result, err := e.executor.Run(ctx, map[string]string{"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"}, []string{"/bin/launchctl", "bootout", "gui/" + p.UID + "/" + a.Label}, nil, &limitedWriter{w: io.Discard, limit: watchdog.MaxStatus})
+	clear(result.Stderr)
+	if err != nil || result.ExitCode != 0 {
+		return hostwatchdog.ErrIntegrity
+	}
+	return nil
+}
+
 type WatchdogRemote struct {
 	credentials ports.CredentialResolver
 	dial        func(context.Context, Target, Credential) (session, error)
@@ -34,7 +58,7 @@ type WatchdogRemote struct {
 func NewWatchdogRemote(c ports.CredentialResolver) *WatchdogRemote {
 	return &WatchdogRemote{c, func(ctx context.Context, t Target, c Credential) (session, error) { return Dial(ctx, t, c) }}
 }
-func (w *WatchdogRemote) with(ctx context.Context, t hostwatchdog.Target, use func(executor, docker) error) error {
+func (w *WatchdogRemote) with(ctx context.Context, t hostwatchdog.Target, use func(watchdogBoundedExecutor, docker) error) error {
 	return w.credentials.WithCredential(ctx, t.Health.CredentialRef, func(raw []byte) error {
 		e, err := ParseEndpoint(raw)
 		if err != nil {
@@ -82,7 +106,7 @@ func (w *WatchdogRemote) with(ctx context.Context, t hostwatchdog.Target, use fu
 }
 func (w *WatchdogRemote) Plan(ctx context.Context, t hostwatchdog.Target) (hostwatchdog.Plan, error) {
 	var p hostwatchdog.Plan
-	err := w.with(ctx, t, func(x executor, d docker) error {
+	err := w.with(ctx, t, func(x watchdogBoundedExecutor, d docker) error {
 		raw, err := readIdentity(ctx, x, 2048, "/bin/sh", "-c", `cd -P "$HOME" && test ! -L "$HOME" && printf '%s\n' "$PWD" && /usr/bin/id -u && /usr/bin/stat -f '%u' "$PWD"`)
 		if err != nil {
 			return err
@@ -181,7 +205,7 @@ func (w *WatchdogRemote) Apply(ctx context.Context, t hostwatchdog.Target, p hos
 	if err != nil || p.Validate() != nil {
 		return hostwatchdog.ErrIntegrity
 	}
-	return w.with(ctx, t, func(x executor, d docker) error {
+	return w.with(ctx, t, func(x watchdogBoundedExecutor, d docker) error {
 		engine, err := d.engineID(ctx)
 		if err != nil || engine != p.Config.EngineID || d.host != p.Config.DockerHost || d.binary != p.Config.DockerPath {
 			return ErrIdentity
@@ -191,8 +215,11 @@ func (w *WatchdogRemote) Apply(ctx context.Context, t hostwatchdog.Target, p hos
 			return err
 		}
 		if action == "remove_host_watchdog" && loaded {
-			prelude := watchdogShellPrelude + watchdogCheckFiles(a, p, true) + "/bin/launchctl bootout " + watchdogQuote("gui/"+p.UID+"/"+a.Label) + "\n"
+			prelude := watchdogShellPrelude + watchdogCheckFiles(a, p, true)
 			if _, err = watchdogRun(ctx, x, prelude); err != nil {
+				return err
+			}
+			if err = x.bootout(ctx, a, p); err != nil {
 				return err
 			}
 			loaded, err = watchdogServiceState(ctx, x, a, p)
@@ -222,7 +249,6 @@ func watchdogMutation(a watchdog.Artifact, p hostwatchdog.Plan, action string, l
 	var b strings.Builder
 	b.WriteString(watchdogShellPrelude)
 	fmt.Fprintf(&b, "test \"$(/usr/bin/id -u)\" = %s || exit 32\nd=%s\n", watchdogQuote(p.UID), watchdogQuote(a.Directory))
-	service := watchdogQuote("gui/" + p.UID + "/" + a.Label)
 	switch action {
 	case "install_host_watchdog":
 		b.WriteString("if test ! -e \"$d\" && test ! -L \"$d\"; then\n/bin/mkdir -m 700 \"$d\"\n")
@@ -237,7 +263,7 @@ func watchdogMutation(a watchdog.Artifact, p hostwatchdog.Plan, action string, l
 
 	case "remove_host_watchdog":
 		if loaded {
-			fmt.Fprintf(&b, "/bin/launchctl bootout %s\n", service)
+			return "", ErrRequest
 		}
 		b.WriteString("if test ! -e \"$d\" && test ! -L \"$d\"; then exit 0; fi\n" + watchdogCheckFiles(a, p, true))
 
@@ -263,7 +289,7 @@ func (w *WatchdogRemote) Status(ctx context.Context, t hostwatchdog.Target, p ho
 		return nil, err
 	}
 	var status *watchdog.Status
-	err = w.with(ctx, t, func(x executor, _ docker) error {
+	err = w.with(ctx, t, func(x watchdogBoundedExecutor, _ docker) error {
 		q := watchdogQuote(a.Directory + "/" + watchdog.StatusName)
 		script := watchdogShellPrelude + "d=" + watchdogQuote(a.Directory) + "\nif test ! -e \"$d\" && test ! -L \"$d\"; then exit 0; fi\n" + watchdogCheck(a, p) + "if test ! -e " + q + "; then exit 0; fi\ntest ! -L " + q + " && test -f " + q + " || exit 34\n/usr/bin/head -c 1025 " + q + "\n"
 		raw, err := watchdogRun(ctx, x, script)
@@ -284,7 +310,7 @@ func (w *WatchdogRemote) Observe(ctx context.Context, t hostwatchdog.Target, p h
 		return false, err
 	}
 	confirmed := false
-	err = w.with(ctx, t, func(x executor, _ docker) error {
+	err = w.with(ctx, t, func(x watchdogBoundedExecutor, _ docker) error {
 		loaded, err := watchdogServiceState(ctx, x, a, p)
 		if err != nil {
 			return err
