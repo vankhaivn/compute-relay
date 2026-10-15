@@ -207,7 +207,10 @@ func noSuch(kind string) Result {
 	return Result{ExitCode: 1, Stderr: []byte("Error response from daemon: No such " + kind + ": x")}
 }
 
-func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, stdin io.Reader, stdout io.Writer) (Result, error) {
+func (h *fakeHost) Run(ctx context.Context, env map[string]string, argv []string, stdin io.Reader, stdout io.Writer) (Result, error) {
+	if _, err := shellCommand(env, argv); err != nil {
+		return Result{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}

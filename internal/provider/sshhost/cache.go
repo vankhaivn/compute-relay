@@ -20,6 +20,8 @@ import (
 	runnerassets "github.com/vankhaivn/compute-relay/runner"
 )
 
+const cacheWriterBootstrap = "import base64,sys;source=base64.b64decode(sys.argv.pop(1));exec(source)"
+
 const cacheWriterSource = `import hashlib,os,signal,sys
 signal.alarm(7200)
 size=int(sys.argv[1]); expected=sys.argv[2]
@@ -316,7 +318,7 @@ func (a *Adapter) writeVolume(ctx context.Context, d docker, image string, g hos
 		"--read-only", "--pids-limit", "32", "--memory", "134217728", "--memory-swap", "134217728", "--cpus", "1",
 		"--mount", "type=volume,source=" + g.VolumeName + ",target=/cache,volume-nocopy"}
 	args = append(args, cacheHelperLabels(g, "cache-writer")...)
-	args = append(args, "--entrypoint", "python3", image, "-B", "-E", "-s", "-c", cacheWriterSource, strconv.FormatInt(g.Key.Bytes, 10), string(g.Key.SHA256))
+	args = append(args, "--entrypoint", "python3", image, "-B", "-E", "-s", "-c", cacheWriterBootstrap, base64.StdEncoding.EncodeToString([]byte(cacheWriterSource)), strconv.FormatInt(g.Key.Bytes, 10), string(g.Key.SHA256))
 	result, err := d.run(ctx, reader, io.Discard, args...)
 	_ = reader.CloseWithError(errStagingStopped)
 	werr := <-written

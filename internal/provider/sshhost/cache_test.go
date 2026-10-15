@@ -1,6 +1,7 @@
 package sshhost
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -441,5 +442,53 @@ func TestForeignCacheVolumeNameCollisionCannotBeInspectedOrWritten(t *testing.T)
 	v := h.host.volumes[name]
 	if len(v.labels) != 1 || v.labels["foreign"] != "owner" || string(v.blob) != "foreign" {
 		t.Fatal("foreign volume changed")
+	}
+}
+
+func TestFixedCacheWriterBootstrapPreservesInputArguments(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	h, _ := cacheHarness(t)
+	h.prepare(t)
+	var command []string
+	for _, call := range h.host.wireCalls {
+		for i, arg := range call {
+			if arg == cacheWriterBootstrap {
+				command = append([]string(nil), call[i:]...)
+				break
+			}
+		}
+		if command != nil {
+			break
+		}
+	}
+	if len(command) != 4 {
+		t.Fatalf("writer command arguments: %d", len(command))
+	}
+	source, err := base64.StdEncoding.DecodeString(command[1])
+	if err != nil || string(source) != cacheWriterSource {
+		t.Fatal("writer source changed in transport")
+	}
+	root := t.TempDir()
+	data := []byte("finite cache writer input")
+	// Substitute only the container mount path for an isolated local test directory.
+	source = bytes.ReplaceAll(source, []byte("/cache"), []byte(root))
+	args := []string{"-B", "-E", "-s", "-c", command[0], base64.StdEncoding.EncodeToString(source), fmt.Sprint(len(data)), string(provider.Digest(data))}
+	if _, err := shellCommand(nil, append([]string{python}, args...)); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(python, args...)
+	cmd.Stdin = bytes.NewReader(data)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("writer: %v %s", err, out)
+	}
+	blob, err := os.ReadFile(filepath.Join(root, "blob"))
+	if err != nil || !bytes.Equal(blob, data) {
+		t.Fatal("writer did not publish exact input", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".writing")); !os.IsNotExist(err) {
+		t.Fatal("writer left provisional file")
 	}
 }
