@@ -40,6 +40,7 @@ type machineSample struct {
 	confirmed time.Time
 	since     time.Time
 	failed    bool
+	digest    string
 }
 
 type Service struct {
@@ -145,11 +146,13 @@ func (s *Service) Refresh(ctx context.Context, target Target) (View, error) {
 		m.failed = failed || err != nil || snapshot.Platform.Status != Available || snapshot.Platform.Value == nil
 		if m.failed {
 			m.confirmed, m.since = time.Time{}, time.Time{}
+			m.digest = ""
 		} else {
 			if m.since.IsZero() || snapshot.ObservedAt.Before(m.confirmed) || snapshot.ObservedAt.Sub(m.confirmed) > StaleAfter {
 				m.since = snapshot.ObservedAt
 			}
 			m.confirmed = snapshot.ObservedAt
+			m.digest = snapshotDigest(snapshot)
 		}
 		close(m.inflight)
 		m.inflight = nil
@@ -191,11 +194,13 @@ func (s *Service) Cached(ctx context.Context, resourceID string) (View, error) {
 	m := s.machines[resourceID]
 	var confirmed time.Time
 	var since time.Time
+	var digest string
 	failed := false
 	if m != nil {
-		confirmed, since, failed = m.confirmed, m.since, m.failed
+		confirmed, since, failed, digest = m.confirmed, m.since, m.failed, m.digest
 		if now.Before(latest.ObservedAt) {
 			m.confirmed, m.since = time.Time{}, time.Time{}
+			m.digest = ""
 		}
 	}
 	s.mu.Unlock()
@@ -204,7 +209,7 @@ func (s *Service) Cached(ctx context.Context, resourceID string) (View, error) {
 		view.UnknownReason = "health_observation_failed"
 	case confirmed.IsZero():
 		view.UnknownReason = "health_not_reobserved"
-	case !latest.ObservedAt.Equal(confirmed):
+	case !latest.ObservedAt.Equal(confirmed) || snapshotDigest(latest) != digest:
 		view.UnknownReason = "health_not_reobserved"
 	case now.Before(latest.ObservedAt):
 		view.UnknownReason = "health_clock_changed"

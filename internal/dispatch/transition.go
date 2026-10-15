@@ -27,6 +27,20 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 	next := state
 	var event domain.EventType
 	switch a.Kind {
+	case RefuseNewWork:
+		if old.SubmitStarted || (old.Phase != Local && old.Phase != Ready) || state.Cancellation != domain.CancellationNotRequested || state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted {
+			return Journal{}, state, "", ErrConflict
+		}
+		p := provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "Host health refuses new preparation or execution.").WithDetail(domain.ReasonDetail, "host_unhealthy").WithRecommendedAction(domain.RecommendedActionWait)
+		j.Problem = &p
+		if old.Plan == nil {
+			j.Phase = Failed
+			next.Orchestration = domain.OrchestrationFailed
+			next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+		}
+		// A prepared hold remains owned and stopped; its unused start grant is not
+		// consumed and the machine reservation is retained while health refuses it.
+		event = domain.EventReconciliationDeferred
 	case PreventDispatch, ExpireDispatch:
 		if old.SubmitStarted || state.Orchestration.Terminal() || state.Execution != domain.ExecutionNotSubmitted || (state.RemoteActivity != domain.RemoteActivityNotStarted && state.RemoteActivity != domain.RemoteActivityInactive) {
 			return Journal{}, state, "", ErrConflict

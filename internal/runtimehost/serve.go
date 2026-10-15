@@ -79,6 +79,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	if err != nil {
 		return err
 	}
+	jobs.WithPreflight(managed.guard)
 	dispatcher, collector, schedulerSettings := managed.dispatcher, managed.collector, managed.settings
 	mode := "managed-connections"
 	dispatchEnabled := dispatcher != nil
@@ -147,7 +148,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	}
 	if managed != nil {
 		extra = append(extra, func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) })
-		extra = append(extra, managed.health.Run, managed.watchdog.Run)
+		extra = append(extra, managed.guard.Run, managed.watchdog.Run)
 		if managed.secrets != nil {
 			extra = append(extra, managed.secrets.Run)
 		}

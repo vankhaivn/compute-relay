@@ -70,7 +70,7 @@ func (h *handler) routes() {
 	add("POST", "objects", routePolicy{upload: true}, h.upload)
 	add("GET", "objects/{object}", routePolicy{}, h.object)
 	if h.config.Jobs != nil {
-		add("POST", "jobs", routePolicy{bodyLimit: admission.MaxRequestBytes}, h.jobs)
+		add("POST", "jobs", routePolicy{remote: h.config.Health != nil, bodyLimit: admission.MaxRequestBytes}, h.jobs)
 		add("POST", "jobs/validate", routePolicy{bodyLimit: admission.MaxRequestBytes}, h.jobs)
 		add("GET", "jobs/{job}", routePolicy{}, h.jobs)
 	}

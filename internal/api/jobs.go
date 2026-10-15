@@ -115,6 +115,8 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 		respondError(w, r, 404, domain.CodeInputNotFound, domain.FailureStageInputPreparation, "referenced input is missing or not visible")
 	case errors.Is(err, admission.ErrNotFound):
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "job not found or not visible")
+	case errors.Is(err, admission.ErrHostUnhealthy):
+		respondError(w, r, 422, domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "host health does not permit new work; inspect connection health")
 	case errors.Is(err, admission.ErrRequirements):
 		respondError(w, r, 422, domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "job exceeds the resolved profile policy")
 	case errors.Is(err, admission.ErrExpired):

@@ -23,5 +23,8 @@ func readDispatchProblem(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, 
 	if err != nil {
 		return nil, err
 	}
+	if problem, err := hostCriticalStopProblem(ctx, tx, w, j, a, journal); err != nil || problem != nil {
+		return problem, err
+	}
 	return journal.Problem, nil
 }

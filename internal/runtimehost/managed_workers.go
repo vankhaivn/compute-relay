@@ -56,6 +56,7 @@ func (c ManagedServeConfig) accelerator() string {
 }
 
 type managedServices struct {
+	guard          *managedHostHealthGuard
 	watchdog       *hostwatchdog.Service
 	health         *hosthealth.Service
 	secrets        *workloadsecret.Service
@@ -99,6 +100,10 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 	if err != nil {
 		return nil, ErrState
 	}
+	result.guard, err = h.newHostHealthGuard(result.health, clock{})
+	if err != nil {
+		return nil, ErrState
+	}
 	result.watchdog, err = hostwatchdog.New(h.access, h.store, sshhost.NewWatchdogRemote(service))
 	if err != nil {
 		return nil, ErrState
@@ -127,6 +132,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return nil, ErrState
 	}
 	result.dispatcher.WithSecrets(pool)
+	result.dispatcher.WithNewWorkGuard(result.guard)
 	collectionConfig := collection.DefaultConfig()
 	collectionConfig.Workers = config.MaxWorkers
 	result.collector, err = collection.New(h.store, resolver, h.results, clock{}, collectionConfig)

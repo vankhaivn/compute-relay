@@ -12,6 +12,14 @@
         {
           "file": "internal/store/sqlite/admission_test.go",
           "name": "TestAdmissionReplaySurvivesRemapDisableAndRestart"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthAdmissionDemandAuthReplayAndUnsupported"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthAdmissionConcurrentReplayWinsOverFailedDemand"
         }
       ]
     },
@@ -32,6 +40,14 @@
         {
           "file": "internal/store/sqlite/dispatch_crash_test.go",
           "name": "TestDispatchProcessKillAtMutationIntentBoundaries"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthFinalMutationTransactionsRejectNewerWarning"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthAdmissionFinalTransactionRejectsChangedEvidenceAndBinding"
         }
       ]
     },
@@ -42,6 +58,10 @@
         {
           "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemDispatchLostSubmitResponseRestartAndTerminalCollectionGate"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthPossibleSubmissionStopsAfterIdentityRecoveryWithoutResubmit"
         }
       ]
     },
@@ -82,6 +102,10 @@
         {
           "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemFaultMatrixRestartKeepsActiveAttempt"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthRestartResetsSustainedWindowAndLostCancelNeverRepeats"
         }
       ]
     },
@@ -130,6 +154,14 @@
         {
           "file": "internal/runtimehost/system_gate_secret_suite_test.go",
           "name": "TestSystemControlsUnsupportedAcceptedAndConfirmedCancellation"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthRunningWarningUnknownContinueAndCriticalStopsOnce"
+        },
+        {
+          "file": "internal/store/sqlite/host_health_stop_test.go",
+          "name": "TestHostHealthStopProjectionRequiresConfirmedExactCancellation"
         }
       ]
     },
@@ -270,6 +302,10 @@
         {
           "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
           "name": "TestSystemDispatchFrozenProfileDoesNotFollowRemap"
+        },
+        {
+          "file": "internal/runtimehost/health_guard_test.go",
+          "name": "TestHostHealthRunningStopUsesFrozenPolicyAfterConfigureAndDisable"
         }
       ]
     },

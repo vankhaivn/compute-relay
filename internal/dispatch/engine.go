@@ -37,7 +37,10 @@ type Engine struct {
 	config    Config
 	slots     chan struct{}
 	secrets   *workloadsecret.Pool
+	newWork   NewWorkGuard
 }
+
+func (e *Engine) WithNewWorkGuard(guard NewWorkGuard) *Engine { e.newWork = guard; return e }
 
 func (e *Engine) WithSecrets(pool *workloadsecret.Pool) *Engine { e.secrets = pool; return e }
 
@@ -88,7 +91,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			return worker.Classify(err)
 		}
 		var p *domain.Problem
-		if errors.As(err, &p) || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
+		if errors.As(err, &p) || errors.Is(err, admission.ErrHostUnhealthy) || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
 			return worker.Continue
 		}
 		return worker.Classify(err)
@@ -148,6 +151,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if errors.Is(resultErr, ErrPolicy) {
 			delay = 5 * time.Minute
 		}
+		if errors.Is(resultErr, admission.ErrHostUnhealthy) {
+			delay = 30 * time.Second
+		}
 		// Deterministic per-attempt jitter spreads observations while remaining reproducible.
 		if len(w.Handle.Claim.Fence) > 0 {
 			delay += time.Duration(w.Handle.Claim.Fence[0]%4) * delay / 10
@@ -180,6 +186,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	}
 	switch work.Journal.Phase {
 	case Local:
+		if err := s.guardNewWork(); err != nil {
+			return err
+		}
 		snapshot, err := e.freeze(ctx, s)
 		if err != nil {
 			return s.fail(errorCode(err, domain.CodeInputFetchFailed))
@@ -197,12 +206,18 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return s.fail(domain.CodeUnsupportedCapability)
 		}
 		if err = s.consumeAuthorization(); err != nil {
+			if errors.Is(err, admission.ErrHostUnhealthy) {
+				return s.refuseNewWork()
+			}
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
 			return err
 		}
 		if err = s.commit(Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prepID}); err != nil {
+			if errors.Is(err, admission.ErrHostUnhealthy) {
+				return s.refuseNewWork()
+			}
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
@@ -273,6 +288,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 				return s.fail(domain.CodeRemoteIdentityMismatch)
 			}
 		}
+		if err := s.guardNewWork(); err != nil {
+			return err
+		}
 		if work.Gate != nil && work.Gate.Start.Secrets != nil {
 			key := workloadsecret.Key{WorkspaceID: work.Job.Job.WorkspaceID, JobID: work.Job.Job.ID, AttemptID: work.Job.Attempt.ID}
 			material, err = e.secrets.Claim(key, work.Gate.Start.Secrets.AuthorizationID, e.clock.Now(), func() error { return s.commit(Action{Kind: BeginSubmission, SecretsAvailable: true}) })
@@ -280,6 +298,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			err = s.commit(Action{Kind: BeginSubmission})
 		}
 		if err != nil {
+			if errors.Is(err, admission.ErrHostUnhealthy) {
+				return s.refuseNewWork()
+			}
 			if errors.Is(err, workloadsecret.ErrUnavailable) {
 				return nil
 			}
@@ -338,6 +359,33 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	}
 }
 
+func (s *session) guardNewWork() error {
+	if s.e.newWork == nil {
+		return nil
+	}
+	ctx, err := s.e.newWork.BeforeNewWork(s.ctx, s.work().Job)
+	if ctx != nil {
+		s.ctx = ctx
+	}
+	if errors.Is(err, admission.ErrHostUnhealthy) {
+		return s.refuseNewWork()
+	}
+	return err
+}
+
+func (s *session) refuseNewWork() error {
+	w := s.work()
+	if w.Journal.Problem == nil || w.Journal.Problem.Details[domain.ReasonDetail] != "host_unhealthy" {
+		if err := s.commit(Action{Kind: RefuseNewWork}); err != nil {
+			if errors.Is(err, ErrPolicy) {
+				return admission.ErrHostUnhealthy
+			}
+			return err
+		}
+	}
+	return admission.ErrHostUnhealthy
+}
+
 func control[T any](ctx context.Context, limit time.Duration, fn func(context.Context) (T, error)) (value T, err error) {
 	bounded, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
@@ -381,6 +429,8 @@ func (s *session) commit(action Action) error {
 	base := context.Background()
 	if action.Kind == BeginPreparation || action.Kind == BeginSubmission {
 		base = s.ctx /* Cancellation can save an outcome, but can never authorize new work. */
+	} else if action.Kind == RefuseNewWork {
+		base = context.WithoutCancel(s.ctx)
 	}
 	ctx, stop := context.WithTimeout(base, 5*time.Second)
 	defer stop()
