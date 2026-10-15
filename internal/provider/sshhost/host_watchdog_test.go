@@ -180,6 +180,8 @@ type watchdogPipelineSession struct {
 	filesPresent     bool
 	bootoutDelay     time.Duration
 	bootoutUncertain bool
+	unloadingReads   int
+	unloadingForeign bool
 }
 
 func (s *watchdogPipelineSession) Close() error { return nil }
@@ -208,9 +210,21 @@ func (s *watchdogPipelineSession) Run(ctx context.Context, env map[string]string
 			return Result{}, ctx.Err()
 		case <-time.After(s.bootoutDelay):
 		}
-		s.loaded = false
+		if s.unloadingReads == 0 {
+			s.loaded = false
+		}
 		return Result{}, nil
 	case args[0] == "/bin/launchctl":
+		if s.bootouts > 0 && s.unloadingForeign {
+			return write("path = /unrelated/agent.plist\n")
+		}
+		if s.bootouts > 0 && s.unloadingReads > 0 {
+			s.unloadingReads--
+			if s.unloadingReads == 0 {
+				s.loaded = false
+			}
+			return write("path = " + s.artifact.Directory + "/" + watchdog.PlistName + "\n")
+		}
 		if !s.loaded {
 			return Result{ExitCode: 113, Stderr: []byte("Could not find service \"" + s.artifact.Label + "\" in domain for user gui: 501")}, nil
 		}
@@ -346,6 +360,42 @@ func TestWatchdogDelayedBootoutUsesDedicatedBudgetAndDeletesOnce(t *testing.T) {
 	}
 	if fake.bootouts != 1 || fake.deletions != 1 {
 		t.Fatal("observation replayed mutation")
+	}
+}
+
+func TestWatchdogAsynchronousUnloadWaitsWithoutRepeatingMutation(t *testing.T) {
+	remote, fake, target, p := newWatchdogPipeline(t)
+	fake.loaded, fake.filesPresent = true, true
+	fake.unloadingReads = 2
+	ctx, cancel := context.WithTimeout(context.Background(), hostwatchdog.Timeout)
+	defer cancel()
+	if err := remote.Apply(ctx, target, p, "remove_host_watchdog"); err != nil {
+		t.Fatal("asynchronous unload failed", err)
+	}
+	if fake.bootouts != 1 || fake.deletions != 1 || fake.loaded || fake.filesPresent {
+		t.Fatal("unload must complete before exactly one cleanup")
+	}
+}
+
+func TestWatchdogUnloadingUncertaintyRetainsFiles(t *testing.T) {
+	for _, foreign := range []bool{false, true} {
+		t.Run(strconv.FormatBool(foreign), func(t *testing.T) {
+			remote, fake, target, p := newWatchdogPipeline(t)
+			fake.loaded, fake.filesPresent = true, true
+			fake.unloadingReads, fake.unloadingForeign = 100, foreign
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			if err := remote.Apply(ctx, target, p, "remove_host_watchdog"); err == nil {
+				t.Fatal("uncertain unload reported success")
+			}
+			if fake.bootouts != 1 || fake.deletions != 0 || !fake.filesPresent {
+				t.Fatal("uncertain unload repeated mutation or deleted files")
+			}
+			confirmed, _ := remote.Observe(context.Background(), target, p, "remove_host_watchdog")
+			if confirmed || fake.bootouts != 1 || fake.deletions != 0 {
+				t.Fatal("observation replayed an uncertain removal")
+			}
+		})
 	}
 }
 func TestWatchdogCancelledBootoutRetainsFilesAndObservationNeverRetries(t *testing.T) {

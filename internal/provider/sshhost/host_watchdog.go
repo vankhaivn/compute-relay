@@ -27,9 +27,8 @@ func (e watchdogBoundedExecutor) Run(ctx context.Context, env map[string]string,
 	return result, err
 }
 
-// launchd may wait for the watchdog's foreground sample sleep to finish before
-// unloading. Only this exact direct bootout gets a longer command budget; the
-// worker's enclosing 45-second action budget still applies.
+// Only this exact direct bootout gets a longer command budget; the worker's
+// enclosing 45-second action budget still applies.
 const watchdogBootoutTimeout = 35 * time.Second
 
 func (e watchdogBoundedExecutor) bootout(ctx context.Context, a watchdog.Artifact, p hostwatchdog.Plan) error {
@@ -189,6 +188,29 @@ func watchdogServiceState(ctx context.Context, x executor, a watchdog.Artifact, 
 	return true, nil
 }
 
+// Successful bootout can precede service disappearance. Poll only that exact
+// verified service; uncertain reads retain the files and never repeat bootout.
+func watchdogAwaitRemoval(ctx context.Context, x executor, a watchdog.Artifact, p hostwatchdog.Plan) error {
+	ctx, cancel := context.WithTimeout(ctx, watchdogBootoutTimeout)
+	defer cancel()
+	for {
+		loaded, err := watchdogServiceState(ctx, x, a, p)
+		if err != nil {
+			return err
+		}
+		if !loaded {
+			return nil
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 const watchdogShellPrelude = "set -eu\nPATH=/usr/bin:/bin:/usr/sbin:/sbin; LC_ALL=C; export PATH LC_ALL\nunset PERL5OPT PERL5LIB PERLLIB ENV BASH_ENV CDPATH\numask 077\n"
 
 func watchdogRun(ctx context.Context, x executor, script string) ([]byte, error) {
@@ -222,10 +244,10 @@ func (w *WatchdogRemote) Apply(ctx context.Context, t hostwatchdog.Target, p hos
 			if err = x.bootout(ctx, a, p); err != nil {
 				return err
 			}
-			loaded, err = watchdogServiceState(ctx, x, a, p)
-			if err != nil || loaded {
-				return hostwatchdog.ErrIntegrity
+			if err = watchdogAwaitRemoval(ctx, x, a, p); err != nil {
+				return err
 			}
+			loaded = false
 		}
 		script, err := watchdogMutation(a, p, action, loaded)
 		if err != nil {
