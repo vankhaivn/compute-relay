@@ -332,6 +332,11 @@ func (s *Store) Ready(ctx context.Context) error {
 func withTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		var coded interface{ Code() int }
+		if errors.As(err, &coded) && coded.Code()&255 == 9 && ctx.Err() != nil {
+			// An interrupted BEGIN may retain SQLite's code instead of ctx.Err().
+			return ctx.Err()
+		}
 		return dbError(err)
 	}
 	defer tx.Rollback()
@@ -339,7 +344,12 @@ func withTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 		return err
 	}
 	// Never replay after Commit returns an error; its outcome may be uncertain.
-	return dbError(tx.Commit())
+	err = tx.Commit()
+	if errors.Is(err, sql.ErrTxDone) && ctx.Err() != nil {
+		// database/sql may finish its cancellation rollback before Commit runs.
+		return ctx.Err()
+	}
+	return dbError(err)
 }
 
 // busyError retains safe diagnostics while identifying retryable contention.
