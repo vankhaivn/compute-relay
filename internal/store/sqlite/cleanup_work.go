@@ -223,6 +223,19 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 			if err = releaseAttemptStorageResourcesInTx(ctx, tx, before.Operation.WorkspaceID, before.Operation.JobID, before.Operation.AttemptID, now); err != nil {
 				return err
 			}
+			if row.Request.DiscardUncollected && !w.Request.ResultsCollected {
+				a, _, err := loadAttempt(ctx, tx, before.Operation.WorkspaceID, before.Operation.JobID, before.Operation.AttemptID)
+				if err != nil {
+					return err
+				}
+				if a.State.Orchestration == domain.OrchestrationCollecting {
+					state := a.State
+					state.Orchestration = domain.OrchestrationNeedsAttention
+					if _, err = controlState(ctx, tx, row, a, state, domain.EventCollectionFailed, now); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		if err = releaseWorkLease(ctx, tx, cleanupLease(w.Lease), now); err != nil {
 			return err

@@ -304,6 +304,11 @@ func admitCleanupOperation(ctx context.Context, tx *sql.Tx, c operations.Command
 	if err = inheritConfirmedCleanupResources(ctx, tx, op); err != nil {
 		return operations.Record{}, err
 	}
+	if c.Request.DiscardUncollected && !plan.collected {
+		if err = discardPendingCollection(ctx, tx, target, now); err != nil {
+			return operations.Record{}, err
+		}
+	}
 	if err = saveOperationReceipt(ctx, tx, c, row.Record); err != nil {
 		return operations.Record{}, err
 	}

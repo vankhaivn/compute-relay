@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -108,6 +109,33 @@ func TestCleanupPreparedAdmissionStoresStagingLedgerIdentity(t *testing.T) {
 	if err := f.s.db.QueryRow("SELECT resource_id FROM operations WHERE kind='cleanup'").Scan(&resource); err != nil || resource != "res_staging_"+string(f.journal(t, id).Prepared.Identity.IntentID) {
 		t.Fatal("cleanup did not pin staging ledger identity", resource, err)
 	}
+}
+
+func TestCleanupCollectingAttemptRequiresExplicitDiscard(t *testing.T) {
+	ctx := context.Background()
+	f, id, _, _ := collectionFixture(t)
+	before := f.state(t, id)
+	if before.Orchestration != domain.OrchestrationCollecting || before.Result != domain.ResultNotAvailable {
+		t.Fatal("fixture already collected results", before)
+	}
+	service, actor := cleanupService(t, f, "a", auth.Operate)
+	if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCleanup, "cleanup-no-discard", cleanupBody(id.AttemptID, false, "")); !errors.Is(err, operations.ErrUncollected) {
+		t.Fatal("collecting attempt did not require discard authority", err)
+	}
+	if controlCount(t, f.s, `SELECT count(*) FROM operations WHERE kind='cleanup'`) != 0 || f.state(t, id) != before {
+		t.Fatal("refused cleanup changed the original attempt")
+	}
+	if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCleanup, "cleanup-with-discard", cleanupBody(id.AttemptID, true, "")); err != nil {
+		t.Fatal("explicit discard did not admit settled collecting attempt", err)
+	}
+	worker, _ := cleanupWorker(t, f)
+	runCleanup(t, worker)
+	want := before
+	want.Orchestration = domain.OrchestrationNeedsAttention
+	if got := f.state(t, id); got != want || controlCount(t, f.s, `SELECT count(*) FROM collection_publications`) != 0 {
+		t.Fatal("explicit discard rewrote terminal or result evidence", got)
+	}
+	assertNoNewCompute(t, f)
 }
 
 func TestCleanupSchemaFourteenUpgradePreservesState(t *testing.T) {

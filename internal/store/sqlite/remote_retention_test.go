@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
+	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -175,6 +176,63 @@ func TestRemoteRetentionUncollectedAndPreparedAttempts(t *testing.T) {
 	}
 }
 
+func TestRemoteRetentionUncollectedCollectingWithoutCollectorCompletes(t *testing.T) {
+	ctx := context.Background()
+	f, id, _, _ := terminalPolicyFixture(t, `{"uncollected_max_seconds":2}`)
+	before := f.state(t, id)
+	if before.Orchestration != domain.OrchestrationCollecting || before.Result != domain.ResultNotAvailable ||
+		before.Execution != domain.ExecutionSucceeded || before.RemoteActivity != domain.RemoteActivityInactive {
+		t.Fatalf("fixture did not preserve terminal uncollected evidence: %+v", before)
+	}
+	due := remoteDeadlineAt(t, f, "uncollected")
+	if due <= f.clock.Now().UnixMilli() {
+		t.Fatal("retention deadline was not in the future")
+	}
+	if created, err := f.s.ScheduleRetention(ctx, retentionScanLimit); err != nil || created != 0 {
+		t.Fatalf("uncollected cleanup started before deadline: %d %v", created, err)
+	}
+	f.clock.advance(time.UnixMilli(due).Sub(f.clock.Now()))
+	f.restart(t)
+	if created, err := f.s.ScheduleRetention(ctx, retentionScanLimit); err != nil || created != 1 {
+		t.Fatalf("due uncollected cleanup was not admitted: %d %v", created, err)
+	}
+	if claim, err := f.s.ClaimCollection(ctx, time.Minute, 1); err != nil || claim != nil {
+		t.Fatalf("collector raced accepted discard: claim=%+v err=%v", claim, err)
+	}
+	worker, probe := cleanupWorker(t, f)
+	runCleanup(t, worker)
+	if got := controlCount(t, f.s, `SELECT count(*) FROM operations WHERE kind='cleanup' AND status='succeeded' AND attempt_id='`+string(id.AttemptID)+`'`); got != 1 || len(probe.requests) == 0 {
+		t.Fatalf("due uncollected cleanup never completed: receipts=%d requests=%d", got, len(probe.requests))
+	}
+	var discard bool
+	requireNoError(t, f.s.db.QueryRow(`SELECT json_extract(request_json,'$.discard_uncollected')
+	 FROM operations WHERE kind='cleanup' AND attempt_id=?`, id.AttemptID).Scan(&discard))
+	if !discard || controlCount(t, f.s, `SELECT count(*) FROM collection_publications`) != 0 {
+		t.Fatal("uncollected cleanup lost discard authority or fabricated publication")
+	}
+	want := before
+	want.Orchestration = domain.OrchestrationNeedsAttention
+	if got := f.state(t, id); got != want {
+		t.Fatalf("cleanup did not settle collection while preserving execution and result facts: got=%+v want=%+v", got, want)
+	}
+	if claim, err := f.s.ClaimCollection(ctx, time.Minute, 1); err != nil || claim != nil {
+		t.Fatalf("collector reopened discarded remote data: claim=%+v err=%v", claim, err)
+	}
+	if controlCount(t, f.s, `SELECT count(*) FROM operations WHERE kind='collect'`) != 0 ||
+		controlCount(t, f.s, `SELECT count(*) FROM collection_snapshots`) != 0 {
+		t.Fatal("discarded attempt acquired a collection ticket or snapshot")
+	}
+	service, actor, _ := controlService(t, f, "a", auth.Operate)
+	if _, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "collect-after-discard", controlRequest(id.AttemptID)); !errors.Is(err, operations.ErrState) {
+		t.Fatalf("explicit collection reopened discarded remote data: %v", err)
+	}
+	f.clock.advance(time.Minute)
+	if created, err := f.s.ScheduleRetention(ctx, retentionScanLimit); err != nil || created != 0 {
+		t.Fatalf("completed due cleanup replayed: %d %v", created, err)
+	}
+	assertNoNewCompute(t, f)
+}
+
 func TestRemoteRetentionCollectionWinsExpiryRace(t *testing.T) {
 	ctx := context.Background()
 	f, _, p, blobs := terminalPolicyFixture(t, `{"after_collection_seconds":3600,"uncollected_max_seconds":1}`)
@@ -202,7 +260,12 @@ func TestRemoteRetentionCollectionWinsExpiryRace(t *testing.T) {
 
 func TestRemoteRetentionBusyCollectionDefersThenRuns(t *testing.T) {
 	ctx := context.Background()
-	f, _, p, blobs := terminalPolicyFixture(t, `{"uncollected_max_seconds":1}`)
+	f, _, p, _ := terminalPolicyFixture(t, `{"uncollected_max_seconds":1}`)
+	claim, err := f.s.ClaimCollection(ctx, time.Minute, 1)
+	if err != nil || claim == nil {
+		t.Fatal("fixture collector did not claim the attempt", claim, err)
+	}
+	pin := collectionPin(t, *claim, p)
 	f.clock.advance(2 * time.Second)
 	if created, err := f.s.ScheduleRetention(ctx, retentionScanLimit); err != nil || created != 0 {
 		t.Fatal("pending collection was not protected at expiry", created, err)
@@ -212,13 +275,89 @@ func TestRemoteRetentionBusyCollectionDefersThenRuns(t *testing.T) {
 	if retry <= f.clock.Now().UnixMilli() {
 		t.Fatal("busy attempt was not deferred", retry)
 	}
-	p.mode = "corrupt"
-	if worked, err := collectionEngine(t, f, p, blobs, f.s).RunOnce(ctx); !worked || err == nil {
-		t.Fatal("fixture collection did not fail verification", worked, err)
-	}
+	requireNoError(t, f.s.FailCollection(ctx, *claim, collection.Failure{Code: domain.CodeArtifactCollectionFailed}))
 	f.clock.advance(retentionBusyDelay)
 	if created, err := f.s.ScheduleRetention(ctx, retentionScanLimit); err != nil || created != 1 {
 		t.Fatal("deferred due deletion was lost", created, err)
+	}
+	worker, _ := cleanupWorker(t, f)
+	runCleanup(t, worker)
+	if err = f.s.PinCollection(ctx, *claim, pin); !errors.Is(err, collection.ErrLeaseLost) {
+		t.Fatal("released collector pinned results after discard", err)
+	}
+	if err = f.s.CompleteCollection(ctx, *claim, collection.Verified{}); !errors.Is(err, collection.ErrLeaseLost) {
+		t.Fatal("released collector published after discard", err)
+	}
+	if controlCount(t, f.s, `SELECT count(*) FROM collection_snapshots`) != 0 ||
+		controlCount(t, f.s, `SELECT count(*) FROM collection_publications`) != 0 {
+		t.Fatal("discarded attempt acquired a stale pin or publication")
+	}
+}
+
+func TestRemoteRetentionDiscardClosesIdleCollectionTicket(t *testing.T) {
+	ctx := context.Background()
+	for _, started := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unclaimed ticket", true: "expired collector"}[started], func(t *testing.T) {
+			f, id, p, _ := terminalPolicyFixture(t, `{"uncollected_max_seconds":2}`)
+			var operation domain.OperationID
+			var stale *collection.Work
+			var pin collection.Snapshot
+			if started {
+				var err error
+				stale, err = f.s.ClaimCollection(ctx, time.Second, 1)
+				if err != nil || stale == nil {
+					t.Fatal("collector did not claim its ticket", stale, err)
+				}
+				operation = stale.Lease.OperationID
+				pin = collectionPin(t, *stale, p)
+				requireNoError(t, f.s.PinCollection(ctx, *stale, pin))
+			} else {
+				service, actor := cleanupService(t, f, "a", auth.Operate)
+				receipt, err := service.Submit(ctx, actor, "a", id.JobID, domain.OperationCollect, "idle-collection-ticket", controlRequest(id.AttemptID))
+				requireNoError(t, err)
+				operation = receipt.Operation.ID
+			}
+			f.clock.advance(2 * time.Second)
+			f.restart(t)
+			if created, err := f.s.ScheduleRetention(ctx, retentionScanLimit); err != nil || created != 1 {
+				t.Fatalf("idle collection blocked its declared maximum lifetime: %d %v", created, err)
+			}
+			service, actor := cleanupService(t, f, "a", auth.Read, auth.Operate)
+			closed, err := service.Get(ctx, actor, "a", operation)
+			if err != nil || closed.Operation.Status != domain.OperationFailed || closed.Operation.Failure == nil || closed.Operation.Failure.Code != domain.CodeArtifactCollectionFailed {
+				t.Fatal("discard left the idle collection ticket pending", closed, err)
+			}
+			if claim, err := f.s.ClaimCollection(ctx, time.Minute, 1); err != nil || claim != nil {
+				t.Fatal("collector reclaimed a ticket after accepted discard", claim, err)
+			}
+			if stale != nil {
+				if err = f.s.PinCollection(ctx, *stale, pin); !errors.Is(err, collection.ErrLeaseLost) {
+					t.Fatal("stale collector pinned after accepted discard", err)
+				}
+				if err = f.s.CompleteCollection(ctx, *stale, collection.Verified{}); !errors.Is(err, collection.ErrLeaseLost) {
+					t.Fatal("stale collector published after accepted discard", err)
+				}
+			}
+			worker, _ := cleanupWorker(t, f)
+			runCleanup(t, worker)
+			wantResult := domain.ResultNotAvailable
+			if started {
+				wantResult = domain.ResultIncomplete
+			}
+			if state := f.state(t, id); state.Orchestration != domain.OrchestrationNeedsAttention || state.Result != wantResult || state.Execution != domain.ExecutionSucceeded || state.RemoteActivity != domain.RemoteActivityInactive {
+				t.Fatal("discard rewrote terminal evidence or left collection active", state)
+			}
+			wantPins := 0
+			if started {
+				wantPins = 1
+			}
+			if controlCount(t, f.s, `SELECT count(*) FROM collection_snapshots`) != wantPins ||
+				controlCount(t, f.s, `SELECT count(*) FROM collection_publications`) != 0 ||
+				controlCount(t, f.s, `SELECT count(*) FROM operations WHERE kind='cleanup' AND status='succeeded'`) != 1 {
+				t.Fatal("discard lost recovery material, fabricated results, or did not complete cleanup")
+			}
+			assertNoNewCompute(t, f)
+		})
 	}
 }
 

@@ -35,7 +35,9 @@ func ensureInitialCollection(ctx context.Context, tx *sql.Tx, now time.Time) err
  AND a.orchestration='collecting' AND d.phase='collectible'
  AND COALESCE(json_extract(j.request,'$.result_collection'),'automatic')='automatic'
  AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.workspace_id=q.workspace_id AND o.job_id=q.job_id AND o.attempt_id=q.attempt_id AND o.kind='collect')
- ORDER BY q.queue_seq LIMIT 1`).Scan(&w, &job, &attempt)
+ AND NOT EXISTS (SELECT 1 FROM operations c WHERE c.kind='cleanup' AND c.workspace_id=q.workspace_id AND c.job_id=q.job_id AND c.attempt_id=q.attempt_id
+ AND `+pendingCleanupPredicate+`)
+ ORDER BY q.queue_seq LIMIT 1`, string(domain.CodeProviderStateUnknown)).Scan(&w, &job, &attempt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -104,7 +106,9 @@ func (s *Store) ClaimCollection(ctx context.Context, ttl time.Duration, workers 
  LEFT JOIN work_leases c ON c.kind='collection' AND c.key=json_array(o.workspace_id,o.job_id,o.attempt_id)
  WHERE NOT EXISTS (SELECT 1 FROM retired_explicit_attempts r WHERE r.workspace_id=o.workspace_id AND r.job_id=o.job_id AND r.attempt_id=o.attempt_id)
  AND o.kind='collect' AND o.status='accepted' AND (c.held IS NULL OR c.held=0 OR c.until_ms<=?)
- ORDER BY o.operation_seq LIMIT 1`, now.UnixMilli()).Scan(&w, &id)
+ AND NOT EXISTS (SELECT 1 FROM operations c WHERE c.kind='cleanup' AND c.workspace_id=o.workspace_id AND c.job_id=o.job_id AND c.attempt_id=o.attempt_id
+ AND `+pendingCleanupPredicate+`)
+ ORDER BY o.operation_seq LIMIT 1`, now.UnixMilli(), string(domain.CodeProviderStateUnknown)).Scan(&w, &id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -243,6 +247,12 @@ func checkedCollection(ctx context.Context, tx *sql.Tx, w collection.Work, now t
 	}
 	if now.Before(a.UpdatedAt) || now.Before(op.Operation.UpdatedAt) {
 		return empty, zero, noAttempt, ErrCorrupt
+	}
+	if err := pendingCleanup(ctx, tx, l.WorkspaceID, l.JobID, l.AttemptID); err != nil {
+		if errors.Is(err, operations.ErrState) {
+			return empty, zero, noAttempt, collection.ErrLeaseLost
+		}
+		return empty, zero, noAttempt, err
 	}
 	current, err := collectionWork(ctx, tx, l)
 	if err != nil {
