@@ -109,7 +109,7 @@ func (s *Store) AcceptWatchdog(ctx context.Context, in hostwatchdog.Accept) (hos
 		var lastPlan []byte
 		var lastID string
 		var lease int64
-		err = tx.QueryRowContext(ctx, `SELECT action,status,plan,operation_id,lease_until FROM host_watchdog_operations WHERE resource_id=? ORDER BY rowid DESC LIMIT 1`, target.ResourceID).Scan(&lastAction, &lastStatus, &lastPlan, &lastID, &lease)
+		err = tx.QueryRowContext(ctx, `SELECT action,status,plan,operation_id,lease_until FROM host_watchdog_operations WHERE resource_id=? AND status!='failed' ORDER BY rowid DESC LIMIT 1`, target.ResourceID).Scan(&lastAction, &lastStatus, &lastPlan, &lastID, &lease)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return dbError(err)
 		}

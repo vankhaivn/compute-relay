@@ -15,10 +15,15 @@ import (
 type watchdogFake struct {
 	apply, observe int
 	ambiguous      bool
+	dieTemperature float64
 }
 
 func (f *watchdogFake) Plan(_ context.Context, t hostwatchdog.Target) (hostwatchdog.Plan, error) {
-	return hostwatchdog.Plan{UID: "501", Config: watchdog.Config{Home: "/Users/synthetic", InstallationID: t.Installation, DockerPath: "/usr/local/bin/docker", DockerHost: "unix:///var/run/docker.sock", EngineID: strings.Repeat("e", 64), CriticalThermalLevel: 2, MinimumCPUSpeedPercent: 50.5, CriticalDieTemperatureCelsius: 100, CriticalDurationSeconds: 60, LowBatteryPercent: 10.5, SampleIntervalSeconds: 30}}, nil
+	temperature := f.dieTemperature
+	if temperature == 0 {
+		temperature = 100
+	}
+	return hostwatchdog.Plan{UID: "501", Config: watchdog.Config{Home: "/Users/synthetic", InstallationID: t.Installation, DockerPath: "/usr/local/bin/docker", DockerHost: "unix:///var/run/docker.sock", EngineID: strings.Repeat("e", 64), CriticalThermalLevel: 2, MinimumCPUSpeedPercent: 50.5, CriticalDieTemperatureCelsius: temperature, CriticalDurationSeconds: 60, LowBatteryPercent: 10.5, SampleIntervalSeconds: 30}}, nil
 }
 func (f *watchdogFake) Apply(context.Context, hostwatchdog.Target, hostwatchdog.Plan, string) error {
 	f.apply++
@@ -97,6 +102,45 @@ func TestWatchdogStaleQueuedAuthorityFailsWithoutHostMutation(t *testing.T) {
 	requireNoError(t, err)
 	if read.Status != "failed" || remote.apply != 0 {
 		t.Fatal("stale authority mutated host", read, remote.apply)
+	}
+	c = f.get(t, "a", c.ID)
+	remote.dieTemperature = 95
+	retry, err := service.Submit(ctx, f.principals["a"], "a", c.ID, "watchdog-new-explicit-install", "install_host_watchdog", c.Revision)
+	requireNoError(t, err)
+	requireNoError(t, service.RunOnce(ctx))
+	done, err := service.Operation(ctx, f.principals["a"], "a", retry.ID)
+	requireNoError(t, err)
+	prior, err := service.Operation(ctx, f.principals["a"], "a", op.ID)
+	requireNoError(t, err)
+	if done.Status != "succeeded" || prior.Status != "failed" || remote.apply != 1 {
+		t.Fatal("failed-before-apply receipt blocked explicit changed-plan install", done, prior, remote.apply)
+	}
+}
+
+func TestWatchdogFailedRemovalPreservesInstalledPlanLock(t *testing.T) {
+	f, _ := healthStateFixture(t)
+	ctx := context.Background()
+	c := createHealthConnection(t, f, "a", "watchdog-failed-remove-create", "SYNTHETIC_LAN")
+	remote := &watchdogFake{}
+	service, err := hostwatchdog.New(f.access, f.s, remote)
+	requireNoError(t, err)
+	_, err = service.Submit(ctx, f.principals["a"], "a", c.ID, "watchdog-first-install", "install_host_watchdog", c.Revision)
+	requireNoError(t, err)
+	requireNoError(t, service.RunOnce(ctx))
+	removal, err := service.Submit(ctx, f.principals["a"], "a", c.ID, "watchdog-stale-remove", "remove_host_watchdog", c.Revision)
+	requireNoError(t, err)
+	configureConnection(t, f, c, "watchdog-invalidate-removal", 2400)
+	requireNoError(t, service.RunOnce(ctx))
+	read, err := service.Operation(ctx, f.principals["a"], "a", removal.ID)
+	requireNoError(t, err)
+	if read.Status != "failed" || remote.apply != 1 {
+		t.Fatal("stale removal mutated host", read, remote.apply)
+	}
+	c = f.get(t, "a", c.ID)
+	remote.dieTemperature = 95
+	_, err = service.Submit(ctx, f.principals["a"], "a", c.ID, "watchdog-changed-plan-after-failed-remove", "install_host_watchdog", c.Revision)
+	if !errors.Is(err, connections.ErrConflict) || remote.apply != 1 {
+		t.Fatal("failed removal unlocked the installed policy", err, remote.apply)
 	}
 }
 func TestWatchdogExplicitRemovalAfterAmbiguousInstallDoesNotReplay(t *testing.T) {
