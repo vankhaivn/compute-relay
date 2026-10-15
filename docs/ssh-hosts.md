@@ -2,7 +2,7 @@
 
 Run finite CPU jobs in Docker on a machine you own, such as a Mac on your LAN or a VPS reached by
 a Tailscale address. Relay logs in over SSH, runs each attempt in its own container and deletes
-remote data only when you request cleanup. It is a [managed connection](managed-connections.md)
+remote data only through an explicit cleanup or a retention rule declared in the admitted job. It is a [managed connection](managed-connections.md)
 type, so the usual connection, admission and per-attempt authorization rules apply.
 
 ## Prepare the host
@@ -174,6 +174,27 @@ job requires it. CPU, memory and process limits are frozen with the selection. O
 standard library is preinstalled; declare pinned wheels in jobs that need more and whose network
 policy allows downloads. Cancellation is confirmed from Docker's state. Logs stream the payload's
 standard output; standard error is collected with results.
+
+## Cache, application images and storage
+
+For managed SSH v3 jobs, Relay caches bundle and input objects using each workspace object's
+frozen SHA-256 and byte count. Optional request fields assert that identity. Entries are immutable and shared across aliases
+and workspaces on the same installation, machine and Docker engine. Attempts mount verified
+entries read-only. Kaggle continues to upload each object. See [host cache and application images](host-cache.md)
+for the job fields and verification behavior.
+
+An optional `application_image` job field selects a workspace-owned Docker or OCI archive by
+object ID, whole-archive digest and byte count. Relay verifies and normalizes the archive, then
+reuses its exact derived, Relay-labelled image identity. It does not import the archive's source
+tags. The standard SSH image and jobs that omit the field keep their existing behavior.
+
+New SSH revisions use a 64 GiB soft and 80 GiB hard storage budget by default; both can be
+configured per revision. The soft limit allows eviction of unreferenced cache entries and
+application images by least-recently-used order. The hard limit blocks new work when storage is
+full or unknown; it does not stop running work or limit arbitrary writes inside a running job.
+The machine storage view and explicit orphan preview/apply flow are described in
+[host storage budget and inventory](host-storage.md). Optional job retention uses the existing
+exact-attempt cleanup engine; see [remote attempt retention](retention.md).
 
 ## Host health and protection
 
@@ -368,8 +389,8 @@ not repeat its remote mutation.
 
 ## Delete remote data
 
-Containers, their staged inputs and their outputs stay on the host after the attempt. Nothing on
-the host is deleted automatically or by restarting Relay. To delete one attempt's container,
+Containers, their staged inputs and their outputs stay on the host after the attempt unless that
+job declared remote retention. Restarting Relay alone never deletes an attempt. To delete one attempt's container,
 send an authenticated request with an `operate` token and an `Idempotency-Key`:
 
 ```http

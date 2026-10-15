@@ -37,6 +37,23 @@ private filesystem roots hold input/result bytes; the embedded Python runner exe
     resubmit after a health stop. The optional host watchdog uses a separate one-shot receipt,
     verifies its frozen artifact, and filters stops to exact Relay-owned container labels; it never
     changes host power, sleep or fan settings.
+14. Remote storage has three lifecycles: immutable shared cache entries, frozen application images,
+    and per-attempt data. Cache keys include installation, verified machine, Docker engine,
+    SHA-256 and byte count; attempts pin exact generations and mount verified entries read-only.
+    Image archives and derived labelled image IDs remain distinct identities. No mutable persistent
+    workspace, host-filesystem cache, host package install, Dockerfile build or registry pull is
+    introduced by these paths.
+15. Remote attempt data is deleted only by the existing exact-identity cleanup engine. Optional
+    retention is frozen at admission: the after-collection clock starts only at durable verified
+    publication; an uncollected maximum starts only for a terminal, inactive or never-started
+    attempt. Omission preserves explicit-cleanup behavior. Unknown activity or deletion remains
+    unknown and does not authorize a retry or early removal.
+16. SSH storage accounting is per installation, verified machine and engine. Charge physical
+    objects once, keep workspace references as logical attribution, and retain reservations through
+    uncertainty. A fresh complete observation gates new writes; soft-limit eviction requires zero
+    references and exact removal evidence. The hard limit is an admission/mutation gate, not a
+    quota or reason to stop running work. Inventory inspects only installation-filtered objects;
+    orphan deletion needs explicit preview, apply and an exact operation receipt.
 
 ## Domain
 
@@ -47,6 +64,11 @@ private filesystem roots hold input/result bytes; the embedded Python runner exe
 | Connection | Managed provider identity, credential reference, revision and verified account/machine facts. |
 | Selection / profile | Immutable policy and accelerator offered for admission; later configuration creates a new selection. |
 | Object / bundle | Immutable workspace-owned input bytes, with bounded size/digest and safe logical paths. |
+| Cache generation | Immutable, machine-scoped Docker volume for one verified content digest and byte count; workspace pins protect live attempts. |
+| Application image | Workspace archive identity plus its separately verified, derived and Relay-labelled Docker image ID. |
+| Retention deadline | Frozen policy deadline linked to the original attempt and an ordinary exact cleanup operation. |
+| Storage scope | Installation, verified machine and Docker engine identity shared across connection aliases. |
+| Inventory / orphan | Bounded installation-filtered observation; an orphan requires explicit preview and apply, while absence is only observation evidence. |
 | Job | Accepted canonical specification, input/output declarations and original admission receipt. |
 | Attempt | One explicit execution history with frozen binding, nonce, finite budgets and remote evidence. |
 | Authorization | Consume-once execution, preparation, start or workload-secret grant for an exact attempt. |
@@ -136,6 +158,9 @@ The CLI-effect case also applies to SSH Docker commands; native Kaggle uses dire
 | FM23 | A managed remote resource is manually modified outside the runtime. |
 | FM24 | Cleanup is retried after the remote resource is already absent. |
 | FM25 | A CLI exits nonzero after a possible remote side effect. |
+| FM26 | Storage eviction races new references or a deleted identity reappears. |
+| FM27 | Retention crosses restart, races collection, or follows an uncertain provider view. |
+| FM28 | Inventory finds foreign objects or orphan cleanup loses its acknowledgement. |
 
 Do not weaken a scenario or assertion to obtain a pass. Changed test locations must update the
 catalog and retain the behavior. Run `./scripts/check.sh`; see [development](development.md).
