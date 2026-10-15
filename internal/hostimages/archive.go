@@ -245,10 +245,11 @@ type layerSource struct {
 }
 
 type parsedImage struct {
-	config  []byte
-	id      string
-	diffIDs []string
-	layers  []layerSource
+	config       []byte
+	id           string
+	architecture string
+	diffIDs      []string
+	layers       []layerSource
 }
 
 func parseImage(ctx context.Context, f *os.File, e archiveEntries, opts Options, limits Limits) (parsedImage, error) {

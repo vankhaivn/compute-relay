@@ -84,9 +84,11 @@ The outer archive must contain regular metadata and layer files; linked outer me
 unreferenced members and mixed Docker/OCI layouts are rejected. Links inside image layers remain
 part of the image. The
 image must not declare a non-empty entrypoint or Docker volumes: Relay's fixed runner command must
-remain the process, and anonymous volumes would escape the ownership inventory. The derived Docker
-image ID is based on the rewritten image config and therefore differs from the source archive
-digest. Relay reuses the exact verified derived ID on later jobs; it never imports source tags into
+remain the process, and anonymous volumes would escape the ownership inventory. The derived image
+ID is the rewritten config digest for Docker's classic image store or the canonical OCI manifest
+digest for its containerd image store. Relay detects the store and freezes the exact ID before
+loading; an unrecognized store is refused. These IDs differ from the source archive digest.
+Relay reuses the exact verified derived ID on later jobs; it never imports source tags into
 the host daemon. Kaggle rejects this field as unsupported rather than silently using a different
 runtime. Omitting it preserves the standard SSH image behavior.
 

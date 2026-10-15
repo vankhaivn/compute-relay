@@ -11,7 +11,7 @@ import (
 	"errors"
 	"io"
 	"os"
-	"strconv"
+	"strings"
 )
 
 type cappedWriter struct {
@@ -29,44 +29,93 @@ func (c *cappedWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func writeDockerArchive(ctx context.Context, input, output *os.File, image parsedImage, limits Limits) (int64, error) {
+type archiveDescriptor struct {
+	MediaType string           `json:"mediaType"`
+	Digest    string           `json:"digest"`
+	Size      int64            `json:"size"`
+	Platform  *archivePlatform `json:"platform,omitempty"`
+}
+
+type archivePlatform struct {
+	OS           string `json:"os"`
+	Architecture string `json:"architecture"`
+}
+
+type archiveMetadata struct {
+	configPath, manifestID  string
+	layerPaths              []string
+	manifest, index, docker []byte
+}
+
+func blobPath(digest string) string { return "blobs/sha256/" + strings.TrimPrefix(digest, "sha256:") }
+
+// Both archive views share the same blobs. Supplying an OCI manifest keeps
+// containerd from rebuilding it with whichever compressed layers it already has.
+func normalizedMetadata(image parsedImage) archiveMetadata {
+	m := archiveMetadata{configPath: blobPath(image.id), layerPaths: make([]string, len(image.layers))}
+	layers := make([]archiveDescriptor, len(image.layers))
+	for i, layer := range image.layers {
+		m.layerPaths[i] = blobPath(image.diffIDs[i])
+		layers[i] = archiveDescriptor{MediaType: ociTarType, Digest: image.diffIDs[i], Size: layer.size}
+	}
+	m.manifest, _ = json.Marshal(struct {
+		SchemaVersion int                 `json:"schemaVersion"`
+		MediaType     string              `json:"mediaType"`
+		Config        archiveDescriptor   `json:"config"`
+		Layers        []archiveDescriptor `json:"layers"`
+	}{2, ociManifestType, archiveDescriptor{MediaType: ociConfigType, Digest: image.id, Size: int64(len(image.config))}, layers})
+	hash := sha256.Sum256(m.manifest)
+	m.manifestID = "sha256:" + hex.EncodeToString(hash[:])
+	m.index, _ = json.Marshal(struct {
+		SchemaVersion int                 `json:"schemaVersion"`
+		MediaType     string              `json:"mediaType"`
+		Manifests     []archiveDescriptor `json:"manifests"`
+	}{2, "application/vnd.oci.image.index.v1+json", []archiveDescriptor{{MediaType: ociManifestType,
+		Digest: m.manifestID, Size: int64(len(m.manifest)), Platform: &archivePlatform{OS: "linux", Architecture: image.architecture}}}})
+	m.docker, _ = json.Marshal([]struct {
+		Config   string   `json:"Config"`
+		RepoTags []string `json:"RepoTags"`
+		Layers   []string `json:"Layers"`
+	}{{Config: m.configPath, RepoTags: []string{}, Layers: m.layerPaths}})
+	return m
+}
+
+func writeDockerArchive(ctx context.Context, input, output *os.File, image parsedImage, metadata archiveMetadata, limits Limits) (int64, error) {
 	capped := &cappedWriter{w: output, max: limits.MaxOutputBytes}
 	tw := tar.NewWriter(capped)
-	configName := image.id[len("sha256:"):] + ".json"
-	if err := writeBytes(tw, configName, image.config); err != nil {
+	for _, dir := range []string{"blobs/", "blobs/sha256/"} {
+		if err := writeDir(tw, dir); err != nil {
+			return 0, err
+		}
+	}
+	if err := writeBytes(tw, metadata.configPath, image.config); err != nil {
 		return 0, err
 	}
-	if err := writeDir(tw, "layers/"); err != nil {
-		return 0, err
+	for _, file := range []struct {
+		name string
+		data []byte
+	}{{blobPath(metadata.manifestID), metadata.manifest}, {"oci-layout", []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{"index.json", metadata.index}, {"manifest.json", metadata.docker}} {
+		if err := writeBytes(tw, file.name, file.data); err != nil {
+			return 0, err
+		}
 	}
-	paths := make([]string, 0, len(image.layers))
+	written := map[string]bool{metadata.configPath: true, blobPath(metadata.manifestID): true}
 	for i, layer := range image.layers {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-		dir := "layers/" + strconv.FormatInt(int64(i), 10) + "/"
-		if err := writeDir(tw, dir); err != nil {
-			return 0, err
+		name := metadata.layerPaths[i]
+		if written[name] {
+			continue
 		}
-		name := dir + "layer.tar"
-		paths = append(paths, name)
+		written[name] = true
 		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: layer.size, Format: tar.FormatUSTAR}); err != nil {
 			return 0, err
 		}
 		if err := writeLayer(ctx, tw, input, layer, image.diffIDs[i]); err != nil {
 			return 0, err
 		}
-	}
-	manifest, err := json.Marshal([]struct {
-		Config   string   `json:"Config"`
-		RepoTags []string `json:"RepoTags"`
-		Layers   []string `json:"Layers"`
-	}{{Config: configName, RepoTags: []string{}, Layers: paths}})
-	if err != nil {
-		return 0, ErrInvalidArchive
-	}
-	if err := writeBytes(tw, "manifest.json", manifest); err != nil {
-		return 0, err
 	}
 	if err := tw.Close(); err != nil {
 		return 0, err
@@ -91,16 +140,25 @@ func verifyCompletedArchive(ctx context.Context, output *os.File, image parsedIm
 	if err != nil {
 		return err
 	}
-	configName := image.id[len("sha256:"):] + ".json"
-	config, err := readMetadata(output, entries, configName, limits.MaxMetadataBytes)
+	metadata := normalizedMetadata(image)
+	config, err := readMetadata(output, entries, metadata.configPath, limits.MaxMetadataBytes)
 	if err != nil || !bytes.Equal(config, image.config) {
 		return ErrInvalidArchive
 	}
-	paths := make([]string, len(image.layers))
-	expected := map[string]bool{configName: true, "manifest.json": true}
+	expected := map[string]bool{metadata.configPath: true}
+	for _, file := range []struct {
+		name string
+		data []byte
+	}{{blobPath(metadata.manifestID), metadata.manifest}, {"oci-layout", []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{"index.json", metadata.index}, {"manifest.json", metadata.docker}} {
+		raw, err := readMetadata(output, entries, file.name, limits.MaxMetadataBytes)
+		if err != nil || !bytes.Equal(raw, file.data) {
+			return ErrInvalidArchive
+		}
+		expected[file.name] = true
+	}
 	for i, layer := range image.layers {
-		name := "layers/" + strconv.Itoa(i) + "/layer.tar"
-		paths[i] = name
+		name := metadata.layerPaths[i]
 		member, ok := entries.files[name]
 		if !ok || member.size != layer.size {
 			return ErrInvalidArchive
@@ -113,18 +171,6 @@ func verifyCompletedArchive(ctx context.Context, output *os.File, image parsedIm
 	}
 	if err := entries.exactFiles(expected); err != nil {
 		return err
-	}
-	manifest, err := readMetadata(output, entries, "manifest.json", limits.MaxMetadataBytes)
-	if err != nil {
-		return err
-	}
-	want, err := json.Marshal([]struct {
-		Config   string   `json:"Config"`
-		RepoTags []string `json:"RepoTags"`
-		Layers   []string `json:"Layers"`
-	}{{Config: configName, RepoTags: []string{}, Layers: paths}})
-	if err != nil || !bytes.Equal(manifest, want) {
-		return ErrInvalidArchive
 	}
 	return nil
 }

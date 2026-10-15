@@ -21,6 +21,52 @@ type imageInspectExecutor struct {
 	calls         [][]string
 }
 
+type imageStoreExecutor struct {
+	output string
+	result Result
+	calls  int
+}
+
+func (e *imageStoreExecutor) Run(_ context.Context, _ map[string]string, args []string, _ io.Reader, out io.Writer) (Result, error) {
+	e.calls++
+	if !slices.Equal(args, []string{"/usr/local/bin/docker", "info", "--format", imageStoreFormat}) {
+		return Result{}, ErrRequest
+	}
+	_, err := io.WriteString(out, e.output)
+	return e.result, err
+}
+
+func TestApplicationImageIdentitySelectsKnownStoreBeforeLoad(t *testing.T) {
+	archive := &hostimages.Prepared{ImageID: "sha256:" + strings.Repeat("a", 64), ManifestID: "sha256:" + strings.Repeat("b", 64)}
+	for _, tc := range []struct {
+		name, output, want string
+		result             Result
+	}{
+		{"containerd", `{"driver":"overlayfs","status":[["driver-type","io.containerd.snapshotter.v1"]]}`, archive.ManifestID, Result{}},
+		{"classic-overlay2", `{"driver":"overlay2","status":[["Backing Filesystem","extfs"]]}`, archive.ImageID, Result{}},
+		{"classic-vfs", `{"driver":"vfs","status":null}`, archive.ImageID, Result{}},
+		{"unknown-driver", `{"driver":"future-driver","status":[]}`, "", Result{}},
+		{"missing-containerd-type", `{"driver":"overlayfs","status":[]}`, "", Result{}},
+		{"unknown-driver-type", `{"driver":"overlay2","status":[["driver-type","future.store"]]}`, "", Result{}},
+		{"duplicate-driver-type", `{"driver":"overlayfs","status":[["driver-type","io.containerd.snapshotter.v1"],["driver-type","io.containerd.snapshotter.v1"]]}`, "", Result{}},
+		{"short-status-row", `{"driver":"overlay2","status":[["driver-type"]]}`, "", Result{}},
+		{"long-status-row", `{"driver":"overlay2","status":[["driver-type","io.containerd.snapshotter.v1","extra"]]}`, "", Result{}},
+		{"unknown-field", `{"driver":"overlay2","status":[],"other":true}`, "", Result{}},
+		{"trailing-json", `{"driver":"overlay2","status":[]} {}`, "", Result{}},
+		{"invalid-json", `{"driver":`, "", Result{}},
+		{"command-failed", `{"driver":"overlay2","status":[]}`, "", Result{ExitCode: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &imageStoreExecutor{output: tc.output, result: tc.result}
+			d := docker{exec: e, binary: "/usr/local/bin/docker"}
+			got, err := d.applicationImageID(t.Context(), archive)
+			if got != tc.want || (tc.want == "") != errors.Is(err, ErrRemoteDocker) || e.calls != 1 {
+				t.Fatalf("identity=%q err=%v calls=%d", got, err, e.calls)
+			}
+		})
+	}
+}
+
 func (e *imageInspectExecutor) Run(_ context.Context, _ map[string]string, args []string, _ io.Reader, out io.Writer) (Result, error) {
 	e.calls = append(e.calls, slices.Clone(args))
 	switch {

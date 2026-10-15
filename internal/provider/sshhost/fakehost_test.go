@@ -70,6 +70,7 @@ type fakeHost struct {
 	applicationLoads       int
 	applicationLoadAckLost bool
 	applicationLoadMissing bool
+	containerdImages       bool
 	builds                 int
 	buildExit              int
 	buildInput             []byte
@@ -106,7 +107,7 @@ func newFakeHost(t *testing.T) *fakeHost {
 		machineID: strings.Repeat("a", 32), engineID: "synthetic-engine-01", dockerHost: "unix:///var/run/docker.sock"}
 }
 
-func decodeFakeApplicationArchive(raw []byte) (fakeApplicationImage, error) {
+func decodeFakeApplicationArchive(raw []byte, containerd bool) (fakeApplicationImage, error) {
 	files := map[string][]byte{}
 	tr := tar.NewReader(bytes.NewReader(raw))
 	for {
@@ -127,6 +128,7 @@ func decodeFakeApplicationArchive(raw []byte) (fakeApplicationImage, error) {
 	var manifest []struct {
 		Config   string   `json:"Config"`
 		RepoTags []string `json:"RepoTags"`
+		Layers   []string `json:"Layers"`
 	}
 	if json.Unmarshal(files["manifest.json"], &manifest) != nil || len(manifest) != 1 {
 		return fakeApplicationImage{}, fmt.Errorf("invalid manifest")
@@ -146,8 +148,59 @@ func decodeFakeApplicationArchive(raw []byte) (fakeApplicationImage, error) {
 		return fakeApplicationImage{}, fmt.Errorf("invalid config")
 	}
 	id := sha256.Sum256(configBytes)
-	return fakeApplicationImage{id: "sha256:" + hex.EncodeToString(id[:]), labels: config.Config.Labels,
+	imageID := "sha256:" + hex.EncodeToString(id[:])
+	if containerd {
+		var err error
+		imageID, err = fakeContainerdImageID(files, manifest[0].Config, manifest[0].Layers)
+		if err != nil {
+			return fakeApplicationImage{}, err
+		}
+	}
+	return fakeApplicationImage{id: imageID, labels: config.Config.Labels,
 		diffIDs: config.RootFS.DiffIDs, tags: manifest[0].RepoTags}, nil
+}
+
+func fakeContainerdImageID(files map[string][]byte, config string, paths []string) (string, error) {
+	type descriptor struct {
+		MediaType string `json:"mediaType"`
+		Digest    string `json:"digest"`
+		Size      int    `json:"size"`
+	}
+	if files["oci-layout"] != nil {
+		var index struct {
+			Manifests []descriptor `json:"manifests"`
+		}
+		if json.Unmarshal(files["index.json"], &index) != nil || len(index.Manifests) != 1 {
+			return "", fmt.Errorf("invalid OCI index")
+		}
+		d := index.Manifests[0]
+		manifest := files["blobs/sha256/"+strings.TrimPrefix(d.Digest, "sha256:")]
+		hash := sha256.Sum256(manifest)
+		if len(manifest) != d.Size || d.Digest != "sha256:"+hex.EncodeToString(hash[:]) {
+			return "", fmt.Errorf("invalid OCI manifest identity")
+		}
+		return d.Digest, nil
+	}
+	describe := func(name, media string) descriptor {
+		b := files[name]
+		h := sha256.Sum256(b)
+		return descriptor{media, "sha256:" + hex.EncodeToString(h[:]), len(b)}
+	}
+	layers := make([]descriptor, len(paths))
+	for i, name := range paths {
+		layers[i] = describe(name, "application/vnd.docker.image.rootfs.diff.tar")
+	}
+	manifest, err := json.Marshal(struct {
+		SchemaVersion int          `json:"schemaVersion"`
+		MediaType     string       `json:"mediaType"`
+		Config        descriptor   `json:"config"`
+		Layers        []descriptor `json:"layers"`
+	}{2, "application/vnd.docker.distribution.manifest.v2+json", describe(config, "application/vnd.docker.container.image.v1+json"), layers})
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(manifest)
+	return "sha256:" + hex.EncodeToString(hash[:]), nil
 }
 
 func (h *fakeHost) Close() error {
@@ -274,6 +327,13 @@ func (h *fakeHost) Run(ctx context.Context, env map[string]string, argv []string
 	case slices.Equal(args, []string{"info", "--format", "{{.SystemTime}}"}):
 		_, _ = io.WriteString(stdout, h.engineTime.Format(time.RFC3339Nano))
 		return Result{}, nil
+	case slices.Equal(args, []string{"info", "--format", `{"driver":{{json .Driver}},"status":{{json .DriverStatus}}}`}):
+		if h.containerdImages {
+			_, _ = io.WriteString(stdout, `{"driver":"overlayfs","status":[["driver-type","io.containerd.snapshotter.v1"]]}`)
+		} else {
+			_, _ = io.WriteString(stdout, `{"driver":"overlay2","status":[["Backing Filesystem","extfs"]]}`)
+		}
+		return Result{}, nil
 	case slices.Equal(args, []string{"version"}):
 		return Result{}, nil
 	case slices.Equal(args, []string{"version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"}):
@@ -333,7 +393,7 @@ func (h *fakeHost) Run(ctx context.Context, env map[string]string, argv []string
 	case slices.Equal(args, []string{"image", "load", "--quiet"}):
 		h.applicationLoads++
 		if !h.applicationLoadMissing {
-			image, err := decodeFakeApplicationArchive(archive)
+			image, err := decodeFakeApplicationArchive(archive, h.containerdImages)
 			if err != nil {
 				h.t.Errorf("invalid normalized application archive: %v", err)
 				return Result{ExitCode: 125}, nil

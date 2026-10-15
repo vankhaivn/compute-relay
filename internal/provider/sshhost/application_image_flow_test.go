@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -246,6 +247,104 @@ func TestApplicationImageFirstLoadReuseAndReadOnlyRecovery(t *testing.T) {
 	}
 	if out := h.adapter.Start(context.Background(), second, nil, nil); out.Status != provider.SubmissionAccepted {
 		t.Fatalf("second application start: %+v", out)
+	}
+}
+
+func TestApplicationImageClassicAndContainerdFreezeEngineIdentity(t *testing.T) {
+	for _, containerd := range []bool{false, true} {
+		name := "classic"
+		if containerd {
+			name = "containerd"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, repo, key := applicationHarness(t)
+			h.host.containerdImages = containerd
+			plan, first := h.prepare(t)
+			g, err := repo.ActiveImage(t.Context(), key)
+			if err != nil || g == nil || g.State != hostimages.StateReady || h.host.applicationLoads != 1 || repo.permits != 1 {
+				t.Fatalf("successful load not retained: generation=%+v loads=%d permits=%d err=%v", g, h.host.applicationLoads, repo.permits, err)
+			}
+			if _, ok := h.host.applicationImages[g.ExpectedImageID]; !ok || h.host.container(t).imageID != g.ExpectedImageID {
+				t.Fatal("preparation did not freeze the exact engine image ID")
+			}
+			if seen, err := h.adapter.ReconcilePrepare(t.Context(), plan, testOperation); err != nil || seen.Prepared == nil || *seen.Prepared != first {
+				t.Fatal("read-only recovery changed the exact prepared image", err)
+			}
+			secondImageAttempt(h, repo, key)
+			h.prepare(t)
+			if h.host.applicationLoads != 1 || repo.permits != 1 {
+				t.Fatal("reuse granted another image load")
+			}
+		})
+	}
+}
+
+func TestApplicationImageUnavailableStoreDoesNotIssueLoadPermit(t *testing.T) {
+	h, repo, key := applicationHarness(t)
+	h.host.fail = func(args []string) (Result, bool) {
+		if len(args) == 3 && args[0] == "info" && args[2] == imageStoreFormat {
+			return Result{ExitCode: 1}, true
+		}
+		return Result{}, false
+	}
+	plan, err := h.adapter.Validate(t.Context(), h.job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.adapter.Prepare(t.Context(), plan, testOperation); !errors.Is(err, ErrRemoteDocker) {
+		t.Fatal("unavailable backend did not block preparation", err)
+	}
+	g, err := repo.ActiveImage(t.Context(), key)
+	if err != nil || g != nil || h.host.applicationLoads != 0 || repo.permits != 0 || h.host.created != 0 {
+		t.Fatal("backend refusal retained local preparation or granted a mutation")
+	}
+}
+
+func TestApplicationImageLegacyUnknownConfigIdentityNeverRewrittenOrReloaded(t *testing.T) {
+	h, repo, key := applicationHarness(t)
+	h.host.containerdImages = true
+	meta := h.job.Inputs.ApplicationImage
+	archive, err := hostimages.Normalize(t.Context(), bytes.NewReader(h.blobs[meta.ID]), hostimages.Options{
+		ArchiveSHA256: meta.SHA256, ArchiveBytes: meta.Bytes, InstallationID: key.InstallationID,
+		MachineID: key.MachineID, EngineID: key.EngineID, Architecture: "amd64", TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archive.Close()
+	owner := hostimages.Owner{WorkspaceID: h.job.Identity.WorkspaceID, JobID: h.job.Identity.JobID,
+		AttemptID: h.job.Identity.AttemptID, ObjectID: meta.ID}
+	g, elected, err := repo.ClaimImage(t.Context(), owner, key)
+	if err != nil || !elected {
+		t.Fatal("legacy generation absent", err)
+	}
+	if begun, err := repo.BeginImageLoad(t.Context(), g, archive.ImageID, archive.RootFSDiffIDs); err != nil || !begun {
+		t.Fatal("legacy load permit absent", err)
+	}
+	g.State, g.ExpectedImageID, g.RootFSDiffIDs = hostimages.StateLoading, archive.ImageID, archive.RootFSDiffIDs
+	if err := repo.MarkImageUnknown(t.Context(), g); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := decodeFakeApplicationArchive(raw, true)
+	if err != nil || loaded.id == g.ExpectedImageID {
+		t.Fatal("fixture did not preserve the config/manifest mismatch", err)
+	}
+	h.host.applicationImages[loaded.id] = loaded
+	plan, err := h.adapter.Validate(t.Context(), h.job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.adapter.Prepare(t.Context(), plan, testOperation); !errors.Is(err, hostimages.ErrImageState) {
+		t.Fatal("legacy unknown load gained new mutation authority", err)
+	}
+	active, err := repo.ActiveImage(t.Context(), key)
+	if err != nil || active == nil || active.ID != g.ID || active.OperationID != g.OperationID ||
+		active.ExpectedImageID != g.ExpectedImageID || active.State != hostimages.StateUnknown ||
+		repo.permits != 1 || h.host.applicationLoads != 0 || h.host.created != 0 {
+		t.Fatal("legacy load identity was changed or its mutation repeated")
 	}
 }
 

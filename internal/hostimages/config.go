@@ -109,5 +109,5 @@ func rewriteConfig(raw []byte, opts Options, limits Limits) (parsedImage, error)
 		return parsedImage{}, ErrLimitExceeded
 	}
 	id := sha256.Sum256(result)
-	return parsedImage{config: result, id: "sha256:" + hex.EncodeToString(id[:]), diffIDs: diffIDs}, nil
+	return parsedImage{config: result, id: "sha256:" + hex.EncodeToString(id[:]), architecture: arch, diffIDs: diffIDs}, nil
 }

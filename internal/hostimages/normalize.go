@@ -95,7 +95,8 @@ func (o Options) validate() (Limits, error) {
 // Prepared is not safe for concurrent reads and closes.
 type Prepared struct {
 	ArchiveSHA256   domain.SHA256Digest
-	ImageID         string
+	ImageID         string // Config digest used by the classic Docker image store.
+	ManifestID      string // Canonical OCI manifest digest used by the containerd image store.
 	RootFSDiffIDs   []string
 	NormalizedBytes int64
 	file            *os.File
@@ -189,7 +190,8 @@ func Normalize(ctx context.Context, source io.Reader, opts Options) (_ *Prepared
 			_ = os.Remove(output.Name())
 		}
 	}()
-	size, err := writeDockerArchive(ctx, input, output, image, limits)
+	metadata := normalizedMetadata(image)
+	size, err := writeDockerArchive(ctx, input, output, image, metadata, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +204,7 @@ func Normalize(ctx context.Context, source io.Reader, opts Options) (_ *Prepared
 	if _, err = output.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
-	return &Prepared{ArchiveSHA256: opts.ArchiveSHA256, ImageID: image.id,
+	return &Prepared{ArchiveSHA256: opts.ArchiveSHA256, ImageID: image.id, ManifestID: metadata.manifestID,
 		RootFSDiffIDs: append([]string(nil), image.diffIDs...), NormalizedBytes: size,
 		file: output, path: output.Name()}, nil
 }

@@ -104,6 +104,53 @@ func (d docker) loadApplicationArchive(ctx context.Context, archive io.Reader) e
 	return nil
 }
 
+const imageStoreFormat = `{"driver":{{json .Driver}},"status":{{json .DriverStatus}}}`
+
+// The classic store identifies an image by its config; containerd identifies the
+// canonical manifest. Select that exact digest before committing the load intent.
+func (d docker) applicationImageID(ctx context.Context, archive *hostimages.Prepared) (string, error) {
+	if archive == nil || !ValidImageID(archive.ImageID) || !ValidImageID(archive.ManifestID) {
+		return "", ErrRequest
+	}
+	var output bytes.Buffer
+	result, err := d.run(ctx, nil, &limitedWriter{w: &output, limit: 8 << 10}, "info", "--format", imageStoreFormat)
+	if err != nil || result.ExitCode != 0 {
+		return "", ErrRemoteDocker
+	}
+	var info struct {
+		Driver string     `json:"driver"`
+		Status [][]string `json:"status"`
+	}
+	decoder := json.NewDecoder(&output)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&info) != nil || decoder.Decode(new(any)) != io.EOF || info.Driver == "" || len(info.Driver) > 64 || len(info.Status) > 64 {
+		return "", ErrRemoteDocker
+	}
+	seen := map[string]bool{}
+	driverType := ""
+	for _, row := range info.Status {
+		if len(row) != 2 || row[0] == "" || len(row[0]) > 256 || len(row[1]) > 256 || seen[row[0]] {
+			return "", ErrRemoteDocker
+		}
+		seen[row[0]] = true
+		if row[0] == "driver-type" {
+			driverType = row[1]
+		}
+	}
+	if seen["driver-type"] {
+		if driverType == "io.containerd.snapshotter.v1" {
+			return archive.ManifestID, nil
+		}
+		return "", ErrRemoteDocker
+	}
+	switch info.Driver {
+	case "overlay", "overlay2", "aufs", "btrfs", "devicemapper", "fuse-overlayfs", "vfs", "zfs":
+		return archive.ImageID, nil
+	default:
+		return "", ErrRemoteDocker
+	}
+}
+
 type applicationImageContext struct {
 	config            Config
 	blobs             StagingBlobs
@@ -195,7 +242,12 @@ func (a applicationImageContext) selectApplicationImage(ctx context.Context, d d
 				}
 				return "", closeErr
 			}
-			id := prepared.ImageID
+			id, err := d.applicationImageID(ctx, prepared)
+			if err != nil {
+				_ = prepared.Close()
+				_ = a.applicationImages.RetirePreloadImage(ctx, g)
+				return "", err
+			}
 			diffs := append([]string(nil), prepared.RootFSDiffIDs...)
 			begun, beginErr := a.applicationImages.BeginImageLoad(ctx, g, id, diffs)
 			if beginErr != nil || !begun {

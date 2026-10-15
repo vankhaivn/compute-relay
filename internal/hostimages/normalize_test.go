@@ -97,6 +97,9 @@ func readOutput(t *testing.T, p *Prepared) map[string][]byte {
 			t.Fatal(err)
 		}
 		if h.Typeflag == tar.TypeReg {
+			if _, exists := files[h.Name]; exists {
+				t.Fatal("normalized archive repeats a blob", h.Name)
+			}
 			files[h.Name], err = io.ReadAll(r)
 			if err != nil {
 				t.Fatal(err)
@@ -104,6 +107,67 @@ func readOutput(t *testing.T, p *Prepared) map[string][]byte {
 		}
 	}
 	return files
+}
+
+func assertNormalizedViews(t *testing.T, files map[string][]byte, p *Prepared, architecture string) {
+	t.Helper()
+	type descriptor struct {
+		MediaType string            `json:"mediaType"`
+		Digest    string            `json:"digest"`
+		Size      int               `json:"size"`
+		Platform  map[string]string `json:"platform"`
+	}
+	var index struct {
+		SchemaVersion int          `json:"schemaVersion"`
+		MediaType     string       `json:"mediaType"`
+		Manifests     []descriptor `json:"manifests"`
+	}
+	if string(files["oci-layout"]) != `{"imageLayoutVersion":"1.0.0"}` || json.Unmarshal(files["index.json"], &index) != nil ||
+		index.SchemaVersion != 2 || index.MediaType != "application/vnd.oci.image.index.v1+json" || len(index.Manifests) != 1 {
+		t.Fatal("normalized archive has no single OCI image")
+	}
+	md := index.Manifests[0]
+	manifestBytes := files["blobs/sha256/"+strings.TrimPrefix(md.Digest, "sha256:")]
+	if md.MediaType != ociManifestType || md.Digest != p.ManifestID || md.Digest != "sha256:"+digest(manifestBytes) ||
+		md.Size != len(manifestBytes) || md.Platform["os"] != "linux" || md.Platform["architecture"] != architecture {
+		t.Fatal("OCI manifest descriptor differs from frozen digest, size or platform")
+	}
+	var manifest struct {
+		SchemaVersion int          `json:"schemaVersion"`
+		MediaType     string       `json:"mediaType"`
+		Config        descriptor   `json:"config"`
+		Layers        []descriptor `json:"layers"`
+	}
+	var docker []struct {
+		Config   string   `json:"Config"`
+		RepoTags []string `json:"RepoTags"`
+		Layers   []string `json:"Layers"`
+	}
+	if json.Unmarshal(manifestBytes, &manifest) != nil || manifest.SchemaVersion != 2 || manifest.MediaType != ociManifestType ||
+		json.Unmarshal(files["manifest.json"], &docker) != nil || len(docker) != 1 || len(docker[0].RepoTags) != 0 ||
+		len(manifest.Layers) != len(p.RootFSDiffIDs) || len(docker[0].Layers) != len(manifest.Layers) {
+		t.Fatal("OCI and Docker views differ")
+	}
+	config := files[docker[0].Config]
+	if docker[0].Config != "blobs/sha256/"+strings.TrimPrefix(p.ImageID, "sha256:") ||
+		manifest.Config.Digest != p.ImageID || manifest.Config.Digest != "sha256:"+digest(config) ||
+		manifest.Config.Size != len(config) || manifest.Config.MediaType != ociConfigType {
+		t.Fatal("OCI and Docker views do not share the exact labelled config")
+	}
+	expected := map[string]bool{"oci-layout": true, "index.json": true, "manifest.json": true, docker[0].Config: true,
+		"blobs/sha256/" + strings.TrimPrefix(p.ManifestID, "sha256:"): true}
+	for i, d := range manifest.Layers {
+		name := docker[0].Layers[i]
+		layer := files[name]
+		if name != "blobs/sha256/"+strings.TrimPrefix(d.Digest, "sha256:") || d.Digest != p.RootFSDiffIDs[i] ||
+			d.Digest != "sha256:"+digest(layer) || d.Size != len(layer) || d.MediaType != ociTarType {
+			t.Fatal("OCI and Docker views do not share verified uncompressed layers")
+		}
+		expected[name] = true
+	}
+	if len(files) != len(expected) || bytes.Contains(files["index.json"], []byte("annotations")) || bytes.Contains(manifestBytes, []byte("annotations")) {
+		t.Fatal("normalized archive has unreferenced blobs or image names")
+	}
 }
 
 func assertTempEmpty(t *testing.T, dir string) {
@@ -128,8 +192,9 @@ func TestDockerArchiveIsLabelledAndSourceTagsAreStripped(t *testing.T) {
 		t.Fatal("wrong source or rootfs identity", p)
 	}
 	files := readOutput(t, p)
-	if len(files) != 3 || files["repositories"] != nil || files["old/layer.tar"] != nil ||
-		files[digest(config)+".json"] != nil || !bytes.Equal(files["layers/0/layer.tar"], layer) {
+	assertNormalizedViews(t, files, p, "amd64")
+	if len(files) != 6 || files["repositories"] != nil || files["old/layer.tar"] != nil ||
+		files[digest(config)+".json"] != nil || !bytes.Equal(files["blobs/sha256/"+digest(layer)], layer) {
 		t.Fatal("source metadata or layer leaked into normalized archive", files)
 	}
 	var manifest []struct {
@@ -138,7 +203,7 @@ func TestDockerArchiveIsLabelledAndSourceTagsAreStripped(t *testing.T) {
 		Layers   []string `json:"Layers"`
 	}
 	if json.Unmarshal(files["manifest.json"], &manifest) != nil || len(manifest) != 1 || len(manifest[0].RepoTags) != 0 ||
-		manifest[0].Config != strings.TrimPrefix(p.ImageID, "sha256:")+".json" {
+		manifest[0].Config != "blobs/sha256/"+strings.TrimPrefix(p.ImageID, "sha256:") {
 		t.Fatal("source tags survived", manifest)
 	}
 	labelled := files[manifest[0].Config]
@@ -287,7 +352,8 @@ func TestOCIArchiveGzipNormalizesToDockerArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := readOutput(t, p)
-	if !bytes.Equal(files["layers/0/layer.tar"], layer) || len(files) != 3 || p.ImageID != "sha256:"+digest(files[strings.TrimPrefix(p.ImageID, "sha256:")+".json"]) {
+	assertNormalizedViews(t, files, p, "amd64")
+	if !bytes.Equal(files["blobs/sha256/"+digest(layer)], layer) || len(files) != 6 || p.ImageID != "sha256:"+digest(files["blobs/sha256/"+strings.TrimPrefix(p.ImageID, "sha256:")]) {
 		t.Fatal("OCI conversion changed uncompressed layer or config ID")
 	}
 	if err := p.Close(); err != nil {
@@ -406,11 +472,33 @@ func TestNormalizationIsDeterministicForFrozenOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ImageID != second.ImageID || !bytes.Equal(a, b) {
+	if first.ImageID != second.ImageID || first.ManifestID != second.ManifestID || !bytes.Equal(a, b) {
 		t.Fatal("same frozen source and ownership produced different Docker bytes")
 	}
 	if err := second.Close(); err != nil {
 		t.Fatal(err)
 	}
 	assertTempEmpty(t, dir)
+}
+
+func TestNormalizedArchiveStoresRepeatedLayersOnce(t *testing.T) {
+	layer := testLayer(t)
+	var config map[string]any
+	if err := json.Unmarshal(testConfig(layer, nil), &config); err != nil {
+		t.Fatal(err)
+	}
+	config["rootfs"] = map[string]any{"type": "layers", "diff_ids": []string{"sha256:" + digest(layer), "sha256:" + digest(layer)}}
+	configBytes, _ := json.Marshal(config)
+	manifest, _ := json.Marshal([]map[string]any{{"Config": digest(configBytes) + ".json", "RepoTags": []string{}, "Layers": []string{"old/layer.tar", "other/layer.tar"}}})
+	source := dockerFixture(t, configBytes, layer, manifest, testMember{"other/layer.tar", layer})
+	p, err := Normalize(t.Context(), bytes.NewReader(source), testOptions(source, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	files := readOutput(t, p)
+	assertNormalizedViews(t, files, p, "amd64")
+	if len(files) != 6 || len(p.RootFSDiffIDs) != 2 {
+		t.Fatal("repeated layer was copied or lost")
+	}
 }
