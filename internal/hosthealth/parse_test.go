@@ -59,9 +59,9 @@ func TestRecordedSnapshot(t *testing.T) {
 		t.Fatal("Intel temperature must be decikelvin")
 	}
 	requireValue(t, s.SleepEnabled, false)
-	requireValue(t, s.CPUDieTemperatureCelsius, 62.5)
-	requireValue(t, s.GPUDieTemperatureCelsius, 55.25)
-	requireValue(t, s.FanRPM, 2200.0)
+	requireValue(t, s.CPUDieTemperatureCelsius, 44.55)
+	requireValue(t, s.GPUDieTemperatureCelsius, 35.0)
+	requireValue(t, s.FanRPM, 1828.39)
 	if s.DockerDataFreeBytes.Status != Unavailable || s.GPUUsagePercent.Status != Unavailable || s.BatteryCondition.Status != Unavailable || s.MemoryPressure.Status != Unavailable {
 		t.Fatal("unexposed metrics must remain unavailable")
 	}

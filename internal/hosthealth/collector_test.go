@@ -41,7 +41,7 @@ func TestCollectorUsesFixedCommandsAndPinnedDocker(t *testing.T) {
 	s := Collect(context.Background(), exec, testResource, cfg)
 	requireValue(t, s.CPUCount, 16)
 	requireValue(t, s.SudoGrant, "narrow")
-	requireValue(t, s.CPUDieTemperatureCelsius, 62.5)
+	requireValue(t, s.CPUDieTemperatureCelsius, 44.55)
 	if !seen[Docker] || !seen[GPU] || !seen[Powermetrics] {
 		t.Fatal("missing fixed sources")
 	}
