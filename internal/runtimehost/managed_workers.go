@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
@@ -54,6 +55,7 @@ func (c ManagedServeConfig) accelerator() string {
 }
 
 type managedServices struct {
+	health         *hosthealth.Service
 	secrets        *workloadsecret.Service
 	connections    *connections.Service
 	authorizations *executionauth.Service
@@ -91,6 +93,10 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return nil, ErrState
 	}
 	result := &managedServices{connections: service, authorizations: permits}
+	result.health, err = hosthealth.NewService(h.access, h.store, managedHealthSampler{credentials: service, collect: sshhost.CollectHealth}, clock{})
+	if err != nil {
+		return nil, ErrState
+	}
 	if vault == nil {
 		return result, nil // Unsupported protected storage never falls back or fails old jobs.
 	}
