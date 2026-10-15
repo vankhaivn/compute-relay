@@ -97,6 +97,11 @@ func (e *healthTestExecutor) Run(ctx context.Context, env map[string]string, arg
 			return write(strings.Repeat("x", hosthealth.MaxSourceBytes+1))
 		}
 		return write(e.platform + "\n")
+	case "/usr/bin/osascript":
+		if !slices.Equal(argv, []string{"/usr/bin/osascript", "-l", "JavaScript", "-e", hosthealth.ThermalStateScript}) {
+			e.t.Fatal("unexpected Foundation thermal probe")
+		}
+		name = "thermal-state.txt"
 	case "/usr/sbin/sysctl":
 		if slices.Equal(argv, []string{"/usr/sbin/sysctl", "-n", "hw.cputype"}) {
 			return write("7\n")
