@@ -3,6 +3,7 @@ package hosthealth
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -69,5 +70,21 @@ func TestAnnotatedDieTemperatureStillDrivesCriticalGuard(t *testing.T) {
 	decision := Evaluate(view, DefaultPolicy(), at)
 	if decision.Level != LevelCritical || !decision.RefuseNew || decision.Stop || len(decision.Reasons) != 1 || decision.Reasons[0] != ReasonCPUCritical {
 		t.Fatal("recognized annotation withheld critical temperature evidence", decision)
+	}
+}
+
+func TestRecordedPowermetricsPowerAnnotation(t *testing.T) {
+	raw, err := os.ReadFile("testdata/powermetrics-annotated.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples := fixtures(t)
+	samples[Powermetrics] = Sample{Status: Available, Data: raw}
+	snapshot := Parse(testResource, time.Now(), samples)
+	requireValue(t, snapshot.CPUDieTemperatureCelsius, 100.29)
+	requireValue(t, snapshot.GPUDieTemperatureCelsius, 35.0)
+	requireValue(t, snapshot.FanRPM, 3241.52)
+	if snapshot.Validate() != nil {
+		t.Fatal("recorded annotated sample is invalid")
 	}
 }

@@ -5,3 +5,5 @@ The thermal-state fixture is Foundation `NSProcessInfo.processInfo.thermalState`
 Temperature parser tests also cover Apple's exact optional ` (fan)` annotation, identified in the qualified Intel `powermetrics` binary's CPU/GPU format strings. The recorded idle fixture has no annotation. Other suffixes remain unavailable; annotation text never enters a snapshot.
 
 The top-unpadded fixture contains allowlisted CPU lines from idle qualification on the same host. Apple top globalstats.c computes and prints integer hundredths without padding: https://github.com/apple-oss-distributions/top/blob/main/globalstats.c .
+
+`powermetrics-annotated.txt` contains only three scalar lines recorded from the qualified Intel host after a bounded load reached the guard threshold. The optional `(power)` annotation is emitted by the stock tool; the load was cancelled immediately.
