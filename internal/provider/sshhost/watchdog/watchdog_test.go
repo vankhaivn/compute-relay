@@ -81,6 +81,17 @@ func newFixture(t *testing.T, samples ...sample) *fixture {
 	f.container(ownedID, "runtime_fixture", "instance", "attempt", "preparation", "workspace", "job", strings.Repeat("n", 32), strings.Repeat("d", 64), f.config.EngineID)
 	f.container(foreignID, "foreign_installation", "instance", "attempt", "preparation", "workspace", "job", strings.Repeat("n", 32), strings.Repeat("d", 64), f.config.EngineID)
 	f.container(unlabelledID, "", "", "", "", "", "", "", "", "")
+	// Finish launching the generated fixture executable before measuring the
+	// watchdog's command deadlines. The watchdog itself retains every bound.
+	mustWrite(t, filepath.Join(f.control, "index"), "0", 0600)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	started := time.Now()
+	out, err := exec.CommandContext(ctx, filepath.Join(f.bin, "id"), "-u").CombinedOutput()
+	if err != nil || string(out) != "501\n" {
+		t.Fatalf("fixture command setup failed: %v: %s", err, out)
+	}
+	t.Logf("fixture command setup: %s", time.Since(started))
 	return f
 }
 
@@ -113,10 +124,10 @@ func (f *fixture) run() Status {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sh", filepath.Join(f.artifact.Directory, ScriptName), f.artifact.ManifestDigest)
 	cmd.Env = append(os.Environ(), "DOCKER_CONTEXT=foreign", "DOCKER_HOST=tcp://foreign:2375", "DOCKER_TLS_VERIFY=1", "PERL5OPT=-MRelayHostileFixtureModule")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	out, runErr := cmd.CombinedOutput()
+	if runErr != nil {
 		if ctx.Err() != nil {
-			f.t.Fatalf("watchdog exceeded outer bound: %v: %s", err, out)
+			f.t.Fatalf("watchdog exceeded outer bound: %v: %s", runErr, out)
 		}
 		// Integrity refusal exits nonzero after recording its status.
 		if len(out) != 0 {
@@ -125,7 +136,7 @@ func (f *fixture) run() Status {
 	}
 	raw, err := os.ReadFile(filepath.Join(f.artifact.Directory, StatusName))
 	if err != nil {
-		f.t.Fatalf("missing status: %v (process %v, output %s)", err, cmd.ProcessState, out)
+		f.t.Fatalf("missing status: %v (run %v, process %v, output %s, commands:\n%s)", err, runErr, cmd.ProcessState, out, f.log())
 	}
 	s, err := ParseStatus(raw)
 	if err != nil {
