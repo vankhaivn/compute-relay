@@ -133,3 +133,53 @@ func TestCollectionHonorsOverallCallerDeadline(t *testing.T) {
 		t.Fatal("collection exceeded caller deadline")
 	}
 }
+
+func TestCollectorQualifiesNativeArchitectureBeforeMetrics(t *testing.T) {
+	for _, tt := range []struct {
+		name, platform, native string
+		failed                 bool
+		want                   Status
+		calls                  int
+	}{
+		{"rosetta", "Darwin x86_64\n", "16777228\n", false, Unsupported, 2},
+		{"native_arm", "Darwin arm64\n", "", false, Unsupported, 1},
+		{"linux", "Linux x86_64\n", "", false, Unsupported, 1},
+		{"failed_probe", "Darwin x86_64\n", "7\n", true, Unavailable, 2},
+		{"empty_probe", "Darwin x86_64\n", "", false, Unavailable, 2},
+		{"hostile_probe", "Darwin x86_64\n", "7\nHOSTILE", false, Unavailable, 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			exec := executorFunc(func(_ context.Context, argv []string, out, stderr io.Writer) error {
+				calls++
+				switch calls {
+				case 1:
+					if !reflect.DeepEqual(argv, []string{"/usr/bin/uname", "-sm"}) {
+						t.Fatal("first command is not uname")
+					}
+					_, err := io.WriteString(out, tt.platform)
+					return err
+				case 2:
+					if !reflect.DeepEqual(argv, []string{"/usr/sbin/sysctl", "-n", "hw.cputype"}) {
+						t.Fatal("native probe missing")
+					}
+					_, err := io.WriteString(out, tt.native)
+					if tt.failed {
+						return errors.New("probe failed")
+					}
+					return err
+				default:
+					t.Fatalf("unexpected metric or privileged command %q", argv)
+					return nil
+				}
+			})
+			s := Collect(context.Background(), exec, testResource, Config{})
+			if calls != tt.calls || s.ThermalLevel.Status != tt.want {
+				t.Fatalf("calls=%d status=%s", calls, s.ThermalLevel.Status)
+			}
+			if err := s.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

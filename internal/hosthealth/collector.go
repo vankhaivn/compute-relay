@@ -14,18 +14,19 @@ import (
 type Source string
 
 const (
-	Platform       Source = "platform"
-	Thermal        Source = "thermal-pressure"
-	Power          Source = "power-battery"
-	Sleep          Source = "sleep-settings"
-	Battery        Source = "smart-battery-ioreg"
-	Sysctl         Source = "sysctl-metrics"
-	Top            Source = "top-sample"
-	MemoryPressure Source = "memory-pressure"
-	Docker         Source = "docker-info"
-	GPU            Source = "gpu-utilization"
-	Sudo           Source = "sudo-list-noninteractive"
-	Powermetrics   Source = "powermetrics"
+	Platform           Source = "platform"
+	NativeArchitecture Source = "native-architecture"
+	Thermal            Source = "thermal-pressure"
+	Power              Source = "power-battery"
+	Sleep              Source = "sleep-settings"
+	Battery            Source = "smart-battery-ioreg"
+	Sysctl             Source = "sysctl-metrics"
+	Top                Source = "top-sample"
+	MemoryPressure     Source = "memory-pressure"
+	Docker             Source = "docker-info"
+	GPU                Source = "gpu-utilization"
+	Sudo               Source = "sudo-list-noninteractive"
+	Powermetrics       Source = "powermetrics"
 )
 const MaxSourceBytes = 64 << 10
 const CommandTimeout = 4 * time.Second
@@ -65,6 +66,7 @@ func commands(config Config) []command {
 	local = local && path.IsAbs(socket) && path.Clean(socket) == socket && len(socket) <= 2048 && !strings.ContainsAny(socket, "\x00\r\n")
 	out := []command{
 		{Platform, []string{"/usr/bin/uname", "-sm"}},
+		{NativeArchitecture, []string{"/usr/sbin/sysctl", "-n", "hw.cputype"}},
 		{Sysctl, []string{"/usr/sbin/sysctl", "hw.ncpu", "hw.memsize", "vm.loadavg", "machdep.xcpm.cpu_thermal_level"}},
 		{Thermal, []string{"/usr/bin/pmset", "-g", "therm"}},
 		{Power, []string{"/usr/bin/pmset", "-g", "batt"}},
@@ -146,17 +148,28 @@ func Collect(ctx context.Context, executor Executor, resourceID string, config C
 		return Parse(resourceID, time.Now().UTC(), samples)
 	}
 	for _, cmd := range commands(config) {
-		if cmd.source != Platform && !supported(samples[Platform]) {
+		if cmd.source == NativeArchitecture && !intelProcess(samples[Platform]) {
+			break
+		}
+		if cmd.source != Platform && cmd.source != NativeArchitecture && !supported(samples) {
 			break
 		}
 		samples[cmd.source] = collectSource(ctx, executor, cmd.argv)
 	}
 	grant := ClassifyGrant(samples[Sudo])
-	if supported(samples[Platform]) && (grant == "narrow" || grant == "broader") {
+	if supported(samples) && (grant == "narrow" || grant == "broader") {
 		samples[Powermetrics] = collectSource(ctx, executor, []string{"/usr/bin/sudo", "-n", "/usr/bin/powermetrics", "--samplers", "smc", "-n", "1", "-i", "1000"})
 	}
 	return Parse(resourceID, time.Now().UTC(), samples)
 }
-func supported(s Sample) bool {
+func intelProcess(s Sample) bool {
 	return strings.TrimSpace(sourceText(s)) == "Darwin x86_64"
+}
+
+// uname can report x86_64 under Rosetta; only the native hardware probe can
+// establish Intel support. HW_LOCAL_CPUTYPE reads host_info CPU type, unaffected
+// by user-process translation (Apple XNU bsd/kern/kern_mib.c and osfmk/kern/host.c).
+// Missing evidence stays unknown, never unsupported.
+func supported(samples map[Source]Sample) bool {
+	return intelProcess(samples[Platform]) && strings.TrimSpace(sourceText(samples[NativeArchitecture])) == "7"
 }

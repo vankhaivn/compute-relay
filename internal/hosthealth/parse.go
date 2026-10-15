@@ -71,9 +71,9 @@ func Parse(resourceID string, observed time.Time, samples map[Source]Sample) Sna
 		return emptySnapshot("", observed, Unavailable, "platform_unknown")
 	}
 	platform := samples[Platform]
-	if !supported(platform) {
+	if !supported(samples) {
 		p := strings.TrimSpace(sourceText(platform))
-		if regexp.MustCompile(`^(Linux [a-zA-Z0-9_]+|Darwin arm64)$`).MatchString(p) {
+		if regexp.MustCompile(`^(Linux [a-zA-Z0-9_]+|Darwin arm64)$`).MatchString(p) || intelProcess(platform) && strings.TrimSpace(sourceText(samples[NativeArchitecture])) == "16777228" {
 			s := emptySnapshot(resourceID, observed, Unsupported, "platform_unsupported")
 			s.Platform = value("unsupported")
 			return s

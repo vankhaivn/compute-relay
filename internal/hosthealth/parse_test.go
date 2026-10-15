@@ -14,7 +14,7 @@ const testResource = "resource_" + "0123456789abcdef0123456789abcdef0123456789ab
 func fixtures(t *testing.T) map[Source]Sample {
 	t.Helper()
 	out := map[Source]Sample{}
-	for _, source := range []Source{Platform, Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics} {
+	for _, source := range []Source{Platform, NativeArchitecture, Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics} {
 		data, err := os.ReadFile("testdata/" + string(source) + ".txt")
 		if err != nil {
 			t.Fatal(err)
@@ -253,5 +253,51 @@ func TestUntrustedIdentityAndReasonsNeverSurvive(t *testing.T) {
 	encoded, _ := json.Marshal(s)
 	if strings.Contains(string(encoded), "NO_PERSIST") {
 		t.Fatal("untrusted source reason leaked")
+	}
+}
+
+func TestNativeArchitectureQualification(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		sample Sample
+		want   Status
+	}{
+		{"native_intel", Sample{Status: Available, Data: []byte("7\n")}, Available},
+		{"rosetta_arm", Sample{Status: Available, Data: []byte("16777228\n")}, Unsupported},
+		{"missing", Sample{}, Unavailable},
+		{"failed", Sample{Status: Unavailable, Reason: "command_failed", Data: []byte("7\n")}, Unavailable},
+		{"truncated", Sample{Status: Unavailable, Reason: "output_limit", Data: []byte("7\n")}, Unavailable},
+		{"malformed", Sample{Status: Available, Data: []byte("hw.cputype: 7\n")}, Unavailable},
+		{"conflicting", Sample{Status: Available, Data: []byte("7\n16777228\n")}, Unavailable},
+		{"hostile", Sample{Status: Available, Data: []byte("7\nHOST_IDENTITY_NEVER_PERSIST")}, Unavailable},
+		{"negative", Sample{Status: Available, Data: []byte("-1\n")}, Unavailable},
+		{"unknown_scalar", Sample{Status: Available, Data: []byte("2\n")}, Unavailable},
+		{"zero_is_not_native_intel", Sample{Status: Available, Data: []byte("0\n")}, Unavailable},
+		{"nul", Sample{Status: Available, Data: []byte("7\x00")}, Unavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := fixtures(t)
+			f[NativeArchitecture] = tt.sample
+			s := Parse(testResource, time.Now(), f)
+			if s.ThermalLevel.Status != tt.want {
+				t.Fatalf("thermal status=%s want %s", s.ThermalLevel.Status, tt.want)
+			}
+			if tt.want == Unavailable && (s.Platform.Status != Unavailable || s.Platform.Reason != "platform_unknown") {
+				t.Fatal("uncertain native probe must fail closed")
+			}
+			if tt.want == Unsupported {
+				requireValue(t, s.Platform, "unsupported")
+				if s.SudoGrant.Status != Unsupported {
+					t.Fatal("Rosetta accepted")
+				}
+			}
+			if err := s.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			encoded, _ := json.Marshal(s)
+			if strings.Contains(string(encoded), "HOST_IDENTITY_NEVER_PERSIST") {
+				t.Fatal("probe identity leaked")
+			}
+		})
 	}
 }
