@@ -433,3 +433,32 @@ func TestHealthWorkerRetainsTransientStateFailuresAndStopsOnCorruption(t *testin
 }
 
 var _ ports.Clock = (*serviceClock)(nil)
+
+func TestHealthAliasesShareMetricsButKeepRequestPolicy(t *testing.T) {
+	f := newServiceFixture(t)
+	lan := hosthealth.DefaultPolicy()
+	vpn := lan
+	vpn.LowBatteryPercent = 20
+	f.lan.Policy = &lan
+	f.vpn.Policy = &vpn
+	first, err := f.service.Refresh(context.Background(), f.lan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.service.Refresh(context.Background(), f.vpn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.calls != 1 || first.Policy == nil || second.Policy == nil || first.Policy.LowBatteryPercent != 10 || second.Policy.LowBatteryPercent != 20 {
+		t.Fatal("machine cache shared connection policy", f.calls)
+	}
+	second.Policy.LowBatteryPercent = 99
+	again, err := f.service.Refresh(context.Background(), f.vpn)
+	if err != nil || again.Policy.LowBatteryPercent != 20 {
+		t.Fatal("returned policy mutated target", err)
+	}
+	cached, err := f.service.Cached(context.Background(), f.lan.ResourceID)
+	if err != nil || cached.Policy != nil {
+		t.Fatal("machine cache retained connection policy", err)
+	}
+}

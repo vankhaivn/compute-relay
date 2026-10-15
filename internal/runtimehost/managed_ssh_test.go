@@ -9,6 +9,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 )
 
@@ -183,5 +184,30 @@ func TestManagedSSHConfigurationKeepsLimitsAcrossChecks(t *testing.T) {
 	_, err = f.services.connections.Submit(ctx, f.actor, "app", kaggle.ID, "kaggle-limit-unsupported", []byte(fmt.Sprintf(`{"action":"configure","expected_revision":%d,"configuration":{"max_remote_wall_seconds":1200,"max_processes":128}}`, kaggle.Revision)))
 	if err != connections.ErrRequest {
 		t.Fatal("provider accepted unsupported limits", err)
+	}
+}
+
+func TestManagedSSHRuntimePolicyLegacyAndFrozenHealth(t *testing.T) {
+	old := []byte(fmt.Sprintf(`{"schema_version":1,"image":%q}`, sshhost.StandardImage))
+	original := string(old)
+	parsed, err := parseManagedSSHRuntimeConfig(old)
+	if err != nil || parsed.HostHealth == nil || *parsed.HostHealth != hosthealth.LegacyPolicyV1() {
+		t.Fatal("legacy interpretation changed", err)
+	}
+	policy := hosthealth.DefaultPolicy()
+	policy.CriticalDurationSeconds = 30
+	frozen, err := hosthealth.FreezeRuntimePolicy(old, policy)
+	requireNoError(t, err)
+	parsed, err = parseManagedSSHRuntimeConfig(frozen)
+	if err != nil || parsed.HostHealth == nil || *parsed.HostHealth != policy {
+		t.Fatal("frozen policy lost", err)
+	}
+	if string(old) != original {
+		t.Fatal("old runtime rewritten")
+	}
+	for _, raw := range []string{fmt.Sprintf(`{"schema_version":1,"image":%q,"host_health":null}`, sshhost.StandardImage), fmt.Sprintf(`{"schema_version":1,"image":%q,"host_health":{}}`, sshhost.StandardImage)} {
+		if _, err := parseManagedSSHRuntimeConfig([]byte(raw)); err == nil {
+			t.Fatal("invalid health policy accepted")
+		}
 	}
 }

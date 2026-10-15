@@ -31,6 +31,7 @@ type View struct {
 	Fresh           bool       `json:"-"`
 	UnknownReason   string     `json:"-"`
 	ReobservedSince time.Time  `json:"-"`
+	Policy          *Policy    `json:"-"`
 }
 
 type machineSample struct {
@@ -116,7 +117,8 @@ func (s *Service) Refresh(ctx context.Context, target Target) (View, error) {
 		// unlimited retry loop. Its cached view remains unknown until time catches up.
 		if !m.attempted.IsZero() && now.Sub(m.attempted) < DemandCache {
 			s.mu.Unlock()
-			return s.Cached(ctx, target.ResourceID)
+			view, err := s.Cached(ctx, target.ResourceID)
+			return withTargetPolicy(view, target), err
 		}
 		m.attempted = now
 		m.inflight = make(chan struct{})
@@ -155,8 +157,17 @@ func (s *Service) Refresh(ctx context.Context, target Target) (View, error) {
 		if err != nil {
 			return View{}, err
 		}
-		return s.Cached(ctx, target.ResourceID)
+		view, err := s.Cached(ctx, target.ResourceID)
+		return withTargetPolicy(view, target), err
 	}
+}
+
+func withTargetPolicy(view View, target Target) View {
+	if target.Policy != nil {
+		policy := *target.Policy
+		view.Policy = &policy
+	}
+	return view
 }
 
 // Cached never probes. Persisted snapshots are not current evidence until this

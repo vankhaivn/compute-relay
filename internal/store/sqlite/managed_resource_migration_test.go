@@ -90,6 +90,8 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 		schedulerSetState(t, f.s, id, state)
 	}
 	queued, queuedOriginal := admit(lan, "legacy-queued-job")
+	var originalRuntime []byte
+	requireNoError(t, f.s.db.QueryRow(`SELECT config FROM managed_profile_runtime WHERE profile=? AND revision=?`, lan.Selection.Profile, lan.Selection.ConfigurationRevision).Scan(&originalRuntime))
 	oldPath := copyFixtureAtSchema(t, f.s, version)
 	requireNoError(t, f.s.Close())
 	f.s, err = Open(ctx, oldPath, DefaultOptions())
@@ -121,7 +123,7 @@ func testResourceMigrationPreservesOldReservations(t *testing.T, version int) {
 	}
 	binding := provider.BindingSnapshot{Binding: retained.Profile.Binding, AccountScope: retained.Profile.AccountScope, CredentialRef: retained.Profile.CredentialRef}
 	runtime, err := f.s.ReadManagedBinding(ctx, binding)
-	if err != nil || string(runtime.RuntimeConfig) != string(legacy.RuntimeConfig()) || runtime.Resource == nil {
+	if err != nil || string(runtime.RuntimeConfig) != string(originalRuntime) || runtime.Resource == nil {
 		t.Fatal("migration lost original recovery policy", runtime, err)
 	}
 	for _, id := range []scheduler.Identity{first, second} {

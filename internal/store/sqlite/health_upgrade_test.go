@@ -39,7 +39,7 @@ func TestHostHealthUpgradeFromV28PreservesStateAndArtifactBytes(t *testing.T) {
 		"SELECT * FROM api_token_hashes ORDER BY token_id",
 		"SELECT * FROM jobs ORDER BY workspace_id,job_id",
 		"SELECT * FROM attempts ORDER BY workspace_id,job_id,attempt_id",
-		"SELECT * FROM managed_connections ORDER BY connection_id",
+		"SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence,max_active_attempts,max_processes FROM managed_connections ORDER BY connection_id",
 		"SELECT * FROM managed_profile_runtime ORDER BY profile,revision",
 		"SELECT * FROM managed_resource_accounts ORDER BY account_scope",
 		"SELECT * FROM receipts ORDER BY namespace,scope,workspace_id,key_sha256",
@@ -88,6 +88,11 @@ func TestHostHealthUpgradeFromV28PreservesStateAndArtifactBytes(t *testing.T) {
 		if after := upgradeRows(t, upgraded.db, q); !reflect.DeepEqual(before[i], after) {
 			t.Fatal("v28 upgrade changed original rows", q)
 		}
+	}
+	var addedPolicies int
+	requireNoError(t, upgraded.db.QueryRow("SELECT count(*) FROM managed_connections WHERE host_health IS NOT NULL").Scan(&addedPolicies))
+	if addedPolicies != 0 {
+		t.Fatal("upgrade rewrote legacy connection policy")
 	}
 	var samples int
 	requireNoError(t, upgraded.db.QueryRow("SELECT count(*) FROM host_health_history").Scan(&samples))

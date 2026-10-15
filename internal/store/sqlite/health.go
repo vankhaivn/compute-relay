@@ -35,7 +35,7 @@ func hostHealthTarget(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id 
 		return hosthealth.Target{}, hosthealth.ErrUnverified
 	}
 	target := hosthealth.Target{Workspace: w, ConnectionID: id, ProviderType: r.view.ProviderType,
-		CanonicalAccount: r.account, CredentialRef: ports.CredentialRef("vault:" + id), ResourceID: resource.ID}
+		CanonicalAccount: r.account, CredentialRef: ports.CredentialRef("vault:" + id), ResourceID: resource.ID, Policy: r.healthPolicy}
 	// A verified machine can be observed before its execution image is installed.
 	// Existing frozen policy, when present, supplies an additional engine pin.
 	if r.profile != "" {

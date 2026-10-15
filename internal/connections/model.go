@@ -11,6 +11,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
@@ -110,12 +111,16 @@ type Selection struct {
 // Configuration is a persisted, non-secret policy override for future selections.
 // Omission preserves the adapter's configured startup default.
 type Configuration struct {
-	MaxRemoteWallSeconds int64 `json:"max_remote_wall_seconds"`
-	MaxActiveAttempts    int   `json:"max_active_attempts,omitempty"`
-	MaxProcesses         int   `json:"max_processes,omitempty"`
+	MaxRemoteWallSeconds int64                   `json:"max_remote_wall_seconds"`
+	MaxActiveAttempts    int                     `json:"max_active_attempts,omitempty"`
+	MaxProcesses         int                     `json:"max_processes,omitempty"`
+	HostHealth           *hosthealth.PolicyPatch `json:"host_health,omitempty"`
 }
 
 func (c Configuration) Validate() error {
+	if c.HostHealth != nil && c.HostHealth.Validate() != nil {
+		return ErrRequest
+	}
 	if c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxActiveAttempts < 0 || c.MaxActiveAttempts > 64 || c.MaxProcesses < 0 || c.MaxProcesses > 65536 {
 		return ErrRequest
 	}
@@ -274,6 +279,7 @@ type Record struct {
 	ActiveCredentialKey string
 	ActorTokenID        string
 	Configuration       *Configuration
+	HostHealthPolicy    *hosthealth.Policy
 	Installation        *ImageInstallation
 	Resource            *ResourceIdentity
 }

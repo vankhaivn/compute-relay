@@ -133,7 +133,7 @@ func TestHostHealthTargetsRequireActorAndVerifiedResourceIncludingNoImage(t *tes
 	if _, err = f.s.ResolveHostHealthTarget(ctx, "a", f.principals["a"].TokenID(), op.ConnectionID); !errors.Is(err, hosthealth.ErrUnverified) {
 		t.Fatal("pending connection supplied a target", err)
 	}
-	if _, err = f.s.db.Exec(`UPDATE managed_connections SET provider_type='kaggle' WHERE connection_id=?`, c.ID); err != nil {
+	if _, err = f.s.db.Exec(`UPDATE managed_connections SET provider_type='kaggle',host_health=NULL WHERE connection_id=?`, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.s.ResolveHostHealthTarget(ctx, "a", f.principals["a"].TokenID(), c.ID); !errors.Is(err, hosthealth.ErrUnsupported) {

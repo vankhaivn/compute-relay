@@ -24,13 +24,14 @@ type Target struct {
 	CredentialRef    ports.CredentialRef `json:"-"`
 	ResourceID       string              `json:"-"`
 	RuntimeConfig    []byte              `json:"-"`
+	Policy           *Policy             `json:"-"`
 }
 
 func (Target) String() string   { return "[host health target redacted]" }
 func (Target) GoString() string { return "[host health target redacted]" }
 
 func (t Target) Valid() bool {
-	return t.Workspace.Valid() && domain.ObjectID(t.ConnectionID).Valid() &&
+	return (t.Policy == nil || t.Policy.Validate() == nil) && t.Workspace.Valid() && domain.ObjectID(t.ConnectionID).Valid() &&
 		domain.ObjectID(t.ProviderType).Valid() && domain.ObjectID(t.CanonicalAccount).Valid() &&
 		t.CredentialRef == ports.CredentialRef("vault:"+t.ConnectionID) && resourcePattern.MatchString(t.ResourceID) && len(t.RuntimeConfig) <= 8192
 }

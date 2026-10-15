@@ -50,6 +50,8 @@ func TestImageMigrationRetiresLegacyAdmissionButPreservesFrozenJobs(t *testing.T
 	requireNoError(t, err)
 	original, err := jobs.Get(ctx, f.principals["a"], "a", receipt.JobID)
 	requireNoError(t, err)
+	var originalRuntime []byte
+	requireNoError(t, f.s.db.QueryRow(`SELECT config FROM managed_profile_runtime WHERE profile=? AND revision=?`, connection.Selection.Profile, connection.Selection.ConfigurationRevision).Scan(&originalRuntime))
 	oldPath := copyFixtureAtSchema(t, f.s, 17)
 	upgraded, err := Open(ctx, oldPath, DefaultOptions())
 	if err != nil {
@@ -66,7 +68,7 @@ func TestImageMigrationRetiresLegacyAdmissionButPreservesFrozenJobs(t *testing.T
 	}
 	binding := provider.BindingSnapshot{Binding: retained.Profile.Binding, AccountScope: retained.Profile.AccountScope, CredentialRef: retained.Profile.CredentialRef}
 	frozen, err := upgraded.ReadManagedBinding(ctx, binding)
-	if err != nil || string(frozen.RuntimeConfig) != string((legacySSHStateAdapter{}).RuntimeConfig()) {
+	if err != nil || string(frozen.RuntimeConfig) != string(originalRuntime) {
 		t.Fatal("upgrade lost exact image recovery policy", err)
 	}
 	var enabled bool

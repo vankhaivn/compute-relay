@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 )
 
@@ -20,6 +21,7 @@ var _ connections.Repository = (*Store)(nil)
 type managedRecord struct {
 	view                                                connections.Connection
 	account, accountScope, credential, profile, pending string
+	healthPolicy                                        *hosthealth.Policy
 }
 
 func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id string) (managedRecord, error) {
@@ -27,13 +29,17 @@ func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id strin
 	var updated string
 	var wall sql.NullInt64
 	var maxActive, maxProcesses int
-	var host []byte
-	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence,max_active_attempts,max_processes FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall, &host, &maxActive, &maxProcesses)
+	var host, health []byte
+	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence,max_active_attempts,max_processes,host_health FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall, &host, &maxActive, &maxProcesses, &health)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
 	if err != nil {
 		return r, dbError(err)
+	}
+	r.healthPolicy, err = managedHostHealthPolicy(r.view.ProviderType, health)
+	if err != nil {
+		return r, err
 	}
 	r.view.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated)
 	if err != nil {
@@ -41,6 +47,9 @@ func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id strin
 	}
 	if wall.Valid {
 		r.view.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}
+		if r.healthPolicy != nil {
+			r.view.Configuration.HostHealth = r.healthPolicy.Patch()
+		}
 		if r.view.Configuration.Validate() != nil {
 			return r, ErrCorrupt
 		}
@@ -179,16 +188,20 @@ func (s *Store) ListConnections(ctx context.Context, w domain.WorkspaceID, token
 func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID) (connections.Record, error) {
 	var r connections.Record
 	var receipt, status, updated string
-	var installation []byte
+	var installation, health []byte
 	var problem sql.NullString
 	var wall sql.NullInt64
 	var maxActive, maxProcesses int
-	err := tx.QueryRowContext(ctx, `SELECT r.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation)
+	err := tx.QueryRowContext(ctx, `SELECT r.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation,c.host_health FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation, &health)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
 	if err != nil {
 		return r, dbError(err)
+	}
+	r.HostHealthPolicy, err = managedHostHealthPolicy(r.ProviderType, health)
+	if err != nil {
+		return r, err
 	}
 	if len(installation) > 0 {
 		r.Installation = &connections.ImageInstallation{}
@@ -209,6 +222,9 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 	}
 	if wall.Valid {
 		r.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}
+		if r.HostHealthPolicy != nil {
+			r.Configuration.HostHealth = r.HostHealthPolicy.Patch()
+		}
 		if r.Configuration.Validate() != nil {
 			return r, ErrCorrupt
 		}
