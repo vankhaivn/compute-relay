@@ -413,12 +413,12 @@
         "warning_thermal_level": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 255
+          "maximum": 3
         },
         "critical_thermal_level": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 255
+          "maximum": 3
         },
         "warning_cpu_speed_percent": {
           "type": "number",

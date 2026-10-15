@@ -16,6 +16,7 @@ type Source string
 const (
 	Platform           Source = "platform"
 	NativeArchitecture Source = "native-architecture"
+	ThermalState       Source = "thermal-state"
 	Thermal            Source = "thermal-pressure"
 	Power              Source = "power-battery"
 	Sleep              Source = "sleep-settings"
@@ -31,6 +32,10 @@ const (
 const MaxSourceBytes = 64 << 10
 const CommandTimeout = 4 * time.Second
 const CollectionTimeout = 25 * time.Second
+
+// Foundation NSProcessInfoThermalState is nominal=0, fair=1, serious=2, critical=3.
+// https://developer.apple.com/library/archive/documentation/Performance/Conceptual/power_efficiency_guidelines_osx/RespondToThermalStateChanges.html
+const ThermalStateScript = `ObjC.import('Foundation'); $.NSProcessInfo.processInfo.thermalState`
 
 type Sample struct {
 	Data   []byte
@@ -67,7 +72,8 @@ func commands(config Config) []command {
 	out := []command{
 		{Platform, []string{"/usr/bin/uname", "-sm"}},
 		{NativeArchitecture, []string{"/usr/sbin/sysctl", "-n", "hw.cputype"}},
-		{Sysctl, []string{"/usr/sbin/sysctl", "hw.ncpu", "hw.memsize", "vm.loadavg", "machdep.xcpm.cpu_thermal_level"}},
+		{ThermalState, []string{"/usr/bin/osascript", "-l", "JavaScript", "-e", ThermalStateScript}},
+		{Sysctl, []string{"/usr/sbin/sysctl", "hw.ncpu", "hw.memsize", "vm.loadavg"}},
 		{Thermal, []string{"/usr/bin/pmset", "-g", "therm"}},
 		{Power, []string{"/usr/bin/pmset", "-g", "batt"}},
 		{Sleep, []string{"/usr/bin/pmset", "-g", "custom"}},

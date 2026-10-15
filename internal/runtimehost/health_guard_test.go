@@ -527,7 +527,7 @@ func TestHostHealthRunningStopUsesFrozenPolicyAfterConfigureAndDisable(t *testin
 	job := g.running(t)
 	original := g.read(t, job).Profile
 	body := systemJSON(t, map[string]any{"action": "configure", "expected_revision": g.connection.Revision,
-		"configuration": map[string]any{"max_remote_wall_seconds": 600, "host_health": map[string]any{"warning_thermal_level": 100, "critical_thermal_level": 200, "low_battery_percent": 0}}})
+		"configuration": map[string]any{"max_remote_wall_seconds": 600, "host_health": map[string]any{"warning_thermal_level": 3, "critical_thermal_level": 3, "low_battery_percent": 0}}})
 	_, err := g.f.services.connections.Submit(t.Context(), g.f.actor, "app", g.connection.ID, "guard-permissive-current-policy", body)
 	requireNoError(t, err)
 	current, err := g.f.services.connections.Get(t.Context(), g.f.actor, "app", g.connection.ID)

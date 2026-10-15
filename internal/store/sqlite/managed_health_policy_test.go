@@ -38,14 +38,14 @@ func TestManagedHostHealthPolicyFreezesAndPreservesOmittedThresholds(t *testing.
 	if p != hosthealth.DefaultPolicy() || !bytes.Contains(original, []byte(`"host_health"`)) {
 		t.Fatal("new profile did not materialize defaults")
 	}
-	c = configureHealthPolicy(t, f, c, "health-policy-change", `{"warning_thermal_level":3,"critical_thermal_level":4,"critical_duration_seconds":30}`)
+	c = configureHealthPolicy(t, f, c, "health-policy-change", `{"warning_thermal_level":2,"critical_thermal_level":3,"critical_duration_seconds":30}`)
 	_, changed := runtimeHealthPolicy(t, f, c)
-	if changed.WarningThermalLevel != 3 || changed.CriticalThermalLevel != 4 || changed.CriticalDurationSeconds != 30 || changed.LowBatteryPercent != p.LowBatteryPercent {
+	if changed.WarningThermalLevel != 2 || changed.CriticalThermalLevel != 3 || changed.CriticalDurationSeconds != 30 || changed.LowBatteryPercent != p.LowBatteryPercent {
 		t.Fatal(changed)
 	}
 	c = configureHealthPolicy(t, f, c, "health-policy-partial", `{"low_battery_percent":0}`)
 	_, partial := runtimeHealthPolicy(t, f, c)
-	if partial.LowBatteryPercent != 0 || partial.CriticalThermalLevel != 4 || partial.CriticalDurationSeconds != 30 {
+	if partial.LowBatteryPercent != 0 || partial.CriticalThermalLevel != 3 || partial.CriticalDurationSeconds != 30 {
 		t.Fatal("patch lost saved thresholds", partial)
 	}
 	configureConnection(t, f, c, "health-policy-omitted", 2400)

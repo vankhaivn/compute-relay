@@ -34,6 +34,12 @@ func TestCollectorUsesFixedCommandsAndPinnedDocker(t *testing.T) {
 		if source == Powermetrics && !reflect.DeepEqual(argv, []string{"/usr/bin/sudo", "-n", "/usr/bin/powermetrics", "--samplers", "smc", "-n", "1", "-i", "1000"}) {
 			t.Fatalf("unexpected command %q", argv)
 		}
+		if source == ThermalState && !reflect.DeepEqual(argv, []string{"/usr/bin/osascript", "-l", "JavaScript", "-e", `ObjC.import('Foundation'); $.NSProcessInfo.processInfo.thermalState`}) {
+			t.Fatal("thermal state command is not the fixed Foundation scalar read")
+		}
+		if source == Sysctl && !reflect.DeepEqual(argv, []string{"/usr/sbin/sysctl", "hw.ncpu", "hw.memsize", "vm.loadavg"}) {
+			t.Fatal("sysctl still collects a raw thermal counter")
+		}
 		seen[source] = true
 		_, err := out.Write(f[source].Data)
 		return err
@@ -42,7 +48,7 @@ func TestCollectorUsesFixedCommandsAndPinnedDocker(t *testing.T) {
 	requireValue(t, s.CPUCount, 16)
 	requireValue(t, s.SudoGrant, "narrow")
 	requireValue(t, s.CPUDieTemperatureCelsius, 44.55)
-	if !seen[Docker] || !seen[GPU] || !seen[Powermetrics] {
+	if !seen[ThermalState] || !seen[Docker] || !seen[GPU] || !seen[Powermetrics] {
 		t.Fatal("missing fixed sources")
 	}
 	for _, cfg := range []Config{{DockerPath: "/bin/docker"}, {DockerPath: "/bin/docker", DockerHost: "tcp://remote:2375"}, {DockerPath: "docker", DockerHost: "unix:///docker.sock"}} {

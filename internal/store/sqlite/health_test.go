@@ -64,7 +64,8 @@ func storeHealthSnapshot(resource string, now time.Time) hosthealth.Snapshot {
 	return hosthealth.Parse(resource, now, map[hosthealth.Source]hosthealth.Sample{
 		hosthealth.Platform:           {Status: hosthealth.Available, Data: []byte("Darwin x86_64")},
 		hosthealth.NativeArchitecture: {Status: hosthealth.Available, Data: []byte("7\n")},
-		hosthealth.Sysctl:             {Status: hosthealth.Available, Data: []byte("hw.ncpu: 16\nhw.memsize: 68719476736\nvm.loadavg: { 1.0 2.0 3.0 }\nmachdep.xcpm.cpu_thermal_level: 0\n")},
+		hosthealth.ThermalState:       {Status: hosthealth.Available, Data: []byte("0\n")},
+		hosthealth.Sysctl:             {Status: hosthealth.Available, Data: []byte("hw.ncpu: 16\nhw.memsize: 68719476736\nvm.loadavg: { 1.0 2.0 3.0 }\n")},
 	})
 }
 

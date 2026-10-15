@@ -91,8 +91,9 @@ type healthHTTP struct {
 func healthHTTPSample(target hosthealth.Target, at time.Time, platform string) hosthealth.Snapshot {
 	return hosthealth.Parse(target.ResourceID, at, map[hosthealth.Source]hosthealth.Sample{
 		hosthealth.Platform: {Status: hosthealth.Available, Data: []byte(platform)}, hosthealth.NativeArchitecture: {Status: hosthealth.Available, Data: []byte("7\n")},
-		hosthealth.Sysctl:  {Status: hosthealth.Available, Data: []byte("hw.ncpu: 16\nhw.memsize: 68719476736\nvm.loadavg: { 1.0 1.0 1.0 }\nmachdep.xcpm.cpu_thermal_level: 0\n")},
-		hosthealth.Thermal: {Status: hosthealth.Available, Data: []byte("CPU_Speed_Limit = 100\n")}, hosthealth.Power: {Status: hosthealth.Available, Data: []byte("Now drawing from 'AC Power'\n")},
+		hosthealth.ThermalState: {Status: hosthealth.Available, Data: []byte("0\n")},
+		hosthealth.Sysctl:       {Status: hosthealth.Available, Data: []byte("hw.ncpu: 16\nhw.memsize: 68719476736\nvm.loadavg: { 1.0 1.0 1.0 }\n")},
+		hosthealth.Thermal:      {Status: hosthealth.Available, Data: []byte("CPU_Speed_Limit = 100\n")}, hosthealth.Power: {Status: hosthealth.Available, Data: []byte("Now drawing from 'AC Power'\n")},
 	})
 }
 func setupHealthHTTP(t *testing.T) *healthHTTP {

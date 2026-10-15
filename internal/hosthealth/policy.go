@@ -13,8 +13,8 @@ var ErrPolicy = errors.New("invalid host health policy")
 // observations arrive every DemandCache (120 rows cover at least 1785 seconds).
 const MaxCriticalDurationSeconds = 900
 
-// Policy thresholds are inclusive. Thermal levels are raw
-// machdep.xcpm.cpu_thermal_level units, not Apple's separate pressure enum.
+// Policy thresholds are inclusive. Thermal levels use Foundation's
+// NSProcessInfoThermalState: nominal=0, fair=1, serious=2, critical=3.
 type Policy struct {
 	WarningThermalLevel           int     `json:"warning_thermal_level"`
 	CriticalThermalLevel          int     `json:"critical_thermal_level"`
@@ -26,15 +26,15 @@ type Policy struct {
 	CriticalDurationSeconds       int     `json:"critical_duration_seconds"`
 }
 
-// DefaultPolicy is provisional pending sustained-load qualification. Discovery
-// measured raw thermal 0 and CPU speed 100%; no die-temperature baseline exists yet.
+// DefaultPolicy refuses at fair and stops sustained serious or critical state.
+// Speed and die-temperature thresholds remain provisional pending qualification.
 func DefaultPolicy() Policy { return LegacyPolicyV1() }
 
 // LegacyPolicyV1 fixes the semantics of runtime revisions predating host health.
 // Changing future defaults must never change these legacy values.
 func LegacyPolicyV1() Policy { return Policy{1, 2, 90, 50, 90, 100, 10, 60} }
 func (p Policy) Validate() error {
-	if p.WarningThermalLevel < 0 || p.CriticalThermalLevel > 255 || p.WarningThermalLevel > p.CriticalThermalLevel ||
+	if p.WarningThermalLevel < 0 || p.CriticalThermalLevel > 3 || p.WarningThermalLevel > p.CriticalThermalLevel ||
 		!between(0, 100)(p.WarningCPUSpeedPercent) || !between(0, p.WarningCPUSpeedPercent)(p.CriticalCPUSpeedPercent) ||
 		!between(0, 150)(p.WarningDieTemperatureCelsius) || !between(p.WarningDieTemperatureCelsius, 150)(p.CriticalDieTemperatureCelsius) ||
 		!between(0, 100)(p.LowBatteryPercent) || p.CriticalDurationSeconds < 1 || p.CriticalDurationSeconds > MaxCriticalDurationSeconds {
@@ -91,7 +91,7 @@ func (p Policy) Apply(patch *PolicyPatch) (Policy, error) {
 // Validate validates individual overrides; ordering is checked against the saved
 // policy when the patch is applied in the configuration transaction.
 func (p PolicyPatch) Validate() error {
-	if p.WarningThermalLevel != nil && (*p.WarningThermalLevel < 0 || *p.WarningThermalLevel > 255) || p.CriticalThermalLevel != nil && (*p.CriticalThermalLevel < 0 || *p.CriticalThermalLevel > 255) {
+	if p.WarningThermalLevel != nil && (*p.WarningThermalLevel < 0 || *p.WarningThermalLevel > 3) || p.CriticalThermalLevel != nil && (*p.CriticalThermalLevel < 0 || *p.CriticalThermalLevel > 3) {
 		return ErrPolicy
 	}
 	for _, v := range []*float64{p.WarningCPUSpeedPercent, p.CriticalCPUSpeedPercent, p.LowBatteryPercent} {

@@ -14,7 +14,7 @@ const testResource = "resource_" + "0123456789abcdef0123456789abcdef0123456789ab
 func fixtures(t *testing.T) map[Source]Sample {
 	t.Helper()
 	out := map[Source]Sample{}
-	for _, source := range []Source{Platform, NativeArchitecture, Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics} {
+	for _, source := range []Source{Platform, NativeArchitecture, ThermalState, Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics} {
 		data, err := os.ReadFile("testdata/" + string(source) + ".txt")
 		if err != nil {
 			t.Fatal(err)
@@ -119,7 +119,7 @@ func TestUnsupportedAndUnknownPlatform(t *testing.T) {
 	}
 }
 func TestMissingTruncatedAndHostileSources(t *testing.T) {
-	for _, sample := range []Sample{{}, {Status: Available, Data: []byte("hw.ncpu: nan\nhw.memsize: 999999999999999999999999\nmachdep.xcpm.cpu_thermal_level: -1\n")}, {Status: Unavailable, Reason: "output_limit", Data: []byte("hw.ncpu: 16\n")}, {Status: Available, Data: []byte("hw.ncpu: 16\nhw.ncpu: 1\n")}, {Status: Available, Data: []byte("hw.ncpu: 16\x00\n")}, {Status: Available, Data: []byte(strings.Repeat("a", MaxSourceBytes+1))}} {
+	for _, sample := range []Sample{{}, {Status: Available, Data: []byte("hw.ncpu: nan\nhw.memsize: 999999999999999999999999\n")}, {Status: Unavailable, Reason: "output_limit", Data: []byte("hw.ncpu: 16\n")}, {Status: Available, Data: []byte("hw.ncpu: 16\nhw.ncpu: 1\n")}, {Status: Available, Data: []byte("hw.ncpu: 16\x00\n")}, {Status: Available, Data: []byte(strings.Repeat("a", MaxSourceBytes+1))}} {
 		f := fixtures(t)
 		f[Sysctl] = sample
 		s := Parse(testResource, time.Now(), f)
@@ -178,6 +178,7 @@ func TestSnapshotValidation(t *testing.T) {
 		func(s *Snapshot) { s.CPUCount.Status = Unavailable }, func(s *Snapshot) { s.CPUCount.Reason = "HOSTILE" },
 		func(s *Snapshot) { s.Platform = value("HOSTILE") }, func(s *Snapshot) { s.PowerSource = value("HOSTILE") },
 		func(s *Snapshot) { s.CPUUsagePercent = value(math.NaN()) }, func(s *Snapshot) { s.BatteryChargePercent = value(101.0) },
+		func(s *Snapshot) { s.ThermalLevel = value(-1) }, func(s *Snapshot) { s.ThermalLevel = value(4) }, func(s *Snapshot) { s.ThermalLevel = value(60) },
 		func(s *Snapshot) { s.Warnings = []string{"HOSTILE"} }, func(s *Snapshot) { s.BatteryCondition = value("arbitrary host string") },
 	} {
 		s := valid
@@ -189,14 +190,18 @@ func TestSnapshotValidation(t *testing.T) {
 }
 
 func TestEverySourceFailureRemovesItsValues(t *testing.T) {
-	for _, source := range []Source{Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics, GPU} {
+	for _, source := range []Source{ThermalState, Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics, GPU} {
 		t.Run(string(source), func(t *testing.T) {
 			f := fixtures(t)
 			f[source] = Sample{Status: Unavailable, Reason: "output_limit", Data: f[source].Data}
 			s := Parse(testResource, time.Now(), f)
 			switch source {
+			case ThermalState:
+				if s.ThermalLevel.Value != nil || s.CPUSpeedLimitPercent.Value == nil {
+					t.Fatal("partial Foundation thermal state affected speed limit")
+				}
 			case Thermal:
-				if s.CPUSpeedLimitPercent.Value != nil {
+				if s.CPUSpeedLimitPercent.Value != nil || s.ThermalLevel.Value == nil {
 					t.Fatal("partial thermal")
 				}
 			case Power:
@@ -212,7 +217,7 @@ func TestEverySourceFailureRemovesItsValues(t *testing.T) {
 					t.Fatal("partial battery")
 				}
 			case Sysctl:
-				if s.CPUCount.Value != nil || s.ThermalLevel.Value != nil || s.MemoryTotalBytes.Value != nil || s.LoadAverage.Value != nil {
+				if s.CPUCount.Value != nil || s.MemoryTotalBytes.Value != nil || s.LoadAverage.Value != nil || s.ThermalLevel.Value == nil {
 					t.Fatal("partial sysctl")
 				}
 			case Top:

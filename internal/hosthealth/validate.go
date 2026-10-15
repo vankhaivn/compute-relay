@@ -81,7 +81,7 @@ func (s Snapshot) Validate() error {
 	if !metricRange(s.BatteryHealthPercent, between(0, 200)) || !metricRange(s.BatteryTemperatureCelsius, between(-50.05, 100)) || !metricRange(s.CPUDieTemperatureCelsius, between(0, 150)) || !metricRange(s.GPUDieTemperatureCelsius, between(0, 150)) || !metricRange(s.FanRPM, between(0, 30000)) {
 		return ErrSnapshot
 	}
-	if !metricRange(s.CPUCount, func(v int) bool { return v > 0 && v <= 65536 }) || !metricRange(s.DockerCPUCount, func(v int) bool { return v > 0 && v <= 65536 }) || !metricRange(s.ThermalLevel, func(v int) bool { return v >= 0 && v <= 255 }) || !metricRange(s.BatteryCycleCount, func(v int) bool { return v >= 0 && v <= 100000 }) {
+	if !metricRange(s.CPUCount, func(v int) bool { return v > 0 && v <= 65536 }) || !metricRange(s.DockerCPUCount, func(v int) bool { return v > 0 && v <= 65536 }) || !metricRange(s.ThermalLevel, func(v int) bool { return v >= 0 && v <= 3 }) || !metricRange(s.BatteryCycleCount, func(v int) bool { return v >= 0 && v <= 100000 }) {
 		return ErrSnapshot
 	}
 	for _, m := range []Metric[uint64]{s.MemoryTotalBytes, s.MemoryUsedBytes, s.DockerMemoryBytes, s.DockerDataFreeBytes} {

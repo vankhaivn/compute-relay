@@ -196,7 +196,7 @@ native Intel source set supports these fields:
 
 | Metrics | Status and source |
 |---|---|
-| Thermal level; CPU speed limit | Available from `sysctl machdep.xcpm.cpu_thermal_level` and `pmset -g therm`. The thermal level is a raw integer, not Apple's separate pressure enum. |
+| Thermal level; CPU speed limit | Available from Foundation `ProcessInfo.thermalState` through stock `osascript`, and `pmset -g therm`. Thermal states are nominal (0), fair (1), serious (2), and critical (3). |
 | CPU count, load average, current CPU use | Available from `sysctl` and `top`. |
 | Memory total, used, and system-wide free percentage | Available from `sysctl`, `top` and `memory_pressure`. The categorical memory-pressure field is `unavailable`; the inspected source did not expose a bounded normal/warning/critical value. |
 | GPU utilization | Available when `ioreg` exposes the allowlisted accelerator utilization scalar. It read 0% throughout the current idle baseline; other hardware may not expose it. |
@@ -247,15 +247,19 @@ is pending. Do not treat these values as qualified thermal limits:
 
 | Threshold | Current default |
 |---|---:|
-| Thermal warning / critical | raw `machdep.xcpm.cpu_thermal_level` 1 / 2 |
+| Thermal warning / critical | Foundation fair (1) / serious (2) |
 | CPU speed warning / critical | at or below 90% / 50% |
 | CPU or GPU die temperature warning / critical | at or above 90°C / 100°C |
 | Low battery | at or below 10% while drawing from battery |
 | Sustained critical duration | 60 seconds; configurable from 1 to 900 seconds |
 
-Thermal levels here are raw `machdep.xcpm.cpu_thermal_level` values, not Apple's separate
-thermal pressure enum. Comparisons are inclusive. Missing optional die-temperature readings do
-not erase available core thermal and power readings.
+Thermal levels use Apple's documented Foundation enum (0–3); Relay begins its critical policy
+at serious (2). The fixed read-only script imports Foundation and reads
+`NSProcessInfo.processInfo.thermalState`. A failed or malformed result remains unavailable; Relay
+does not substitute the undocumented XCPM counter. Older hardware without thermal-state support
+may report nominal, so CPU speed and available die temperatures remain independent signals.
+Comparisons are inclusive. Missing optional die-temperature readings do not erase available core
+thermal and power readings.
 
 Thresholds are set with the existing `configure` connection action. Include
 `max_remote_wall_seconds` in the configuration object, even when leaving that value unchanged;

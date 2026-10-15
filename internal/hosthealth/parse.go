@@ -77,6 +77,14 @@ func sampleReason(s Sample) string {
 	return "source_missing_or_invalid"
 }
 
+func thermalState(s Sample) Metric[int] {
+	text := strings.TrimSpace(sourceText(s))
+	if len(text) == 1 && text[0] >= '0' && text[0] <= '3' {
+		return value(int(text[0] - '0'))
+	}
+	return missing[int](sampleReason(s))
+}
+
 // Parse accepts only bounded, complete successful samples. Every output string is an
 // allowlisted constant; arbitrary host properties cannot enter a snapshot.
 func Parse(resourceID string, observed time.Time, samples map[Source]Sample) Snapshot {
@@ -100,7 +108,7 @@ func Parse(resourceID string, observed time.Time, samples map[Source]Sample) Sna
 	if s.CPUCount.Value != nil && *s.CPUCount.Value == 0 {
 		s.CPUCount = missing[int]("source_missing_or_invalid")
 	}
-	s.ThermalLevel = integer(sys, `(?m)^machdep\.xcpm\.cpu_thermal_level:\s*([0-9]+)\s*$`, 255)
+	s.ThermalLevel = thermalState(samples[ThermalState])
 	s.CPUSpeedLimitPercent = numeric(samples[Thermal], `(?m)^\s*CPU_Speed_Limit\s*=\s*([0-9]+)\s*$`, 100)
 	if n, ok := number(sourceText(sys), `(?m)^hw\.memsize:\s*([0-9]+)\s*$`, 1<<53); ok && n > 0 {
 		s.MemoryTotalBytes = value(uint64(n))
@@ -213,8 +221,8 @@ func Parse(resourceID string, observed time.Time, samples map[Source]Sample) Sna
 		s.FanRPM = missing[float64]("sudo_grant_absent")
 	} else {
 		pm := samples[Powermetrics]
-		s.CPUDieTemperatureCelsius = numeric(pm, `(?m)^CPU die temperature:\s*([0-9.]+) C\s*$`, 150)
-		s.GPUDieTemperatureCelsius = numeric(pm, `(?m)^GPU die temperature:\s*([0-9.]+) C\s*$`, 150)
+		s.CPUDieTemperatureCelsius = numeric(pm, `(?m)^CPU die temperature:[ \t]*([0-9.]+) C(?: \(fan\))?[ \t]*$`, 150)
+		s.GPUDieTemperatureCelsius = numeric(pm, `(?m)^GPU die temperature:[ \t]*([0-9.]+) C(?: \(fan\))?[ \t]*$`, 150)
 		s.FanRPM = numeric(pm, `(?m)^Fan:\s*([0-9.]+) rpm\s*$`, 30000)
 	}
 	return s
