@@ -7,8 +7,10 @@ Docker archive on stdin and emits only SHA-256 digests and sizes on stdout.
 import base64
 import hashlib
 import json
+import os
 import posixpath
 import signal
+import stat
 import sys
 import tarfile
 
@@ -133,10 +135,37 @@ def scan():
     return {"files": [files[name] for name in expected], "marker": marker}
 
 
+def volume_scan(root_path, expected_size):
+    """Inspect one already identified read-only volume without target execution."""
+    try:
+        if expected_size < 0 or expected_size > MAX_WIRE_BYTES:
+            raise ValueError
+        root = os.open(root_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            if os.listdir(root) != ["blob"]:
+                raise InvalidArchive("unexpected volume entry")
+            fd = os.open("blob", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != expected_size:
+                    raise InvalidArchive("invalid volume blob")
+                with os.fdopen(fd, "rb", closefd=False) as stream:
+                    digest = hash_file(stream, expected_size)
+                if os.fstat(fd).st_size != expected_size:
+                    raise InvalidArchive("volume blob changed")
+                return {"files": [digest], "marker": None}
+            finally:
+                os.close(fd)
+        finally:
+            os.close(root)
+    except (OSError, ValueError, IndexError) as exc:
+        raise InvalidArchive("invalid volume") from exc
+
+
 def main():
     signal.alarm(3600)
     try:
-        result = scan()
+        result = volume_scan("/cache", int(sys.argv[3])) if len(sys.argv) == 4 and sys.argv[2] == "volume" else scan()
     except Exception:
         print("verification failed", file=sys.stderr)
         return 2

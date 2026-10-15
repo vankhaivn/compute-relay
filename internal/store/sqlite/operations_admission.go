@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostcache"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
@@ -344,6 +345,11 @@ func createRetry(ctx context.Context, tx *sql.Tx, target admission.Record, r ope
 	_, err = tx.ExecContext(ctx, `INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?,?)`, string(target.Job.WorkspaceID), string(target.Job.ID), id, a.Number, nonce, string(state), string(a.State.Orchestration), a.Revision, created, created)
 	if err != nil {
 		return r, dbError(err)
+	}
+	if err = pinHostCacheRetry(ctx, tx,
+		hostcache.Attempt{WorkspaceID: target.Job.WorkspaceID, JobID: target.Job.ID, AttemptID: target.Attempt.ID},
+		hostcache.Attempt{WorkspaceID: target.Job.WorkspaceID, JobID: target.Job.ID, AttemptID: a.ID}, now); err != nil {
+		return r, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE jobs SET active_attempt_id=? WHERE workspace_id=? AND job_id=? AND active_attempt_id=?`, id, string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID))
 	if err != nil {

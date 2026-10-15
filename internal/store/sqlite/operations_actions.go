@@ -111,6 +111,9 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 			if err = releaseGateStorage(ctx, tx, string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID)); err != nil {
 				return r, err
 			}
+			if err = releaseHostCachePinsWithoutPreparation(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, now); err != nil {
+				return r, err
+			}
 		}
 		next, state, _, err := dispatch.Apply(work.Journal, state, dispatch.Action{Kind: dispatch.PreventDispatch}, now)
 		if err != nil {

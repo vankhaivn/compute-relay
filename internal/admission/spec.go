@@ -31,6 +31,8 @@ var (
 type Source struct {
 	Kind           string              `json:"kind"`
 	ObjectID       domain.ObjectID     `json:"object_id,omitempty"`
+	SHA256         domain.SHA256Digest `json:"sha256,omitempty"`
+	Bytes          *int64              `json:"bytes,omitempty"`
 	URL            string              `json:"url,omitempty"`
 	ExpectedSHA256 domain.SHA256Digest `json:"expected_sha256,omitempty"`
 }
@@ -64,7 +66,9 @@ type Spec struct {
 	Profile          string                `json:"profile"`
 	Labels           map[string]string     `json:"labels,omitempty"`
 	Bundle           struct {
-		ObjectID domain.ObjectID `json:"object_id"`
+		ObjectID domain.ObjectID     `json:"object_id"`
+		SHA256   domain.SHA256Digest `json:"sha256,omitempty"`
+		Bytes    *int64              `json:"bytes,omitempty"`
 	} `json:"bundle"`
 	Execution struct {
 		Kind             string            `json:"kind"`
@@ -188,6 +192,9 @@ func Parse(raw []byte) (Request, error) {
 }
 
 func semantic(s Spec) error {
+	if !validObjectExpectation(s.Bundle.SHA256, s.Bundle.Bytes) {
+		return ErrSpec
+	}
 	if !workloadsecret.ValidSlots(s.WorkloadSecrets) || len(s.WorkloadSecrets) > 0 && !s.SeparateStart() {
 		return ErrSpec
 	}
@@ -225,6 +232,9 @@ func semantic(s Spec) error {
 	names := map[string]bool{}
 	targets := []string{}
 	for _, in := range s.Inputs {
+		if in.Source.Kind == "object" && !validObjectExpectation(in.Source.SHA256, in.Source.Bytes) {
+			return ErrSpec
+		}
 		name := strings.ToLower(in.Name)
 		if names[name] {
 			return ErrSpec
@@ -243,6 +253,13 @@ func semantic(s Spec) error {
 		targets = append(targets, out.Path)
 	}
 	return nil
+}
+
+func validObjectExpectation(sha domain.SHA256Digest, size *int64) bool {
+	if (sha == "") != (size == nil) {
+		return false
+	}
+	return size == nil || sha.Valid() && *size >= 0
 }
 func overlaps(paths []string, next string) bool {
 	n := strings.ToLower(next)

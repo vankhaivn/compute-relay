@@ -214,6 +214,9 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 			if err = releaseGateStorage(ctx, tx, string(before.Operation.WorkspaceID), string(before.Operation.JobID), string(before.Operation.AttemptID)); err != nil {
 				return err
 			}
+			if err = releaseHostCachePinsOnCleanup(ctx, tx, before.Operation, resources, now); err != nil {
+				return err
+			}
 		}
 		if err = releaseWorkLease(ctx, tx, cleanupLease(w.Lease), now); err != nil {
 			return err

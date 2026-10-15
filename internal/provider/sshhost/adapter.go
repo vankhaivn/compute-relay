@@ -22,6 +22,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostcache"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
@@ -109,7 +110,15 @@ type Adapter struct {
 	creds   ports.CredentialResolver
 	blobs   StagingBlobs
 	clock   ports.Clock
+	cache   hostcache.Repository
 	dial    func(context.Context, Target, Credential) (session, error)
+}
+
+// WithHostCache enables immutable host-volume staging for attempts that have
+// durable cache pins. It is set at composition, before the adapter is used.
+func (a *Adapter) WithHostCache(repository hostcache.Repository) *Adapter {
+	a.cache = repository
+	return a
 }
 
 var (
@@ -297,6 +306,7 @@ type marker struct {
 	EngineID     string              `json:"engine_id,omitempty"`
 	Verification domain.SHA256Digest `json:"verification_sha256,omitempty"`
 	Manifest     domain.SHA256Digest `json:"manifest_sha256,omitempty"`
+	Cache        bool                `json:"cache,omitempty"`
 }
 
 // Prepare creates the attempt's stopped container, copies the runner, manifest, bundle
@@ -312,10 +322,6 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 	}
 	if spec.Expired(a.clock.Now()) {
 		return provider.Prepared{}, admission.ErrExpired
-	}
-	manifestJSON, err := json.Marshal(manifest)
-	if err != nil {
-		return provider.Prepared{}, ErrRequest
 	}
 	modules, err := runnerassets.Sources()
 	if err != nil {
@@ -337,6 +343,18 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		}
 		if err != nil || !found || image.OS != "linux" {
 			return ErrRemoteDocker
+		}
+		bindings, err := a.prepareCache(ctx, d, plan)
+		if err != nil {
+			return err
+		}
+		cached := len(bindings) > 0
+		if err := cacheManifest(manifest, plan, bindings); err != nil {
+			return err
+		}
+		manifestJSON, err := json.Marshal(manifest)
+		if err != nil {
+			return ErrRequest
 		}
 		platform := ""
 		if a.config.ImageRecipeSHA256 != "" {
@@ -361,6 +379,9 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		command := []string{"timeout", "-k", "30", strconv.FormatInt(plan.Job.WallSeconds+timeoutGrace, 10),
 			"python3", "-E", "-s", "/relay/runner/run.py", "--manifest", "/relay/manifest.json", "--execute",
 			"--staging-root", "/relay/staging", "--work-root", workRoot, "--network-mode", mode}
+		if cached {
+			command[12] = "/staging-cache"
+		}
 		if spec.Timeouts.ExecutionDeadline != "" || spec.SeparateStart() {
 			// The trusted supervisor is PID 1, so its final exit also tears down any
 			// remaining descendants in Docker's private PID namespace.
@@ -372,15 +393,18 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		}
 		ownedLabels := labels(plan, operation)
 		ownedLabels[labelPrefix+"engine"] = engine
+		if cached {
+			ownedLabels[labelPrefix+"cache"] = "volumes/v1"
+		}
 		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: ownedLabels, Internet: mode == "required",
 			SecretTmpfs: len(spec.WorkloadSecrets) > 0,
 			CPUs:        endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
-			Command: command})
+			Command: command, Mounts: cacheMounts(bindings)})
 		if err != nil {
 			return err
 		}
-		proof := marker{Preparation: operation, Plan: plan.Digest(), Container: id, EngineID: engine}
-		if err = a.stage(ctx, d, id, plan, modules, manifestJSON); err == nil && spec.SeparateStart() {
+		proof := marker{Preparation: operation, Plan: plan.Digest(), Container: id, EngineID: engine, Cache: cached}
+		if err = a.stage(ctx, d, id, plan, modules, manifestJSON, cached); err == nil && (spec.SeparateStart() || cached) {
 			var info containerInfo
 			var exists bool
 			info, exists, err = d.inspect(ctx, name)
@@ -388,7 +412,7 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 				err = ErrIdentity
 			}
 			if err == nil {
-				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON)
+				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON, bindings)
 				proof.Manifest = provider.Digest(manifestJSON)
 			}
 		}
@@ -412,11 +436,11 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 
 // stage streams one tar archive into the stopped container. Both the remote copy and
 // the local writer, which verifies every frozen object, must succeed.
-func (a *Adapter) stage(ctx context.Context, d docker, container string, plan provider.Plan, modules map[string]string, manifest []byte) error {
+func (a *Adapter) stage(ctx context.Context, d docker, container string, plan provider.Plan, modules map[string]string, manifest []byte, cached bool) error {
 	reader, writer := io.Pipe()
 	written := make(chan error, 1)
 	go func() {
-		err := a.writeStaging(ctx, writer, plan, modules, manifest)
+		err := a.writeStaging(ctx, writer, plan, modules, manifest, cached)
 		_ = writer.CloseWithError(err)
 		written <- err
 	}()
@@ -441,7 +465,7 @@ type tarEntry struct {
 	data []byte
 }
 
-func (a *Adapter) writeStaging(ctx context.Context, w io.Writer, plan provider.Plan, modules map[string]string, manifest []byte) error {
+func (a *Adapter) writeStaging(ctx context.Context, w io.Writer, plan provider.Plan, modules map[string]string, manifest []byte, cached bool) error {
 	now := a.clock.Now().UTC().Truncate(time.Second)
 	tw := tar.NewWriter(w)
 	header := func(name string, kind byte, uid int, size int64) error {
@@ -466,6 +490,9 @@ func (a *Adapter) writeStaging(ctx context.Context, w io.Writer, plan provider.P
 		if _, err := tw.Write(e.data); err != nil {
 			return err
 		}
+	}
+	if cached {
+		return tw.Close()
 	}
 	type staged struct {
 		path   string
@@ -560,7 +587,7 @@ func (a *Adapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, oper
 			info.Config.Labels[labelPrefix+"plan"] != string(plan.Digest()) {
 			return ErrIdentity
 		}
-		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, 4096)
+		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
 		var staged marker
 		if err != nil || !found || json.Unmarshal(raw, &staged) != nil {
 			return err
@@ -569,7 +596,35 @@ func (a *Adapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, oper
 		if err := d.verifyEngine(ctx, engine); err != nil {
 			return err
 		}
-		if staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine}) {
+		if staged.Cache {
+			if info.Config.Labels[labelPrefix+"cache"] != "volumes/v1" {
+				return ErrIdentity
+			}
+			bindings, err := a.activeCachePlan(ctx, plan)
+			if err != nil || len(bindings) == 0 {
+				return ErrIdentity
+			}
+			manifest, _, err := runnerplan.Build(plan)
+			if err != nil {
+				return ErrRequest
+			}
+			if err := cacheManifest(manifest, plan, bindings); err != nil {
+				return err
+			}
+			rawManifest, _ := json.Marshal(manifest)
+			modules, err := runnerassets.Sources()
+			if err != nil {
+				return err
+			}
+			verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings)
+			if err != nil || staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine, Verification: verified, Manifest: provider.Digest(rawManifest), Cache: true}) {
+				return ErrIdentity
+			}
+			observation = provider.PreparationObservation{Status: provider.ReconciliationFound, Prepared: &provider.Prepared{
+				Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID, engine), Ready: true, Private: true, VerificationSHA256: verified, ManifestSHA256: staged.Manifest}}
+			return nil
+		}
+		if info.Config.Labels[labelPrefix+"cache"] != "" || staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine}) {
 			return nil
 		}
 		observation = provider.PreparationObservation{Status: provider.ReconciliationFound, Prepared: &provider.Prepared{
@@ -637,6 +692,11 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 			outcome = rejected("start_authorization_required")
 			return nil
 		}
+		cached := info.Config.Labels[labelPrefix+"cache"] == "volumes/v1"
+		if info.Config.Labels[labelPrefix+"cache"] != "" && !cached {
+			outcome = rejected("preparation_mismatch")
+			return nil
+		}
 		rawDeadline := info.Config.Labels[labelPrefix+"execution-deadline"]
 		if start != nil {
 			if err = a.checkControlledStart(ctx, d, info, prepared, *start); err != nil {
@@ -650,6 +710,11 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 			before, _ := time.Parse(time.RFC3339, start.StartBefore)
 			if !a.clock.Now().Before(before) {
 				outcome = startExpired(*start)
+				return nil
+			}
+		} else if cached {
+			if err = a.checkCachedStart(ctx, d, info, prepared); err != nil {
+				outcome = rejected("readiness_invalidated")
 				return nil
 			}
 		}

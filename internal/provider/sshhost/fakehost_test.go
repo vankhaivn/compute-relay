@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,6 +39,13 @@ type fakeContainer struct {
 	started  time.Time
 	files    map[string]fakeFile // container paths without the leading slash
 	logs     string
+	mounts   []dockerMountRequest
+}
+
+type fakeVolume struct {
+	labels   map[string]string
+	blob     []byte
+	complete bool
 }
 
 // fakeHost is an in-memory Docker host behind the executor seam. It understands only
@@ -53,6 +62,9 @@ type fakeHost struct {
 	image                  bool
 	registry               bool // pull succeeds
 	containers             map[string]*fakeContainer
+	volumes                map[string]*fakeVolume
+	writes                 int
+	volumeVerifications    int
 	calls                  [][]string
 	wireCalls              [][]string
 	machineID              string
@@ -74,7 +86,7 @@ type fakeHost struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{},
+	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{}, volumes: map[string]*fakeVolume{},
 		machineID: strings.Repeat("a", 32), engineID: "synthetic-engine-01", dockerHost: "unix:///var/run/docker.sock"}
 }
 
@@ -241,6 +253,10 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 		}
 		h.image = true
 		return Result{}, nil
+	case len(args) > 1 && args[0] == "volume":
+		return h.volume(args[1:], stdout), nil
+	case len(args) > 2 && args[0] == "container" && args[1] == "run":
+		return h.runCacheHelper(args[2:], archive, stdout), nil
 	case len(args) < 3 || args[0] != "container":
 		h.t.Errorf("unexpected docker command %q", args)
 		return Result{ExitCode: 125}, nil
@@ -361,6 +377,28 @@ func (h *fakeHost) create(args []string, stdout io.Writer) Result {
 		case "--label":
 			key, value, _ := strings.Cut(args[i+1], "=")
 			c.labels[key] = value
+		case "--mount":
+			var mount dockerMountRequest
+			for _, part := range strings.Split(args[i+1], ",") {
+				key, value, hasValue := strings.Cut(part, "=")
+				switch key {
+				case "type":
+					mount.Type = value
+				case "source":
+					mount.Source = value
+				case "target":
+					mount.Target = value
+				case "readonly":
+					mount.ReadOnly = true
+				case "volume-nocopy":
+					mount.VolumeOptions.NoCopy = true
+				default:
+					if !hasValue {
+						h.t.Errorf("unknown mount option %q", part)
+					}
+				}
+			}
+			c.mounts = append(c.mounts, mount)
 		}
 	}
 	if h.find(c.name) != nil {
@@ -378,6 +416,11 @@ func (h *fakeHost) inspect(c *fakeContainer, stdout io.Writer) Result {
 		"StartedAt": c.started.Format(time.RFC3339Nano), "FinishedAt": "0001-01-01T00:00:00Z"}
 	cfg := map[string]any{"Labels": c.labels}
 	host := map[string]any{}
+	host["Mounts"] = c.mounts
+	effective := []dockerMount{}
+	for _, mount := range c.mounts {
+		effective = append(effective, dockerMount{Type: "volume", Name: mount.Source, Destination: mount.Target, RW: !mount.ReadOnly})
+	}
 	for i := 0; i+1 < len(c.args); i++ {
 		val := c.args[i+1]
 		switch c.args[i] {
@@ -412,9 +455,140 @@ func (h *fakeHost) inspect(c *fakeContainer, stdout io.Writer) Result {
 			cfg["Cmd"] = c.args[i+1:]
 		}
 	}
-	raw, _ := json.Marshal([]map[string]any{{"Id": c.id, "Name": "/" + c.name, "Image": fakeImageID, "State": state, "Config": cfg, "HostConfig": host}})
+	raw, _ := json.Marshal([]map[string]any{{"Id": c.id, "Name": "/" + c.name, "Image": fakeImageID, "State": state, "Config": cfg, "HostConfig": host, "Mounts": effective}})
 	_, _ = stdout.Write(raw)
 	return Result{}
+}
+
+func (h *fakeHost) volume(args []string, stdout io.Writer) Result {
+	if len(args) > 2 && args[0] == "ls" {
+		filters := map[string]string{}
+		for i := 1; i < len(args)-1; i++ {
+			if args[i] != "--filter" {
+				continue
+			}
+			value, ok := strings.CutPrefix(args[i+1], "label=")
+			if !ok {
+				h.t.Errorf("unlabelled volume discovery: %q", args)
+				return Result{ExitCode: 125}
+			}
+			key, want, ok := strings.Cut(value, "=")
+			if !ok {
+				h.t.Errorf("invalid volume label filter: %q", args)
+				return Result{ExitCode: 125}
+			}
+			filters[key] = want
+		}
+		if len(filters) != 8 || !slices.Equal(args[len(args)-2:], []string{"--format", "{{.Name}}"}) {
+			h.t.Errorf("incomplete cache volume discovery: %q", args)
+			return Result{ExitCode: 125}
+		}
+		names := []string{}
+		for name, volume := range h.volumes {
+			match := true
+			for key, want := range filters {
+				if volume.labels[key] != want {
+					match = false
+					break
+				}
+			}
+			if match {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			_, _ = io.WriteString(stdout, name+"\n")
+		}
+		return Result{}
+	}
+	if len(args) == 2 && args[0] == "inspect" {
+		v := h.volumes[args[1]]
+		if v == nil {
+			return noSuch("volume")
+		}
+		raw, _ := json.Marshal([]volumeInfo{{Name: args[1], Driver: "local", Scope: "local", Labels: v.labels, Options: map[string]string{}}})
+		_, _ = stdout.Write(raw)
+		return Result{}
+	}
+	if len(args) > 3 && args[0] == "create" {
+		name := ""
+		labels := map[string]string{}
+		for i := 1; i < len(args)-1; i++ {
+			switch args[i] {
+			case "--name":
+				name = args[i+1]
+			case "--label":
+				key, value, _ := strings.Cut(args[i+1], "=")
+				labels[key] = value
+			}
+		}
+		if name == "" {
+			h.t.Error("unnamed volume")
+			return Result{ExitCode: 125}
+		}
+		if h.volumes[name] == nil {
+			h.volumes[name] = &fakeVolume{labels: labels}
+		}
+		_, _ = io.WriteString(stdout, name+"\n")
+		return Result{}
+	}
+	h.t.Errorf("unexpected volume command %q", args)
+	return Result{ExitCode: 125}
+}
+
+func (h *fakeHost) runCacheHelper(args []string, input []byte, stdout io.Writer) Result {
+	mount := ""
+	readonly := false
+	kind := ""
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--mount" {
+			for _, part := range strings.Split(args[i+1], ",") {
+				key, value, _ := strings.Cut(part, "=")
+				if key == "source" {
+					mount = value
+				}
+				if key == "readonly" {
+					readonly = true
+				}
+			}
+		}
+		if args[i] == "--label" && strings.HasPrefix(args[i+1], labelPrefix+"kind=") {
+			kind = strings.TrimPrefix(args[i+1], labelPrefix+"kind=")
+		}
+	}
+	v := h.volumes[mount]
+	if v == nil {
+		h.t.Errorf("helper mounted missing volume %q", mount)
+		return Result{ExitCode: 125}
+	}
+	switch kind {
+	case "cache-writer":
+		if readonly || v.complete || len(args) < 2 {
+			return Result{ExitCode: 2}
+		}
+		size, err := strconv.ParseInt(args[len(args)-2], 10, 64)
+		digest := sha256.Sum256(input)
+		if err != nil || size != int64(len(input)) || hex.EncodeToString(digest[:]) != args[len(args)-1] {
+			return Result{ExitCode: 2}
+		}
+		v.blob = append([]byte(nil), input...)
+		v.complete = true
+		h.writes++
+		return Result{}
+	case "verification":
+		if !readonly || !v.complete {
+			return Result{ExitCode: 2}
+		}
+		h.volumeVerifications++
+		digest := sha256.Sum256(v.blob)
+		raw, _ := json.Marshal(verifierInventory{Files: []verifierDigest{{Bytes: int64(len(v.blob)), SHA256: hex.EncodeToString(digest[:])}}})
+		_, _ = stdout.Write(raw)
+		return Result{}
+	default:
+		h.t.Errorf("unexpected helper kind %q", kind)
+		return Result{ExitCode: 125}
+	}
 }
 
 func (h *fakeHost) copy(args []string, archive []byte, stdout io.Writer) Result {

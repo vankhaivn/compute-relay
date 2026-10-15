@@ -313,6 +313,9 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 			if err = releaseGateStorage(ctx, tx, string(work.Job.Job.WorkspaceID), string(work.Job.Job.ID), string(work.Job.Attempt.ID)); err != nil {
 				return err
 			}
+			if err = releaseHostCachePinsWithoutPreparation(ctx, tx, work.Job.Job.WorkspaceID, work.Job.Job.ID, work.Job.Attempt.ID, now); err != nil {
+				return err
+			}
 		}
 		raw, err := json.Marshal(next)
 		if err != nil || len(raw) > dispatch.MaxJournalBytes {
