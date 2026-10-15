@@ -209,12 +209,15 @@ type containerInfo struct {
 	Image  string         `json:"Image"`
 	State  containerState `json:"State"`
 	Config struct {
-		Labels     map[string]string `json:"Labels"`
-		User       string            `json:"User"`
-		Cmd        []string          `json:"Cmd"`
-		Entrypoint []string          `json:"Entrypoint"`
-		WorkingDir string            `json:"WorkingDir"`
-		Env        []string          `json:"Env"`
+		Labels      map[string]string `json:"Labels"`
+		User        string            `json:"User"`
+		Cmd         []string          `json:"Cmd"`
+		Entrypoint  []string          `json:"Entrypoint"`
+		WorkingDir  string            `json:"WorkingDir"`
+		Env         []string          `json:"Env"`
+		Healthcheck *struct {
+			Test []string `json:"Test"`
+		} `json:"Healthcheck,omitempty"`
 	} `json:"Config"`
 	HostConfig struct {
 		Mounts        []dockerMountRequest `json:"Mounts"`
@@ -284,17 +287,18 @@ func (d docker) inspect(ctx context.Context, name string) (containerInfo, bool, 
 // containerSpec is the complete hardened create request for one attempt. CPUs and
 // MemoryBytes are optional operator limits.
 type containerSpec struct {
-	SecretTmpfs bool
-	Name        string
-	Image       string
-	Platform    string
-	Labels      map[string]string
-	Internet    bool
-	CPUs        string
-	MemoryBytes int64
-	PIDs        int
-	Command     []string
-	Mounts      []dockerMountRequest
+	SecretTmpfs   bool
+	NoHealthcheck bool
+	Name          string
+	Image         string
+	Platform      string
+	Labels        map[string]string
+	Internet      bool
+	CPUs          string
+	MemoryBytes   int64
+	PIDs          int
+	Command       []string
+	Mounts        []dockerMountRequest
 }
 
 func (s containerSpec) args() []string {
@@ -307,6 +311,9 @@ func (s containerSpec) args() []string {
 		"--restart", "no", "--stop-timeout", "30", "--workdir", "/relay"}
 	if s.SecretTmpfs {
 		args = append(args, "--tmpfs", secretTmpfsPath+":"+secretTmpfsOptions)
+	}
+	if s.NoHealthcheck {
+		args = append(args, "--no-healthcheck")
 	}
 	if s.Platform != "" {
 		args = append(args, "--platform", s.Platform)

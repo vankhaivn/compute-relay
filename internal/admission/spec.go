@@ -48,6 +48,14 @@ type Output struct {
 	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
 
+// ApplicationImage names one immutable, workspace-owned Docker/OCI archive.
+// Its digest and byte count are mandatory when the image is selected.
+type ApplicationImage struct {
+	ObjectID domain.ObjectID     `json:"object_id"`
+	SHA256   domain.SHA256Digest `json:"sha256"`
+	Bytes    int64               `json:"bytes"`
+}
+
 // Retention is frozen with the job. A zero after-collection delay requests
 // cleanup after verified publication; an uncollected lifetime permits discard
 // only after a terminal attempt with confirmed remote inactivity (or no start).
@@ -70,7 +78,8 @@ type Spec struct {
 		SHA256   domain.SHA256Digest `json:"sha256,omitempty"`
 		Bytes    *int64              `json:"bytes,omitempty"`
 	} `json:"bundle"`
-	Execution struct {
+	ApplicationImage *ApplicationImage `json:"application_image,omitempty"`
+	Execution        struct {
 		Kind             string            `json:"kind"`
 		Command          []string          `json:"command"`
 		WorkingDirectory string            `json:"working_directory,omitempty"`
@@ -193,6 +202,9 @@ func Parse(raw []byte) (Request, error) {
 
 func semantic(s Spec) error {
 	if !validObjectExpectation(s.Bundle.SHA256, s.Bundle.Bytes) {
+		return ErrSpec
+	}
+	if image := s.ApplicationImage; image != nil && (!image.ObjectID.Valid() || !image.SHA256.Valid() || image.Bytes < 1 || image.Bytes > 2<<30) {
 		return ErrSpec
 	}
 	if !workloadsecret.ValidSlots(s.WorkloadSecrets) || len(s.WorkloadSecrets) > 0 && !s.SeparateStart() {

@@ -67,7 +67,15 @@ func observedPreparationHash(info containerInfo, planDigest domain.SHA256Digest,
 	// Preserve the original v1 byte shape for stopped preparations made before
 	// cache mounts existed. Adding a field to containerInfo's HostConfig alone
 	// would otherwise change every legacy readiness revision on restart.
-	if info.Config.Labels[labelPrefix+"cache"] == "" && len(info.HostConfig.Mounts) == 0 && len(info.Mounts) == 0 {
+	if info.Config.Labels[labelPrefix+"application-image"] == "" && info.Config.Labels[labelPrefix+"cache"] == "" && len(info.HostConfig.Mounts) == 0 && len(info.Mounts) == 0 {
+		legacyConfig := struct {
+			Labels     map[string]string `json:"Labels"`
+			User       string            `json:"User"`
+			Cmd        []string          `json:"Cmd"`
+			Entrypoint []string          `json:"Entrypoint"`
+			WorkingDir string            `json:"WorkingDir"`
+			Env        []string          `json:"Env"`
+		}{info.Config.Labels, info.Config.User, info.Config.Cmd, info.Config.Entrypoint, info.Config.WorkingDir, info.Config.Env}
 		host := struct {
 			Tmpfs         map[string]string `json:"Tmpfs"`
 			NetworkMode   string            `json:"NetworkMode"`
@@ -95,8 +103,12 @@ func observedPreparationHash(info containerInfo, planDigest domain.SHA256Digest,
 			HostConfig any
 			Plan       domain.SHA256Digest
 			Files      map[string]stagedFile
-		}{"ssh-readiness/v1", info.ID, info.Image, info.Config, host, planDigest, files})
+		}{"ssh-readiness/v1", info.ID, info.Image, legacyConfig, host, planDigest, files})
 		return provider.Digest(raw)
+	}
+	version := "ssh-readiness/v2"
+	if info.Config.Labels[labelPrefix+"application-image"] != "" {
+		version = "ssh-readiness/v3"
 	}
 	raw, _ := json.Marshal(struct {
 		Version    string
@@ -107,7 +119,7 @@ func observedPreparationHash(info containerInfo, planDigest domain.SHA256Digest,
 		Mounts     any
 		Plan       domain.SHA256Digest
 		Files      map[string]stagedFile
-	}{"ssh-readiness/v2", info.ID, info.Image, info.Config, info.HostConfig, info.Mounts, planDigest, files})
+	}{version, info.ID, info.Image, info.Config, info.HostConfig, info.Mounts, planDigest, files})
 	return provider.Digest(raw)
 }
 func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
@@ -130,6 +142,13 @@ func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
 func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte, bindings []cacheBinding) (domain.SHA256Digest, error) {
 	req, err := admission.Parse(plan.Job.Specification)
 	if err != nil || !validStoppedPolicy(info, req.Spec().Network.RemoteInternet == "required", len(req.Spec().WorkloadSecrets) > 0) {
+		return "", ErrIdentity
+	}
+	if req.Spec().ApplicationImage != nil {
+		if !validApplicationContainer(info, info.Image) {
+			return "", ErrIdentity
+		}
+	} else if info.Config.Labels[labelPrefix+"application-image"] != "" {
 		return "", ErrIdentity
 	}
 	if len(bindings) > 0 {
@@ -169,6 +188,12 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		if err := d.verifyEngine(ctx, engine); err != nil {
 			return err
 		}
+		applicationID, pinned, err := a.imageContext().frozenApplicationImage(ctx, d, plan.Job.Identity)
+		if err != nil || pinned != (plan.Job.Inputs.ApplicationImage != nil) ||
+			pinned && !validApplicationContainer(info, applicationID) ||
+			!pinned && info.Config.Labels[labelPrefix+"application-image"] != "" {
+			return ErrIdentity
+		}
 		p := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID, engine), Private: true}
 		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
 		if err != nil {
@@ -181,7 +206,7 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		}
 		var staged marker
 		var bindings []cacheBinding
-		if json.Unmarshal(raw, &staged) != nil || staged.Preparation != operation || staged.Plan != plan.Digest() || staged.Container != info.ID || staged.EngineID != engine || !staged.Verification.Valid() || staged.Cache != (info.Config.Labels[labelPrefix+"cache"] == "volumes/v1") {
+		if json.Unmarshal(raw, &staged) != nil || staged.Preparation != operation || staged.Plan != plan.Digest() || staged.Container != info.ID || staged.EngineID != engine || !staged.Verification.Valid() || staged.Cache != (info.Config.Labels[labelPrefix+"cache"] == "volumes/v1") || staged.ApplicationImage != applicationID {
 			return ErrIdentity
 		}
 		if staged.Cache {
@@ -197,12 +222,14 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		if staged.Manifest != provider.Digest(rawManifest) {
 			return ErrIdentity
 		}
-		image, found, err := d.inspectImage(ctx, a.config.Image)
-		if err != nil {
-			return err
-		}
-		if !found || info.Image != image.ID {
-			return ErrIdentity
+		if !pinned {
+			image, found, err := d.inspectImage(ctx, a.config.Image)
+			if err != nil {
+				return err
+			}
+			if !found || info.Image != image.ID {
+				return ErrIdentity
+			}
 		}
 		verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings)
 		if err != nil {
@@ -248,7 +275,7 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 	var m marker
 	ref, refErr := decodeRef(p.Resource, p.Identity)
 	cached := info.Config.Labels[labelPrefix+"cache"] == "volumes/v1"
-	if refErr != nil || err != nil || !found || json.Unmarshal(raw, &m) != nil || m != (marker{Preparation: p.PreparationID, Plan: p.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: p.VerificationSHA256, Manifest: p.ManifestSHA256, Cache: cached}) {
+	if refErr != nil || err != nil || !found || json.Unmarshal(raw, &m) != nil || m != (marker{Preparation: p.PreparationID, Plan: p.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: p.VerificationSHA256, Manifest: p.ManifestSHA256, Cache: cached, ApplicationImage: info.Config.Labels[labelPrefix+"application-image"]}) {
 		return ErrIdentity
 	}
 	raw, found, err = readFile(ctx, d, info.ID, "/relay/manifest.json", maxManifestBytes)

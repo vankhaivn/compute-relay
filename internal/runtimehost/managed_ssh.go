@@ -214,5 +214,5 @@ func (h *Host) managedSSHProvider(resolver ports.CredentialResolver, binding con
 	if err != nil {
 		return nil, ErrRequest
 	}
-	return adapter.WithHostCache(h.store), nil
+	return adapter.WithHostCache(h.store).WithApplicationImages(h.store), nil
 }

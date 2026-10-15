@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/vankhaivn/compute-relay/internal/hostimages"
 )
 
 const fakeImageID = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -30,16 +32,18 @@ type fakeFile struct {
 }
 
 type fakeContainer struct {
-	id, name string
-	args     []string
-	labels   map[string]string
-	status   string
-	exit     int
-	oom      bool
-	started  time.Time
-	files    map[string]fakeFile // container paths without the leading slash
-	logs     string
-	mounts   []dockerMountRequest
+	id, name      string
+	imageID       string
+	noHealthcheck bool
+	args          []string
+	labels        map[string]string
+	status        string
+	exit          int
+	oom           bool
+	started       time.Time
+	files         map[string]fakeFile // container paths without the leading slash
+	logs          string
+	mounts        []dockerMountRequest
 }
 
 type fakeVolume struct {
@@ -48,12 +52,24 @@ type fakeVolume struct {
 	complete bool
 }
 
+type fakeApplicationImage struct {
+	id      string
+	labels  map[string]string
+	diffIDs []string
+	tags    []string
+	digests []string
+}
+
 // fakeHost is an in-memory Docker host behind the executor seam. It understands only
 // the fixed argument arrays the adapter issues and records every command.
 type fakeHost struct {
 	t                      *testing.T
 	mu                     sync.Mutex
 	images                 map[string]imageInfo
+	applicationImages      map[string]fakeApplicationImage
+	applicationLoads       int
+	applicationLoadAckLost bool
+	applicationLoadMissing bool
 	builds                 int
 	buildExit              int
 	buildInput             []byte
@@ -86,8 +102,52 @@ type fakeHost struct {
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
-	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, containers: map[string]*fakeContainer{}, volumes: map[string]*fakeVolume{},
+	return &fakeHost{t: t, image: true, platform: "linux/amd64", images: map[string]imageInfo{}, applicationImages: map[string]fakeApplicationImage{}, containers: map[string]*fakeContainer{}, volumes: map[string]*fakeVolume{},
 		machineID: strings.Repeat("a", 32), engineID: "synthetic-engine-01", dockerHost: "unix:///var/run/docker.sock"}
+}
+
+func decodeFakeApplicationArchive(raw []byte) (fakeApplicationImage, error) {
+	files := map[string][]byte{}
+	tr := tar.NewReader(bytes.NewReader(raw))
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fakeApplicationImage{}, err
+		}
+		if header.Typeflag == tar.TypeReg {
+			files[header.Name], err = io.ReadAll(tr)
+			if err != nil {
+				return fakeApplicationImage{}, err
+			}
+		}
+	}
+	var manifest []struct {
+		Config   string   `json:"Config"`
+		RepoTags []string `json:"RepoTags"`
+	}
+	if json.Unmarshal(files["manifest.json"], &manifest) != nil || len(manifest) != 1 {
+		return fakeApplicationImage{}, fmt.Errorf("invalid manifest")
+	}
+	configBytes := files[manifest[0].Config]
+	var config struct {
+		OS           string `json:"os"`
+		Architecture string `json:"architecture"`
+		RootFS       struct {
+			DiffIDs []string `json:"diff_ids"`
+		} `json:"rootfs"`
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"config"`
+	}
+	if json.Unmarshal(configBytes, &config) != nil || config.OS != "linux" || config.Architecture != "amd64" || len(config.RootFS.DiffIDs) == 0 {
+		return fakeApplicationImage{}, fmt.Errorf("invalid config")
+	}
+	id := sha256.Sum256(configBytes)
+	return fakeApplicationImage{id: "sha256:" + hex.EncodeToString(id[:]), labels: config.Config.Labels,
+		diffIDs: config.RootFS.DiffIDs, tags: manifest[0].RepoTags}, nil
 }
 
 func (h *fakeHost) Close() error {
@@ -237,6 +297,13 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 		h.images[info.ID] = info
 		return Result{ExitCode: h.buildExit}, nil
 	case len(args) == 3 && args[0] == "image" && args[1] == "inspect":
+		if image, exists := h.applicationImages[args[2]]; exists {
+			raw, _ := json.Marshal([]map[string]any{{"Id": image.id, "Os": "linux", "Architecture": strings.TrimPrefix(h.platform, "linux/"),
+				"RepoTags": image.tags, "RepoDigests": image.digests, "Config": map[string]any{"Labels": image.labels},
+				"RootFS": map[string]any{"Layers": image.diffIDs}}})
+			_, _ = stdout.Write(raw)
+			return Result{}, nil
+		}
 		if image, exists := h.images[args[2]]; exists {
 			raw, _ := json.Marshal([]imageInfo{image})
 			_, _ = stdout.Write(raw)
@@ -246,6 +313,33 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 			return noSuch("image"), nil
 		}
 		_, _ = fmt.Fprintf(stdout, `[{"Id":%q,"Os":"linux","Architecture":"amd64"}]`, fakeImageID)
+		return Result{}, nil
+	case len(args) == 8 && slices.Equal(args[:5], []string{"image", "ls", "--all", "--no-trunc", "--filter"}) &&
+		slices.Equal(args[6:], []string{"--format", "{{.ID}}"}):
+		label, value, ok := strings.Cut(strings.TrimPrefix(args[5], "label="), "=")
+		if !strings.HasPrefix(args[5], "label=") || !ok || label != hostimages.LabelInstallation {
+			h.t.Errorf("application image discovery was not scoped: %q", args)
+			return Result{ExitCode: 125}, nil
+		}
+		for _, image := range h.applicationImages {
+			if image.labels[label] == value {
+				_, _ = io.WriteString(stdout, image.id+"\n")
+			}
+		}
+		return Result{}, nil
+	case slices.Equal(args, []string{"image", "load", "--quiet"}):
+		h.applicationLoads++
+		if !h.applicationLoadMissing {
+			image, err := decodeFakeApplicationArchive(archive)
+			if err != nil {
+				h.t.Errorf("invalid normalized application archive: %v", err)
+				return Result{ExitCode: 125}, nil
+			}
+			h.applicationImages[image.id] = image
+		}
+		if h.applicationLoadAckLost || h.applicationLoadMissing {
+			return Result{ExitCode: 1, Stderr: []byte("load reply lost")}, nil
+		}
 		return Result{}, nil
 	case len(args) == 3 && args[0] == "pull" && args[1] == "--quiet" && args[2] == StandardImage:
 		if !h.registry {
@@ -369,9 +463,11 @@ func (h *fakeHost) runVerifier(ctx context.Context, argv []string, stdout io.Wri
 }
 
 func (h *fakeHost) create(args []string, stdout io.Writer) Result {
-	c := &fakeContainer{args: args, labels: map[string]string{}, status: "created", files: map[string]fakeFile{}}
+	c := &fakeContainer{args: args, imageID: fakeImageID, labels: map[string]string{}, status: "created", files: map[string]fakeFile{}}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--no-healthcheck":
+			c.noHealthcheck = true
 		case "--name":
 			c.name = args[i+1]
 		case "--label":
@@ -400,6 +496,9 @@ func (h *fakeHost) create(args []string, stdout io.Writer) Result {
 			}
 			c.mounts = append(c.mounts, mount)
 		}
+		if _, ok := h.applicationImages[args[i]]; ok {
+			c.imageID = args[i]
+		}
 	}
 	if h.find(c.name) != nil {
 		return Result{ExitCode: 125, Stderr: []byte("Conflict. The container name is already in use")}
@@ -415,6 +514,9 @@ func (h *fakeHost) inspect(c *fakeContainer, stdout io.Writer) Result {
 	state := map[string]any{"Status": c.status, "Running": c.status == "running", "OOMKilled": c.oom, "ExitCode": c.exit,
 		"StartedAt": c.started.Format(time.RFC3339Nano), "FinishedAt": "0001-01-01T00:00:00Z"}
 	cfg := map[string]any{"Labels": c.labels}
+	if c.noHealthcheck {
+		cfg["Healthcheck"] = map[string]any{"Test": []string{"NONE"}}
+	}
 	host := map[string]any{}
 	host["Mounts"] = c.mounts
 	effective := []dockerMount{}
@@ -451,11 +553,13 @@ func (h *fakeHost) inspect(c *fakeContainer, stdout io.Writer) Result {
 		case "--cpus":
 			n, _ := strconv.ParseFloat(val, 64)
 			host["NanoCpus"] = int64(n * 1e9)
-		case fakeImageID:
-			cfg["Cmd"] = c.args[i+1:]
+		default:
+			if c.args[i] == c.imageID {
+				cfg["Cmd"] = c.args[i+1:]
+			}
 		}
 	}
-	raw, _ := json.Marshal([]map[string]any{{"Id": c.id, "Name": "/" + c.name, "Image": fakeImageID, "State": state, "Config": cfg, "HostConfig": host, "Mounts": effective}})
+	raw, _ := json.Marshal([]map[string]any{{"Id": c.id, "Name": "/" + c.name, "Image": c.imageID, "State": state, "Config": cfg, "HostConfig": host, "Mounts": effective}})
 	_, _ = stdout.Write(raw)
 	return Result{}
 }

@@ -217,6 +217,9 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 			if err = releaseHostCachePinsOnCleanup(ctx, tx, before.Operation, resources, now); err != nil {
 				return err
 			}
+			if err = releaseHostApplicationImagePinsOnCleanup(ctx, tx, before.Operation, resources, now); err != nil {
+				return err
+			}
 		}
 		if err = releaseWorkLease(ctx, tx, cleanupLease(w.Lease), now); err != nil {
 			return err

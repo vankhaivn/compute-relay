@@ -715,7 +715,7 @@ func (a *Adapter) checkCachedStart(ctx context.Context, d docker, info container
 	}
 	var proof marker
 	ref, err := decodeRef(prepared.Resource, prepared.Identity)
-	if err != nil || json.Unmarshal(raw, &proof) != nil || proof != (marker{Preparation: prepared.PreparationID, Plan: prepared.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: prepared.VerificationSHA256, Manifest: prepared.ManifestSHA256, Cache: true}) {
+	if err != nil || json.Unmarshal(raw, &proof) != nil || proof != (marker{Preparation: prepared.PreparationID, Plan: prepared.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: prepared.VerificationSHA256, Manifest: prepared.ManifestSHA256, Cache: true, ApplicationImage: info.Config.Labels[labelPrefix+"application-image"]}) {
 		return ErrIdentity
 	}
 	manifest, found, err := readFile(ctx, d, info.ID, "/relay/manifest.json", maxManifestBytes)

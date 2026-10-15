@@ -160,6 +160,10 @@ func (p *RuntimeAdapter) localPlan(ctx context.Context, job provider.ResolvedJob
 		return provider.Plan{}, ErrConfig
 	}
 	spec := req.Spec()
+	if spec.ApplicationImage != nil || job.Inputs.ApplicationImage != nil {
+		return provider.Plan{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation,
+			"application image archives are unsupported by this Kaggle provider")
+	}
 	gpu := spec.Resources.Accelerator == "gpu"
 	if gpu != (p.policy.MachineShape != "") || spec.Network.RemoteInternet == "required" && !p.policy.AllowInternet {
 		return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "job requirements exceed the configured Kaggle provider policy")

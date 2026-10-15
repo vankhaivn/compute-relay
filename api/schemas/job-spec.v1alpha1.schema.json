@@ -62,6 +62,16 @@
         }
       }
     },
+    "application_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "sha256", "bytes"],
+      "properties": {
+        "object_id": {"$ref": "common.v1alpha1.schema.json#/$defs/object_id"},
+        "sha256": {"$ref": "common.v1alpha1.schema.json#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 1, "maximum": 2147483648}
+      }
+    },
     "execution": {
       "type": "object",
       "additionalProperties": false,

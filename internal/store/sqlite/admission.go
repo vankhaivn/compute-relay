@@ -121,7 +121,7 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, req admis
 		if m.Bytes > max {
 			return admission.ErrRequirements
 		}
-		if role != "bundle" {
+		if role != "bundle" && role != "application_image" {
 			if m.Bytes > profile.MaxInputBytes-total {
 				return admission.ErrRequirements
 			}
@@ -135,6 +135,18 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, req admis
 	}
 	for i, in := range spec.Inputs {
 		if err = load("input:"+strconv.Itoa(i), in.Source.ObjectID, 2<<30, in.Source.SHA256, in.Source.Bytes); err != nil {
+			return profile, nil, err
+		}
+	}
+	if image := spec.ApplicationImage; image != nil {
+		target, err := cacheTargetInTx(ctx, tx, w, profile)
+		if err != nil {
+			return profile, nil, err
+		}
+		if target == nil {
+			return profile, nil, admission.ErrRequirements
+		}
+		if err := load("application_image", image.ObjectID, 2<<30, image.SHA256, &image.Bytes); err != nil {
 			return profile, nil, err
 		}
 	}
@@ -246,6 +258,9 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 			}
 		}
 		if err = pinHostCacheAdmission(ctx, tx, w, domain.JobID(job), domain.AttemptID(attempt), profile, refs, now); err != nil {
+			return err
+		}
+		if err = pinHostApplicationImageAdmission(ctx, tx, w, domain.JobID(job), domain.AttemptID(attempt), profile, refs, now); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO events(workspace_id,job_id,event_id,sequence,attempt_id,type,occurred_at) VALUES(?,?,?,?,?,?,?)`, string(w), job, event, 1, attempt, string(domain.EventJobAccepted), created)

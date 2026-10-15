@@ -96,7 +96,7 @@ func readJobRecord(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id dom
 			rows.Close()
 			return admission.Record{}, dbError(err)
 		}
-		if !ref.Object.Valid() || refs[ref.Role] || len(refs) >= 65 {
+		if !ref.Object.Valid() || refs[ref.Role] || len(refs) >= 66 {
 			rows.Close()
 			return admission.Record{}, ErrCorrupt
 		}
@@ -104,6 +104,12 @@ func readJobRecord(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id dom
 		switch {
 		case ref.Role == "bundle":
 			if ref.Object.ID != spec.Bundle.ObjectID {
+				rows.Close()
+				return admission.Record{}, ErrCorrupt
+			}
+		case ref.Role == "application_image":
+			if spec.ApplicationImage == nil || ref.Object.ID != spec.ApplicationImage.ObjectID ||
+				ref.Object.SHA256 != spec.ApplicationImage.SHA256 || ref.Object.Bytes != spec.ApplicationImage.Bytes {
 				rows.Close()
 				return admission.Record{}, ErrCorrupt
 			}
@@ -130,6 +136,9 @@ func readJobRecord(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id dom
 		return admission.Record{}, dbError(err)
 	}
 	if !refs["bundle"] {
+		return admission.Record{}, ErrCorrupt
+	}
+	if refs["application_image"] != (spec.ApplicationImage != nil) {
 		return admission.Record{}, ErrCorrupt
 	}
 	for i, in := range spec.Inputs {
