@@ -30,6 +30,13 @@ private filesystem roots hold input/result bytes; the embedded Python runner exe
     committed tombstones and original root bindings. Preserve ambiguous recovery material.
 12. No automatic submission, restaging, start, cleanup, quota evasion or billing after ambiguity.
     CI remains offline; live effects need exact authorization and finite budgets.
+13. Host health is time-bounded observation, not compute authority. Stale, missing or post-restart
+    evidence is `unknown`: refuse new admission, preparation and start, but never stop running work.
+    Warning also refuses only new work. Stop Relay-owned attempts only after consecutively measured
+    critical health for the frozen duration or a confirmed low-battery condition. Never retry or
+    resubmit after a health stop. The optional host watchdog uses a separate one-shot receipt,
+    verifies its frozen artifact, and filters stops to exact Relay-owned container labels; it never
+    changes host power, sleep or fan settings.
 
 ## Domain
 

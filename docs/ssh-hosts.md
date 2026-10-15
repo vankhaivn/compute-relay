@@ -175,6 +175,182 @@ standard library is preinstalled; declare pinned wheels in jobs that need more a
 policy allows downloads. Cancellation is confirmed from Docker's state. Logs stream the payload's
 standard output; standard error is collected with results.
 
+## Host health and protection
+
+For a verified native Intel Mac, Relay collects a bounded, read-only host snapshot and uses it to
+protect new and running work. Native Intel is established with `sysctl -n hw.cputype`; a process
+that reports `x86_64` under Rosetta is not enough. Read the latest snapshot, guard level,
+machine-readable reasons and bounded history with
+`GET /v1/workspaces/{w}/connections/{id}/health`. The response includes `schema_version`,
+`resource_id`, `latest`, `guard` (`level`, `reasons`, optional `diagnostics`, `refuse_new`, `stop`
+and optional `critical_since`), newest-first `history`, and the effective `policy`. Each snapshot
+metric includes its status and either a typed value or a fixed reason. Connections that resolve to
+the same machine share one snapshot and history, including LAN, Tailscale and alias connections.
+The guard is evaluated separately for each connection using that connection's frozen policy, so
+aliases with different thresholds can show different guard decisions for the same snapshot.
+See the [health response schema](../api/schemas/connection-health.v1alpha1.schema.json) and
+[valid response example](../api/examples/connection-health.ok.valid.json).
+
+Each metric carries a value or an explicit `unavailable` or `unsupported` status. The inspected
+native Intel source set supports these fields:
+
+| Metrics | Status and source |
+|---|---|
+| Thermal level; CPU speed limit | Available from `sysctl machdep.xcpm.cpu_thermal_level` and `pmset -g therm`. The thermal level is a raw integer, not Apple's separate pressure enum. |
+| CPU count, load average, current CPU use | Available from `sysctl` and `top`. |
+| Memory total, used, and system-wide free percentage | Available from `sysctl`, `top` and `memory_pressure`. The categorical memory-pressure field is `unavailable`; the inspected source did not expose a bounded normal/warning/critical value. |
+| GPU utilization | Available when `ioreg` exposes the allowlisted accelerator utilization scalar. It read 0% throughout the current idle baseline; other hardware may not expose it. |
+| Docker CPU and memory budget | Available from `docker info` on the verified local Docker engine. |
+| Docker data free space | `unavailable`; `docker system df` reports usage/reclaimable bytes, not free capacity in Docker's VM. Host filesystem free space is not a substitute. |
+| Power source, battery charge and charging state | Available from `pmset -g batt`. |
+| Battery temperature, cycle count and health percentage | Available from allowlisted scalar `ioreg` properties. Battery health is full-charge capacity relative to design capacity. |
+| Battery condition text | `unavailable`; the inspected source did not expose a condition string. |
+| Whether sleep is enabled on the current power source | Available from `pmset -g custom`. |
+| CPU/GPU die temperature and fan RPM | `unavailable` unless the narrow privileged sampler succeeds. |
+
+Linux and Apple Silicon hosts report `unsupported`; a failed or stale sample on a supported host
+reports `unknown`, not `unsupported`.
+
+Collection caps each source at 64 KiB and each command at four seconds, with a 25-second total
+collection bound. It emits typed scalar values and fixed reason codes, never raw host output or
+hardware identifiers. While a machine has queued, preparing or running work, Relay samples it
+every 30 seconds. A health request for an idle machine samples on demand, with a 15-second shared
+cache. History is limited to 120 rows and 24 hours. A sample older than 90 seconds is stale.
+History survives a Relay restart, but persisted samples are not current evidence until the new
+process reobserves the machine. Until then the level is `unknown`.
+An idle health request can take up to 35 seconds while Relay samples; the HTTP deadline is bounded
+to 60 seconds. The health route applies to SSH connections. Linux and Apple Silicon SSH hosts
+return `unsupported`; other provider types have no host identity for this feature and return HTTP
+400 `UNSUPPORTED_CAPABILITY` with `host health is unsupported for this provider`.
+
+### Optional temperature and fan readings
+
+The default configuration does not grant root access. The host can expose die temperatures and
+fan RPM through Apple's `/usr/bin/powermetrics` only if the SSH account has the exact passwordless
+sudo permission below. Replace `relay` with the account used by the SSH connection and add this
+one line through the host owner's normal sudoers editor (for example, `visudo`):
+
+```sudoers
+relay ALL=(root) NOPASSWD: /usr/bin/powermetrics --samplers smc -n 1 -i 1000
+```
+
+Relay classifies the grant as `absent`, `narrow` or `broader`. It invokes only
+`sudo -n /usr/bin/powermetrics --samplers smc -n 1 -i 1000`; `-n` prevents a prompt, and Relay
+never sends a password to `sudo`. Without a matching grant those optional metrics remain
+`unavailable`. A broader grant is reported as a diagnostic warning. To remove the grant, use the
+same host-side sudoers editor and delete the exact line above; Relay never edits sudoers.
+
+### Guard and thresholds
+
+The current defaults are shown below; live idle and sustained-load qualification on the Intel host
+is pending. Do not treat these values as qualified thermal limits:
+
+| Threshold | Current default |
+|---|---:|
+| Thermal warning / critical | raw `machdep.xcpm.cpu_thermal_level` 1 / 2 |
+| CPU speed warning / critical | at or below 90% / 50% |
+| CPU or GPU die temperature warning / critical | at or above 90°C / 100°C |
+| Low battery | at or below 10% while drawing from battery |
+| Sustained critical duration | 60 seconds; configurable from 1 to 900 seconds |
+
+Thermal levels here are raw `machdep.xcpm.cpu_thermal_level` values, not Apple's separate
+thermal pressure enum. Comparisons are inclusive. Missing optional die-temperature readings do
+not erase available core thermal and power readings.
+
+Thresholds are set with the existing `configure` connection action. Include
+`max_remote_wall_seconds` in the configuration object, even when leaving that value unchanged;
+`host_health` is a patch, so omitted threshold fields keep their saved values. The effective
+policy is frozen into each new connection revision and running attempt. Configure each alias that
+reaches the same machine if it should use the same thresholds for future attempts; snapshots and
+history are shared, but each connection's guard uses its own policy.
+
+For example, this patch changes the critical duration while retaining the current wall-time limit
+and all other saved host-health thresholds:
+
+```json
+{
+  "action": "configure",
+  "expected_revision": 3,
+  "configuration": {
+    "max_remote_wall_seconds": 1800,
+    "host_health": {"critical_duration_seconds": 120}
+  }
+}
+```
+
+| Guard level | New admission, preparation and start | Existing running work |
+|---|---|---|
+| `ok` | Allowed under normal admission rules. | Continues. |
+| `warning` | Admission returns HTTP 422 `RESOURCE_REQUIREMENT_UNSATISFIED`; inspect the health route for machine-readable reasons. A retained pre-submit attempt reports `host_unhealthy`. | Continues. |
+| `unknown` | Admission returns HTTP 422 `RESOURCE_REQUIREMENT_UNSATISFIED`; inspect the health route for machine-readable reasons. A retained pre-submit attempt reports `host_unhealthy`. | Continues; health uncertainty never stops work. |
+| `critical` | Refused. | Continues until critical evidence remains continuously measured for the configured duration, then Relay requests stop through its existing stop path and records `host_critical_stopped`. A confirmed battery-power reading at or below the low-battery threshold stops immediately. |
+| `unsupported` | Not blocked solely because Intel-specific metrics do not apply. | Continues; watchdog installation is unsupported. |
+
+An enabled sleep setting is reported as a diagnostic; Relay never changes it. The critical duration
+uses consecutive fresh observations. A healthy observation, missing core metric, stale gap, clock
+change or Relay restart resets the measured interval; Relay does not infer sustained danger from
+elapsed time alone. An unknown sample never stops a running attempt. Health refusal or stop never
+creates a retry, resubmits work, switches hosts or changes provider. The original attempt and stop
+evidence remain available for inspection.
+
+The admission error uses Relay's existing code and fixed message
+`host health does not permit new work; inspect connection health`; it does not contain the specific
+health reason. The health route is the source of that reason. When an already admitted attempt is
+refused at preparation or start, its job status carries `problem.details.reason: "host_unhealthy"`.
+After a critical stop is confirmed, job status carries `host_critical_stopped`.
+
+### Host watchdog
+
+On a supported native Intel Mac with the verified Docker engine, an explicit watchdog action
+installs a user-level `launchd` agent; it does not require root. Watchdog controls have a separate
+connection route and receipt type, outside the ordinary connection-operation action enum. Use a
+management token and a fresh `Idempotency-Key` for each new action:
+
+- `POST /v1/workspaces/{w}/connections/{id}/host-watchdog/actions/install_host_watchdog`
+- `POST /v1/workspaces/{w}/connections/{id}/host-watchdog/actions/remove_host_watchdog`
+- `GET /v1/workspaces/{w}/connections/{id}/host-watchdog`
+- `GET /v1/workspaces/{w}/host-watchdog-operations/{operation_id}`
+
+Each POST body contains only `expected_revision`. Poll the dedicated operation route for the
+result; do not use the ordinary `/connection-operations/{id}` route. The initial `queued` receipt
+is immutable and keyed by the idempotency key. The dedicated operation reports `queued`,
+`succeeded`, `unknown` or `failed`; its `problem` is normally null, and a failed operation reports
+`stale_revision` or `authority_revoked` when its queued authority became invalid before mutation.
+An `unknown` result means the remote mutation could not be confirmed and is never repeated by exact
+replay. After an unknown install has finished or its bounded worker lease expires, use a separate
+explicit remove action to reconcile it; the old receipt remains `unknown`. The status GET uses a
+read token and returns either a null status or a bounded version, last-run time and last-action
+record. See the [watchdog operation schema](../api/schemas/host-watchdog-operation.v1alpha1.schema.json),
+[queued receipt example](../api/examples/host-watchdog-operation.queued.valid.json),
+[status schema](../api/schemas/host-watchdog-status.v1alpha1.schema.json) and
+[status example](../api/examples/host-watchdog-status.idle.valid.json).
+
+Install freezes the current critical thresholds. To change the watchdog policy, remove it and
+install it again after configuring the connection. Its versioned script, launchd plist, manifest,
+status and stop ledger live under one Relay-owned directory in the SSH user's home. File digests
+and directory permissions are checked before launch. The agent runs in the user's GUI launchd
+domain, and uses the fixed `powermetrics` invocation only when that exact grant was available at
+installation.
+
+The watchdog filters for containers carrying the complete Relay installation ownership labels on
+the verified Docker engine. It stops only those exact container IDs and never stops or removes
+unlabelled containers or images, or changes unrelated launch agents or host settings. Its stop
+ledger records intent before requesting a stop and allows at most 64 distinct container IDs during
+one installation. It
+does not retry an ambiguous stop. `stop_requested` records a committed stop request;
+`stop_unknown` means inactivity was not proved; `confirmed_inactive` requires an immediate
+exact-ID inspection showing a stopped container. Absence from a filtered running list is not
+proof of inactivity. If the ledger is full, explicitly remove and reinstall the watchdog to start
+a new ledger; Relay never clears it automatically.
+
+The watchdog cannot enforce a rule while the Mac is asleep or Docker is stopped. Those conditions
+are limits, not reasons to change host settings; Relay never changes sleep or power settings or
+controls fans. The watchdog refuses unsupported platforms and ambiguous installations. A
+null `status` means no status file was returned; it does not prove installation is absent because
+the agent may not have written its first status yet. Check the operation receipt and read status
+again. An uncertain install or remove remains an operation receipt to inspect; exact replay does
+not repeat its remote mutation.
+
 ## Delete remote data
 
 Containers, their staged inputs and their outputs stay on the host after the attempt. Nothing on
