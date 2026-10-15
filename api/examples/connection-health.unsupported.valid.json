@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "latest": {
+    "schema_version": 1,
+    "observed_at": "2026-10-15T06:00:00Z",
+    "resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "platform": {
+      "status": "available",
+      "value": "unsupported"
+    },
+    "thermal_level": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "cpu_speed_limit_percent": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "cpu_count": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "load_average": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "cpu_usage_percent": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "memory_total_bytes": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "memory_used_bytes": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "memory_free_percent": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "memory_pressure": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "gpu_usage_percent": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "docker_cpu_count": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "docker_memory_bytes": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "docker_data_free_bytes": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "power_source": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "battery_charge_percent": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "battery_charging": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "battery_temperature_celsius": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "battery_cycle_count": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "battery_health_percent": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "battery_condition": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "sleep_enabled": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "sudo_grant": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "cpu_die_temperature_celsius": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "gpu_die_temperature_celsius": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    },
+    "fan_rpm": {
+      "status": "unsupported",
+      "reason": "platform_unsupported"
+    }
+  },
+  "guard": {
+    "level": "unsupported",
+    "reasons": [
+      "host_platform_unsupported"
+    ],
+    "refuse_new": false,
+    "stop": false
+  },
+  "history": [
+    {
+      "schema_version": 1,
+      "observed_at": "2026-10-15T06:00:00Z",
+      "resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "platform": {
+        "status": "available",
+        "value": "unsupported"
+      },
+      "thermal_level": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "cpu_speed_limit_percent": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "cpu_count": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "load_average": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "cpu_usage_percent": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "memory_total_bytes": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "memory_used_bytes": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "memory_free_percent": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "memory_pressure": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "gpu_usage_percent": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "docker_cpu_count": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "docker_memory_bytes": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "docker_data_free_bytes": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "power_source": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "battery_charge_percent": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "battery_charging": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "battery_temperature_celsius": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "battery_cycle_count": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "battery_health_percent": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "battery_condition": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "sleep_enabled": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "sudo_grant": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "cpu_die_temperature_celsius": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "gpu_die_temperature_celsius": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      },
+      "fan_rpm": {
+        "status": "unsupported",
+        "reason": "platform_unsupported"
+      }
+    }
+  ],
+  "policy": {
+    "warning_thermal_level": 1,
+    "critical_thermal_level": 2,
+    "warning_cpu_speed_percent": 90,
+    "critical_cpu_speed_percent": 50,
+    "warning_die_temperature_celsius": 90,
+    "critical_die_temperature_celsius": 100,
+    "low_battery_percent": 10,
+    "critical_duration_seconds": 60
+  }
+}

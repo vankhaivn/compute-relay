@@ -123,6 +123,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	if managed != nil {
 		cfg.Connections, cfg.Authorizations = managed.connections, managed.authorizations
 		cfg.Secrets = managed.secrets
+		cfg.Health = managed.health
 	}
 	server, err := api.NewServer(cfg, h.access, objectService, h.store.Ready)
 	if err != nil {

@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "latest": {
+    "schema_version": 1,
+    "observed_at": "2026-10-15T06:00:00Z",
+    "resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "platform": {
+      "status": "available",
+      "value": "macos_intel"
+    },
+    "thermal_level": {
+      "status": "available",
+      "value": 0
+    },
+    "cpu_speed_limit_percent": {
+      "status": "available",
+      "value": 100
+    },
+    "cpu_count": {
+      "status": "available",
+      "value": 16
+    },
+    "load_average": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "cpu_usage_percent": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "memory_total_bytes": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "memory_used_bytes": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "memory_free_percent": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "memory_pressure": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "gpu_usage_percent": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "docker_cpu_count": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "docker_memory_bytes": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "docker_data_free_bytes": {
+      "status": "unavailable",
+      "reason": "docker_vm_free_space_not_exposed"
+    },
+    "power_source": {
+      "status": "available",
+      "value": "ac"
+    },
+    "battery_charge_percent": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "battery_charging": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "battery_temperature_celsius": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "battery_cycle_count": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "battery_health_percent": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "battery_condition": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "sleep_enabled": {
+      "status": "available",
+      "value": false
+    },
+    "sudo_grant": {
+      "status": "available",
+      "value": "absent"
+    },
+    "cpu_die_temperature_celsius": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "gpu_die_temperature_celsius": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    },
+    "fan_rpm": {
+      "status": "unavailable",
+      "reason": "source_not_exposed"
+    }
+  },
+  "guard": {
+    "level": "ok",
+    "reasons": [],
+    "refuse_new": false,
+    "stop": false
+  },
+  "history": [
+    {
+      "schema_version": 1,
+      "observed_at": "2026-10-15T06:00:00Z",
+      "resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "platform": {
+        "status": "available",
+        "value": "macos_intel"
+      },
+      "thermal_level": {
+        "status": "available",
+        "value": 0
+      },
+      "cpu_speed_limit_percent": {
+        "status": "available",
+        "value": 100
+      },
+      "cpu_count": {
+        "status": "available",
+        "value": 16
+      },
+      "load_average": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "cpu_usage_percent": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "memory_total_bytes": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "memory_used_bytes": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "memory_free_percent": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "memory_pressure": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "gpu_usage_percent": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "docker_cpu_count": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "docker_memory_bytes": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "docker_data_free_bytes": {
+        "status": "unavailable",
+        "reason": "docker_vm_free_space_not_exposed"
+      },
+      "power_source": {
+        "status": "available",
+        "value": "ac"
+      },
+      "battery_charge_percent": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "battery_charging": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "battery_temperature_celsius": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "battery_cycle_count": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "battery_health_percent": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "battery_condition": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "sleep_enabled": {
+        "status": "available",
+        "value": false
+      },
+      "sudo_grant": {
+        "status": "available",
+        "value": "absent"
+      },
+      "cpu_die_temperature_celsius": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "gpu_die_temperature_celsius": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      },
+      "fan_rpm": {
+        "status": "unavailable",
+        "reason": "source_not_exposed"
+      }
+    }
+  ],
+  "policy": {
+    "warning_thermal_level": 1,
+    "critical_thermal_level": 2,
+    "warning_cpu_speed_percent": 90,
+    "critical_cpu_speed_percent": 50,
+    "warning_die_temperature_celsius": 90,
+    "critical_die_temperature_celsius": 100,
+    "low_battery_percent": 10,
+    "critical_duration_seconds": 60
+  }
+}

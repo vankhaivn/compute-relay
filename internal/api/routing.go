@@ -81,6 +81,9 @@ func (h *handler) routes() {
 		add("POST", "connections/{connection}/actions", routePolicy{bodyLimit: connections.MaxRequestBytes}, h.connections)
 		add("GET", "connection-operations/{connectionOperation}", routePolicy{}, h.connections)
 	}
+	if h.config.Health != nil {
+		add("GET", "connections/{connection}/health", routePolicy{remote: true}, h.health)
+	}
 	if h.config.Authorizations != nil {
 		add("POST", "jobs/{job}/authorize", routePolicy{bodyLimit: executionauth.MaxRequestBytes}, h.authorizations)
 		add("GET", "jobs/{job}/authorizations/{authorization}", routePolicy{}, h.authorizations)
