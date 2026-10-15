@@ -157,6 +157,22 @@ func (g *hostGuardFixture) running(t *testing.T) admission.Receipt {
 	return job
 }
 
+func (g *hostGuardFixture) setCriticalDuration(t *testing.T, seconds int) {
+	t.Helper()
+	body := systemJSON(t, map[string]any{"action": "configure", "expected_revision": g.connection.Revision,
+		"configuration": map[string]any{"max_remote_wall_seconds": 600, "host_health": map[string]any{"critical_duration_seconds": seconds}}})
+	op, err := g.f.services.connections.Submit(t.Context(), g.f.actor, "app", g.connection.ID, "guard-scenario-duration", body)
+	if err != nil || op.Status != "succeeded" {
+		t.Fatal("configure scenario duration", op.Status, err)
+	}
+	g.connection, err = g.f.services.connections.Get(t.Context(), g.f.actor, "app", g.connection.ID)
+	requireNoError(t, err)
+	target, err := g.f.host.store.ResolveHostHealthTarget(t.Context(), "app", g.f.actor.TokenID(), g.connection.ID)
+	if err != nil || target.Policy == nil || target.Policy.CriticalDurationSeconds != seconds {
+		t.Fatal("scenario duration was not saved before admission", err)
+	}
+}
+
 func TestHostHealthAdmissionDemandAuthReplayAndUnsupported(t *testing.T) {
 	for _, mode := range []string{"ok", "warning", "critical", "unknown", "failed", "unsupported"} {
 		t.Run(mode, func(t *testing.T) {
@@ -349,6 +365,7 @@ func TestHostHealthRunningWarningUnknownContinueAndCriticalStopsOnce(t *testing.
 	for _, danger := range []string{"critical", "battery"} {
 		t.Run(danger, func(t *testing.T) {
 			g := newHostGuardFixture(t, "ok")
+			g.setCriticalDuration(t, 60)
 			probe := g.cancelProbe(t, false)
 			job := g.running(t)
 			for _, mode := range []string{"warning", "unknown", "failed"} {
@@ -393,12 +410,16 @@ func TestHostHealthRunningWarningUnknownContinueAndCriticalStopsOnce(t *testing.
 
 func TestHostHealthRestartResetsSustainedWindowAndLostCancelNeverRepeats(t *testing.T) {
 	g := newHostGuardFixture(t, "ok")
+	g.setCriticalDuration(t, 60)
 	probe := g.cancelProbe(t, true)
 	job := g.running(t)
 	g.sampler.set("critical")
 	for range 2 {
 		g.f.advance(t, hosthealth.SampleCadence)
 		requireNoError(t, g.guard.RunOnce(t.Context()))
+		if g.read(t, job).Attempt.State.Cancellation != domain.CancellationNotRequested {
+			t.Fatal("partial pre-restart interval was treated as sustained danger")
+		}
 	}
 	g.f.reopen(t)
 	g.bind(t)

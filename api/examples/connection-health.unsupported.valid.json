@@ -235,8 +235,8 @@
     "warning_cpu_speed_percent": 90,
     "critical_cpu_speed_percent": 50,
     "warning_die_temperature_celsius": 90,
-    "critical_die_temperature_celsius": 100,
+    "critical_die_temperature_celsius": 95,
     "low_battery_percent": 10,
-    "critical_duration_seconds": 60
+    "critical_duration_seconds": 30
   }
 }

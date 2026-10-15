@@ -27,8 +27,8 @@ type Policy struct {
 }
 
 // DefaultPolicy refuses at fair and stops sustained serious or critical state.
-// Speed and die-temperature thresholds remain provisional pending qualification.
-func DefaultPolicy() Policy { return LegacyPolicyV1() }
+// These are operational load-shedding thresholds, not hardware safety limits.
+func DefaultPolicy() Policy { return Policy{1, 2, 90, 50, 90, 95, 10, 30} }
 
 // LegacyPolicyV1 fixes the semantics of runtime revisions predating host health.
 // Changing future defaults must never change these legacy values.

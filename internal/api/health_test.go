@@ -223,6 +223,13 @@ func TestConnectionHealthHTTPUnsupportedSSHAndUnknownObservations(t *testing.T) 
 }
 func TestConnectionHealthHTTPReportsSustainedCriticalWithoutControlAuthority(t *testing.T) {
 	f := setupHealthHTTP(t)
+	f.repo.mu.Lock()
+	target := f.repo.targets["a/con_lan"]
+	policy := *target.Policy
+	policy.CriticalDurationSeconds = 60
+	target.Policy = &policy
+	f.repo.targets["a/con_lan"] = target
+	f.repo.mu.Unlock()
 	f.setSample(func(_ context.Context, target hosthealth.Target) (hosthealth.Snapshot, error) {
 		s := healthHTTPSample(target, f.clock.Now(), "Darwin x86_64")
 		level := hosthealth.DefaultPolicy().CriticalThermalLevel
@@ -234,6 +241,9 @@ func TestConnectionHealthHTTPReportsSustainedCriticalWithoutControlAuthority(t *
 		response := healthResponse(t, raw)
 		if response.Guard.Level != hosthealth.LevelCritical || response.Guard.Stop != (i == 2) {
 			t.Fatal(response.Guard)
+		}
+		if response.Policy.CriticalDurationSeconds != 60 || len(response.History) != i+1 || f.calls.Load() != int32(i+1) {
+			t.Fatal("critical interval did not use the configured policy and distinct samples")
 		}
 		f.clock.advance(30 * time.Second)
 	}

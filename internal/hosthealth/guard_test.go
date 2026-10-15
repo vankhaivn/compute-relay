@@ -103,6 +103,7 @@ func TestGuardDiagnosticsDoNotRefuseNew(t *testing.T) {
 func TestGuardSustainedCriticalRequiresConsecutiveObservations(t *testing.T) {
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	p := DefaultPolicy()
+	p.CriticalDurationSeconds = 60
 	critical := func(delta time.Duration) Snapshot {
 		s := guardSnapshot(t, at.Add(delta))
 		s.ThermalLevel = value(p.CriticalThermalLevel)
@@ -143,6 +144,92 @@ func TestGuardSustainedCriticalRequiresConsecutiveObservations(t *testing.T) {
 		})
 	}
 }
+
+func TestPolicyDefaultsAndLegacyValuesAreFixed(t *testing.T) {
+	defaults := Policy{1, 2, 90, 50, 90, 95, 10, 30}
+	legacy := Policy{1, 2, 90, 50, 90, 100, 10, 60}
+	if got := DefaultPolicy(); got != defaults || got.Validate() != nil {
+		t.Fatalf("future defaults changed: %+v", got)
+	}
+	if got := LegacyPolicyV1(); got != legacy || got.Validate() != nil {
+		t.Fatalf("legacy policy changed: %+v", got)
+	}
+	for _, raw := range []string{
+		`{"schema_version":3,"image":"sha256:synthetic"}`,
+		`{"schema_version":3,"host_health":{"warning_thermal_level":1,"critical_thermal_level":2,"warning_cpu_speed_percent":90,"critical_cpu_speed_percent":50,"warning_die_temperature_celsius":90,"critical_die_temperature_celsius":100,"low_battery_percent":10,"critical_duration_seconds":60}}`,
+	} {
+		got, err := PolicyFromRuntime([]byte(raw))
+		if err != nil || got != legacy {
+			t.Fatalf("historical runtime adopted future defaults: policy=%+v err=%v", got, err)
+		}
+		original := []byte(raw)
+		frozen, err := FreezeRuntimePolicy(original, defaults)
+		if err != nil || string(original) != raw {
+			t.Fatal("freezing a future revision changed historical runtime bytes", err)
+		}
+		got, err = PolicyFromRuntime(frozen)
+		if err != nil || got != defaults {
+			t.Fatalf("future revision did not freeze final defaults: policy=%+v err=%v", got, err)
+		}
+	}
+}
+
+func TestDefaultGuardTemperatureAndThirtySecondBoundaries(t *testing.T) {
+	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	for _, sensor := range []struct {
+		name string
+		set  func(*Snapshot, float64)
+	}{
+		{"cpu", func(s *Snapshot, temperature float64) { s.CPUDieTemperatureCelsius = value(temperature) }},
+		{"gpu", func(s *Snapshot, temperature float64) { s.GPUDieTemperatureCelsius = value(temperature) }},
+	} {
+		for _, test := range []struct {
+			name        string
+			temperature float64
+			span        time.Duration
+			nowAdvance  time.Duration
+			legacy      bool
+			level       Level
+			stop        bool
+		}{
+			{"below_warning", 89.99, 30 * time.Second, 0, false, LevelOK, false},
+			{"warning_inclusive", 90, 30 * time.Second, 0, false, LevelWarning, false},
+			{"below_critical", 94.99, 30 * time.Second, 0, false, LevelWarning, false},
+			{"critical_first_endpoint", 95, 0, 0, false, LevelCritical, false},
+			{"elapsed_time_is_not_a_second_endpoint", 95, 0, 30 * time.Second, false, LevelCritical, false},
+			{"before_thirty_seconds", 95, 30*time.Second - time.Nanosecond, 0, false, LevelCritical, false},
+			{"two_thirty_second_endpoints", 95, 30 * time.Second, 0, false, LevelCritical, true},
+			{"legacy_ninety_five_is_warning", 95, 60 * time.Second, 0, true, LevelWarning, false},
+			{"legacy_thirty_seconds_is_not_sustained", 100, 30 * time.Second, 0, true, LevelCritical, false},
+			{"legacy_before_sixty_seconds", 100, 60*time.Second - time.Nanosecond, 0, true, LevelCritical, false},
+			{"legacy_sixty_seconds_inclusive", 100, 60 * time.Second, 0, true, LevelCritical, true},
+		} {
+			t.Run(sensor.name+"/"+test.name, func(t *testing.T) {
+				latest := guardSnapshot(t, at)
+				sensor.set(&latest, test.temperature)
+				history := []Snapshot{latest}
+				if test.span > 0 {
+					previous := guardSnapshot(t, at.Add(-test.span))
+					sensor.set(&previous, test.temperature)
+					history = append(history, previous)
+				}
+				view := View{ResourceID: testResource, Latest: &latest, History: history, Fresh: true, ReobservedSince: at.Add(-time.Hour)}
+				policy := DefaultPolicy()
+				if test.legacy {
+					policy = LegacyPolicyV1()
+				}
+				decision := Evaluate(view, policy, at.Add(test.nowAdvance))
+				if decision.Level != test.level || decision.Stop != test.stop || decision.RefuseNew != (test.level != LevelOK) {
+					t.Fatalf("boundary decision: %+v", decision)
+				}
+				if test.level == LevelCritical && (decision.CriticalSince == nil || !decision.CriticalSince.Equal(at.Add(-test.span))) {
+					t.Fatalf("critical interval did not use measured endpoints: %+v", decision)
+				}
+			})
+		}
+	}
+}
+
 func TestGuardMaximumDurationFitsBoundedHistory(t *testing.T) {
 	at := time.Now()
 	p := DefaultPolicy()
@@ -174,9 +261,9 @@ func TestPolicyValidationPatchAndImmutableRuntime(t *testing.T) {
 		}
 	}
 	zero := 0
-	duration := 30
+	duration := 120
 	changed, err := p.Apply(&PolicyPatch{WarningThermalLevel: &zero, CriticalDurationSeconds: &duration})
-	if err != nil || changed.WarningThermalLevel != 0 || changed.CriticalDurationSeconds != 30 || changed.CriticalThermalLevel != p.CriticalThermalLevel {
+	if err != nil || changed.WarningThermalLevel != 0 || changed.CriticalDurationSeconds != 120 || changed.CriticalThermalLevel != p.CriticalThermalLevel {
 		t.Fatal(changed, err)
 	}
 	original := []byte(`{"schema_version":3,"image":"sha256:synthetic"}`)

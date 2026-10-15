@@ -242,16 +242,24 @@ same host-side sudoers editor and delete the exact line above; Relay never edits
 
 ### Guard and thresholds
 
-The current defaults are shown below; live idle and sustained-load qualification on the Intel host
-is pending. Do not treat these values as qualified thermal limits:
+New connections use the operational defaults below. Existing connection revisions, attempts and
+installed watchdogs retain their frozen policy:
 
 | Threshold | Current default |
 |---|---:|
 | Thermal warning / critical | Foundation fair (1) / serious (2) |
 | CPU speed warning / critical | at or below 90% / 50% |
-| CPU or GPU die temperature warning / critical | at or above 90°C / 100°C |
+| CPU or GPU die temperature warning / critical | at or above 90°C / 95°C |
 | Low battery | at or below 10% while drawing from battery |
-| Sustained critical duration | 60 seconds; configurable from 1 to 900 seconds |
+| Sustained critical duration | 30 seconds; configurable from 1 to 900 seconds |
+
+On the qualified Intel Mac, ten minutes of idle sampling measured CPU die temperatures of
+45.85–52.68°C. A four-minute duty-cycled workload using about 10% of one CPU peaked at 65.32°C.
+A full one-CPU load reached 101.05°C and was cancelled immediately while Foundation reported fair
+and CPU speed remained 100%. These observations support an independent temperature guard and
+conservative load shedding; they do not establish a hardware safe limit or sustained full-load
+capacity. The 95°C threshold itself was not tested by deliberately holding the host at that
+temperature.
 
 Thermal levels use Apple's documented Foundation enum (0–3); Relay begins its critical policy
 at serious (2). The fixed read-only script imports Foundation and reads
@@ -291,8 +299,10 @@ and all other saved host-health thresholds:
 | `unsupported` | Not blocked solely because Intel-specific metrics do not apply. | Continues; watchdog installation is unsupported. |
 
 An enabled sleep setting is reported as a diagnostic; Relay never changes it. The critical duration
-uses consecutive fresh observations. A healthy observation, missing core metric, stale gap, clock
-change or Relay restart resets the measured interval; Relay does not infer sustained danger from
+uses consecutive fresh observations and is a minimum observed span, not a maximum stop latency.
+The 30-second collector cadence can add another sampling interval, plus collection and cancellation
+time; protection cannot prevent a rapid temperature spike. A healthy observation, missing core
+metric, stale gap, clock change or Relay restart resets the measured interval; Relay does not infer sustained danger from
 elapsed time alone. An unknown sample never stops a running attempt. Health refusal or stop never
 creates a retry, resubmits work, switches hosts or changes provider. The original attempt and stop
 evidence remain available for inspection.
@@ -320,8 +330,9 @@ result; do not use the ordinary `/connection-operations/{id}` route. The initial
 is immutable and keyed by the idempotency key. The dedicated operation reports `queued`,
 `succeeded`, `unknown` or `failed`; its `problem` is normally null, and a failed operation reports
 `stale_revision` or `authority_revoked` when its queued authority became invalid before mutation.
-An `unknown` result means the remote mutation could not be confirmed and is never repeated by exact
-replay. After an unknown install has finished or its bounded worker lease expires, use a separate
+An `unknown` result means the remote mutation is not yet confirmed; it can also appear while the
+first application is in progress. Keep Relay running and poll the original operation. Exact replay
+never repeats the mutation. After an unknown install has finished or its bounded worker lease expires, use a separate
 explicit remove action to reconcile it; the old receipt remains `unknown`. The status GET uses a
 read token and returns either a null status or a bounded version, last-run time and last-action
 record. See the [watchdog operation schema](../api/schemas/host-watchdog-operation.v1alpha1.schema.json),

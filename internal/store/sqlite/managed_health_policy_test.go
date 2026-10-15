@@ -35,17 +35,21 @@ func TestManagedHostHealthPolicyFreezesAndPreservesOmittedThresholds(t *testing.
 	c := createHealthConnection(t, f, "a", "health-policy-create", "SYNTHETIC_LAN")
 	old := c
 	original, p := runtimeHealthPolicy(t, f, c)
-	if p != hosthealth.DefaultPolicy() || !bytes.Contains(original, []byte(`"host_health"`)) {
+	want := hosthealth.Policy{WarningThermalLevel: 1, CriticalThermalLevel: 2,
+		WarningCPUSpeedPercent: 90, CriticalCPUSpeedPercent: 50,
+		WarningDieTemperatureCelsius: 90, CriticalDieTemperatureCelsius: 95,
+		LowBatteryPercent: 10, CriticalDurationSeconds: 30}
+	if p != want || !bytes.Contains(original, []byte(`"host_health"`)) {
 		t.Fatal("new profile did not materialize defaults")
 	}
-	c = configureHealthPolicy(t, f, c, "health-policy-change", `{"warning_thermal_level":2,"critical_thermal_level":3,"critical_duration_seconds":30}`)
+	c = configureHealthPolicy(t, f, c, "health-policy-change", `{"warning_thermal_level":2,"critical_thermal_level":3,"critical_duration_seconds":120}`)
 	_, changed := runtimeHealthPolicy(t, f, c)
-	if changed.WarningThermalLevel != 2 || changed.CriticalThermalLevel != 3 || changed.CriticalDurationSeconds != 30 || changed.LowBatteryPercent != p.LowBatteryPercent {
+	if changed.WarningThermalLevel != 2 || changed.CriticalThermalLevel != 3 || changed.CriticalDurationSeconds != 120 || changed.LowBatteryPercent != p.LowBatteryPercent {
 		t.Fatal(changed)
 	}
 	c = configureHealthPolicy(t, f, c, "health-policy-partial", `{"low_battery_percent":0}`)
 	_, partial := runtimeHealthPolicy(t, f, c)
-	if partial.LowBatteryPercent != 0 || partial.CriticalThermalLevel != 3 || partial.CriticalDurationSeconds != 30 {
+	if partial.LowBatteryPercent != 0 || partial.CriticalThermalLevel != 3 || partial.CriticalDurationSeconds != 120 {
 		t.Fatal("patch lost saved thresholds", partial)
 	}
 	configureConnection(t, f, c, "health-policy-omitted", 2400)
@@ -79,6 +83,51 @@ func TestManagedHostHealthPolicyFreezesAndPreservesOmittedThresholds(t *testing.
 		t.Fatal("effective policy not persisted")
 	}
 }
+
+func TestManagedHostHealthLegacyPolicyAndAttemptRemainFrozen(t *testing.T) {
+	legacy := hosthealth.Policy{WarningThermalLevel: 1, CriticalThermalLevel: 2,
+		WarningCPUSpeedPercent: 90, CriticalCPUSpeedPercent: 50,
+		WarningDieTemperatureCelsius: 90, CriticalDieTemperatureCelsius: 100,
+		LowBatteryPercent: 10, CriticalDurationSeconds: 60}
+	fallback, err := managedHostHealthPolicy("ssh", nil)
+	if err != nil || fallback == nil || *fallback != legacy {
+		t.Fatal("historical connection adopted future defaults", err)
+	}
+	f, _ := healthStateFixture(t)
+	c := createHealthConnection(t, f, "a", "policy-legacy-create", "SYNTHETIC_LAN")
+	raw, err := json.Marshal(legacy)
+	requireNoError(t, err)
+	c = configureHealthPolicy(t, f, c, "policy-legacy-frozen", string(raw))
+	old := c
+	original, policy := runtimeHealthPolicy(t, f, old)
+	if policy != legacy {
+		t.Fatal("legacy runtime was not frozen", policy)
+	}
+	_, attempt := f.admit(t, "a", c, "policy-legacy-attempt")
+	frozen, err := f.s.HostHealthTargetForAttempt(t.Context(), attempt)
+	if err != nil || frozen == nil || frozen.Policy == nil || *frozen.Policy != legacy || !bytes.Equal(frozen.RuntimeConfig, original) {
+		t.Fatal("attempt did not bind original policy", err)
+	}
+	c = configureHealthPolicy(t, f, c, "policy-final-future-revision", `{"critical_die_temperature_celsius":95,"critical_duration_seconds":30}`)
+	want := legacy
+	want.CriticalDieTemperatureCelsius = 95
+	want.CriticalDurationSeconds = 30
+	_, current := runtimeHealthPolicy(t, f, c)
+	if current != want {
+		t.Fatal("future revision did not receive requested final policy", current)
+	}
+	f.restartManaged(t)
+	preserved, prior := runtimeHealthPolicy(t, f, old)
+	stillFrozen, err := f.s.HostHealthTargetForAttempt(t.Context(), attempt)
+	if err != nil || stillFrozen == nil || stillFrozen.Policy == nil || *stillFrozen.Policy != legacy || prior != legacy || !bytes.Equal(original, preserved) || !bytes.Equal(original, stillFrozen.RuntimeConfig) {
+		t.Fatal("configuration or restart rewrote historical policy", err)
+	}
+	target, err := f.s.ResolveHostHealthTarget(t.Context(), "a", f.principals["a"].TokenID(), c.ID)
+	if err != nil || target.Policy == nil || *target.Policy != want {
+		t.Fatal("current connection lost its explicit future policy", err)
+	}
+}
+
 func TestManagedHostHealthPolicyRejectsUnsupportedProviderAndOrdering(t *testing.T) {
 	f, _ := healthStateFixture(t)
 	c := createHealthConnection(t, f, "a", "health-invalid-create", "SYNTHETIC_LAN")
