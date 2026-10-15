@@ -9,13 +9,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 )
 
 func testConfig() Config {
 	return Config{
 		Home: "/Users/relay", InstallationID: "runtime_fixture", DockerPath: "/usr/local/bin/docker",
 		DockerHost: "unix:///Users/relay/.docker/run/docker.sock", EngineID: "ENGINE:fixture:123456789",
-		CriticalThermalLevel: 20, MinimumCPUSpeedPercent: 20, CriticalDieTemperatureCelsius: 100,
+		CriticalThermalLevel: 2, MinimumCPUSpeedPercent: 20, CriticalDieTemperatureCelsius: 100,
 		CriticalDurationSeconds: 2, LowBatteryPercent: 10, SampleIntervalSeconds: 1,
 	}
 }
@@ -31,7 +33,7 @@ func TestRenderFrozenArtifact(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(a, again) {
 		t.Fatal("render is not deterministic")
 	}
-	if a.Version != Version || path.Dir(a.Directory) != c.Home || len(a.Files) != 3 || a.SourceDigest != digest([]byte(source)) {
+	if a.Version != Version || path.Dir(a.Directory) != c.Home || len(a.Files) != 3 || a.SourceDigest != digest([]byte(source+"\x00"+hosthealth.ThermalStateScript)) {
 		t.Fatalf("unexpected artifact metadata: %+v", a)
 	}
 	for _, f := range a.Files {
@@ -46,12 +48,12 @@ func TestRenderFrozenArtifact(t *testing.T) {
 				t.Fatalf("shell syntax: %v: %s", err, out)
 			}
 			text := string(f.Content)
-			for _, fixed := range []string{"sysctl='/usr/sbin/sysctl'", "pmset='/usr/bin/pmset'", "sudo='/usr/bin/sudo'", "flush='/usr/bin/perl'", "/usr/bin/powermetrics --samplers smc -n 1 -i 1000", `"$sysctl" -n hw.cputype`} {
+			for _, fixed := range []string{"sysctl='/usr/sbin/sysctl'", "osascript='/usr/bin/osascript'", "thermal_state_script=" + quote(hosthealth.ThermalStateScript), "pmset='/usr/bin/pmset'", "sudo='/usr/bin/sudo'", "flush='/usr/bin/perl'", "/usr/bin/powermetrics --samplers smc -n 1 -i 1000", `"$sysctl" -n hw.cputype`, `"$osascript" -l JavaScript -e "$thermal_state_script"`} {
 				if !strings.Contains(text, fixed) {
 					t.Errorf("missing fixed command %q", fixed)
 				}
 			}
-			if strings.Contains(text, "@@") || strings.Contains(text, "eval ") || strings.Contains(text, "kill -TERM -") {
+			if strings.Contains(text, "@@") || strings.Contains(text, "eval ") || strings.Contains(text, "kill -TERM -") || strings.Contains(text, "machdep.xcpm.cpu_thermal_level") {
 				t.Fatal("unresolved or unsafe script")
 			}
 		case ManifestName:
@@ -83,7 +85,7 @@ func TestConfigRejectsHostileOrUnboundedMaterial(t *testing.T) {
 		"root home":            func(c *Config) { c.Home = "/" },
 		"home newline":         func(c *Config) { c.Home += "\n" },
 		"home backslash":       func(c *Config) { c.Home += "\\path" },
-		"thermal excess":       func(c *Config) { c.CriticalThermalLevel = 256 },
+		"thermal excess":       func(c *Config) { c.CriticalThermalLevel = 4 },
 		"installation command": func(c *Config) { c.InstallationID = "runtime; touch pwned" },
 		"engine command":       func(c *Config) { c.EngineID = "$(touch pwned)" },
 		"thermal negative":     func(c *Config) { c.CriticalThermalLevel = -1 },

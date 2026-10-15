@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 )
 
 const (
@@ -40,8 +41,8 @@ var ErrStatus = errors.New("invalid host watchdog status")
 // Config is private installation material, frozen into the rendered script. Home
 // is the authenticated user's canonical home. DockerPath, DockerHost and EngineID
 // must come from verification of that same machine and its local Docker daemon.
-// CriticalThermalLevel uses raw machdep.xcpm.cpu_thermal_level units. The CPU
-// speed, temperature and battery comparisons are inclusive. Missing optional die
+// CriticalThermalLevel uses Foundation's nominal=0, fair=1, serious=2, critical=3.
+// The CPU speed, temperature and battery comparisons are inclusive. Missing optional die
 // temperatures do not invalidate the unprivileged thermal and power samples.
 type Config struct {
 	Home                          string
@@ -86,12 +87,12 @@ type Artifact struct {
 var source string
 
 type commands struct {
-	sysctl, pmset, sudo, uname, date, stat, id, sleep string
-	path, sync                                        string
+	sysctl, osascript, pmset, sudo, uname, date, stat, id, sleep string
+	path, sync                                                   string
 }
 
 var productionCommands = commands{
-	sysctl: "/usr/sbin/sysctl", pmset: "/usr/bin/pmset", sudo: "/usr/bin/sudo", uname: "/usr/bin/uname",
+	sysctl: "/usr/sbin/sysctl", osascript: "/usr/bin/osascript", pmset: "/usr/bin/pmset", sudo: "/usr/bin/sudo", uname: "/usr/bin/uname",
 	date: "/bin/date", stat: "/usr/bin/stat", id: "/usr/bin/id", sleep: "/bin/sleep",
 	path: "/usr/bin:/bin:/usr/sbin:/sbin",
 	sync: "/usr/bin/perl",
@@ -115,7 +116,7 @@ func (c Config) Validate() error {
 	socket, unix := strings.CutPrefix(c.DockerHost, "unix://")
 	if !cleanAbsolute(c.Home) || !domain.RuntimeInstallationID(c.InstallationID).Valid() || !cleanAbsolute(c.DockerPath) ||
 		!unix || !cleanAbsolute(socket) || !nativeEngine.MatchString(c.EngineID) ||
-		c.CriticalThermalLevel < 0 || c.CriticalThermalLevel > 255 ||
+		c.CriticalThermalLevel < 0 || c.CriticalThermalLevel > 3 ||
 		math.IsNaN(c.MinimumCPUSpeedPercent) || math.IsInf(c.MinimumCPUSpeedPercent, 0) || c.MinimumCPUSpeedPercent < 0 || c.MinimumCPUSpeedPercent > 100 ||
 		math.IsNaN(c.CriticalDieTemperatureCelsius) || math.IsInf(c.CriticalDieTemperatureCelsius, 0) ||
 		c.CriticalDieTemperatureCelsius < 0 || c.CriticalDieTemperatureCelsius > 150 ||
@@ -137,7 +138,7 @@ func render(c Config, cmd commands) (Artifact, error) {
 	dir := path.Join(c.Home, ".compute-relay-host-watchdog-"+c.InstallationID)
 	a := Artifact{
 		Version: Version, Directory: dir, Label: "io.compute-relay.host-watchdog." + c.InstallationID,
-		SourceDigest: digest([]byte(source)),
+		SourceDigest: digest([]byte(source + "\x00" + hosthealth.ThermalStateScript)),
 		RuntimeFiles: []string{StatusName, LedgerName, ".command-v1.out", ".status-v1.tmp", ".stop-ledger-v1.tmp"},
 	}
 	powermetrics := "0"
@@ -153,6 +154,7 @@ func render(c Config, cmd commands) (Artifact, error) {
 		"@@INTERVAL@@", strconv.Itoa(c.SampleIntervalSeconds), "@@POWERMETRICS@@", powermetrics,
 		"@@SOURCE_DIGEST@@", quote(a.SourceDigest),
 		"@@SYSCTL@@", quote(cmd.sysctl), "@@PMSET@@", quote(cmd.pmset), "@@SUDO@@", quote(cmd.sudo),
+		"@@OSASCRIPT@@", quote(cmd.osascript), "@@THERMAL_STATE_SCRIPT@@", quote(hosthealth.ThermalStateScript),
 		"@@UNAME@@", quote(cmd.uname), "@@DATE@@", quote(cmd.date), "@@STAT@@", quote(cmd.stat),
 		"@@ID@@", quote(cmd.id), "@@SLEEP@@", quote(cmd.sleep),
 		"@@PATH@@", quote(cmd.path),

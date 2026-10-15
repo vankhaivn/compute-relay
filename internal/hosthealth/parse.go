@@ -221,8 +221,8 @@ func Parse(resourceID string, observed time.Time, samples map[Source]Sample) Sna
 		s.FanRPM = missing[float64]("sudo_grant_absent")
 	} else {
 		pm := samples[Powermetrics]
-		s.CPUDieTemperatureCelsius = numeric(pm, `(?m)^CPU die temperature:[ \t]*([0-9.]+) C(?: \(fan\))?[ \t]*$`, 150)
-		s.GPUDieTemperatureCelsius = numeric(pm, `(?m)^GPU die temperature:[ \t]*([0-9.]+) C(?: \(fan\))?[ \t]*$`, 150)
+		s.CPUDieTemperatureCelsius = numeric(pm, `(?m)^CPU die temperature:[ \t]*([0-9.]+) C(?: \((?:fan|power)\))?[ \t]*$`, 150)
+		s.GPUDieTemperatureCelsius = numeric(pm, `(?m)^GPU die temperature:[ \t]*([0-9.]+) C(?: \((?:fan|power)\))?[ \t]*$`, 150)
 		s.FanRPM = numeric(pm, `(?m)^Fan:\s*([0-9.]+) rpm\s*$`, 30000)
 	}
 	return s

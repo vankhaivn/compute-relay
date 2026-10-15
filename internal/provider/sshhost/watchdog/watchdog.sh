@@ -20,6 +20,8 @@ interval=@@INTERVAL@@
 powermetrics_granted=@@POWERMETRICS@@
 source_digest=@@SOURCE_DIGEST@@
 sysctl=@@SYSCTL@@
+osascript=@@OSASCRIPT@@
+thermal_state_script=@@THERMAL_STATE_SCRIPT@@
 pmset=@@PMSET@@
 sudo=@@SUDO@@
 uname=@@UNAME@@
@@ -295,9 +297,9 @@ while :; do
     result=idle
     epoch || { write_status unknown; exit 1; }
     sample_start=$now
-    if capture 128 8 "$sysctl" -n machdep.xcpm.cpu_thermal_level; then
+    if capture 128 8 "$osascript" -l JavaScript -e "$thermal_state_script"; then
         level=$(printf '%s\n' "$command_output" | /usr/bin/awk '
-            NR!=1 || $0!~/^(0|[1-9][0-9]*)$/ || length($0)>3 || $0+0>255 {bad=1}
+            NR!=1 || $0!~/^[0-3]$/ {bad=1}
             END {if (bad) exit 1; print $0}') || core_known=0
         if [ "$core_known" = 1 ] && [ "$level" -ge "$thermal_threshold" ]; then critical=1; fi
     else core_known=0; fi
@@ -326,7 +328,7 @@ while :; do
     else core_known=0; fi
     if [ "$powermetrics_granted" = 1 ] && capture 8192 8 "$sudo" -n /usr/bin/powermetrics --samplers smc -n 1 -i 1000; then
         if printf '%s\n' "$command_output" | /usr/bin/awk -v threshold="$temperature_threshold" '
-            /^(CPU|GPU) die temperature:/ {n++; if ($0!~/^(CPU|GPU) die temperature:[ \t]*[0-9]+([.][0-9]+)?[ \t]+C[ \t]*$/) bad=1; split($0,p,":"); sub(/^[ \t]*/, "", p[2]); split(p[2],v,/[ \t]+/); if (v[1]+0>150) bad=1; if (v[1]+0>=threshold+0) hot=1; if ($1=="CPU") cpu++; else gpu++}
+            /^(CPU|GPU) die temperature:/ {n++; if ($0!~/^(CPU|GPU) die temperature:[ \t]*[0-9]+([.][0-9]+)?[ \t]+C( [(](fan|power)[)])?[ \t]*$/) bad=1; split($0,p,":"); sub(/^[ \t]*/, "", p[2]); split(p[2],v,/[ \t]+/); if (v[1]+0>150) bad=1; if (v[1]+0>=threshold+0) hot=1; if ($1=="CPU") cpu++; else gpu++}
             END {exit bad || cpu>1 || gpu>1 || !n || !hot}'; then critical=1; fi
     fi
     epoch || { write_status unknown; exit 1; }

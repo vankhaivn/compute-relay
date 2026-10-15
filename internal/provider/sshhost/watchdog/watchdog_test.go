@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 )
 
 const ownedID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -28,7 +30,7 @@ func healthy() sample {
 	return sample{level: "0\n", therm: "Note: No thermal warning level has been recorded\n CPU_Speed_Limit = 100\n", batt: "Now drawing from 'AC Power'\n -InternalBattery-0 (id=123)\t100%; charged; 0:00 remaining present: true\n"}
 }
 
-func hot() sample { s := healthy(); s.level = "20\n"; return s }
+func hot() sample { s := healthy(); s.level = "3\n"; return s }
 func lowBattery() sample {
 	s := healthy()
 	s.batt = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=123)\t10%; discharging; 0:10 remaining present: true\n"
@@ -57,7 +59,7 @@ func newFixture(t *testing.T, samples ...sample) *fixture {
 		if s.epoch == 0 {
 			s.epoch = int64(1000 + i)
 		}
-		for name, value := range map[string]string{"sysctl": s.level, "therm": s.therm, "batt": s.batt, "sudo": s.temperatures,
+		for name, value := range map[string]string{"osascript": s.level, "therm": s.therm, "batt": s.batt, "sudo": s.temperatures,
 			"epoch": strconv.FormatInt(s.epoch, 10), "elapsed": strconv.FormatInt(s.elapsed, 10)} {
 			mustWrite(t, filepath.Join(dir, name), value, 0600)
 		}
@@ -73,8 +75,8 @@ func newFixture(t *testing.T, samples ...sample) *fixture {
 		}
 		mustWrite(t, filepath.Join(dir, "ids"), strings.Join(ids, "\n"), 0600)
 	}
-	for _, name := range []string{"sysctl", "pmset", "sudo", "uname", "date", "stat", "id", "sample-sleep", "docker", "sync"} {
-		script := "#!/bin/sh\ncontrol=" + quote(f.control) + "\ncount=" + strconv.Itoa(len(samples)) + "\n" + fakeHost
+	for _, name := range []string{"sysctl", "osascript", "pmset", "sudo", "uname", "date", "stat", "id", "sample-sleep", "docker", "sync"} {
+		script := "#!/bin/sh\ncontrol=" + quote(f.control) + "\ncount=" + strconv.Itoa(len(samples)) + "\nthermal_payload=" + quote(hosthealth.ThermalStateScript) + "\n" + fakeHost
 		mustWrite(t, filepath.Join(f.bin, name), script, 0700)
 	}
 	f.render()
@@ -97,7 +99,7 @@ func newFixture(t *testing.T, samples ...sample) *fixture {
 
 func (f *fixture) render() {
 	f.t.Helper()
-	a, err := render(f.config, commands{sysctl: "sysctl", pmset: "pmset", sudo: "sudo", uname: "uname", date: "date", stat: "stat", id: "id", sleep: "sample-sleep", sync: "sync", path: f.bin + ":/usr/bin:/bin:/usr/sbin:/sbin"})
+	a, err := render(f.config, commands{sysctl: "sysctl", osascript: "osascript", pmset: "pmset", sudo: "sudo", uname: "uname", date: "date", stat: "stat", id: "id", sleep: "sample-sleep", sync: "sync", path: f.bin + ":/usr/bin:/bin:/usr/sbin:/sbin"})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -159,7 +161,7 @@ func (f *fixture) assertStops(want int) {
 	if got := strings.Count(f.log(), "\tcontainer\tstop\t"); got != want {
 		f.t.Fatalf("got %d stops, want %d; log:\n%s", got, want, f.log())
 	}
-	for _, forbidden := range []string{"intent_missing", "unsafe_endpoint", "ambient_context", "\tcontainer\trm", "\timage\t", "\tvolume\t", "\tcontainer\tstart", "\tcontainer\trestart", unlabelledID} {
+	for _, forbidden := range []string{"intent_missing", "unsafe_endpoint", "ambient_context", "unexpected_sysctl", "machdep.xcpm.cpu_thermal_level", "\tcontainer\trm", "\timage\t", "\tvolume\t", "\tcontainer\tstart", "\tcontainer\trestart", unlabelledID} {
 		if strings.Contains(f.log(), forbidden) {
 			f.t.Fatalf("unsafe command %q in log:\n%s", forbidden, f.log())
 		}
@@ -170,11 +172,11 @@ func TestCriticalRequiresFreshConsecutiveCoreSamples(t *testing.T) {
 	for name, samples := range map[string][]sample{
 		"sustained": {hot(), hot(), hot()},
 		"cleared":   {hot(), healthy(), hot(), hot()},
-		"gap":       {hot(), {level: "20\n", therm: healthy().therm, batt: healthy().batt, epoch: 1004}, {level: "20\n", therm: healthy().therm, batt: healthy().batt, epoch: 1005}},
+		"gap":       {hot(), {level: "3\n", therm: healthy().therm, batt: healthy().batt, epoch: 1004}, {level: "3\n", therm: healthy().therm, batt: healthy().batt, epoch: 1005}},
 		"unknown":   {hot(), {level: "unknown\n", therm: healthy().therm, batt: healthy().batt}, hot(), hot()},
-		"stale":     {hot(), {level: "20\n", therm: healthy().therm, batt: healthy().batt, elapsed: 3}, hot(), hot()},
-		"clock back": {hot(), {level: "20\n", therm: healthy().therm, batt: healthy().batt, epoch: 999},
-			{level: "20\n", therm: healthy().therm, batt: healthy().batt, epoch: 1000}},
+		"stale":     {hot(), {level: "3\n", therm: healthy().therm, batt: healthy().batt, elapsed: 3}, hot(), hot()},
+		"clock back": {hot(), {level: "3\n", therm: healthy().therm, batt: healthy().batt, epoch: 999},
+			{level: "3\n", therm: healthy().therm, batt: healthy().batt, epoch: 1000}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, samples...)
@@ -193,9 +195,9 @@ func TestCriticalRequiresFreshConsecutiveCoreSamples(t *testing.T) {
 
 func TestCriticalSourcesAndInclusiveThresholds(t *testing.T) {
 	for name, s := range map[string]sample{
-		"raw thermal":         hot(),
-		"raw thermal over100": func() sample { s := healthy(); s.level = "200\n"; return s }(),
-		"cpu speed":           func() sample { s := healthy(); s.therm = "CPU_Speed_Limit = 20\n"; return s }(),
+		"critical thermal state": hot(),
+		"serious thermal state":  func() sample { s := healthy(); s.level = "2\n"; return s }(),
+		"cpu speed":              func() sample { s := healthy(); s.therm = "CPU_Speed_Limit = 20\n"; return s }(),
 		"cpu temperature": func() sample {
 			s := healthy()
 			s.temperatures = "CPU die temperature: 100.0 C\nGPU die temperature: 55 C\n"
@@ -204,6 +206,21 @@ func TestCriticalSourcesAndInclusiveThresholds(t *testing.T) {
 		"gpu temperature": func() sample {
 			s := healthy()
 			s.temperatures = "CPU die temperature: 60.0 C\nGPU die temperature: 100.0 C\n"
+			return s
+		}(),
+		"cpu temperature power": func() sample {
+			s := healthy()
+			s.temperatures = "CPU die temperature: 100.00 C (power)\nGPU die temperature: 55.00 C (power)\n"
+			return s
+		}(),
+		"cpu temperature fan": func() sample {
+			s := healthy()
+			s.temperatures = "CPU die temperature: 100.00 C (fan)\nGPU die temperature: 55.00 C (fan)\n"
+			return s
+		}(),
+		"gpu temperature fan": func() sample {
+			s := healthy()
+			s.temperatures = "CPU die temperature: 60.00 C (fan)\nGPU die temperature: 100.00 C (fan)\n"
 			return s
 		}(),
 	} {
@@ -215,9 +232,45 @@ func TestCriticalSourcesAndInclusiveThresholds(t *testing.T) {
 				t.Fatalf("got %s", got)
 			}
 			f.assertStops(1)
+			if !strings.Contains(f.log(), "osascript\t-l\tJavaScript\t-e\t"+hosthealth.ThermalStateScript) {
+				t.Fatal("thermal state invocation differs from the shared Foundation probe")
+			}
 			if f.config.PowermetricsGranted && !strings.Contains(f.log(), "sudo\t-n\t/usr/bin/powermetrics\t--samplers\tsmc\t-n\t1\t-i\t1000") {
 				t.Fatal("powermetrics invocation differs from fixed grant command")
 			}
+		})
+	}
+}
+
+func TestFoundationThermalStatesMatchConfiguredThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    string
+		critical int
+		stops    int
+	}{
+		{"nominal", "0\n", 2, 0},
+		{"fair", "1\n", 2, 0},
+		{"serious", "2\n", 2, 1},
+		{"critical", "3\n", 3, 1},
+		{"serious below configured critical", "2\n", 3, 0},
+		{"lowered nominal threshold", "0\n", 0, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := healthy()
+			s.level = tc.state
+			s.therm = "CPU_Speed_Limit = 98\n"
+			f := newFixture(t, s, s, s)
+			f.config.CriticalThermalLevel = tc.critical
+			f.render()
+			want := "idle"
+			if tc.stops != 0 {
+				want = "confirmed_inactive"
+			}
+			if got := f.run().LastAction; got != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+			f.assertStops(tc.stops)
 		})
 	}
 }
@@ -247,7 +300,13 @@ func TestLowBatteryStopsImmediatelyWithKnownSourceAndCharge(t *testing.T) {
 func TestUnknownAndHostileSourcesNeverStop(t *testing.T) {
 	for name, change := range map[string]func(*sample){
 		"unknown thermal": func(s *sample) { s.level = "not available\n" },
-		"thermal command": func(s *sample) { s.level = "20; touch pwned\n" },
+		"thermal command": func(s *sample) { s.level = "3; touch pwned\n" },
+		"out of enum":     func(s *sample) { s.level = "4\n" },
+		"negative enum":   func(s *sample) { s.level = "-1\n" },
+		"legacy counter":  func(s *sample) { s.level = "60\n" },
+		"fractional enum": func(s *sample) { s.level = "2.0\n" },
+		"duplicate enum":  func(s *sample) { s.level = "2\n3\n" },
+		"failed probe":    func(s *sample) { s.fail = "osascript" },
 		"duplicate speed": func(s *sample) { s.therm += "CPU_Speed_Limit = 1\n" },
 		"missing speed":   func(s *sample) { s.therm = "No data\n" },
 		"malformed speed": func(s *sample) { s.therm = "CPU_Speed_Limit = 0; touch pwned\n" },
@@ -280,7 +339,7 @@ func TestUnknownAndHostileSourcesNeverStop(t *testing.T) {
 }
 
 func TestTemperatureParserNeverGuessesUnits(t *testing.T) {
-	for _, raw := range []string{"CPU die temperature: 100000\n", "CPU die temperature: 100 K\n", "CPU die temperature: 100 C\nCPU die temperature: 40 C\n", "CPU die temperature: 100; touch pwned C\n"} {
+	for _, raw := range []string{"CPU die temperature: 100000\n", "CPU die temperature: 100 K\n", "CPU die temperature: 100 C\nCPU die temperature: 40 C\n", "CPU die temperature: 100; touch pwned C\n", "CPU die temperature: 100 C (fans)\n", "CPU die temperature: 100 C(fan)\n", "CPU die temperature: 100 C (fan) trailing\n"} {
 		t.Run(strings.TrimSpace(raw), func(t *testing.T) {
 			s := healthy()
 			s.temperatures = raw
@@ -548,7 +607,7 @@ func TestManifestAndScriptTamperingPreventsSampling(t *testing.T) {
 				t.Fatalf("got %s", got)
 			}
 			f.assertStops(0)
-			if strings.Contains(f.log(), "sysctl") || strings.Contains(f.log(), "pmset") {
+			if strings.Contains(f.log(), "sysctl") || strings.Contains(f.log(), "osascript") || strings.Contains(f.log(), "pmset") {
 				t.Fatal("sampled after integrity failure")
 			}
 		})
@@ -562,7 +621,7 @@ func TestIntegrityIsVerifiedAgainBeforeEachCycle(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 	f.assertStops(0)
-	if got := strings.Count(f.log(), "sysctl\t-n\tmachdep.xcpm.cpu_thermal_level"); got != 1 {
+	if got := strings.Count(f.log(), "osascript\t-l\tJavaScript\t-e\t"); got != 1 {
 		t.Fatalf("sampled %d cycles despite manifest tampering", got)
 	}
 }
@@ -609,7 +668,7 @@ func TestUnsupportedHostNeverSamplesOrStops(t *testing.T) {
 				t.Fatalf("got %s", got)
 			}
 			f.assertStops(0)
-			if strings.Contains(f.log(), "sysctl") || strings.Contains(f.log(), "pmset") {
+			if strings.Contains(f.log(), "sysctl") || strings.Contains(f.log(), "osascript") || strings.Contains(f.log(), "pmset") {
 				t.Fatal("sampled unsupported host")
 			}
 		})
@@ -632,7 +691,7 @@ func TestNativeCPUTypeRejectsTranslatedOrUnknownHardware(t *testing.T) {
 				t.Fatalf("got %s, want %s", got, want)
 			}
 			f.assertStops(0)
-			for _, forbidden := range []string{"\tmachdep.xcpm.cpu_thermal_level", "pmset\t", "sudo\t", "docker\t"} {
+			for _, forbidden := range []string{"osascript\t", "pmset\t", "sudo\t", "docker\t"} {
 				if strings.Contains(f.log(), forbidden) {
 					t.Fatalf("acted without positive native Intel evidence: %s", forbidden)
 				}
@@ -648,7 +707,7 @@ func TestStuckSourceIsBoundedAndDoesNotSignalUnrelatedProcess(t *testing.T) {
 	}
 	defer func() { _ = other.Process.Kill(); _ = other.Wait() }()
 	s := hot()
-	s.hang = "sysctl"
+	s.hang = "osascript"
 	f := newFixture(t, s)
 	start := time.Now()
 	if got := f.run().LastAction; got != "unknown" {
@@ -680,7 +739,7 @@ func TestStuckStopIsRecordedAndNeverRepeated(t *testing.T) {
 
 func TestTerminationReapsItsOwnUnresponsiveChild(t *testing.T) {
 	s := hot()
-	s.hang = "sysctl"
+	s.hang = "osascript"
 	f := newFixture(t, s)
 	mustWrite(t, filepath.Join(f.control, "index"), "0", 0600)
 	mustWrite(t, filepath.Join(f.control, "epoch-count"), "0", 0600)
@@ -771,7 +830,10 @@ case "$name" in
                 [ "$value" != failure ] || exit 1
                 printf '%s\n' "$value"
             else printf '7\n'; fi
-        else /bin/cat "$sample/$key"; fi;;
+        else printf 'unexpected_sysctl\n' >>"$control/log"; exit 1; fi;;
+    osascript)
+        [ "$#" = 4 ] && [ "$1" = -l ] && [ "$2" = JavaScript ] && [ "$3" = -e ] && [ "$4" = "$thermal_payload" ] || exit 1
+        /bin/cat "$sample/$key";;
     sudo) /bin/cat "$sample/$key";;
     pmset) /bin/cat "$sample/$key";;
     date)

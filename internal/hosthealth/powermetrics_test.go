@@ -8,14 +8,14 @@ import (
 	"time"
 )
 
-func TestPowermetricsDieTemperaturesAllowOnlyExactFanAnnotation(t *testing.T) {
+func TestPowermetricsDieTemperaturesAllowOnlyKnownAnnotations(t *testing.T) {
 	for _, unit := range []string{"CPU", "GPU"} {
 		for _, test := range []struct {
 			suffix string
 			valid  bool
 		}{
-			{"", true}, {" (fan)", true}, {" (fan) \t", true},
-			{"(fan)", false}, {" (Fan)", false}, {" (fans)", false}, {" (fan: 1)", false},
+			{"", true}, {" (fan)", true}, {" (power)", true}, {" (fan) \t", true},
+			{"(fan)", false}, {" (Fan)", false}, {" (fans)", false}, {" (powers)", false}, {" (fan, power)", false}, {" (fan: 1)", false},
 			{" (fan) (other)", false}, {" (fan) extra", false}, {" NEVER_PERSIST", false},
 		} {
 			t.Run(unit+test.suffix, func(t *testing.T) {
