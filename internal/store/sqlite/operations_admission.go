@@ -222,6 +222,10 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 				return err
 			}
 		}
+		if c.Kind == domain.OperationCleanup {
+			result, err = admitCleanupOperation(ctx, tx, c, target, now)
+			return err
+		}
 		id, err := randomID("op_", 16)
 		if err != nil {
 			return err
@@ -233,24 +237,6 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		r := operationRow{Record: operations.Record{Operation: op, Effect: operations.Pending}}
 		if c.Kind == domain.OperationCollect {
 			r.Effect = operations.CollectionRequested
-		}
-		if c.Kind == domain.OperationCleanup {
-			plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, now, "")
-			if err != nil {
-				return err
-			}
-			r.Resource = plan.resource
-			if err = insertOperation(ctx, tx, c, r); err != nil {
-				return err
-			}
-			if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
-				return err
-			}
-			if err = saveOperationReceipt(ctx, tx, c, r.Record); err != nil {
-				return err
-			}
-			result = r.Record
-			return nil
 		}
 		if err = insertOperation(ctx, tx, c, r); err != nil {
 			return err
@@ -282,6 +268,41 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		return operations.Record{}, err
 	}
 	return result, nil
+}
+
+// admitCleanupOperation is the single durable acceptance path for an explicit
+// request or a due, admission-declared retention rule. Both use the same frozen
+// target checks, resource snapshots, operation record and replay receipt.
+func admitCleanupOperation(ctx context.Context, tx *sql.Tx, c operations.Command, target admission.Record, now time.Time) (operations.Record, error) {
+	if c.Kind != domain.OperationCleanup || c.Validate() != nil || c.WorkspaceID != target.Job.WorkspaceID || c.JobID != target.Job.ID || c.Request.AttemptID != target.Attempt.ID {
+		return operations.Record{}, ErrInvalid
+	}
+	plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, now, "")
+	if err != nil {
+		return operations.Record{}, err
+	}
+	id, err := randomID("op_", 16)
+	if err != nil {
+		return operations.Record{}, err
+	}
+	op, err := domain.NewOperation(domain.OperationID(id), c.WorkspaceID, c.JobID, c.Request.AttemptID, c.Kind, now)
+	if err != nil {
+		return operations.Record{}, ErrInvalid
+	}
+	row := operationRow{Record: operations.Record{Operation: op, Effect: operations.Pending}, Resource: plan.resource}
+	if err = insertOperation(ctx, tx, c, row); err != nil {
+		return operations.Record{}, err
+	}
+	if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
+		return operations.Record{}, err
+	}
+	if err = inheritConfirmedCleanupResources(ctx, tx, op); err != nil {
+		return operations.Record{}, err
+	}
+	if err = saveOperationReceipt(ctx, tx, c, row.Record); err != nil {
+		return operations.Record{}, err
+	}
+	return row.Record, nil
 }
 
 func controlLimit(ctx context.Context, tx *sql.Tx, c operations.Command, retry bool) error {

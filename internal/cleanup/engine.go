@@ -80,6 +80,10 @@ type WorkRepository interface {
 	RenewCleanup(context.Context, Work, time.Duration) (time.Time, error)
 	CompleteCleanup(context.Context, Work, Outcome) error
 }
+
+type retentionScheduler interface {
+	ScheduleRetention(context.Context, int) (int, error)
+}
 type Resolver interface {
 	Resolve(provider.BindingSnapshot) (provider.Provider, error)
 }
@@ -120,6 +124,11 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 		defer func() { <-e.slots }()
 	case <-ctx.Done():
 		return false, ctx.Err()
+	}
+	if scheduler, ok := e.repo.(retentionScheduler); ok {
+		if _, err := scheduler.ScheduleRetention(ctx, 32); err != nil {
+			return false, err
+		}
 	}
 	w, err := e.repo.ClaimCleanup(ctx, worker.LeaseDuration)
 	if err != nil || w == nil {

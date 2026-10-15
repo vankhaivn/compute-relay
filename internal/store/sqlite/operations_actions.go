@@ -37,6 +37,9 @@ func controlState(ctx context.Context, tx *sql.Tx, r operationRow, a domain.Atte
 		if n != 1 {
 			return domain.Attempt{}, operations.ErrChanged
 		}
+		if err = noteAttemptRemoteRetention(ctx, tx, r.Operation.WorkspaceID, a.JobID, a, next, now); err != nil {
+			return domain.Attempt{}, err
+		}
 	}
 	if err = controlEvent(ctx, tx, r.Operation.WorkspaceID, a.JobID, a.ID, r.Operation.ID, event, now); err != nil {
 		return domain.Attempt{}, err

@@ -298,6 +298,9 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 		if err != nil {
 			return dbError(err)
 		}
+		if err = notePublishedRemoteRetention(ctx, tx, l.WorkspaceID, l.JobID, l.AttemptID, now); err != nil {
+			return err
+		}
 		for _, f := range snapshot.Files {
 			if err = registerRetention(ctx, tx, retention.Result, f.Object, now); err != nil {
 				return err

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"time"
 
@@ -27,6 +28,47 @@ func snapshotCleanupResources(ctx context.Context, tx *sql.Tx, op domain.Operati
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO cleanup_resources VALUES(?,?,?,?,?,?,'pending','awaiting_worker')`,
 			string(op.WorkspaceID), string(op.ID), string(resource.Request.LedgerID), ordinal, string(raw), string(resource.Fingerprint())); err != nil {
+			return dbError(err)
+		}
+	}
+	return nil
+}
+
+// A confirmed deletion or absence is final for the original immutable target.
+// In particular, Kaggle can return 403 for a deleted private resource, so a
+// later cleanup must carry its earlier receipt instead of inspecting it again.
+func inheritConfirmedCleanupResources(ctx context.Context, tx *sql.Tx, op domain.Operation) error {
+	current, err := loadCleanupResources(ctx, tx, op)
+	if err != nil {
+		return err
+	}
+	for _, item := range current {
+		var fingerprint, state string
+		err := tx.QueryRowContext(ctx, `SELECT r.target_sha256,r.state FROM cleanup_resources r
+ JOIN operations c ON c.workspace_id=r.workspace_id AND c.operation_id=r.operation_id
+ WHERE c.kind='cleanup' AND c.workspace_id=? AND c.job_id=? AND c.attempt_id=?
+ AND c.operation_id!=? AND r.resource_id=? AND r.state IN ('deleted','absent')
+ ORDER BY CASE r.state WHEN 'deleted' THEN 0 ELSE 1 END,c.operation_seq LIMIT 1`,
+			string(op.WorkspaceID), string(op.JobID), string(op.AttemptID), string(op.ID), string(item.Result.ResourceID)).Scan(&fingerprint, &state)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return dbError(err)
+		}
+		if fingerprint != string(item.Result.Fingerprint) {
+			return ErrCorrupt
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE cleanup_resources SET state='running',reason='prior_delete_intent' WHERE workspace_id=? AND operation_id=? AND resource_id=? AND state='pending'`,
+			string(op.WorkspaceID), string(op.ID), string(item.Result.ResourceID)); err != nil {
+			return dbError(err)
+		}
+		reason := "prior_absence_confirmed"
+		if state == "deleted" {
+			reason = "prior_deletion_confirmed"
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE cleanup_resources SET state=?,reason=? WHERE workspace_id=? AND operation_id=? AND resource_id=? AND state='running'`,
+			state, reason, string(op.WorkspaceID), string(op.ID), string(item.Result.ResourceID)); err != nil {
 			return dbError(err)
 		}
 	}
