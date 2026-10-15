@@ -1,0 +1,257 @@
+package hosthealth
+
+import (
+	"encoding/json"
+	"math"
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+const testResource = "resource_" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func fixtures(t *testing.T) map[Source]Sample {
+	t.Helper()
+	out := map[Source]Sample{}
+	for _, source := range []Source{Platform, Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics} {
+		data, err := os.ReadFile("testdata/" + string(source) + ".txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[source] = Sample{Status: Available, Data: data}
+	}
+	out[Sudo] = Sample{Status: Available, Data: []byte("User REDACTED may run the following commands:\n    (root) NOPASSWD: /usr/bin/powermetrics\n")}
+	return out
+}
+func requireValue[T comparable](t *testing.T, m Metric[T], want T) {
+	t.Helper()
+	if m.Status != Available || m.Value == nil || *m.Value != want {
+		t.Fatalf("metric = %+v, want %v", m, want)
+	}
+}
+func TestRecordedSnapshot(t *testing.T) {
+	f := fixtures(t)
+	now := time.Now()
+	s := Parse(testResource, now, f)
+	if s.SchemaVersion != 1 || !s.ObservedAt.Equal(now) || s.ResourceID != testResource {
+		t.Fatal("snapshot identity")
+	}
+	requireValue(t, s.Platform, "macos_intel")
+	requireValue(t, s.ThermalLevel, 0)
+	requireValue(t, s.CPUSpeedLimitPercent, 100.0)
+	requireValue(t, s.CPUCount, 16)
+	requireValue(t, s.LoadAverage, Load{0.66, 0.94, 1.15})
+	requireValue(t, s.CPUUsagePercent, 3.52)
+	requireValue(t, s.MemoryTotalBytes, uint64(64<<30))
+	requireValue(t, s.MemoryUsedBytes, uint64(28<<30))
+	requireValue(t, s.MemoryFreePercent, 93.0)
+	requireValue(t, s.DockerCPUCount, 16)
+	requireValue(t, s.DockerMemoryBytes, uint64(8320425984))
+	requireValue(t, s.PowerSource, "ac")
+	requireValue(t, s.BatteryChargePercent, 100.0)
+	requireValue(t, s.BatteryCharging, false)
+	requireValue(t, s.BatteryCycleCount, 289)
+	if s.BatteryHealthPercent.Value == nil || math.Abs(*s.BatteryHealthPercent.Value-7559.0/8790*100) > 1e-9 {
+		t.Fatal("battery capacity")
+	}
+	if s.BatteryTemperatureCelsius.Value == nil || math.Abs(*s.BatteryTemperatureCelsius.Value-28.35) > 1e-9 {
+		t.Fatal("Intel temperature must be decikelvin")
+	}
+	requireValue(t, s.SleepEnabled, false)
+	requireValue(t, s.CPUDieTemperatureCelsius, 62.5)
+	requireValue(t, s.GPUDieTemperatureCelsius, 55.25)
+	requireValue(t, s.FanRPM, 2200.0)
+	if s.DockerDataFreeBytes.Status != Unavailable || s.GPUUsagePercent.Status != Unavailable || s.BatteryCondition.Status != Unavailable || s.MemoryPressure.Status != Unavailable {
+		t.Fatal("unexposed metrics must remain unavailable")
+	}
+}
+func TestAbsentGrantDoesNotDegradeOtherMetrics(t *testing.T) {
+	f := fixtures(t)
+	f[Sudo] = Sample{Status: Unavailable, Reason: "command_failed"}
+	s := Parse(testResource, time.Now(), f)
+	requireValue(t, s.SudoGrant, "absent")
+	requireValue(t, s.CPUCount, 16)
+	if s.CPUDieTemperatureCelsius.Status != Unavailable || s.CPUDieTemperatureCelsius.Reason != "sudo_grant_absent" {
+		t.Fatal(s.CPUDieTemperatureCelsius)
+	}
+}
+func TestGrantClassifier(t *testing.T) {
+	for _, tt := range []struct{ data, want string }{
+		{"", "absent"}, {"sudo: a password is required", "broader"},
+		{"    (root) NOPASSWD: /usr/bin/powermetrics", "narrow"},
+		{"    (ALL : ALL) NOPASSWD: /usr/bin/powermetrics --samplers smc -n 1 -i 1000", "narrow"},
+		{"    (root) NOPASSWD: /usr/bin/powermetrics *", "broader"},
+		{"    (ALL) NOPASSWD: ALL", "broader"},
+		{"    (root) NOPASSWD: /usr/bin/powermetrics, /bin/sh", "broader"},
+		{"    (root) NOPASSWD: /usr/bin/powermetrics\n    (ALL) ALL", "broader"},
+		{"    (root) /usr/bin/powermetrics", "broader"},
+		{"    (root) NOPASSWD: /usr/bin/powermetrics\n        /bin/sh", "broader"},
+		{"    (root) NOPASSWD: /usr/bin/powermetrics,\n        /bin/sh", "broader"},
+		{"    (root) NOPASSWD: /usr/bin/powermetrics\n        PASSWD: /bin/sh", "broader"},
+		{"    (nobody) NOPASSWD: /usr/bin/powermetrics", "broader"},
+		{"    (root) NOPASSWD: !/usr/bin/powermetrics", "broader"},
+		{"malformed successful listing", "broader"},
+	} {
+		t.Run(tt.want+tt.data, func(t *testing.T) {
+			if got := ClassifyGrant(Sample{Status: Available, Data: []byte(tt.data)}); got != tt.want {
+				t.Fatalf("got %s want %s", got, tt.want)
+			}
+		})
+	}
+}
+func TestUnsupportedAndUnknownPlatform(t *testing.T) {
+	for _, platform := range []string{"Linux x86_64", "Linux aarch64", "Darwin arm64"} {
+		f := fixtures(t)
+		f[Platform] = Sample{Status: Available, Data: []byte(platform)}
+		s := Parse(testResource, time.Now(), f)
+		if s.ThermalLevel.Status != Unsupported || s.BatteryChargePercent.Status != Unsupported {
+			t.Fatal("unsupported platform accepted")
+		}
+	}
+	for _, sample := range []Sample{{}, {Status: Unavailable, Reason: "collection_timeout"}, {Status: Available, Data: []byte("Darwin x86_64\nHOSTILE")}} {
+		f := fixtures(t)
+		f[Platform] = sample
+		s := Parse(testResource, time.Now(), f)
+		if s.Platform.Status != Unavailable || s.ThermalLevel.Status != Unavailable {
+			t.Fatal("unknown platform must fail closed")
+		}
+	}
+}
+func TestMissingTruncatedAndHostileSources(t *testing.T) {
+	for _, sample := range []Sample{{}, {Status: Available, Data: []byte("hw.ncpu: nan\nhw.memsize: 999999999999999999999999\nmachdep.xcpm.cpu_thermal_level: -1\n")}, {Status: Unavailable, Reason: "output_limit", Data: []byte("hw.ncpu: 16\n")}, {Status: Available, Data: []byte("hw.ncpu: 16\nhw.ncpu: 1\n")}, {Status: Available, Data: []byte("hw.ncpu: 16\x00\n")}, {Status: Available, Data: []byte(strings.Repeat("a", MaxSourceBytes+1))}} {
+		f := fixtures(t)
+		f[Sysctl] = sample
+		s := Parse(testResource, time.Now(), f)
+		if s.CPUCount.Status != Unavailable {
+			t.Fatal("malformed sample accepted")
+		}
+	}
+	f := fixtures(t)
+	f[Battery] = Sample{Status: Available, Data: []byte("Temperature = 999999\nCycleCount = -4\nDesignCapacity = 0\nAppleRawMaxCapacity = 7559\n")}
+	s := Parse(testResource, time.Now(), f)
+	if s.BatteryTemperatureCelsius.Status != Unavailable || s.BatteryCycleCount.Status != Unavailable || s.BatteryHealthPercent.Status != Unavailable {
+		t.Fatal("malformed battery accepted")
+	}
+	f = fixtures(t)
+	for source, sample := range f {
+		sample.Data = append(sample.Data, []byte("\nSERIAL_HOSTILE=NEVER_PERSIST\nIOPlatformUUID=NEVER_PERSIST\n")...)
+		if source != Platform {
+			f[source] = sample
+		}
+	}
+	s = Parse(testResource, time.Now(), f)
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "NEVER_PERSIST") {
+		t.Fatal("source identity leaked")
+	}
+}
+func TestBatteryPowerAndSleep(t *testing.T) {
+	f := fixtures(t)
+	f[Power] = Sample{Status: Available, Data: []byte("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t17%; discharging; 1:00 remaining present: true\n")}
+	s := Parse(testResource, time.Now(), f)
+	requireValue(t, s.PowerSource, "battery")
+	requireValue(t, s.BatteryChargePercent, 17.0)
+	requireValue(t, s.BatteryCharging, false)
+	requireValue(t, s.SleepEnabled, true)
+}
+
+func TestGPUWhenExposed(t *testing.T) {
+	f := fixtures(t)
+	f[GPU] = Sample{Status: Available, Data: []byte("gpu_utilization_percent = 42\n")}
+	s := Parse(testResource, time.Now(), f)
+	requireValue(t, s.GPUUsagePercent, 42.0)
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestSnapshotValidation(t *testing.T) {
+	valid := Parse(testResource, time.Now(), fixtures(t))
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*Snapshot){
+		func(s *Snapshot) { s.ResourceID = "host-name" }, func(s *Snapshot) { s.SchemaVersion = 2 }, func(s *Snapshot) { s.ObservedAt = time.Time{} },
+		func(s *Snapshot) { s.CPUCount.Status = Unavailable }, func(s *Snapshot) { s.CPUCount.Reason = "HOSTILE" },
+		func(s *Snapshot) { s.Platform = value("HOSTILE") }, func(s *Snapshot) { s.PowerSource = value("HOSTILE") },
+		func(s *Snapshot) { s.CPUUsagePercent = value(math.NaN()) }, func(s *Snapshot) { s.BatteryChargePercent = value(101.0) },
+		func(s *Snapshot) { s.Warnings = []string{"HOSTILE"} }, func(s *Snapshot) { s.BatteryCondition = value("arbitrary host string") },
+	} {
+		s := valid
+		mutate(&s)
+		if err := s.Validate(); err == nil {
+			t.Fatal("malformed snapshot validated")
+		}
+	}
+}
+
+func TestEverySourceFailureRemovesItsValues(t *testing.T) {
+	for _, source := range []Source{Thermal, Power, Sleep, Battery, Sysctl, Top, MemoryPressure, Docker, Powermetrics, GPU} {
+		t.Run(string(source), func(t *testing.T) {
+			f := fixtures(t)
+			f[source] = Sample{Status: Unavailable, Reason: "output_limit", Data: f[source].Data}
+			s := Parse(testResource, time.Now(), f)
+			switch source {
+			case Thermal:
+				if s.CPUSpeedLimitPercent.Value != nil {
+					t.Fatal("partial thermal")
+				}
+			case Power:
+				if s.PowerSource.Value != nil || s.BatteryChargePercent.Value != nil || s.SleepEnabled.Value != nil {
+					t.Fatal("partial power")
+				}
+			case Sleep:
+				if s.SleepEnabled.Value != nil {
+					t.Fatal("partial sleep")
+				}
+			case Battery:
+				if s.BatteryTemperatureCelsius.Value != nil || s.BatteryHealthPercent.Value != nil || s.BatteryCycleCount.Value != nil {
+					t.Fatal("partial battery")
+				}
+			case Sysctl:
+				if s.CPUCount.Value != nil || s.ThermalLevel.Value != nil || s.MemoryTotalBytes.Value != nil || s.LoadAverage.Value != nil {
+					t.Fatal("partial sysctl")
+				}
+			case Top:
+				if s.CPUUsagePercent.Value != nil || s.MemoryUsedBytes.Value != nil {
+					t.Fatal("partial top")
+				}
+			case MemoryPressure:
+				if s.MemoryFreePercent.Value != nil {
+					t.Fatal("partial pressure")
+				}
+			case Docker:
+				if s.DockerCPUCount.Value != nil || s.DockerMemoryBytes.Value != nil {
+					t.Fatal("partial docker")
+				}
+			case Powermetrics:
+				if s.CPUDieTemperatureCelsius.Value != nil || s.GPUDieTemperatureCelsius.Value != nil || s.FanRPM.Value != nil {
+					t.Fatal("partial powermetrics")
+				}
+			case GPU:
+				if s.GPUUsagePercent.Value != nil {
+					t.Fatal("partial gpu")
+				}
+			}
+			if err := s.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+func TestUntrustedIdentityAndReasonsNeverSurvive(t *testing.T) {
+	s := Parse("host-NO_PERSIST", time.Now(), fixtures(t))
+	if strings.Contains(s.ResourceID, "NO_PERSIST") || s.Platform.Status != Unavailable {
+		t.Fatal("untrusted identity leaked")
+	}
+	f := fixtures(t)
+	f[Sysctl] = Sample{Status: Unavailable, Reason: "NO_PERSIST"}
+	s = Parse(testResource, time.Now(), f)
+	encoded, _ := json.Marshal(s)
+	if strings.Contains(string(encoded), "NO_PERSIST") {
+		t.Fatal("untrusted source reason leaked")
+	}
+}

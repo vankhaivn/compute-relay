@@ -1,0 +1,4 @@
+*** Sampled system activity (synthetic) ***
+CPU die temperature: 62.50 C
+GPU die temperature: 55.25 C
+Fan: 2200 rpm

@@ -1,0 +1,4 @@
+hw.ncpu: 16
+hw.memsize: 68719476736
+vm.loadavg: { 0.66 0.94 1.15 }
+machdep.xcpm.cpu_thermal_level: 0
