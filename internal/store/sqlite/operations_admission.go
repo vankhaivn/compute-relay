@@ -96,7 +96,11 @@ func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job doma
 	} else if r.Attempt.State.Execution != domain.ExecutionNotSubmitted {
 		return result, operations.ErrUnresolved
 	}
-	if len(r.Objects) != 1+len(r.Request.Spec().Inputs) {
+	expected := 1 + len(r.Request.Spec().Inputs)
+	if r.Request.Spec().ApplicationImage != nil {
+		expected++
+	}
+	if len(r.Objects) != expected {
 		return result, operations.ErrInputs
 	}
 	for _, ref := range r.Objects {

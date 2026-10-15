@@ -21,7 +21,11 @@ var _ executionauth.Repository = (*Store)(nil)
 // authorizationInputs binds the immutable request and each pinned local object.
 // Every input requires pinned bytes, including requests retained from older schemas.
 func authorizationInputs(record admission.Record) (string, error) {
-	if len(record.Objects) != 1+len(record.Request.Spec().Inputs) {
+	expected := 1 + len(record.Request.Spec().Inputs)
+	if record.Request.Spec().ApplicationImage != nil {
+		expected++
+	}
+	if len(record.Objects) != expected {
 		return "", executionauth.ErrInputs
 	}
 	raw, err := json.Marshal(struct {
