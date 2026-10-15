@@ -16,7 +16,7 @@ requires current `execute` authority and its own `Idempotency-Key`.
 | Field | Meaning |
 |---|---|
 | `attempt_id` | The original active attempt from admission. |
-| `max_preparation_seconds` | Provider preparation call limit, 1–600 seconds. The runtime's lower limit still applies. |
+| `max_preparation_seconds` | Provider preparation call limit, 1–3600 seconds. The runtime's lower limit still applies. |
 | `ready_until` | Future whole-second UTC timestamp ending in `Z`, no more than one hour away and no later than a job execution deadline. |
 | `max_staged_bytes` | Maximum sum of uploaded bundle and input bytes, 1 through 4,399,824,896. |
 | `authorize_private_staging` | Must be `true`; grants staging only. |
@@ -27,6 +27,13 @@ container, stages the fixed runtime and ordinary input bytes, then reads back an
 No workload, setup command or application probe runs. The byte limit covers bundle/input content;
 the fixed runner, manifest and control files add bounded overhead. No expanded bundle or workload
 output exists yet.
+
+Budget for both the upload and the complete read-back over SSH: a gigabyte input can need more
+than ten minutes on a slow link. Applications must explicitly request the larger budget (for
+example, 1800 seconds); existing 600-second grants stay unchanged. Keep `ready_until` far enough
+ahead for preparation and the second full verification before Start. The hold, any earlier parent
+deadline and the finite execution deadline still apply; a larger preparation grant never starts
+compute or retries a failed transfer.
 
 At most four outstanding preparation reservations per canonical account and sixteen globally
 are admitted. Remote resources retain reservations after expiry, cancellation or uncertainty

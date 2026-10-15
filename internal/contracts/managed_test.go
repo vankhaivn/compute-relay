@@ -50,3 +50,22 @@ func TestManagedRouteContractsRejectOtherOperationBodies(t *testing.T) {
 		})
 	}
 }
+
+func TestPreparationBudgetSchemaKeepsOneHourCeiling(t *testing.T) {
+	root := filepath.Join(repositoryRoot(t), "api")
+	compiler := jsonschema.NewCompiler()
+	schema, err := compiler.Compile(filepath.Join(root, "schemas", "execution-gate.v1alpha1.schema.json") + "#/$defs/prepare_request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := readJSONValue(filepath.Join(root, "examples", "execution-gate.prepare-request.valid.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seconds := range []float64{1, 600, 601, 1800, 3600, 0, 3601} {
+		value.(map[string]any)["max_preparation_seconds"] = seconds
+		if err := schema.Validate(value); (err == nil) != (seconds >= 1 && seconds <= 3600) {
+			t.Fatalf("preparation budget %v: %v", seconds, err)
+		}
+	}
+}

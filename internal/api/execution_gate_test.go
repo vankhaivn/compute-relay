@@ -30,7 +30,7 @@ func TestManagedHTTPExecutionGatesRemainIndependentAndScoped(t *testing.T) {
 	if state.State != "preparation_required" || state.StagedBytes != 0 || state.Revision != "" {
 		t.Fatal("admission became remote readiness", state)
 	}
-	request, _ := json.Marshal(executionauth.PrepareRequest{AttemptID: job.AttemptID, MaxPreparationSeconds: 30, ReadyUntil: time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339), MaxStagedBytes: 1024, AuthorizePrivateStaging: true})
+	request, _ := json.Marshal(executionauth.PrepareRequest{AttemptID: job.AttemptID, MaxPreparationSeconds: 1800, ReadyUntil: time.Now().UTC().Add(time.Hour).Format(time.RFC3339), MaxStagedBytes: 1024, AuthorizePrivateStaging: true})
 	for _, who := range []string{"read", "write", "operate", "manage"} {
 		f.call(t, "POST", base+"/prepare", who, "gate-prepare", string(request), 403)
 		f.call(t, "POST", base+"/start", who, "gate-start", `{}`, 403)
@@ -61,7 +61,7 @@ func TestManagedHTTPExecutionGatesRemainIndependentAndScoped(t *testing.T) {
 	start, _ := json.Marshal(executionauth.StartRequest{AttemptID: job.AttemptID, ReadinessRevision: domain.SHA256Digest(strings.Repeat("a", 64)), MaxRemoteWallSeconds: 120, ExecutionDeadline: time.Now().UTC().Add(time.Minute).Format(time.RFC3339), AuthorizeCompute: true})
 	f.call(t, "POST", base+"/start", "execute", "too-early-start", string(start), 409)
 	f.call(t, "POST", base+"/prepare", "execute", "second-prepare", string(request), 409)
-	f.call(t, "POST", base+"/prepare", "execute", "gate-prepare", strings.Replace(string(request), `:30,`, `:31,`, 1), 409)
+	f.call(t, "POST", base+"/prepare", "execute", "gate-prepare", strings.Replace(string(request), `:1800,`, `:1801,`, 1), 409)
 	for _, route := range []string{"prepare", "start"} {
 		f.call(t, "POST", base+"/"+route, "execute", "unknown-field", `{"unknown":true}`, 400)
 		f.call(t, "POST", base+"/"+route, "execute", "oversized-gate", strings.Repeat(" ", executionauth.MaxRequestBytes+1), 413)

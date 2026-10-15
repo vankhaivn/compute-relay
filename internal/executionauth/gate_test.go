@@ -72,3 +72,14 @@ func TestGateExpiryAndReceiptSemantics(t *testing.T) {
 		t.Fatal("valid consumption rejected")
 	}
 }
+
+func TestPreparationBudgetAdmitsLargeTransfersWithinOneHour(t *testing.T) {
+	for _, seconds := range []int64{1, 600, 601, 1800, 3600, 0, 3601} {
+		raw, _ := json.Marshal(PrepareRequest{AttemptID: "attempt_1", MaxPreparationSeconds: seconds,
+			ReadyUntil: "2099-10-12T01:00:00Z", MaxStagedBytes: 1 << 30, AuthorizePrivateStaging: true})
+		_, err := ParsePrepare(raw)
+		if (err == nil) != (seconds >= 1 && seconds <= 3600) {
+			t.Fatalf("preparation budget %d: %v", seconds, err)
+		}
+	}
+}

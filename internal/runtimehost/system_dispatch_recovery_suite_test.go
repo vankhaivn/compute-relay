@@ -20,12 +20,53 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
+
+func TestSystemSeparatePreparationHonorsLargeTransferBudgetAndEarlierBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		seconds            int64
+		hold, parent, want time.Duration
+	}{
+		{"existing-grant", 600, time.Hour, time.Hour, 10 * time.Minute},
+		{"large-transfer", 1800, time.Hour, time.Hour, 30 * time.Minute},
+		{"maximum-grant", 3600, time.Hour, time.Hour, time.Hour},
+		{"short-hold", 1800, 5 * time.Minute, time.Hour, 5 * time.Minute},
+		{"short-parent", 1800, time.Hour, 2 * time.Minute, 2 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, e, trace := newSystemGate(t, fake.Accept)
+			id := systemGateSeed(t, f, 1)
+			service, actor := systemAuthorizationService(t, f, "app", auth.Execute, auth.Read)
+			request := executionauth.PrepareRequest{AttemptID: id.AttemptID, MaxPreparationSeconds: tc.seconds,
+				ReadyUntil:     f.fixtureClock().Now().Add(tc.hold).UTC().Format(time.RFC3339),
+				MaxStagedBytes: 1 << 20, AuthorizePrivateStaging: true}
+			_, err := service.Prepare(t.Context(), actor, "app", id.JobID, "large-transfer-prepare", systemJSON(t, request))
+			requireNoError(t, err)
+			e.deadlines = &systemStagingDeadlines{}
+			start := time.Now()
+			ctx, cancel := context.WithTimeout(t.Context(), tc.parent)
+			defer cancel()
+			worked, err := f.services.dispatcher.RunOnce(ctx, "large-transfer-worker")
+			if err != nil || !worked {
+				t.Fatal("preparation failed", worked, err)
+			}
+			budget := e.deadlines.prepare.Sub(start)
+			if budget < tc.want-5*time.Second || budget > tc.want+5*time.Second {
+				t.Fatal("preparation lost the granted or earlier bound", budget, tc.want)
+			}
+			if trace.journal(t, id).Phase != dispatch.Ready || f.backend.Stats().PrepareCalls != 1 || f.backend.Stats().SubmitCalls != 0 {
+				t.Fatal("preparation did not keep one stopped attempt", f.backend.Stats())
+			}
+		})
+	}
+}
 
 func TestSystemDispatchLostSubmitResponseRestartAndTerminalCollectionGate(t *testing.T) {
 	scenario := fake.DefaultScenario()

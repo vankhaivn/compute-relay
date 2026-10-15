@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	MaxPreparationSeconds int64 = 600
+	MaxPreparationSeconds int64 = 3600
 	MaxReadyHold                = time.Hour
 	MaxStagedBytes        int64 = (4 << 30) + (100 << 20)
 )

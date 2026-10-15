@@ -19,7 +19,7 @@
         "max_preparation_seconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 600
+          "maximum": 3600
         },
         "ready_until": {
           "type": "string",
