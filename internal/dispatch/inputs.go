@@ -88,8 +88,19 @@ func Snapshot(record admission.Record, refs map[string]domain.ObjectMetadata) (p
 		return snapshot, ErrInvalid
 	}
 	var total int64
-	if len(refs) != 1+len(spec.Inputs) {
+	imageCount := 0
+	if spec.ApplicationImage != nil {
+		imageCount = 1
+	}
+	if len(refs) != 1+len(spec.Inputs)+imageCount {
 		return snapshot, ErrInvalid
+	}
+	if image := spec.ApplicationImage; image != nil {
+		m, ok := refs["application_image"]
+		if !ok || m.ID != image.ObjectID || m.SHA256 != image.SHA256 || m.Bytes != image.Bytes {
+			return snapshot, ErrInvalid
+		}
+		snapshot.ApplicationImage = &m
 	}
 	for i, in := range spec.Inputs {
 		m, ok := refs["input:"+strconv.Itoa(i)]

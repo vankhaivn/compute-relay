@@ -8,6 +8,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
+	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -60,8 +61,9 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
  EXISTS(SELECT 1 FROM scheduler_queue q JOIN work_leases l ON l.kind='dispatch' AND l.key=json_array(q.queue_seq)
  WHERE q.workspace_id=? AND q.job_id=? AND q.attempt_id=? AND l.held=1 AND l.until_ms>?)
  OR EXISTS(SELECT 1 FROM work_leases WHERE kind='collection' AND key=json_array(?,?,?) AND held=1 AND until_ms>?)
- OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?)`,
-		w, job, attempt, at, w, job, attempt, at, w, job, attempt, string(self)).Scan(&busy)
+ OR EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND status IN ('accepted','running') AND operation_id!=?
+ AND (kind!='collect' OR NOT ?))`,
+		w, job, attempt, at, w, job, attempt, at, w, job, attempt, string(self), discard).Scan(&busy)
 	if err != nil {
 		return result, dbError(err)
 	}
@@ -87,7 +89,9 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
 	} else if executed {
 		return result, operations.ErrUnresolved
 	}
-	if !s.Orchestration.Terminal() && (s.Orchestration != domain.OrchestrationNeedsAttention || !executed || s.RemoteActivity != domain.RemoteActivityInactive) {
+	settledExecution := executed && s.RemoteActivity == domain.RemoteActivityInactive &&
+		(s.Orchestration == domain.OrchestrationNeedsAttention || s.Orchestration == domain.OrchestrationCollecting)
+	if !s.Orchestration.Terminal() && !settledExecution {
 		return result, operations.ErrState
 	}
 	if j.Plan == nil || j.Prepared == nil {
@@ -132,15 +136,55 @@ func eligibleCleanupAttempt(ctx context.Context, tx *sql.Tx, target admission.Re
 	return result, nil
 }
 
+// Admission has already rejected active worker leases. An idle transfer ticket
+// cannot extend an authorized uncollected lifetime or be reclaimed after discard.
+func discardPendingCollection(ctx context.Context, tx *sql.Tx, target admission.Record, now time.Time) error {
+	w, job, attempt := target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID
+	var id domain.OperationID
+	err := tx.QueryRowContext(ctx, `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=?
+ AND kind='collect' AND status IN ('accepted','running')`, string(w), string(job), string(attempt)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return dbError(err)
+	}
+	row, err := loadOperation(ctx, tx, w, id)
+	if err != nil {
+		return err
+	}
+	p, err := domain.NewProblem(domain.CodeArtifactCollectionFailed, "Collection stopped because discard of this attempt's uncollected remote data was authorized.", domain.FailureStageResults)
+	if err != nil {
+		return ErrInvalid
+	}
+	p = p.WithRetrySemantics(false, false).WithRecommendedAction(domain.RecommendedActionRetryRead)
+	state := target.Attempt.State
+	state.Orchestration = domain.OrchestrationNeedsAttention
+	if state.Result == domain.ResultCollecting {
+		state.Result = domain.ResultIncomplete
+	}
+	if _, err = controlState(ctx, tx, row, target.Attempt, state, domain.EventCollectionFailed, now); err != nil {
+		return err
+	}
+	if err = collectionCondition(ctx, tx, collection.Lease{WorkspaceID: w, JobID: job, AttemptID: attempt}, &p); err != nil {
+		return err
+	}
+	_, err = finishControl(ctx, tx, row, domain.OperationFailed, operations.Failed, &p, now)
+	return err
+}
+
+// Both explicit and automatic transfer tickets use the same cleanup fence.
+const pendingCleanupPredicate = `(c.status IN ('accepted','running','succeeded')
+ OR EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id AND r.state IN ('running','deleted','absent','unknown'))
+ OR (c.status='failed' AND json_extract(c.record,'$.Operation.Failure.Code')=?
+ AND NOT EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id)))`
+
 // pendingCleanup blocks new transfer tickets once deletion of the attempt's remote data
 // was requested or applied. It never changes an existing control.
 func pendingCleanup(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID) error {
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM operations c WHERE kind='cleanup' AND workspace_id=? AND job_id=? AND attempt_id=? AND
- (status IN ('accepted','running','succeeded')
- OR EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id AND r.state IN ('running','deleted','absent','unknown'))
- OR (status='failed' AND json_extract(c.record,'$.Operation.Failure.Code')=?
- AND NOT EXISTS(SELECT 1 FROM cleanup_resources r WHERE r.workspace_id=c.workspace_id AND r.operation_id=c.operation_id))))`, string(w), string(job), string(attempt), string(domain.CodeProviderStateUnknown)).Scan(&exists); err != nil {
+ `+pendingCleanupPredicate+`)`, string(w), string(job), string(attempt), string(domain.CodeProviderStateUnknown)).Scan(&exists); err != nil {
 		return dbError(err)
 	}
 	if exists {

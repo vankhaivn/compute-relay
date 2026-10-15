@@ -10,6 +10,9 @@ then use the topic that owns the operation. API schemas and examples live under 
 | [Managed connections](managed-connections.md) | Credentials, selections, capacity and attempt authorization. |
 | [Kaggle](kaggle-runtime.md) | Native adapter, private resources, GPU and evidence limits. |
 | [SSH hosts](ssh-hosts.md) | Host identity, Docker image, limits and execution. |
+| [Host cache and application images](host-cache.md) | Digest-and-size inputs, read-only SSH cache, and optional tag-free application images. |
+| [Remote attempt retention](retention.md) | Admission-declared cleanup after verified collection or a bounded uncollected lifetime. |
+| [Host storage budget and inventory](host-storage.md) | Machine-scoped SSH budget, storage view, inventory and explicit orphan cleanup. |
 | [Bundles](packaging-and-import.md) | Explicit packaging and immutable uploads. |
 | [Execution gates and deadlines](execution-gates.md) | Separate preparation/start and finite UTC bounds. |
 | [Workload secrets](workload-secrets.md) | Attempt-scoped memory-only supply and delivery. |

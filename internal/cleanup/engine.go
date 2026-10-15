@@ -80,6 +80,10 @@ type WorkRepository interface {
 	RenewCleanup(context.Context, Work, time.Duration) (time.Time, error)
 	CompleteCleanup(context.Context, Work, Outcome) error
 }
+
+type retentionScheduler interface {
+	ScheduleRetention(context.Context, int) (int, error)
+}
 type Resolver interface {
 	Resolve(provider.BindingSnapshot) (provider.Provider, error)
 }
@@ -99,9 +103,17 @@ func (c Config) Valid() bool {
 
 type Engine struct {
 	repo     WorkRepository
+	storage  StorageRepository
 	resolver Resolver
 	config   Config
 	slots    chan struct{}
+}
+
+// WithStorage adds the sibling exact storage-target journal to this same
+// fenced cleanup worker. Ordinary attempt operations retain their own ledger.
+func (e *Engine) WithStorage(repo StorageRepository) *Engine {
+	e.storage = repo
+	return e
 }
 
 func New(repo WorkRepository, resolver Resolver, cfg Config) (*Engine, error) {
@@ -121,8 +133,16 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
+	if scheduler, ok := e.repo.(retentionScheduler); ok {
+		if _, err := scheduler.ScheduleRetention(ctx, 32); err != nil {
+			return false, err
+		}
+	}
 	w, err := e.repo.ClaimCleanup(ctx, worker.LeaseDuration)
 	if err != nil || w == nil {
+		if err == nil && e.storage != nil {
+			return e.runStorageOnce(ctx)
+		}
 		return false, err
 	}
 	if !w.Valid() {

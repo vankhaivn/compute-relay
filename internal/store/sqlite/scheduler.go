@@ -223,6 +223,9 @@ func schedulerTransition(ctx context.Context, tx *sql.Tx, id scheduler.Identity,
 		if n != 1 {
 			return domain.Attempt{}, ErrConflict
 		}
+		if err = noteAttemptRemoteRetention(ctx, tx, id.WorkspaceID, id.JobID, a, updated, now); err != nil {
+			return domain.Attempt{}, err
+		}
 	}
 	var seq int64
 	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(max(sequence),0) FROM events WHERE workspace_id=? AND job_id=?", string(id.WorkspaceID), string(id.JobID)).Scan(&seq); err != nil {

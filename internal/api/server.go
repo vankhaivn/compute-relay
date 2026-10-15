@@ -29,6 +29,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/hostwatchdog"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
@@ -37,8 +38,10 @@ import (
 )
 
 type Config struct {
-	HostWatchdog   *hostwatchdog.Service // Durable explicit watchdog operations.
-	Health         *hosthealth.Service   // Bounded read-only machine observations.
+	HostWatchdog   *hostwatchdog.Service      // Durable explicit watchdog operations.
+	Health         *hosthealth.Service        // Bounded read-only machine observations.
+	Storage        hoststorage.ReadRepository // Durable bounded machine storage inventory.
+	StorageCleanup hoststorage.Controller     // Exact orphan preview and durable cleanup admission.
 	Secrets        *workloadsecret.Service
 	Logs           *joblogs.Reader        // Explicit-attempt bounded observational output; nil disables the capability.
 	Connections    *connections.Service   // Optional live management; handlers never invoke providers.

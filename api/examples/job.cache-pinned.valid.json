@@ -1,0 +1,34 @@
+{
+  "api_version": "compute-connector/v1alpha1",
+  "name": "pinned-object-inputs",
+  "profile": "host-cpu",
+  "bundle": {
+    "object_id": "obj_code_01",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bytes": 1024
+  },
+  "execution": {
+    "kind": "python",
+    "command": ["python", "main.py"]
+  },
+  "inputs": [
+    {
+      "name": "data",
+      "source": {
+        "kind": "object",
+        "object_id": "obj_data_01",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bytes": 4096
+      },
+      "target": "data.bin"
+    }
+  ],
+  "outputs": [{"path": "result.json", "required": true}],
+  "resources": {"accelerator": "cpu"},
+  "network": {"remote_internet": "disabled"},
+  "timeouts": {
+    "remote_wall_seconds": 600,
+    "setup_seconds": 120,
+    "finalization_grace_seconds": 30
+  }
+}

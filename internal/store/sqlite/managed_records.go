@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 )
 
@@ -27,10 +28,10 @@ type managedRecord struct {
 func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id string) (managedRecord, error) {
 	var r managedRecord
 	var updated string
-	var wall sql.NullInt64
+	var wall, storageSoft, storageHard sql.NullInt64
 	var maxActive, maxProcesses int
 	var host, health []byte
-	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence,max_active_attempts,max_processes,host_health FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall, &host, &maxActive, &maxProcesses, &health)
+	err := tx.QueryRowContext(ctx, `SELECT connection_id,workspace_id,provider_type,label,revision,authentication,new_work,canonical_account,account_scope,active_credential_key,current_profile,pending_operation,updated_at,max_remote_wall_seconds,host_evidence,max_active_attempts,max_processes,host_health,storage_soft_bytes,storage_hard_bytes FROM managed_connections WHERE workspace_id=? AND connection_id=?`, w, id).Scan(&r.view.ID, &r.view.Workspace, &r.view.ProviderType, &r.view.Label, &r.view.Revision, &r.view.Authentication, &r.view.NewWork, &r.account, &r.accountScope, &r.credential, &r.profile, &r.pending, &updated, &wall, &host, &maxActive, &maxProcesses, &health, &storageSoft, &storageHard)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
@@ -47,6 +48,12 @@ func loadManaged(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id strin
 	}
 	if wall.Valid {
 		r.view.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}
+		if storageSoft.Valid != storageHard.Valid {
+			return r, ErrCorrupt
+		}
+		if storageSoft.Valid {
+			r.view.Configuration.StorageBudget = &hoststorage.Budget{SoftBytes: storageSoft.Int64, HardBytes: storageHard.Int64}
+		}
 		if r.healthPolicy != nil {
 			r.view.Configuration.HostHealth = r.healthPolicy.Patch()
 		}
@@ -190,9 +197,9 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 	var receipt, status, updated string
 	var installation, health []byte
 	var problem sql.NullString
-	var wall sql.NullInt64
+	var wall, storageSoft, storageHard sql.NullInt64
 	var maxActive, maxProcesses int
-	err := tx.QueryRowContext(ctx, `SELECT r.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation,c.host_health FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation, &health)
+	err := tx.QueryRowContext(ctx, `SELECT r.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation,c.host_health,c.storage_soft_bytes,c.storage_hard_bytes FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation, &health, &storageSoft, &storageHard)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
@@ -222,6 +229,12 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 	}
 	if wall.Valid {
 		r.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}
+		if storageSoft.Valid != storageHard.Valid {
+			return r, ErrCorrupt
+		}
+		if storageSoft.Valid {
+			r.Configuration.StorageBudget = &hoststorage.Budget{SoftBytes: storageSoft.Int64, HardBytes: storageHard.Int64}
+		}
 		if r.HostHealthPolicy != nil {
 			r.Configuration.HostHealth = r.HostHealthPolicy.Patch()
 		}

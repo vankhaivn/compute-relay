@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
@@ -132,7 +133,7 @@ func publicOperationProblem(p *domain.Problem) any {
 
 func controlError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, admission.ErrExpired):
+	case errors.Is(err, admission.ErrExpired), errors.Is(err, hoststorage.ErrHardLimit), errors.Is(err, hoststorage.ErrUnknown), errors.Is(err, hoststorage.ErrIneligible):
 		jobError(w, r, err)
 	case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, auth.ErrForbidden):
 		mapError(w, r, err)

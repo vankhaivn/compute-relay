@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
@@ -190,6 +191,14 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 						return ErrCorrupt
 					}
 					config, err = hosthealth.FreezeRuntimePolicy(config, *current.HostHealthPolicy)
+					if err != nil {
+						return ErrInvalid
+					}
+					budget := hoststorage.DefaultBudget()
+					if current.Configuration != nil && current.Configuration.StorageBudget != nil {
+						budget = *current.Configuration.StorageBudget
+					}
+					config, err = hoststorage.FreezeRuntimeBudget(config, budget)
 					if err != nil {
 						return ErrInvalid
 					}

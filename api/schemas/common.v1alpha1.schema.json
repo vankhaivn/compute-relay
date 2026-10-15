@@ -405,6 +405,16 @@
     "provider_instance_id": {
       "$ref": "#/$defs/opaque_id"
     },
+    "storage_budget_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["soft_bytes", "hard_bytes"],
+      "properties": {
+        "soft_bytes": {"type": "integer", "minimum": 1, "maximum": 1125899906842624},
+        "hard_bytes": {"type": "integer", "minimum": 2, "maximum": 1125899906842624}
+      },
+      "description": "Docker engine byte thresholds for future SSH connection revisions; soft must be smaller than hard."
+    },
     "host_health_configuration": {
       "type": "object",
       "additionalProperties": false,

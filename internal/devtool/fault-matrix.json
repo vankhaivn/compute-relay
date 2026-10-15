@@ -342,6 +342,96 @@
           "name": "TestSystemFaultMatrixNonzeroCLIAfterAcceptanceDoesNotResubmit"
         }
       ]
+    },
+    {
+      "number": 26,
+      "scenario": "Storage eviction races new references or a previously deleted identity reappears.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/storage_eviction_test.go",
+          "name": "TestStorageEvictionReceiptDischargesChargeAndNewScanRequeues"
+        },
+        {
+          "file": "internal/store/sqlite/storage_eviction_test.go",
+          "name": "TestStorageEvictionUsesOldestEligibleContentAndFencesNewPins"
+        },
+        {
+          "file": "internal/store/sqlite/storage_eviction_test.go",
+          "name": "TestStorageImageEvictionFencesNewPinsAndRequeuesAfterReappearance"
+        },
+        {
+          "file": "internal/store/sqlite/storage_eviction_test.go",
+          "name": "TestStorageHardLimitSharesBudgetAcrossConnectionAliases"
+        },
+        {
+          "file": "internal/store/sqlite/storage_eviction_test.go",
+          "name": "TestStorageEvictionKeepsCacheAndImagePinsAcrossActiveStates"
+        },
+        {
+          "file": "internal/store/sqlite/storage_repair_test.go",
+          "name": "TestStorageCacheReplacementHasSeparateMutationReservation"
+        },
+        {
+          "file": "internal/store/sqlite/storage_repair_test.go",
+          "name": "TestStorageImageReplacementAndRepeatedExactDeletionReleaseReservations"
+        },
+        {
+          "file": "internal/store/sqlite/storage_repair_test.go",
+          "name": "TestStorageAbsenceSettlesOnlyFinishedRetiredCache"
+        }
+      ]
+    },
+    {
+      "number": 27,
+      "scenario": "Remote retention expires across restart, collection races expiry, or a completed deletion later appears unknown.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/remote_retention_test.go",
+          "name": "TestRemoteRetentionAfterCollectionSurvivesRestartWithoutEarlyCleanup"
+        },
+        {
+          "file": "internal/store/sqlite/remote_retention_test.go",
+          "name": "TestRemoteRetentionCollectionWinsExpiryRace"
+        },
+        {
+          "file": "internal/store/sqlite/remote_retention_test.go",
+          "name": "TestRemoteRetentionUnknownExplicitDeletionStaysPending"
+        },
+        {
+          "file": "internal/store/sqlite/remote_retention_test.go",
+          "name": "TestConfirmedCleanupReceiptSurvivesLaterKaggleStyle403"
+        }
+      ]
+    },
+    {
+      "number": 28,
+      "scenario": "Storage inventory encounters foreign objects or orphan cleanup loses its deletion acknowledgement.",
+      "tests": [
+        {
+          "file": "internal/provider/sshhost/storage_scan_test.go",
+          "name": "TestStorageScanFiltersForeignObjectsAndBoundsOutput"
+        },
+        {
+          "file": "internal/cleanup/storage_engine_test.go",
+          "name": "TestStorageEngineKeepsLocalFailuresAndUnknownDeleteSeparate"
+        },
+        {
+          "file": "internal/store/sqlite/storage_inventory_test.go",
+          "name": "TestStorageOrphanPreviewApplyFreshnessAndExactReplay"
+        },
+        {
+          "file": "internal/store/sqlite/storage_inventory_test.go",
+          "name": "TestStorageOrphanRestartAfterIntentRecoversWithoutSecondDelete"
+        },
+        {
+          "file": "internal/provider/sshhost/storage_cleanup_test.go",
+          "name": "TestStorageBindingMismatchStopsBeforeCredentialOrRemoteIO"
+        },
+        {
+          "file": "internal/provider/sshhost/storage_cleanup_test.go",
+          "name": "TestStorageCleanupNeverInspectsOrDeletesExcludedObjects"
+        }
+      ]
     }
   ]
 }

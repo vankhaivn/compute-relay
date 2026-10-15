@@ -135,17 +135,28 @@ func (s *Service) authorize(ctx context.Context, p auth.Principal, w domain.Work
 }
 
 func (s *Service) verify(ctx context.Context, w domain.WorkspaceID, inputs RetryInputs) error {
-	if inputs.Attempt.Validate() != nil || RetryAllowed(inputs.Attempt.State) != nil || len(inputs.Objects) == 0 || len(inputs.Objects) > 65 {
+	if inputs.Attempt.Validate() != nil || RetryAllowed(inputs.Attempt.State) != nil || len(inputs.Objects) == 0 || len(inputs.Objects) > 66 {
 		return ErrInputs
 	}
 	var total int64
+	imageSeen := false
 	seen := map[domain.ObjectID]domain.ObjectMetadata{}
 	for _, ref := range inputs.Objects {
 		m := ref.Object
-		if !m.Valid() || m.WorkspaceID != w || m.Bytes > 2<<30 || m.Bytes > (4<<30)+(100<<20)-total {
+		if !m.Valid() || m.WorkspaceID != w || m.Bytes > 2<<30 {
 			return ErrInputs
 		}
-		total += m.Bytes
+		if ref.Role == "application_image" {
+			if imageSeen {
+				return ErrInputs
+			}
+			imageSeen = true
+		} else {
+			if m.Bytes > (4<<30)+(100<<20)-total {
+				return ErrInputs
+			}
+			total += m.Bytes
+		}
 		if prior, ok := seen[m.ID]; ok {
 			if prior != m {
 				return ErrInputs

@@ -14,14 +14,25 @@ func (e *Engine) applyResources(ctx, call context.Context, w Work) (Outcome, err
 	if !ok || len(w.Resources) == 0 || len(w.Resources) > operations.MaxCleanupResources {
 		return Outcome{}, ErrInvalid
 	}
-	p, resolveErr := func() (p provider.Provider, err error) {
-		defer func() {
-			if recover() != nil {
-				p, err = nil, ErrInvalid
-			}
+	var p provider.Provider
+	var resolveErr error
+	needsProvider := false
+	for _, item := range w.Resources {
+		if item.Result.State == operations.ResourcePending || item.Result.State == operations.ResourceRunning {
+			needsProvider = true
+			break
+		}
+	}
+	if needsProvider {
+		p, resolveErr = func() (p provider.Provider, err error) {
+			defer func() {
+				if recover() != nil {
+					p, err = nil, ErrInvalid
+				}
+			}()
+			return e.resolver.Resolve(w.Binding)
 		}()
-		return e.resolver.Resolve(w.Binding)
-	}()
+	}
 	if provider.IsLocalStateError(resolveErr) {
 		return Outcome{}, resolveErr
 	}

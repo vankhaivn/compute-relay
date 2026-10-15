@@ -14,6 +14,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -79,7 +80,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	if err != nil {
 		return err
 	}
-	jobs.WithPreflight(managed.guard)
+	jobs.WithPreflight(managed.storageGuard)
 	dispatcher, collector, schedulerSettings := managed.dispatcher, managed.collector, managed.settings
 	mode := "managed-connections"
 	dispatchEnabled := dispatcher != nil
@@ -107,6 +108,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		if cleaner, err = cleanupEngine(cleanupRepo, cleanupResolver); err != nil {
 			return err
 		}
+		cleaner.WithStorage(h.store)
 	}
 
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", serve.Address)
@@ -126,6 +128,13 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		cfg.Secrets = managed.secrets
 		cfg.Health = managed.health
 		cfg.HostWatchdog = managed.watchdog
+		cfg.Storage = h.store
+		if managed.resolver != nil {
+			cfg.StorageCleanup, err = hoststorage.NewService(h.store, managed.resolver)
+			if err != nil {
+				return ErrState
+			}
+		}
 	}
 	server, err := api.NewServer(cfg, h.access, objectService, h.store.Ready)
 	if err != nil {
@@ -148,7 +157,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	}
 	if managed != nil {
 		extra = append(extra, func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) })
-		extra = append(extra, managed.guard.Run, managed.watchdog.Run)
+		extra = append(extra, managed.guard.Run, managed.storageGuard.Run, managed.watchdog.Run)
 		if managed.secrets != nil {
 			extra = append(extra, managed.secrets.Run)
 		}

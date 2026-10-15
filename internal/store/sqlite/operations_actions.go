@@ -37,6 +37,9 @@ func controlState(ctx context.Context, tx *sql.Tx, r operationRow, a domain.Atte
 		if n != 1 {
 			return domain.Attempt{}, operations.ErrChanged
 		}
+		if err = noteAttemptRemoteRetention(ctx, tx, r.Operation.WorkspaceID, a.JobID, a, next, now); err != nil {
+			return domain.Attempt{}, err
+		}
 	}
 	if err = controlEvent(ctx, tx, r.Operation.WorkspaceID, a.JobID, a.ID, r.Operation.ID, event, now); err != nil {
 		return domain.Attempt{}, err
@@ -106,6 +109,15 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 	if !work.Journal.SubmitStarted {
 		if work.Journal.Plan == nil {
 			if err = releaseGateStorage(ctx, tx, string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID)); err != nil {
+				return r, err
+			}
+			if err = releaseHostCachePinsWithoutPreparation(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, now); err != nil {
+				return r, err
+			}
+			if err = releaseHostApplicationImagePins(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, now); err != nil {
+				return r, err
+			}
+			if err = releaseAttemptStorageResourcesInTx(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, now); err != nil {
 				return r, err
 			}
 		}

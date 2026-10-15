@@ -61,6 +61,74 @@ func TestCollectionPolicyDoesNotNormalizeHistoricalRequests(t *testing.T) {
 		}
 	}
 }
+
+func TestRetentionPolicyFrozenInCanonicalRequest(t *testing.T) {
+	withRetention := func(value string) []byte {
+		return []byte(strings.Replace(validJob, `"name":"unit"`, `"name":"unit","retention":`+value, 1))
+	}
+	old, err := Parse([]byte(validJob))
+	if err != nil || old.Spec().Retention != nil || strings.Contains(string(old.Canonical()), `"retention"`) {
+		t.Fatal("omitted retention changed historical request", err)
+	}
+	for _, tc := range []struct {
+		name        string
+		value       string
+		after       *int64
+		uncollected *int64
+	}{
+		{"delete after collection", `{"after_collection_seconds":0}`, ptrInt64(0), nil},
+		{"keep after collection", `{"after_collection_seconds":3600}`, ptrInt64(3600), nil},
+		{"expire uncollected", `{"uncollected_max_seconds":60}`, nil, ptrInt64(60)},
+		{"both", `{"after_collection_seconds":0,"uncollected_max_seconds":60}`, ptrInt64(0), ptrInt64(60)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := Parse(withRetention(tc.value))
+			if err != nil || req.Spec().Retention == nil || req.Hash() == old.Hash() {
+				t.Fatal("valid retention not frozen", err)
+			}
+			s := req.Spec()
+			if !sameOptionalInt64(s.Retention.AfterCollectionSeconds, tc.after) || !sameOptionalInt64(s.Retention.UncollectedMaxSeconds, tc.uncollected) {
+				t.Fatalf("decoded retention differs: %+v", s.Retention)
+			}
+			reparsed, err := Parse(req.Canonical())
+			if err != nil || reparsed.Hash() != req.Hash() {
+				t.Fatal("canonical retention did not round-trip", err)
+			}
+			if s.Retention.AfterCollectionSeconds != nil {
+				*s.Retention.AfterCollectionSeconds = 99
+			}
+			if s.Retention.UncollectedMaxSeconds != nil {
+				*s.Retention.UncollectedMaxSeconds = 99
+			}
+			if req.Hash() != reparsed.Hash() || string(req.Canonical()) != string(reparsed.Canonical()) {
+				t.Fatal("caller mutation changed frozen retention")
+			}
+		})
+	}
+	zero, _ := Parse(withRetention(`{"after_collection_seconds":0}`))
+	hour, _ := Parse(withRetention(`{"after_collection_seconds":3600}`))
+	if zero.Hash() == hour.Hash() {
+		t.Fatal("distinct retention policies share idempotency identity")
+	}
+	for _, value := range []string{
+		`null`, `{}`, `[]`, `{"after_collection_seconds":null}`,
+		`{"uncollected_max_seconds":null}`, `{"after_collection_seconds":-1}`,
+		`{"after_collection_seconds":2592001}`, `{"uncollected_max_seconds":0}`,
+		`{"uncollected_max_seconds":2592001}`, `{"after_collection_seconds":1.5}`,
+		`{"after_collection_seconds":"0"}`, `{"after_collection_seconds":0,"unknown":1}`,
+	} {
+		if _, err := Parse(withRetention(value)); !errors.Is(err, ErrSpec) {
+			t.Fatalf("accepted invalid retention %s: %v", value, err)
+		}
+	}
+}
+
+func ptrInt64(v int64) *int64 { return &v }
+
+func sameOptionalInt64(a, b *int64) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
 func TestSpecRejectsInvalidAndContradictoryData(t *testing.T) {
 	changes := [][2]string{
 		{`"name":"unit"`, `"name":"unit","Name":"alias"`},

@@ -1,14 +1,11 @@
 package sshhost
 
 import (
+	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -47,7 +44,7 @@ type stagedFile struct {
 	SHA256 domain.SHA256Digest
 }
 
-func expectedStaging(plan provider.Plan, modules map[string]string, manifest []byte) map[string]stagedFile {
+func expectedStaging(plan provider.Plan, modules map[string]string, manifest []byte, cached bool) map[string]stagedFile {
 	files := map[string]stagedFile{}
 	add := func(name string, raw []byte) { files[name] = stagedFile{int64(len(raw)), provider.Digest(raw)} }
 	add("manifest.json", manifest)
@@ -55,9 +52,11 @@ func expectedStaging(plan provider.Plan, modules map[string]string, manifest []b
 	for name, source := range modules {
 		add("runner/relay_runner/"+name, []byte(source))
 	}
-	files["staging/"+runnerplan.BundlePath] = stagedFile{plan.Job.Inputs.Bundle.Bytes, plan.Job.Inputs.Bundle.SHA256}
-	for i, input := range plan.Job.Inputs.Inputs {
-		files["staging/"+runnerplan.InputPath(i)] = stagedFile{input.Object.Bytes, input.Object.SHA256}
+	if !cached {
+		files["staging/"+runnerplan.BundlePath] = stagedFile{plan.Job.Inputs.Bundle.Bytes, plan.Job.Inputs.Bundle.SHA256}
+		for i, input := range plan.Job.Inputs.Inputs {
+			files["staging/"+runnerplan.InputPath(i)] = stagedFile{input.Object.Bytes, input.Object.SHA256}
+		}
 	}
 	return files
 }
@@ -66,15 +65,81 @@ func expectedStaging(plan provider.Plan, modules map[string]string, manifest []b
 // frozen job and complete runtime/input manifest. It contains no mutable file paths
 // outside this exact owned container and cannot be reused for another attempt.
 func observedPreparationHash(info containerInfo, planDigest domain.SHA256Digest, files map[string]stagedFile) domain.SHA256Digest {
+	return preparationHash(info, planDigest, files, true)
+}
+
+// preparationHashMatches preserves an original receipt only when the current
+// canonical proof or exact legacy proof matches; it never guesses mount orders.
+func preparationHashMatches(info containerInfo, planDigest domain.SHA256Digest, files map[string]stagedFile, recorded domain.SHA256Digest) bool {
+	return recorded.Valid() && (observedPreparationHash(info, planDigest, files) == recorded || preparationHash(info, planDigest, files, false) == recorded)
+}
+
+func preparationHash(info containerInfo, planDigest domain.SHA256Digest, files map[string]stagedFile, canonical bool) domain.SHA256Digest {
+	// Preserve the original v1 byte shape for stopped preparations made before
+	// cache mounts existed. Adding a field to containerInfo's HostConfig alone
+	// would otherwise change every legacy readiness revision on restart.
+	if info.Config.Labels[labelPrefix+"application-image"] == "" && info.Config.Labels[labelPrefix+"cache"] == "" && len(info.HostConfig.Mounts) == 0 && len(info.Mounts) == 0 {
+		legacyConfig := struct {
+			Labels     map[string]string `json:"Labels"`
+			User       string            `json:"User"`
+			Cmd        []string          `json:"Cmd"`
+			Entrypoint []string          `json:"Entrypoint"`
+			WorkingDir string            `json:"WorkingDir"`
+			Env        []string          `json:"Env"`
+		}{info.Config.Labels, info.Config.User, info.Config.Cmd, info.Config.Entrypoint, info.Config.WorkingDir, info.Config.Env}
+		host := struct {
+			Tmpfs         map[string]string `json:"Tmpfs"`
+			NetworkMode   string            `json:"NetworkMode"`
+			PidMode       string            `json:"PidMode"`
+			Privileged    bool              `json:"Privileged"`
+			CapDrop       []string          `json:"CapDrop"`
+			CapAdd        []string          `json:"CapAdd"`
+			SecurityOpt   []string          `json:"SecurityOpt"`
+			Binds         []string          `json:"Binds"`
+			Memory        int64             `json:"Memory"`
+			MemorySwap    int64             `json:"MemorySwap"`
+			NanoCPUs      int64             `json:"NanoCpus"`
+			PidsLimit     int64             `json:"PidsLimit"`
+			RestartPolicy struct {
+				Name string `json:"Name"`
+			} `json:"RestartPolicy"`
+		}{info.HostConfig.Tmpfs, info.HostConfig.NetworkMode, info.HostConfig.PidMode, info.HostConfig.Privileged,
+			info.HostConfig.CapDrop, info.HostConfig.CapAdd, info.HostConfig.SecurityOpt, info.HostConfig.Binds,
+			info.HostConfig.Memory, info.HostConfig.MemorySwap, info.HostConfig.NanoCPUs, info.HostConfig.PidsLimit, info.HostConfig.RestartPolicy}
+		raw, _ := json.Marshal(struct {
+			Version    string
+			Container  string
+			Image      string
+			Config     any
+			HostConfig any
+			Plan       domain.SHA256Digest
+			Files      map[string]stagedFile
+		}{"ssh-readiness/v1", info.ID, info.Image, legacyConfig, host, planDigest, files})
+		return provider.Digest(raw)
+	}
+	version := "ssh-readiness/v2"
+	if info.Config.Labels[labelPrefix+"application-image"] != "" {
+		version = "ssh-readiness/v3"
+	}
+	if canonical {
+		// Effective mount order is not part of the verified mount set and can
+		// change between Docker observations of the same stopped container.
+		info.Mounts = slices.Clone(info.Mounts)
+		slices.SortFunc(info.Mounts, func(a, b dockerMount) int {
+			return cmp.Compare(a.Destination, b.Destination)
+		})
+		version = "ssh-readiness/v4"
+	}
 	raw, _ := json.Marshal(struct {
 		Version    string
 		Container  string
 		Image      string
 		Config     any
 		HostConfig any
+		Mounts     any
 		Plan       domain.SHA256Digest
 		Files      map[string]stagedFile
-	}{"ssh-readiness/v1", info.ID, info.Image, info.Config, info.HostConfig, planDigest, files})
+	}{version, info.ID, info.Image, info.Config, info.HostConfig, info.Mounts, planDigest, files})
 	return provider.Digest(raw)
 }
 func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
@@ -92,44 +157,36 @@ func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
 	return !info.Started() && !info.State.Running && info.Config.User == "65534:65534" && info.Config.WorkingDir == "/relay" && len(info.Config.Entrypoint) == 0 && info.HostConfig.NetworkMode == network && info.HostConfig.PidMode == "" && !info.HostConfig.Privileged && len(info.HostConfig.Binds) == 0 && len(info.HostConfig.CapAdd) == 0 && slices.Contains(info.HostConfig.CapDrop, "ALL") && slices.Contains(info.HostConfig.SecurityOpt, "no-new-privileges") && info.HostConfig.RestartPolicy.Name == "no"
 }
 
-// Docker's archive API reads bytes from a stopped container. It executes no
-// workload, setup command or preparatory probe, including during start validation.
-func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte) (domain.SHA256Digest, error) {
+// A separate, fixed verifier hashes the stopped container's archive on the
+// host. Only digests and sizes return over SSH; the target runs no code.
+func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte, bindings []cacheBinding, recorded domain.SHA256Digest) (domain.SHA256Digest, error) {
 	req, err := admission.Parse(plan.Job.Specification)
 	if err != nil || !validStoppedPolicy(info, req.Spec().Network.RemoteInternet == "required", len(req.Spec().WorkloadSecrets) > 0) {
 		return "", ErrIdentity
 	}
-	expected := expectedStaging(plan, modules, manifest)
-	seen := map[string]bool{}
-	found, err := readTar(ctx, d, info.ID, "/relay", 2<<30, func(name string, r io.Reader) error {
-		if !strings.HasPrefix(name, "relay/") {
-			return ErrIdentity
+	if req.Spec().ApplicationImage != nil {
+		if !validApplicationContainer(info, info.Image) {
+			return "", ErrIdentity
 		}
-		name = strings.TrimPrefix(name, "relay/")
-		if name == "staged.json" {
-			n, err := io.Copy(io.Discard, io.LimitReader(r, 4097))
-			if err != nil || n > 4096 {
-				return ErrIdentity
-			}
-			return nil
+	} else if info.Config.Labels[labelPrefix+"application-image"] != "" {
+		return "", ErrIdentity
+	}
+	if len(bindings) > 0 {
+		if err := a.verifyCacheMounts(ctx, d, info, plan.Job.Identity, bindings); err != nil {
+			return "", err
 		}
-		file, exists := expected[name]
-		if !exists || seen[name] {
-			return ErrIdentity
-		}
-		seen[name] = true
-		hash := sha256.New()
-		n, err := io.Copy(hash, io.LimitReader(r, file.Bytes+1))
-		if err != nil || n != file.Bytes || domain.SHA256Digest(hex.EncodeToString(hash.Sum(nil))) != file.SHA256 {
-			return ErrIdentity
-		}
-		return nil
-	})
-	if err != nil {
+	} else if len(info.HostConfig.Mounts) != 0 || len(info.Mounts) != 0 {
+		return "", ErrIdentity
+	}
+	expected := expectedStaging(plan, modules, manifest, len(bindings) > 0)
+	if err := a.verifyStagedOnHost(ctx, d, info, plan.Job.Identity, expected); err != nil {
 		return "", err
 	}
-	if !found || len(seen) != len(expected) {
-		return "", ErrIdentity
+	if recorded != "" {
+		if !preparationHashMatches(info, plan.Digest(), expected, recorded) {
+			return "", ErrIdentity
+		}
+		return recorded, nil
 	}
 	return observedPreparationHash(info, plan.Digest(), expected), nil
 }
@@ -139,7 +196,6 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 	if err != nil {
 		return provider.PreparationObservation{}, err
 	}
-	rawManifest, _ := json.Marshal(manifest)
 	modules, err := runnerassets.Sources()
 	if err != nil {
 		return provider.PreparationObservation{}, err
@@ -158,8 +214,14 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		if err := d.verifyEngine(ctx, engine); err != nil {
 			return err
 		}
+		applicationID, pinned, err := a.imageContext().frozenApplicationImage(ctx, d, plan.Job.Identity)
+		if err != nil || pinned != (plan.Job.Inputs.ApplicationImage != nil) ||
+			pinned && !validApplicationContainer(info, applicationID) ||
+			!pinned && info.Config.Labels[labelPrefix+"application-image"] != "" {
+			return ErrIdentity
+		}
 		p := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID, engine), Private: true}
-		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, 4096)
+		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
 		if err != nil {
 			return err
 		}
@@ -169,17 +231,33 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 			return nil
 		}
 		var staged marker
-		if json.Unmarshal(raw, &staged) != nil || staged.Preparation != operation || staged.Plan != plan.Digest() || staged.Container != info.ID || staged.EngineID != engine || staged.Manifest != provider.Digest(rawManifest) || !staged.Verification.Valid() {
+		var bindings []cacheBinding
+		if json.Unmarshal(raw, &staged) != nil || staged.Preparation != operation || staged.Plan != plan.Digest() || staged.Container != info.ID || staged.EngineID != engine || !staged.Verification.Valid() || staged.Cache != (info.Config.Labels[labelPrefix+"cache"] == "volumes/v1") || staged.ApplicationImage != applicationID {
 			return ErrIdentity
 		}
-		image, found, err := d.inspectImage(ctx, a.config.Image)
-		if err != nil {
-			return err
+		if staged.Cache {
+			bindings, err = a.activeCachePlan(ctx, plan)
+			if err != nil || len(bindings) == 0 {
+				return ErrIdentity
+			}
+			if err := cacheManifest(manifest, plan, bindings); err != nil {
+				return err
+			}
 		}
-		if !found || info.Image != image.ID {
+		rawManifest, _ := json.Marshal(manifest)
+		if staged.Manifest != provider.Digest(rawManifest) {
 			return ErrIdentity
 		}
-		verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest)
+		if !pinned {
+			image, found, err := d.inspectImage(ctx, a.config.Image)
+			if err != nil {
+				return err
+			}
+			if !found || info.Image != image.ID {
+				return ErrIdentity
+			}
+		}
+		verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings, staged.Verification)
 		if err != nil {
 			return err
 		}
@@ -213,17 +291,17 @@ func (a *Adapter) Start(ctx context.Context, prepared provider.Prepared, authori
 	return a.submit(ctx, prepared, authorization, material)
 }
 
-// Recheck the small immutable control files and the observed container policy
-// immediately before writing start authority. Full byte verification is the
-// preceding read-only orchestration step; the runner verifies inputs before use.
+// Recheck small control files, container policy and all staged bytes before
+// writing start authority. The on-host verifier does not start the target.
 func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info containerInfo, p provider.Prepared, authorization provider.StartAuthorization) error {
 	if authorization.Validate(p) != nil || info.Config.Labels[labelPrefix+"plan"] != string(p.PlanSHA256) {
 		return ErrIdentity
 	}
-	raw, found, err := readFile(ctx, d, info.ID, stagedMarker, 4096)
+	raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
 	var m marker
 	ref, refErr := decodeRef(p.Resource, p.Identity)
-	if refErr != nil || err != nil || !found || json.Unmarshal(raw, &m) != nil || m != (marker{Preparation: p.PreparationID, Plan: p.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: p.VerificationSHA256, Manifest: p.ManifestSHA256}) {
+	cached := info.Config.Labels[labelPrefix+"cache"] == "volumes/v1"
+	if refErr != nil || err != nil || !found || json.Unmarshal(raw, &m) != nil || m != (marker{Preparation: p.PreparationID, Plan: p.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: p.VerificationSHA256, Manifest: p.ManifestSHA256, Cache: cached, ApplicationImage: info.Config.Labels[labelPrefix+"application-image"]}) {
 		return ErrIdentity
 	}
 	raw, found, err = readFile(ctx, d, info.ID, "/relay/manifest.json", maxManifestBytes)
@@ -278,11 +356,13 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 	for name, source := range modules {
 		files["runner/relay_runner/"+name] = stagedFile{int64(len(source)), provider.Digest([]byte(source))}
 	}
-	files["staging/"+manifest.Bundle.Path] = stagedFile{manifest.Bundle.Bytes, manifest.Bundle.SHA256}
-	for _, input := range manifest.Inputs {
-		files["staging/"+input.Path] = stagedFile{input.Bytes, input.SHA256}
+	if !cached {
+		files["staging/"+manifest.Bundle.Path] = stagedFile{manifest.Bundle.Bytes, manifest.Bundle.SHA256}
+		for _, input := range manifest.Inputs {
+			files["staging/"+input.Path] = stagedFile{input.Bytes, input.SHA256}
+		}
 	}
-	if observedPreparationHash(info, p.PlanSHA256, files) != p.VerificationSHA256 {
+	if !preparationHashMatches(info, p.PlanSHA256, files, p.VerificationSHA256) {
 		return ErrIdentity
 	}
 	// A stale/mismatched control file cannot be overwritten after a possible write.
@@ -290,6 +370,12 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 		return err
 	} else if exists {
 		return errStartClaimed
+	}
+	if cached {
+		return a.verifyCachedReadiness(ctx, d, info, p.Identity, p.PlanSHA256, raw, p.ManifestSHA256, p.VerificationSHA256)
+	}
+	if err := a.verifyStagedOnHost(ctx, d, info, p.Identity, files); err != nil {
+		return err
 	}
 	return nil
 }

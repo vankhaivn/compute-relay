@@ -15,8 +15,9 @@ import (
 // Adapters receive a workspace-scoped BlobStore at composition, not credentials in jobs.
 // The digest is compatible with runner/python/relay_runner/contract.py:input_digest.
 type InputSnapshot struct {
-	Bundle domain.ObjectMetadata `json:"bundle"`
-	Inputs []FrozenInput         `json:"inputs"`
+	Bundle           domain.ObjectMetadata  `json:"bundle"`
+	Inputs           []FrozenInput          `json:"inputs"`
+	ApplicationImage *domain.ObjectMetadata `json:"application_image,omitempty"`
 }
 type FrozenInput struct {
 	Name   string                `json:"name"`
@@ -27,6 +28,9 @@ type FrozenInput struct {
 func (s InputSnapshot) Validate(w domain.WorkspaceID) error {
 	if !s.Bundle.Valid() || s.Bundle.WorkspaceID != w || s.Bundle.Bytes > 100<<20 || len(s.Inputs) > 64 {
 		return errors.New("invalid frozen input snapshot")
+	}
+	if image := s.ApplicationImage; image != nil && (!image.Valid() || image.WorkspaceID != w || image.Bytes < 1 || image.Bytes > 2<<30) {
+		return errors.New("invalid frozen application image")
 	}
 	names, paths := map[string]bool{}, []string{}
 	var total int64
@@ -59,6 +63,10 @@ func (s InputSnapshot) Validate(w domain.WorkspaceID) error {
 }
 func (s InputSnapshot) Clone() InputSnapshot {
 	s.Inputs = append(s.Inputs[:0:0], s.Inputs...)
+	if s.ApplicationImage != nil {
+		image := *s.ApplicationImage
+		s.ApplicationImage = &image
+	}
 	return s
 }
 func (s InputSnapshot) InputDigest() domain.SHA256Digest {

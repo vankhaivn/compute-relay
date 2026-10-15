@@ -94,7 +94,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		if in.Action != "create" {
 			providerType = prior.view.ProviderType
 		}
-		if in.Configuration != nil && in.Configuration.HostHealth != nil && providerType != "ssh" {
+		if in.Configuration != nil && (in.Configuration.HostHealth != nil || in.Configuration.StorageBudget != nil) && providerType != "ssh" {
 			return connections.ErrRequest
 		}
 		operationID, err := randomID("op_", 16)
@@ -105,9 +105,13 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 		if in.Action == "create" {
 			var wall any
 			var maxActive, maxProcesses int
+			var storageSoft, storageHard any
 			if in.Configuration != nil {
 				wall = in.Configuration.MaxRemoteWallSeconds
 				maxActive, maxProcesses = in.Configuration.MaxActiveAttempts, in.Configuration.MaxProcesses
+				if in.Configuration.StorageBudget != nil {
+					storageSoft, storageHard = in.Configuration.StorageBudget.SoftBytes, in.Configuration.StorageBudget.HardBytes
+				}
 			}
 			var health any
 			if in.ProviderType == "ssh" {
@@ -124,7 +128,7 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 					return ErrInvalid
 				}
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at,max_remote_wall_seconds,max_active_attempts,max_processes,host_health) VALUES(?,?,?,?,?,'pending','enabled',?,?,?,?,?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp, wall, maxActive, maxProcesses, health)
+			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at,max_remote_wall_seconds,max_active_attempts,max_processes,host_health,storage_soft_bytes,storage_hard_bytes) VALUES(?,?,?,?,?,'pending','enabled',?,?,?,?,?,?,?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp, wall, maxActive, maxProcesses, health, storageSoft, storageHard)
 		} else {
 			newWork := prior.view.NewWork
 			authentication := prior.view.Authentication

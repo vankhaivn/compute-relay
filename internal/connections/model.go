@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
@@ -115,10 +116,14 @@ type Configuration struct {
 	MaxActiveAttempts    int                     `json:"max_active_attempts,omitempty"`
 	MaxProcesses         int                     `json:"max_processes,omitempty"`
 	HostHealth           *hosthealth.PolicyPatch `json:"host_health,omitempty"`
+	StorageBudget        *hoststorage.Budget     `json:"storage_budget,omitempty"`
 }
 
 func (c Configuration) Validate() error {
 	if c.HostHealth != nil && c.HostHealth.Validate() != nil {
+		return ErrRequest
+	}
+	if c.StorageBudget != nil && !c.StorageBudget.Valid() {
 		return ErrRequest
 	}
 	if c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxActiveAttempts < 0 || c.MaxActiveAttempts > 64 || c.MaxProcesses < 0 || c.MaxProcesses > 65536 {

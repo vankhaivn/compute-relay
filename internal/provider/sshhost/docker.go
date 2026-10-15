@@ -209,30 +209,52 @@ type containerInfo struct {
 	Image  string         `json:"Image"`
 	State  containerState `json:"State"`
 	Config struct {
-		Labels     map[string]string `json:"Labels"`
-		User       string            `json:"User"`
-		Cmd        []string          `json:"Cmd"`
-		Entrypoint []string          `json:"Entrypoint"`
-		WorkingDir string            `json:"WorkingDir"`
-		Env        []string          `json:"Env"`
+		Labels      map[string]string `json:"Labels"`
+		User        string            `json:"User"`
+		Cmd         []string          `json:"Cmd"`
+		Entrypoint  []string          `json:"Entrypoint"`
+		WorkingDir  string            `json:"WorkingDir"`
+		Env         []string          `json:"Env"`
+		Healthcheck *struct {
+			Test []string `json:"Test"`
+		} `json:"Healthcheck,omitempty"`
 	} `json:"Config"`
 	HostConfig struct {
-		Tmpfs         map[string]string `json:"Tmpfs"`
-		NetworkMode   string            `json:"NetworkMode"`
-		PidMode       string            `json:"PidMode"`
-		Privileged    bool              `json:"Privileged"`
-		CapDrop       []string          `json:"CapDrop"`
-		CapAdd        []string          `json:"CapAdd"`
-		SecurityOpt   []string          `json:"SecurityOpt"`
-		Binds         []string          `json:"Binds"`
-		Memory        int64             `json:"Memory"`
-		MemorySwap    int64             `json:"MemorySwap"`
-		NanoCPUs      int64             `json:"NanoCpus"`
-		PidsLimit     int64             `json:"PidsLimit"`
+		Mounts        []dockerMountRequest `json:"Mounts"`
+		Tmpfs         map[string]string    `json:"Tmpfs"`
+		NetworkMode   string               `json:"NetworkMode"`
+		PidMode       string               `json:"PidMode"`
+		Privileged    bool                 `json:"Privileged"`
+		CapDrop       []string             `json:"CapDrop"`
+		CapAdd        []string             `json:"CapAdd"`
+		SecurityOpt   []string             `json:"SecurityOpt"`
+		Binds         []string             `json:"Binds"`
+		Memory        int64                `json:"Memory"`
+		MemorySwap    int64                `json:"MemorySwap"`
+		NanoCPUs      int64                `json:"NanoCpus"`
+		PidsLimit     int64                `json:"PidsLimit"`
 		RestartPolicy struct {
 			Name string `json:"Name"`
 		} `json:"RestartPolicy"`
 	} `json:"HostConfig"`
+	Mounts []dockerMount `json:"Mounts"`
+}
+
+type dockerMountRequest struct {
+	Type          string `json:"Type"`
+	Source        string `json:"Source"`
+	Target        string `json:"Target"`
+	ReadOnly      bool   `json:"ReadOnly"`
+	VolumeOptions struct {
+		NoCopy bool `json:"NoCopy"`
+	} `json:"VolumeOptions"`
+}
+
+type dockerMount struct {
+	Type        string `json:"Type"`
+	Name        string `json:"Name"`
+	Destination string `json:"Destination"`
+	RW          bool   `json:"RW"`
 }
 
 // Started reports Docker's own evidence that the container process was launched.
@@ -265,16 +287,18 @@ func (d docker) inspect(ctx context.Context, name string) (containerInfo, bool, 
 // containerSpec is the complete hardened create request for one attempt. CPUs and
 // MemoryBytes are optional operator limits.
 type containerSpec struct {
-	SecretTmpfs bool
-	Name        string
-	Image       string
-	Platform    string
-	Labels      map[string]string
-	Internet    bool
-	CPUs        string
-	MemoryBytes int64
-	PIDs        int
-	Command     []string
+	SecretTmpfs   bool
+	NoHealthcheck bool
+	Name          string
+	Image         string
+	Platform      string
+	Labels        map[string]string
+	Internet      bool
+	CPUs          string
+	MemoryBytes   int64
+	PIDs          int
+	Command       []string
+	Mounts        []dockerMountRequest
 }
 
 func (s containerSpec) args() []string {
@@ -287,6 +311,9 @@ func (s containerSpec) args() []string {
 		"--restart", "no", "--stop-timeout", "30", "--workdir", "/relay"}
 	if s.SecretTmpfs {
 		args = append(args, "--tmpfs", secretTmpfsPath+":"+secretTmpfsOptions)
+	}
+	if s.NoHealthcheck {
+		args = append(args, "--no-healthcheck")
 	}
 	if s.Platform != "" {
 		args = append(args, "--platform", s.Platform)
@@ -301,6 +328,9 @@ func (s containerSpec) args() []string {
 	}
 	for _, key := range slices.Sorted(maps.Keys(s.Labels)) {
 		args = append(args, "--label", key+"="+s.Labels[key])
+	}
+	for _, mount := range s.Mounts {
+		args = append(args, "--mount", "type=volume,source="+mount.Source+",target="+mount.Target+",readonly,volume-nocopy")
 	}
 	return append(append(args, s.Image), s.Command...)
 }

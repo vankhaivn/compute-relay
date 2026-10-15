@@ -290,6 +290,9 @@
               "maximum": 65536,
               "description": "Maximum processes per container for an operator host."
             },
+            "storage_budget": {
+              "$ref": "common.v1alpha1.schema.json#/$defs/storage_budget_configuration"
+            },
             "host_health": {
               "$ref": "common.v1alpha1.schema.json#/$defs/host_health_configuration"
             }

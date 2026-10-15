@@ -42,13 +42,34 @@
     "bundle": {
       "type": "object",
       "additionalProperties": false,
+      "dependentRequired": {
+        "sha256": ["bytes"],
+        "bytes": ["sha256"]
+      },
       "required": [
         "object_id"
       ],
       "properties": {
         "object_id": {
           "$ref": "common.v1alpha1.schema.json#/$defs/object_id"
+        },
+        "sha256": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
         }
+      }
+    },
+    "application_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "sha256", "bytes"],
+      "properties": {
+        "object_id": {"$ref": "common.v1alpha1.schema.json#/$defs/object_id"},
+        "sha256": {"$ref": "common.v1alpha1.schema.json#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 1, "maximum": 2147483648}
       }
     },
     "execution": {
@@ -163,6 +184,10 @@
               {
                 "type": "object",
                 "additionalProperties": false,
+                "dependentRequired": {
+                  "sha256": ["bytes"],
+                  "bytes": ["sha256"]
+                },
                 "required": [
                   "kind",
                   "object_id"
@@ -173,6 +198,13 @@
                   },
                   "object_id": {
                     "$ref": "common.v1alpha1.schema.json#/$defs/object_id"
+                  },
+                  "sha256": {
+                    "$ref": "common.v1alpha1.schema.json#/$defs/sha256"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 }
               },
@@ -359,6 +391,26 @@
       ],
       "default": "automatic",
       "description": "Frozen per-job result collection policy. Omission preserves automatic collection. Manual requires explicit collect for all results, including diagnostic controls."
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Optional frozen per-job remote cleanup policy. Omission preserves explicit cleanup. When both durations are declared, the uncollected rule applies only until verified publication; the after-collection rule applies after publication.",
+      "properties": {
+        "after_collection_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2592000,
+          "description": "Seconds after durable verified result publication before remote cleanup is due. Zero requests cleanup as soon as publication is committed."
+        },
+        "uncollected_max_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2592000,
+          "description": "Seconds after the later of first terminal attempt observation and confirmed remote inactivity (including never-started attempts) before uncollected results may be discarded. Reobservation does not reset the clock. Never permits cleanup while remote activity remains possible."
+        }
+      }
     },
     "execution_control": {
       "enum": [

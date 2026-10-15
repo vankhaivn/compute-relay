@@ -22,6 +22,8 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostcache"
+	"github.com/vankhaivn/compute-relay/internal/hostimages"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
@@ -109,7 +111,27 @@ type Adapter struct {
 	creds   ports.CredentialResolver
 	blobs   StagingBlobs
 	clock   ports.Clock
+	cache   hostcache.Repository
+	images  hostimages.Repository
 	dial    func(context.Context, Target, Credential) (session, error)
+}
+
+// WithHostCache enables immutable host-volume staging for attempts that have
+// durable cache pins. It is set at composition, before the adapter is used.
+func (a *Adapter) WithHostCache(repository hostcache.Repository) *Adapter {
+	a.cache = repository
+	return a
+}
+
+// WithApplicationImages supplies the durable one-shot load ledger. Composition
+// installs it before any SSH attempt is validated or prepared.
+func (a *Adapter) WithApplicationImages(repository hostimages.Repository) *Adapter {
+	a.images = repository
+	return a
+}
+
+func (a *Adapter) imageContext() applicationImageContext {
+	return applicationImageContext{config: a.config, blobs: a.blobs, applicationImages: a.images}
 }
 
 var (
@@ -213,6 +235,16 @@ func (a *Adapter) Validate(ctx context.Context, job provider.ResolvedJob) (provi
 	if err != nil {
 		return provider.Plan{}, ErrRequest
 	}
+	if image := spec.ApplicationImage; image != nil {
+		frozen := job.Inputs.ApplicationImage
+		if frozen == nil || frozen.ID != image.ObjectID || frozen.SHA256 != image.SHA256 || frozen.Bytes != image.Bytes ||
+			a.images == nil || a.config.ImageRecipeSHA256 == "" || !SupportedArchitecture(a.config.Architecture) ||
+			!domain.SHA256Digest(a.config.MachineID).Valid() || !domain.SHA256Digest(a.config.EngineID).Valid() {
+			return provider.Plan{}, ErrBinding
+		}
+	} else if job.Inputs.ApplicationImage != nil {
+		return provider.Plan{}, ErrBinding
+	}
 	if spec.Resources.Accelerator != "cpu" || job.WallSeconds > a.config.MaxWallSeconds ||
 		spec.Network.RemoteInternet == "required" && !a.config.AllowInternet {
 		return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation,
@@ -291,12 +323,14 @@ func decodeRef(resource string, id provider.Identity) (containerRef, error) {
 }
 
 type marker struct {
-	Preparation  domain.OperationID  `json:"preparation_id"`
-	Plan         domain.SHA256Digest `json:"plan_sha256"`
-	Container    string              `json:"container_id"`
-	EngineID     string              `json:"engine_id,omitempty"`
-	Verification domain.SHA256Digest `json:"verification_sha256,omitempty"`
-	Manifest     domain.SHA256Digest `json:"manifest_sha256,omitempty"`
+	Preparation      domain.OperationID  `json:"preparation_id"`
+	Plan             domain.SHA256Digest `json:"plan_sha256"`
+	Container        string              `json:"container_id"`
+	EngineID         string              `json:"engine_id,omitempty"`
+	Verification     domain.SHA256Digest `json:"verification_sha256,omitempty"`
+	Manifest         domain.SHA256Digest `json:"manifest_sha256,omitempty"`
+	Cache            bool                `json:"cache,omitempty"`
+	ApplicationImage string              `json:"application_image,omitempty"`
 }
 
 // Prepare creates the attempt's stopped container, copies the runner, manifest, bundle
@@ -313,10 +347,6 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 	if spec.Expired(a.clock.Now()) {
 		return provider.Prepared{}, admission.ErrExpired
 	}
-	manifestJSON, err := json.Marshal(manifest)
-	if err != nil {
-		return provider.Prepared{}, ErrRequest
-	}
 	modules, err := runnerassets.Sources()
 	if err != nil {
 		return provider.Prepared{}, ErrRequest
@@ -327,25 +357,55 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		if err != nil {
 			return err
 		}
-		// The digest-pinned image is pulled once per host; the job network policy
-		// governs the container, not the engine's registry access.
-		image, found, err := d.inspectImage(ctx, a.config.Image)
-		if err == nil && !found && a.config.ImageRecipeSHA256 == "" && !spec.SeparateStart() {
-			if err = d.pull(ctx, a.config.Image); err == nil {
-				image, found, err = d.inspectImage(ctx, a.config.Image)
+		application := spec.ApplicationImage != nil
+		var image imageInfo
+		if application {
+			image.ID, err = a.imageContext().selectApplicationImage(ctx, d, plan)
+			if err != nil {
+				return err
+			}
+			image.OS, image.Architecture = "linux", a.config.Architecture
+		} else {
+			// The digest-pinned standard image is pulled once per legacy host;
+			// the job network policy governs the container, not registry access.
+			var found bool
+			image, found, err = d.inspectImage(ctx, a.config.Image)
+			if err == nil && !found && a.config.ImageRecipeSHA256 == "" && !spec.SeparateStart() {
+				if err = d.pull(ctx, a.config.Image); err == nil {
+					image, found, err = d.inspectImage(ctx, a.config.Image)
+				}
+			}
+			if err != nil || !found || image.OS != "linux" {
+				return ErrRemoteDocker
 			}
 		}
-		if err != nil || !found || image.OS != "linux" {
-			return ErrRemoteDocker
+		bindings, err := a.prepareCache(ctx, d, plan)
+		if err != nil {
+			return err
+		}
+		cached := len(bindings) > 0
+		if err := cacheManifest(manifest, plan, bindings); err != nil {
+			return err
+		}
+		manifestJSON, err := json.Marshal(manifest)
+		if err != nil {
+			return ErrRequest
 		}
 		platform := ""
 		if a.config.ImageRecipeSHA256 != "" {
 			os, arch, err := d.platform(ctx)
-			if err != nil || os != "linux" || arch != a.config.Architecture || image.Architecture != arch || image.ID != a.config.Image || image.Config.Labels[imageRecipeLabel] != a.config.ImageRecipeSHA256 {
+			if err != nil || os != "linux" || arch != a.config.Architecture || image.Architecture != arch ||
+				!application && (image.ID != a.config.Image || image.Config.Labels[imageRecipeLabel] != a.config.ImageRecipeSHA256) {
 				return ErrIdentity
 			}
 			endpoint.CPUs, endpoint.MemoryBytes = a.config.CPUs, a.config.MemoryBytes
 			platform = "linux/" + a.config.Architecture
+		}
+		if application {
+			current, pinned, err := a.imageContext().frozenApplicationImage(ctx, d, plan.Job.Identity)
+			if err != nil || !pinned || current != image.ID {
+				return ErrIdentity
+			}
 		}
 		name := containerName(plan.Job.Identity)
 		if _, exists, err := d.inspect(ctx, name); err != nil || exists {
@@ -361,6 +421,9 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		command := []string{"timeout", "-k", "30", strconv.FormatInt(plan.Job.WallSeconds+timeoutGrace, 10),
 			"python3", "-E", "-s", "/relay/runner/run.py", "--manifest", "/relay/manifest.json", "--execute",
 			"--staging-root", "/relay/staging", "--work-root", workRoot, "--network-mode", mode}
+		if cached {
+			command[12] = "/staging-cache"
+		}
 		if spec.Timeouts.ExecutionDeadline != "" || spec.SeparateStart() {
 			// The trusted supervisor is PID 1, so its final exit also tears down any
 			// remaining descendants in Docker's private PID namespace.
@@ -372,23 +435,32 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		}
 		ownedLabels := labels(plan, operation)
 		ownedLabels[labelPrefix+"engine"] = engine
+		if cached {
+			ownedLabels[labelPrefix+"cache"] = "volumes/v1"
+		}
+		if application {
+			ownedLabels[labelPrefix+"application-image"] = image.ID
+		}
 		id, err := d.create(ctx, containerSpec{Name: name, Image: image.ID, Platform: platform, Labels: ownedLabels, Internet: mode == "required",
-			SecretTmpfs: len(spec.WorkloadSecrets) > 0,
-			CPUs:        endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
-			Command: command})
+			SecretTmpfs: len(spec.WorkloadSecrets) > 0, NoHealthcheck: application,
+			CPUs: endpoint.CPUs, MemoryBytes: endpoint.MemoryBytes, PIDs: a.config.MaxProcesses,
+			Command: command, Mounts: cacheMounts(bindings)})
 		if err != nil {
 			return err
 		}
-		proof := marker{Preparation: operation, Plan: plan.Digest(), Container: id, EngineID: engine}
-		if err = a.stage(ctx, d, id, plan, modules, manifestJSON); err == nil && spec.SeparateStart() {
+		proof := marker{Preparation: operation, Plan: plan.Digest(), Container: id, EngineID: engine, Cache: cached}
+		if application {
+			proof.ApplicationImage = image.ID
+		}
+		if err = a.stage(ctx, d, id, plan, modules, manifestJSON, cached); err == nil && (spec.SeparateStart() || cached || application) {
 			var info containerInfo
 			var exists bool
 			info, exists, err = d.inspect(ctx, name)
-			if err == nil && (!exists || info.ID != id || info.Started() || info.Image != image.ID) {
+			if err == nil && (!exists || info.ID != id || info.Started() || info.Image != image.ID || application && !validApplicationContainer(info, image.ID)) {
 				err = ErrIdentity
 			}
 			if err == nil {
-				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON)
+				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON, bindings, "")
 				proof.Manifest = provider.Digest(manifestJSON)
 			}
 		}
@@ -412,11 +484,11 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 
 // stage streams one tar archive into the stopped container. Both the remote copy and
 // the local writer, which verifies every frozen object, must succeed.
-func (a *Adapter) stage(ctx context.Context, d docker, container string, plan provider.Plan, modules map[string]string, manifest []byte) error {
+func (a *Adapter) stage(ctx context.Context, d docker, container string, plan provider.Plan, modules map[string]string, manifest []byte, cached bool) error {
 	reader, writer := io.Pipe()
 	written := make(chan error, 1)
 	go func() {
-		err := a.writeStaging(ctx, writer, plan, modules, manifest)
+		err := a.writeStaging(ctx, writer, plan, modules, manifest, cached)
 		_ = writer.CloseWithError(err)
 		written <- err
 	}()
@@ -441,7 +513,7 @@ type tarEntry struct {
 	data []byte
 }
 
-func (a *Adapter) writeStaging(ctx context.Context, w io.Writer, plan provider.Plan, modules map[string]string, manifest []byte) error {
+func (a *Adapter) writeStaging(ctx context.Context, w io.Writer, plan provider.Plan, modules map[string]string, manifest []byte, cached bool) error {
 	now := a.clock.Now().UTC().Truncate(time.Second)
 	tw := tar.NewWriter(w)
 	header := func(name string, kind byte, uid int, size int64) error {
@@ -466,6 +538,9 @@ func (a *Adapter) writeStaging(ctx context.Context, w io.Writer, plan provider.P
 		if _, err := tw.Write(e.data); err != nil {
 			return err
 		}
+	}
+	if cached {
+		return tw.Close()
 	}
 	type staged struct {
 		path   string
@@ -560,7 +635,7 @@ func (a *Adapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, oper
 			info.Config.Labels[labelPrefix+"plan"] != string(plan.Digest()) {
 			return ErrIdentity
 		}
-		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, 4096)
+		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
 		var staged marker
 		if err != nil || !found || json.Unmarshal(raw, &staged) != nil {
 			return err
@@ -569,7 +644,46 @@ func (a *Adapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, oper
 		if err := d.verifyEngine(ctx, engine); err != nil {
 			return err
 		}
-		if staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine}) {
+		applicationID, pinned, err := a.imageContext().frozenApplicationImage(ctx, d, plan.Job.Identity)
+		if err != nil || pinned != (plan.Job.Inputs.ApplicationImage != nil) ||
+			pinned && !validApplicationContainer(info, applicationID) ||
+			!pinned && info.Config.Labels[labelPrefix+"application-image"] != "" {
+			return ErrIdentity
+		}
+		if staged.Cache || pinned {
+			var bindings []cacheBinding
+			if staged.Cache {
+				if info.Config.Labels[labelPrefix+"cache"] != "volumes/v1" {
+					return ErrIdentity
+				}
+				bindings, err = a.activeCachePlan(ctx, plan)
+				if err != nil || len(bindings) == 0 {
+					return ErrIdentity
+				}
+			} else if info.Config.Labels[labelPrefix+"cache"] != "" {
+				return ErrIdentity
+			}
+			manifest, _, err := runnerplan.Build(plan)
+			if err != nil {
+				return ErrRequest
+			}
+			if err := cacheManifest(manifest, plan, bindings); err != nil {
+				return err
+			}
+			rawManifest, _ := json.Marshal(manifest)
+			modules, err := runnerassets.Sources()
+			if err != nil {
+				return err
+			}
+			verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings, staged.Verification)
+			if err != nil || staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine, Verification: verified, Manifest: provider.Digest(rawManifest), Cache: staged.Cache, ApplicationImage: applicationID}) {
+				return ErrIdentity
+			}
+			observation = provider.PreparationObservation{Status: provider.ReconciliationFound, Prepared: &provider.Prepared{
+				Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID, engine), Ready: true, Private: true, VerificationSHA256: verified, ManifestSHA256: staged.Manifest}}
+			return nil
+		}
+		if info.Config.Labels[labelPrefix+"cache"] != "" || staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine}) {
 			return nil
 		}
 		observation = provider.PreparationObservation{Status: provider.ReconciliationFound, Prepared: &provider.Prepared{
@@ -632,9 +746,20 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 			outcome = rejected("preparation_mismatch")
 			return nil
 		}
+		applicationID, pinned, imageErr := a.imageContext().frozenApplicationImage(ctx, d, prepared.Identity)
+		if imageErr != nil || pinned && !validApplicationContainer(info, applicationID) ||
+			!pinned && labels[labelPrefix+"application-image"] != "" {
+			outcome = rejected("readiness_invalidated")
+			return nil
+		}
 		controlled := info.Config.Labels[labelPrefix+"execution-control"] == "prepare_then_start"
 		if controlled != (start != nil) {
 			outcome = rejected("start_authorization_required")
+			return nil
+		}
+		cached := info.Config.Labels[labelPrefix+"cache"] == "volumes/v1"
+		if info.Config.Labels[labelPrefix+"cache"] != "" && !cached {
+			outcome = rejected("preparation_mismatch")
 			return nil
 		}
 		rawDeadline := info.Config.Labels[labelPrefix+"execution-deadline"]
@@ -650,6 +775,11 @@ func (a *Adapter) submit(ctx context.Context, prepared provider.Prepared, start 
 			before, _ := time.Parse(time.RFC3339, start.StartBefore)
 			if !a.clock.Now().Before(before) {
 				outcome = startExpired(*start)
+				return nil
+			}
+		} else if cached {
+			if err = a.checkCachedStart(ctx, d, info, prepared); err != nil {
+				outcome = rejected("readiness_invalidated")
 				return nil
 			}
 		}

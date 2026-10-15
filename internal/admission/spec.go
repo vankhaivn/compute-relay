@@ -31,6 +31,8 @@ var (
 type Source struct {
 	Kind           string              `json:"kind"`
 	ObjectID       domain.ObjectID     `json:"object_id,omitempty"`
+	SHA256         domain.SHA256Digest `json:"sha256,omitempty"`
+	Bytes          *int64              `json:"bytes,omitempty"`
 	URL            string              `json:"url,omitempty"`
 	ExpectedSHA256 domain.SHA256Digest `json:"expected_sha256,omitempty"`
 }
@@ -45,18 +47,39 @@ type Output struct {
 	Required bool   `json:"required"`
 	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
+
+// ApplicationImage names one immutable, workspace-owned Docker/OCI archive.
+// Its digest and byte count are mandatory when the image is selected.
+type ApplicationImage struct {
+	ObjectID domain.ObjectID     `json:"object_id"`
+	SHA256   domain.SHA256Digest `json:"sha256"`
+	Bytes    int64               `json:"bytes"`
+}
+
+// Retention is frozen with the job. A zero after-collection delay requests
+// cleanup after verified publication; an uncollected lifetime permits discard
+// only after a terminal attempt with confirmed remote inactivity (or no start).
+type Retention struct {
+	AfterCollectionSeconds *int64 `json:"after_collection_seconds,omitempty"`
+	UncollectedMaxSeconds  *int64 `json:"uncollected_max_seconds,omitempty"`
+}
+
 type Spec struct {
 	WorkloadSecrets  []workloadsecret.Slot `json:"workload_secrets,omitempty"`
 	ExecutionControl string                `json:"execution_control,omitempty"`
 	ResultCollection string                `json:"result_collection,omitempty"`
+	Retention        *Retention            `json:"retention,omitempty"`
 	APIVersion       string                `json:"api_version"`
 	Name             string                `json:"name"`
 	Profile          string                `json:"profile"`
 	Labels           map[string]string     `json:"labels,omitempty"`
 	Bundle           struct {
-		ObjectID domain.ObjectID `json:"object_id"`
+		ObjectID domain.ObjectID     `json:"object_id"`
+		SHA256   domain.SHA256Digest `json:"sha256,omitempty"`
+		Bytes    *int64              `json:"bytes,omitempty"`
 	} `json:"bundle"`
-	Execution struct {
+	ApplicationImage *ApplicationImage `json:"application_image,omitempty"`
+	Execution        struct {
 		Kind             string            `json:"kind"`
 		Command          []string          `json:"command"`
 		WorkingDirectory string            `json:"working_directory,omitempty"`
@@ -178,6 +201,12 @@ func Parse(raw []byte) (Request, error) {
 }
 
 func semantic(s Spec) error {
+	if !validObjectExpectation(s.Bundle.SHA256, s.Bundle.Bytes) {
+		return ErrSpec
+	}
+	if image := s.ApplicationImage; image != nil && (!image.ObjectID.Valid() || !image.SHA256.Valid() || image.Bytes < 1 || image.Bytes > 2<<30) {
+		return ErrSpec
+	}
 	if !workloadsecret.ValidSlots(s.WorkloadSecrets) || len(s.WorkloadSecrets) > 0 && !s.SeparateStart() {
 		return ErrSpec
 	}
@@ -215,6 +244,9 @@ func semantic(s Spec) error {
 	names := map[string]bool{}
 	targets := []string{}
 	for _, in := range s.Inputs {
+		if in.Source.Kind == "object" && !validObjectExpectation(in.Source.SHA256, in.Source.Bytes) {
+			return ErrSpec
+		}
 		name := strings.ToLower(in.Name)
 		if names[name] {
 			return ErrSpec
@@ -233,6 +265,13 @@ func semantic(s Spec) error {
 		targets = append(targets, out.Path)
 	}
 	return nil
+}
+
+func validObjectExpectation(sha domain.SHA256Digest, size *int64) bool {
+	if (sha == "") != (size == nil) {
+		return false
+	}
+	return size == nil || sha.Valid() && *size >= 0
 }
 func overlaps(paths []string, next string) bool {
 	n := strings.ToLower(next)

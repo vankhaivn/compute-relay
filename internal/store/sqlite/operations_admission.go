@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostcache"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
@@ -95,7 +96,11 @@ func retryInputs(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job doma
 	} else if r.Attempt.State.Execution != domain.ExecutionNotSubmitted {
 		return result, operations.ErrUnresolved
 	}
-	if len(r.Objects) != 1+len(r.Request.Spec().Inputs) {
+	expected := 1 + len(r.Request.Spec().Inputs)
+	if r.Request.Spec().ApplicationImage != nil {
+		expected++
+	}
+	if len(r.Objects) != expected {
 		return result, operations.ErrInputs
 	}
 	for _, ref := range r.Objects {
@@ -222,6 +227,10 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 				return err
 			}
 		}
+		if c.Kind == domain.OperationCleanup {
+			result, err = admitCleanupOperation(ctx, tx, c, target, now)
+			return err
+		}
 		id, err := randomID("op_", 16)
 		if err != nil {
 			return err
@@ -233,24 +242,6 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		r := operationRow{Record: operations.Record{Operation: op, Effect: operations.Pending}}
 		if c.Kind == domain.OperationCollect {
 			r.Effect = operations.CollectionRequested
-		}
-		if c.Kind == domain.OperationCleanup {
-			plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, now, "")
-			if err != nil {
-				return err
-			}
-			r.Resource = plan.resource
-			if err = insertOperation(ctx, tx, c, r); err != nil {
-				return err
-			}
-			if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
-				return err
-			}
-			if err = saveOperationReceipt(ctx, tx, c, r.Record); err != nil {
-				return err
-			}
-			result = r.Record
-			return nil
 		}
 		if err = insertOperation(ctx, tx, c, r); err != nil {
 			return err
@@ -282,6 +273,46 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		return operations.Record{}, err
 	}
 	return result, nil
+}
+
+// admitCleanupOperation is the single durable acceptance path for an explicit
+// request or a due, admission-declared retention rule. Both use the same frozen
+// target checks, resource snapshots, operation record and replay receipt.
+func admitCleanupOperation(ctx context.Context, tx *sql.Tx, c operations.Command, target admission.Record, now time.Time) (operations.Record, error) {
+	if c.Kind != domain.OperationCleanup || c.Validate() != nil || c.WorkspaceID != target.Job.WorkspaceID || c.JobID != target.Job.ID || c.Request.AttemptID != target.Attempt.ID {
+		return operations.Record{}, ErrInvalid
+	}
+	plan, err := eligibleCleanup(ctx, tx, target, c.Request.DiscardUncollected, now, "")
+	if err != nil {
+		return operations.Record{}, err
+	}
+	id, err := randomID("op_", 16)
+	if err != nil {
+		return operations.Record{}, err
+	}
+	op, err := domain.NewOperation(domain.OperationID(id), c.WorkspaceID, c.JobID, c.Request.AttemptID, c.Kind, now)
+	if err != nil {
+		return operations.Record{}, ErrInvalid
+	}
+	row := operationRow{Record: operations.Record{Operation: op, Effect: operations.Pending}, Resource: plan.resource}
+	if err = insertOperation(ctx, tx, c, row); err != nil {
+		return operations.Record{}, err
+	}
+	if err = snapshotCleanupResources(ctx, tx, op, plan.resources); err != nil {
+		return operations.Record{}, err
+	}
+	if err = inheritConfirmedCleanupResources(ctx, tx, op); err != nil {
+		return operations.Record{}, err
+	}
+	if c.Request.DiscardUncollected && !plan.collected {
+		if err = discardPendingCollection(ctx, tx, target, now); err != nil {
+			return operations.Record{}, err
+		}
+	}
+	if err = saveOperationReceipt(ctx, tx, c, row.Record); err != nil {
+		return operations.Record{}, err
+	}
+	return row.Record, nil
 }
 
 func controlLimit(ctx context.Context, tx *sql.Tx, c operations.Command, retry bool) error {
@@ -323,6 +354,17 @@ func createRetry(ctx context.Context, tx *sql.Tx, target admission.Record, r ope
 	_, err = tx.ExecContext(ctx, `INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?,?)`, string(target.Job.WorkspaceID), string(target.Job.ID), id, a.Number, nonce, string(state), string(a.State.Orchestration), a.Revision, created, created)
 	if err != nil {
 		return r, dbError(err)
+	}
+	if err = pinHostCacheRetry(ctx, tx,
+		hostcache.Attempt{WorkspaceID: target.Job.WorkspaceID, JobID: target.Job.ID, AttemptID: target.Attempt.ID},
+		hostcache.Attempt{WorkspaceID: target.Job.WorkspaceID, JobID: target.Job.ID, AttemptID: a.ID}, now); err != nil {
+		return r, err
+	}
+	if err = pinHostApplicationImageRetry(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, a.ID, now); err != nil {
+		return r, err
+	}
+	if err = storageAdmissionInTx(ctx, tx, target.Job.WorkspaceID, target.Job.ID, a.ID, target.Profile, target.Objects, now); err != nil {
+		return r, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE jobs SET active_attempt_id=? WHERE workspace_id=? AND job_id=? AND active_attempt_id=?`, id, string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID))
 	if err != nil {

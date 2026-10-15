@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 )
 
 // jobs is reached only after the existing server's auth, Host/Origin, rate, body,
@@ -115,6 +116,14 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 		respondError(w, r, 404, domain.CodeInputNotFound, domain.FailureStageInputPreparation, "referenced input is missing or not visible")
 	case errors.Is(err, admission.ErrNotFound):
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "job not found or not visible")
+	case errors.Is(err, hoststorage.ErrHardLimit), errors.Is(err, hoststorage.ErrUnknown), errors.Is(err, hoststorage.ErrIneligible):
+		reason, message := "host_storage_limit", "host storage budget does not permit new work; inspect connection storage"
+		if errors.Is(err, hoststorage.ErrUnknown) || errors.Is(err, hoststorage.ErrIneligible) {
+			reason, message = "host_storage_unknown", "host storage is awaiting a complete observation or pending cleanup; wait and inspect connection storage"
+		}
+		respond(w, 422, ErrorEnvelope{Error: ErrorBody{Code: domain.CodeResourceRequirementUnsatisfied,
+			Message: message, Stage: domain.FailureStageValidation, RequestID: RequestID(r.Context()),
+			RecommendedAction: domain.RecommendedActionWait, Details: map[string]string{domain.ReasonDetail: reason}}})
 	case errors.Is(err, admission.ErrHostUnhealthy):
 		respondError(w, r, 422, domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "host health does not permit new work; inspect connection health")
 	case errors.Is(err, admission.ErrRequirements):

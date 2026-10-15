@@ -51,8 +51,8 @@ func checkFaultCatalog(root string, raw []byte) ([]faultCase, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&catalog) != nil || d.Decode(new(any)) != io.EOF || catalog.Version != 1 || len(catalog.Cases) != 25 {
-		return nil, errors.New("fault matrix must contain exactly 25 version-1 cases")
+	if d.Decode(&catalog) != nil || d.Decode(new(any)) != io.EOF || catalog.Version != 1 || len(catalog.Cases) != 28 {
+		return nil, errors.New("fault matrix must contain exactly 28 version-1 cases")
 	}
 	functions := map[string]map[string]bool{}
 	scenarios := map[string]bool{}

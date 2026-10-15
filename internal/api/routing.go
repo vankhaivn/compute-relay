@@ -89,6 +89,14 @@ func (h *handler) routes() {
 	if h.config.Health != nil {
 		add("GET", "connections/{connection}/health", routePolicy{remote: true}, h.health)
 	}
+	if h.config.Storage != nil {
+		add("GET", "connections/{connection}/storage", routePolicy{}, h.storage)
+	}
+	if h.config.StorageCleanup != nil {
+		add("GET, POST", "connections/{connection}/storage/orphans/{orphan}/cleanup", routePolicy{remote: true, bodyLimit: 1024}, h.storageCleanup)
+		h.policies["POST "+base+"connections/{connection}/storage/orphans/{orphan}/cleanup"] = routePolicy{bodyLimit: 1024}
+		add("GET", "storage-cleanup-operations/{storageOperation}", routePolicy{}, h.storageCleanup)
+	}
 	if h.config.Authorizations != nil {
 		add("POST", "jobs/{job}/authorize", routePolicy{bodyLimit: executionauth.MaxRequestBytes}, h.authorizations)
 		add("GET", "jobs/{job}/authorizations/{authorization}", routePolicy{}, h.authorizations)
