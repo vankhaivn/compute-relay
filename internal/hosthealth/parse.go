@@ -40,6 +40,19 @@ func number(text, pattern string, max float64) (float64, bool) {
 	}
 	return n, true
 }
+
+// Apple top prints integer hundredths without zero padding (globalstats.c).
+// For example, its "0.9" represents 0.09%, not 0.9%.
+func topPercent(text string) (float64, bool) {
+	if !regexp.MustCompile(`^[0-9]{1,3}\.[0-9]{1,2}$`).MatchString(text) {
+		return 0, false
+	}
+	parts := strings.SplitN(text, ".", 2)
+	whole, _ := strconv.Atoi(parts[0])
+	hundredths, _ := strconv.Atoi(parts[1])
+	n := float64(whole) + float64(hundredths)/100
+	return n, n <= 100
+}
 func numeric(s Sample, pattern string, max float64) Metric[float64] {
 	if n, ok := number(sourceText(s), pattern, max); ok {
 		return value(n)
@@ -105,9 +118,9 @@ func Parse(resourceID string, observed time.Time, samples map[Source]Sample) Sna
 	cpus := regexp.MustCompile(`(?m)^CPU usage: ([0-9.]+)% user, ([0-9.]+)% sys, ([0-9.]+)% idle\s*$`).FindAllStringSubmatch(top, -1)
 	if len(cpus) > 0 {
 		last := cpus[len(cpus)-1]
-		u, uok := number(last[1], `^([0-9.]+)$`, 100)
-		sy, sok := number(last[2], `^([0-9.]+)$`, 100)
-		idle, iok := number(last[3], `^([0-9.]+)$`, 100)
+		u, uok := topPercent(last[1])
+		sy, sok := topPercent(last[2])
+		idle, iok := topPercent(last[3])
 		if uok && sok && iok && math.Abs(u+sy+idle-100) < 0.2 {
 			s.CPUUsagePercent = value(u + sy)
 		}

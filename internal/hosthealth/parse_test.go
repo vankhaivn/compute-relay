@@ -301,3 +301,35 @@ func TestNativeArchitectureQualification(t *testing.T) {
 		})
 	}
 }
+
+func TestTopUnpaddedHundredths(t *testing.T) {
+	f := fixtures(t)
+	data, err := os.ReadFile("testdata/top-unpadded.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f[Top] = Sample{Status: Available, Data: data}
+	s := Parse(testResource, time.Now(), f)
+	requireValue(t, s.CPUUsagePercent, 1.59)
+	for _, tt := range []struct {
+		text  string
+		want  float64
+		valid bool
+	}{
+		{"0.9", 0.09, true}, {"0.09", 0.09, true}, {"0.0", 0, true},
+		{"100.0", 100, true}, {"99.99", 99.99, true},
+		{"100.1", 0, false}, {"0.900", 0, false}, {"0", 0, false},
+		{".9", 0, false}, {"-1.0", 0, false}, {"1.2.3", 0, false},
+	} {
+		t.Run(tt.text, func(t *testing.T) {
+			got, ok := topPercent(tt.text)
+			if ok != tt.valid || ok && got != tt.want {
+				t.Fatalf("got %v, %v", got, ok)
+			}
+		})
+	}
+	f[Top] = Sample{Status: Available, Data: []byte("CPU usage: 10.0% user, 10.0% sys, 99.0% idle\n")}
+	if s := Parse(testResource, time.Now(), f); s.CPUUsagePercent.Status != Unavailable {
+		t.Fatal("invalid total must remain unavailable")
+	}
+}
