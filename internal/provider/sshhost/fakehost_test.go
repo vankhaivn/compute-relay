@@ -4,10 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
+	"os/exec"
 	"path"
 	"slices"
 	"strconv"
@@ -40,28 +42,35 @@ type fakeContainer struct {
 // fakeHost is an in-memory Docker host behind the executor seam. It understands only
 // the fixed argument arrays the adapter issues and records every command.
 type fakeHost struct {
-	t             *testing.T
-	mu            sync.Mutex
-	images        map[string]imageInfo
-	builds        int
-	buildExit     int
-	buildInput    []byte
-	platform      string
-	engineTime    time.Time
-	image         bool
-	registry      bool // pull succeeds
-	containers    map[string]*fakeContainer
-	calls         [][]string
-	wireCalls     [][]string
-	machineID     string
-	engineID      string
-	dockerHost    string
-	starts        int
-	created       int
-	secretPackets [][]byte
-	secretAckLost bool
-	closed        int
-	fail          func(args []string) (Result, bool)
+	t                      *testing.T
+	mu                     sync.Mutex
+	images                 map[string]imageInfo
+	builds                 int
+	buildExit              int
+	buildInput             []byte
+	platform               string
+	engineTime             time.Time
+	image                  bool
+	registry               bool // pull succeeds
+	containers             map[string]*fakeContainer
+	calls                  [][]string
+	wireCalls              [][]string
+	machineID              string
+	engineID               string
+	dockerHost             string
+	starts                 int
+	created                int
+	secretPackets          [][]byte
+	secretAckLost          bool
+	verifierOutput         [][]byte
+	verifierTarFault       func([]byte) []byte
+	verifierMutate         func(*fakeContainer)
+	verifierProducerStatus int
+	verifierOmitStatus     bool
+	verifierExit           int
+	verifierExtraOutput    []byte
+	closed                 int
+	fail                   func(args []string) (Result, bool)
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
@@ -144,6 +153,9 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.wireCalls = append(h.wireCalls, append([]string(nil), argv...))
+	if len(argv) > 2 && argv[0] == "/bin/sh" && argv[1] == "-c" && argv[2] == hostVerifierShell {
+		return h.runVerifier(ctx, argv, stdout), nil
+	}
 	if len(argv) > 0 && argv[0] == "/usr/bin/env" {
 		if len(argv) < 9 || !slices.Equal(argv[:5], []string{"/usr/bin/env", "-u", "DOCKER_CONTEXT", "-u", "DOCKER_HOST"}) || argv[6] != "--host" || argv[7] != h.dockerHost {
 			h.t.Fatal("Docker command did not pin the local socket", argv)
@@ -280,6 +292,64 @@ func (h *fakeHost) Run(ctx context.Context, _ map[string]string, argv []string, 
 		return Result{ExitCode: 125}, nil
 	}
 	return Result{}, nil
+}
+
+// runVerifier models the fixed host-local pipe while executing its real Python
+// parser. The archive never crosses the fake SSH stdout seam.
+func (h *fakeHost) runVerifier(ctx context.Context, argv []string, stdout io.Writer) Result {
+	if len(argv) != 14 || argv[3] != "relay-verifier" || argv[4] != "/usr/local/bin/docker" || argv[5] != h.dockerHost || argv[7] != fakeImageID || argv[8] != hostVerifierBootstrap {
+		h.t.Errorf("verifier did not pin Docker and the installed image: %q", argv)
+		return Result{ExitCode: 125}
+	}
+	c := h.find(argv[6])
+	if c == nil || argv[11] != c.labels[labelPrefix+"installation"] || argv[12] != c.labels[labelPrefix+"attempt"] || argv[13] != c.labels[labelPrefix+"preparation"] {
+		h.t.Error("verifier labels do not match frozen target labels")
+		return Result{ExitCode: 125}
+	}
+	source, err := base64.StdEncoding.DecodeString(argv[9])
+	if err != nil || string(source) != hostVerifierSource {
+		h.t.Error("verifier source changed")
+		return Result{ExitCode: 125}
+	}
+	if h.verifierMutate != nil {
+		h.verifierMutate(c)
+	}
+	var archive bytes.Buffer
+	copyResult := h.copy([]string{argv[6] + ":/relay", "-"}, nil, &archive)
+	if copyResult.ExitCode != 0 {
+		return copyResult
+	}
+	data := archive.Bytes()
+	if h.verifierTarFault != nil {
+		data = h.verifierTarFault(data)
+	}
+	producerStatus := h.verifierProducerStatus
+	if !h.verifierOmitStatus {
+		if _, err = fmt.Fprintf(stdout, "cp:%d\n", producerStatus); err != nil {
+			return Result{ExitCode: 125}
+		}
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		h.t.Skip("python3 is required for the fixed verifier contract test")
+	}
+	command := exec.CommandContext(ctx, python, "-B", "-E", "-s", "-c", hostVerifierBootstrap, argv[9], argv[10])
+	command.Stdin = bytes.NewReader(data)
+	var verified, diagnostic bytes.Buffer
+	command.Stdout, command.Stderr = &verified, &diagnostic
+	if err = command.Run(); err != nil {
+		h.t.Logf("fixed verifier rejected fake archive: %s", diagnostic.String())
+		return Result{ExitCode: 2, Stderr: diagnostic.Bytes()}
+	}
+	if h.verifierExit != 0 {
+		return Result{ExitCode: h.verifierExit}
+	}
+	h.verifierOutput = append(h.verifierOutput, append([]byte(nil), verified.Bytes()...))
+	_, _ = stdout.Write(verified.Bytes())
+	if len(h.verifierExtraOutput) > 0 {
+		_, _ = stdout.Write(h.verifierExtraOutput)
+	}
+	return Result{}
 }
 
 func (h *fakeHost) create(args []string, stdout io.Writer) Result {

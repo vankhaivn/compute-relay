@@ -2,13 +2,9 @@ package sshhost
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -92,44 +88,16 @@ func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
 	return !info.Started() && !info.State.Running && info.Config.User == "65534:65534" && info.Config.WorkingDir == "/relay" && len(info.Config.Entrypoint) == 0 && info.HostConfig.NetworkMode == network && info.HostConfig.PidMode == "" && !info.HostConfig.Privileged && len(info.HostConfig.Binds) == 0 && len(info.HostConfig.CapAdd) == 0 && slices.Contains(info.HostConfig.CapDrop, "ALL") && slices.Contains(info.HostConfig.SecurityOpt, "no-new-privileges") && info.HostConfig.RestartPolicy.Name == "no"
 }
 
-// Docker's archive API reads bytes from a stopped container. It executes no
-// workload, setup command or preparatory probe, including during start validation.
+// A separate, fixed verifier hashes the stopped container's archive on the
+// host. Only digests and sizes return over SSH; the target runs no code.
 func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte) (domain.SHA256Digest, error) {
 	req, err := admission.Parse(plan.Job.Specification)
 	if err != nil || !validStoppedPolicy(info, req.Spec().Network.RemoteInternet == "required", len(req.Spec().WorkloadSecrets) > 0) {
 		return "", ErrIdentity
 	}
 	expected := expectedStaging(plan, modules, manifest)
-	seen := map[string]bool{}
-	found, err := readTar(ctx, d, info.ID, "/relay", 2<<30, func(name string, r io.Reader) error {
-		if !strings.HasPrefix(name, "relay/") {
-			return ErrIdentity
-		}
-		name = strings.TrimPrefix(name, "relay/")
-		if name == "staged.json" {
-			n, err := io.Copy(io.Discard, io.LimitReader(r, 4097))
-			if err != nil || n > 4096 {
-				return ErrIdentity
-			}
-			return nil
-		}
-		file, exists := expected[name]
-		if !exists || seen[name] {
-			return ErrIdentity
-		}
-		seen[name] = true
-		hash := sha256.New()
-		n, err := io.Copy(hash, io.LimitReader(r, file.Bytes+1))
-		if err != nil || n != file.Bytes || domain.SHA256Digest(hex.EncodeToString(hash.Sum(nil))) != file.SHA256 {
-			return ErrIdentity
-		}
-		return nil
-	})
-	if err != nil {
+	if err := a.verifyStagedOnHost(ctx, d, info, plan.Job.Identity, expected); err != nil {
 		return "", err
-	}
-	if !found || len(seen) != len(expected) {
-		return "", ErrIdentity
 	}
 	return observedPreparationHash(info, plan.Digest(), expected), nil
 }
@@ -213,9 +181,8 @@ func (a *Adapter) Start(ctx context.Context, prepared provider.Prepared, authori
 	return a.submit(ctx, prepared, authorization, material)
 }
 
-// Recheck the small immutable control files and the observed container policy
-// immediately before writing start authority. Full byte verification is the
-// preceding read-only orchestration step; the runner verifies inputs before use.
+// Recheck small control files, container policy and all staged bytes before
+// writing start authority. The on-host verifier does not start the target.
 func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info containerInfo, p provider.Prepared, authorization provider.StartAuthorization) error {
 	if authorization.Validate(p) != nil || info.Config.Labels[labelPrefix+"plan"] != string(p.PlanSHA256) {
 		return ErrIdentity
@@ -290,6 +257,9 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 		return err
 	} else if exists {
 		return errStartClaimed
+	}
+	if err := a.verifyStagedOnHost(ctx, d, info, p.Identity, files); err != nil {
+		return err
 	}
 	return nil
 }
