@@ -45,10 +45,20 @@ type Output struct {
 	Required bool   `json:"required"`
 	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
+
+// Retention is frozen with the job. A zero after-collection delay requests
+// cleanup after verified publication; an uncollected lifetime permits discard
+// only after a terminal attempt with confirmed remote inactivity (or no start).
+type Retention struct {
+	AfterCollectionSeconds *int64 `json:"after_collection_seconds,omitempty"`
+	UncollectedMaxSeconds  *int64 `json:"uncollected_max_seconds,omitempty"`
+}
+
 type Spec struct {
 	WorkloadSecrets  []workloadsecret.Slot `json:"workload_secrets,omitempty"`
 	ExecutionControl string                `json:"execution_control,omitempty"`
 	ResultCollection string                `json:"result_collection,omitempty"`
+	Retention        *Retention            `json:"retention,omitempty"`
 	APIVersion       string                `json:"api_version"`
 	Name             string                `json:"name"`
 	Profile          string                `json:"profile"`
