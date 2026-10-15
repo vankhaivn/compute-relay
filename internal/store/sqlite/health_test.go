@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -57,6 +58,13 @@ func createHealthConnection(t *testing.T, f *managedStateFixture, w domain.Works
 	op, err := f.service.Submit(context.Background(), f.principals[w], w, "", key, []byte(body))
 	requireNoError(t, err)
 	f.run(t)
+	profiles, err := f.s.ActiveStorageProfiles(context.Background())
+	requireNoError(t, err)
+	for _, profile := range profiles {
+		requireNoError(t, f.s.RecordStorageScan(context.Background(), hoststorage.Scan{
+			Scope: profile.Scope, ObservedAt: f.clock.Now(), Objects: []hoststorage.Object{},
+		}))
+	}
 	return f.get(t, w, op.ConnectionID)
 }
 

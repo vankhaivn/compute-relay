@@ -9,6 +9,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/worker"
@@ -91,7 +92,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			return worker.Classify(err)
 		}
 		var p *domain.Problem
-		if errors.As(err, &p) || errors.Is(err, admission.ErrHostUnhealthy) || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
+		if errors.As(err, &p) || newWorkRefusalReason(err) != "" || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
 			return worker.Continue
 		}
 		return worker.Classify(err)
@@ -151,7 +152,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if errors.Is(resultErr, ErrPolicy) {
 			delay = 5 * time.Minute
 		}
-		if errors.Is(resultErr, admission.ErrHostUnhealthy) {
+		if newWorkRefusalReason(resultErr) != "" {
 			delay = 30 * time.Second
 		}
 		// Deterministic per-attempt jitter spreads observations while remaining reproducible.
@@ -206,8 +207,8 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return s.fail(domain.CodeUnsupportedCapability)
 		}
 		if err = s.consumeAuthorization(); err != nil {
-			if errors.Is(err, admission.ErrHostUnhealthy) {
-				return s.refuseNewWork()
+			if newWorkRefusalReason(err) != "" {
+				return s.refuseNewWork(err)
 			}
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
@@ -215,8 +216,8 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return err
 		}
 		if err = s.commit(Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prepID}); err != nil {
-			if errors.Is(err, admission.ErrHostUnhealthy) {
-				return s.refuseNewWork()
+			if newWorkRefusalReason(err) != "" {
+				return s.refuseNewWork(err)
 			}
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
@@ -298,8 +299,8 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			err = s.commit(Action{Kind: BeginSubmission})
 		}
 		if err != nil {
-			if errors.Is(err, admission.ErrHostUnhealthy) {
-				return s.refuseNewWork()
+			if newWorkRefusalReason(err) != "" {
+				return s.refuseNewWork(err)
 			}
 			if errors.Is(err, workloadsecret.ErrUnavailable) {
 				return nil
@@ -367,23 +368,40 @@ func (s *session) guardNewWork() error {
 	if ctx != nil {
 		s.ctx = ctx
 	}
-	if errors.Is(err, admission.ErrHostUnhealthy) {
-		return s.refuseNewWork()
+	if newWorkRefusalReason(err) != "" {
+		return s.refuseNewWork(err)
 	}
 	return err
 }
 
-func (s *session) refuseNewWork() error {
+func newWorkRefusalReason(err error) string {
+	switch {
+	case errors.Is(err, admission.ErrHostUnhealthy):
+		return "host_unhealthy"
+	case errors.Is(err, hoststorage.ErrHardLimit):
+		return "host_storage_limit"
+	case errors.Is(err, hoststorage.ErrUnknown):
+		return "host_storage_unknown"
+	default:
+		return ""
+	}
+}
+
+func (s *session) refuseNewWork(cause error) error {
+	reason := newWorkRefusalReason(cause)
+	if reason == "" {
+		return cause
+	}
 	w := s.work()
-	if w.Journal.Problem == nil || w.Journal.Problem.Details[domain.ReasonDetail] != "host_unhealthy" {
-		if err := s.commit(Action{Kind: RefuseNewWork}); err != nil {
+	if w.Journal.Problem == nil || w.Journal.Problem.Details[domain.ReasonDetail] != reason {
+		if err := s.commit(Action{Kind: RefuseNewWork, RefusalReason: reason}); err != nil {
 			if errors.Is(err, ErrPolicy) {
-				return admission.ErrHostUnhealthy
+				return cause
 			}
 			return err
 		}
 	}
-	return admission.ErrHostUnhealthy
+	return cause
 }
 
 func control[T any](ctx context.Context, limit time.Duration, fn func(context.Context) (T, error)) (value T, err error) {

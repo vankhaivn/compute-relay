@@ -8,6 +8,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 )
 
 // configureManaged changes future admission policy in the accepting transaction.
@@ -20,6 +21,9 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 		}
 		if configuration.MaxProcesses == 0 {
 			configuration.MaxProcesses = prior.view.Configuration.MaxProcesses
+		}
+		if configuration.StorageBudget == nil {
+			configuration.StorageBudget = prior.view.Configuration.StorageBudget
 		}
 	}
 	var health any
@@ -38,7 +42,7 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 		if err != nil {
 			return ErrInvalid
 		}
-	} else if configuration.HostHealth != nil {
+	} else if configuration.HostHealth != nil || configuration.StorageBudget != nil {
 		return connections.ErrRequest
 	}
 	profileName := ""
@@ -91,6 +95,14 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 			if err != nil {
 				return ErrCorrupt
 			}
+			budget := hoststorage.DefaultBudget()
+			if configuration.StorageBudget != nil {
+				budget = *configuration.StorageBudget
+			}
+			runtime, err = hoststorage.FreezeRuntimeBudget(runtime, budget)
+			if err != nil {
+				return ErrCorrupt
+			}
 		}
 		if runtime == nil {
 			runtime = []byte{}
@@ -99,7 +111,11 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 			return dbError(err)
 		}
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE managed_connections SET max_remote_wall_seconds=?,max_active_attempts=?,max_processes=?,host_health=?,current_profile=?,pending_operation='' WHERE connection_id=?`, configuration.MaxRemoteWallSeconds, configuration.MaxActiveAttempts, configuration.MaxProcesses, health, profileName, op.ConnectionID)
+	var storageSoft, storageHard any
+	if configuration.StorageBudget != nil {
+		storageSoft, storageHard = configuration.StorageBudget.SoftBytes, configuration.StorageBudget.HardBytes
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE managed_connections SET max_remote_wall_seconds=?,max_active_attempts=?,max_processes=?,host_health=?,storage_soft_bytes=?,storage_hard_bytes=?,current_profile=?,pending_operation='' WHERE connection_id=?`, configuration.MaxRemoteWallSeconds, configuration.MaxActiveAttempts, configuration.MaxProcesses, health, storageSoft, storageHard, profileName, op.ConnectionID)
 	if err != nil {
 		return dbError(err)
 	}

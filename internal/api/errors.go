@@ -14,6 +14,7 @@ import (
 )
 
 type ErrorBody struct {
+	Details               map[string]string        `json:"details,omitempty"`
 	Code                  domain.ErrorCode         `json:"code"`
 	Message               string                   `json:"message"`
 	Stage                 domain.FailureStage      `json:"stage"`

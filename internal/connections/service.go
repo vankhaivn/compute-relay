@@ -165,7 +165,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	if replay && record.Stage != "waiting_secret" {
 		return record.Operation, nil
 	}
-	if req.Configuration != nil && (req.Configuration.MaxActiveAttempts != 0 || req.Configuration.MaxProcesses != 0 || req.Configuration.HostHealth != nil) {
+	if req.Configuration != nil && (req.Configuration.MaxActiveAttempts != 0 || req.Configuration.MaxProcesses != 0 || req.Configuration.HostHealth != nil || req.Configuration.StorageBudget != nil) {
 		providerType := req.ProviderType
 		if connection != "" {
 			current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection)
@@ -174,7 +174,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 			}
 			providerType = current.ProviderType
 		}
-		if req.Configuration.HostHealth != nil && providerType != "ssh" {
+		if (req.Configuration.HostHealth != nil || req.Configuration.StorageBudget != nil) && providerType != "ssh" {
 			return Operation{}, ErrRequest
 		}
 		validator, ok := s.adapters[providerType].(ConfigurationValidator)

@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/jsonwire"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -171,7 +172,7 @@ func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
 				return managedSSHRuntimeConfig{}, ErrRequest
 			}
 		}
-		if jsonwire.Fields(fields, required, []string{"cpus", "memory_bytes", "host_health"}) != nil ||
+		if jsonwire.Fields(fields, required, []string{"cpus", "memory_bytes", "host_health", "storage_budget"}) != nil ||
 			!sshhost.ValidImageID(config.Image) || !sshhost.SupportedArchitecture(config.Architecture) || !domain.SHA256Digest(config.RecipeSHA256).Valid() ||
 			!sshhost.ValidResourceLimits(config.CPUs, config.MemoryBytes) {
 			return managedSSHRuntimeConfig{}, ErrRequest
@@ -181,6 +182,9 @@ func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
 	}
 	policy, err := hosthealth.PolicyFromRuntime(raw)
 	if err != nil {
+		return managedSSHRuntimeConfig{}, ErrRequest
+	}
+	if _, err := hoststorage.BudgetFromRuntime(raw); err != nil {
 		return managedSSHRuntimeConfig{}, ErrRequest
 	}
 	config.HostHealth = &policy

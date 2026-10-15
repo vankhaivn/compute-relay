@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -207,6 +208,14 @@ func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now 
 	if err := checkHostNewWork(ctx, tx, work.Job, now); err != nil {
 		return err
 	}
+	// Storage admission fences new preparation. Once a plan has crossed its
+	// preparation barrier, starting that exact prepared work does not reserve
+	// another container or content object.
+	if work.Journal.Plan == nil {
+		if err := checkStorageNewWork(ctx, tx, work.Job, now); err != nil {
+			return err
+		}
+	}
 	if work.Job.Request.Spec().Expired(now) || work.Gate != nil && work.Gate.Expired(now) {
 		return admission.ErrExpired
 	}
@@ -257,13 +266,23 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 			return err
 		}
 		if action.Kind == dispatch.RefuseNewWork {
-			if _, enabled := ctx.Value(hostEvidenceKey{}).(hostEvidence); !enabled {
+			var refusal, expected error
+			switch action.RefusalReason {
+			case "", "host_unhealthy":
+				if _, enabled := ctx.Value(hostEvidenceKey{}).(hostEvidence); !enabled {
+					return dispatch.ErrInvalid
+				}
+				refusal, expected = checkHostNewWork(ctx, tx, work.Job, now), admission.ErrHostUnhealthy
+			case "host_storage_limit":
+				refusal, expected = checkStorageNewWork(ctx, tx, work.Job, now), hoststorage.ErrHardLimit
+			case "host_storage_unknown":
+				refusal, expected = checkStorageNewWork(ctx, tx, work.Job, now), hoststorage.ErrUnknown
+			default:
 				return dispatch.ErrInvalid
 			}
-			err := checkHostNewWork(ctx, tx, work.Job, now)
-			if !errors.Is(err, admission.ErrHostUnhealthy) {
-				if err != nil {
-					return err
+			if !errors.Is(refusal, expected) {
+				if refusal != nil {
+					return refusal
 				}
 				return dispatch.ErrPolicy
 			}
@@ -317,6 +336,9 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 				return err
 			}
 			if err = releaseHostApplicationImagePins(ctx, tx, work.Job.Job.WorkspaceID, work.Job.Job.ID, work.Job.Attempt.ID, now); err != nil {
+				return err
+			}
+			if err = releaseAttemptStorageResourcesInTx(ctx, tx, work.Job.Job.WorkspaceID, work.Job.Job.ID, work.Job.Attempt.ID, now); err != nil {
 				return err
 			}
 		}

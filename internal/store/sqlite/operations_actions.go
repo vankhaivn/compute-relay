@@ -117,6 +117,9 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 			if err = releaseHostApplicationImagePins(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, now); err != nil {
 				return r, err
 			}
+			if err = releaseAttemptStorageResourcesInTx(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, now); err != nil {
+				return r, err
+			}
 		}
 		next, state, _, err := dispatch.Apply(work.Journal, state, dispatch.Action{Kind: dispatch.PreventDispatch}, now)
 		if err != nil {

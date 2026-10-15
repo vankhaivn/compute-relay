@@ -3,14 +3,13 @@ package sshhost
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/vankhaivn/compute-relay/internal/hostidentity"
 )
 
 var ErrResourceIdentity = errors.New("SSH scheduling resource identity unavailable or changed")
@@ -23,9 +22,7 @@ var (
 // resourceDigest namespaces native identifiers before they enter durable state.
 // Raw machine UUIDs, endpoint names and socket paths are never public evidence.
 func resourceDigest(kind, native string) string {
-	hash := hmac.New(sha256.New, []byte("compute-relay/scheduling-resource/v1"))
-	_, _ = hash.Write([]byte(kind + "\x00" + native))
-	return hex.EncodeToString(hash.Sum(nil))
+	return hostidentity.Digest(kind, native)
 }
 
 func readIdentity(ctx context.Context, exec executor, limit int64, args ...string) ([]byte, error) {

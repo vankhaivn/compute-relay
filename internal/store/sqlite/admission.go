@@ -263,6 +263,9 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err = pinHostApplicationImageAdmission(ctx, tx, w, domain.JobID(job), domain.AttemptID(attempt), profile, refs, now); err != nil {
 			return err
 		}
+		if err = storageAdmissionInTx(ctx, tx, w, domain.JobID(job), domain.AttemptID(attempt), profile, refs, now); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO events(workspace_id,job_id,event_id,sequence,attempt_id,type,occurred_at) VALUES(?,?,?,?,?,?,?)`, string(w), job, event, 1, attempt, string(domain.EventJobAccepted), created)
 		if err != nil {
 			return dbError(err)

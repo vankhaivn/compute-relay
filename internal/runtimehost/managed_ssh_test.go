@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 )
 
@@ -54,6 +56,20 @@ func (f *managedTestFixture) sshConnection(t *testing.T, key, password string) (
 	}
 	connection, err := f.services.connections.Get(ctx, f.actor, "app", op.ConnectionID)
 	requireNoError(t, err)
+	if connection.Selection != nil {
+		binding := f.binding(t, connection)
+		profile, _, err := f.host.store.ReadProfile(ctx, binding.Binding.Profile)
+		requireNoError(t, err)
+		scope, err := f.host.store.StorageScopeForProfile(ctx, "app", profile)
+		requireNoError(t, err)
+		if scope.Valid() {
+			now := time.Now().UTC()
+			if f.clock != nil {
+				now = f.clock.Now()
+			}
+			requireNoError(t, f.host.store.RecordStorageScan(ctx, hoststorage.Scan{Scope: scope, ObservedAt: now, Objects: []hoststorage.Object{}}))
+		}
+	}
 	return op, connection
 }
 

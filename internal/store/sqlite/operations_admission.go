@@ -358,6 +358,9 @@ func createRetry(ctx context.Context, tx *sql.Tx, target admission.Record, r ope
 	if err = pinHostApplicationImageRetry(ctx, tx, target.Job.WorkspaceID, target.Job.ID, target.Attempt.ID, a.ID, now); err != nil {
 		return r, err
 	}
+	if err = storageAdmissionInTx(ctx, tx, target.Job.WorkspaceID, target.Job.ID, a.ID, target.Profile, target.Objects, now); err != nil {
+		return r, err
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE jobs SET active_attempt_id=? WHERE workspace_id=? AND job_id=? AND active_attempt_id=?`, id, string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID))
 	if err != nil {
 		return r, dbError(err)

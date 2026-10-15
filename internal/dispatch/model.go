@@ -174,6 +174,7 @@ const (
 )
 
 type Action struct {
+	RefusalReason      string
 	SecretsAvailable   bool
 	Kind               Kind
 	Plan               *provider.Plan

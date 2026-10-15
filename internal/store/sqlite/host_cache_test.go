@@ -15,12 +15,14 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hostcache"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 const cacheMachine = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-const cacheEngine = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+const cacheNativeEngine = "synthetic-engine-01"
+const cacheEngine = "32f98314e1cb06675fb34e7e86cb0ceee4a3471818a8fc21696da26b79b7e397"
 
 func cacheAdmissionFixture(t *testing.T) admissionFixture {
 	t.Helper()
@@ -46,6 +48,18 @@ func cacheAdmissionFixture(t *testing.T) admissionFixture {
 			[]byte(`{"schema_version":3,"image":"sha256:`+strings.Repeat("a", 64)+`","architecture":"amd64","recipe_sha256":"`+strings.Repeat("b", 64)+`","machine_id":"`+cacheMachine+`","engine_id":"`+cacheEngine+`"}`))
 		requireNoError(t, err)
 	}
+	_, err := f.s.db.Exec(`INSERT INTO managed_resource_accounts(account_scope,resource_kind,resource_scope)
+	 VALUES(?,'machine',?)`, f.profile.AccountScope, "resource_"+cacheMachine)
+	requireNoError(t, err)
+	// Direct store fixtures do not run the managed SSH scanner. Supply the
+	// complete empty-machine observation that production admission refreshes
+	// before accepting new work.
+	info, err := f.s.Info(ctx)
+	requireNoError(t, err)
+	requireNoError(t, f.s.RecordStorageScan(ctx, hoststorage.Scan{
+		Scope:      hoststorage.Scope{InstallationID: domain.RuntimeInstallationID(info.InstallationID), MachineID: cacheMachine, EngineID: cacheEngine},
+		ObservedAt: time.Now().UTC(), Objects: []hoststorage.Object{},
+	}))
 	return f
 }
 
@@ -363,7 +377,7 @@ func TestHostCachePinsReleaseOnlyForExactConfirmedCleanup(t *testing.T) {
 		Resource: cleanup.Resource{Request: provider.CleanupResourceRequest{
 			CleanupRequest: provider.CleanupRequest{Remote: provider.RemoteReference{
 				Identity: provider.Identity{InstallationID: key.InstallationID},
-				Resource: `{"container":"relay-job","id":"` + container + `","engine_id":"` + string(key.EngineID) + `"}`,
+				Resource: `{"container":"relay-job","id":"` + container + `","engine_id":"` + cacheNativeEngine + `"}`,
 			}}, Purpose: "staging"}},
 		Result: operations.ResourceResult{Purpose: "staging", State: operations.ResourceDeleted},
 	}
@@ -376,11 +390,18 @@ func TestHostCachePinsReleaseOnlyForExactConfirmedCleanup(t *testing.T) {
 		t.Fatalf("unresolved cleanup released pins: %v", err)
 	}
 	wrong := staging
-	wrong.Resource.Request.Remote.Resource = `{"container":"relay-job","id":"` + strings.Repeat("f", 64) + `","engine_id":"` + string(key.EngineID) + `"}`
+	wrong.Resource.Request.Remote.Resource = `{"container":"relay-job","id":"` + strings.Repeat("f", 64) + `","engine_id":"` + cacheNativeEngine + `"}`
 	if err := f.s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		return releaseHostCachePinsOnCleanup(ctx, tx, op, []cleanup.ResourceWork{wrong}, now)
 	}); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("different container cleanup released pins: %v", err)
+	}
+	wrongEngine := staging
+	wrongEngine.Resource.Request.Remote.Resource = `{"container":"relay-job","id":"` + container + `","engine_id":"another-engine-01"}`
+	if err := f.s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		return releaseHostCachePinsOnCleanup(ctx, tx, op, []cleanup.ResourceWork{wrongEngine}, now)
+	}); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("different native engine released pins: %v", err)
 	}
 	inventory, err := f.s.Inventory(ctx, key.InstallationID, key.MachineID, key.EngineID)
 	requireNoError(t, err)

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "scope": {"resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "connection_revision": 7},
+  "observed_at": "2026-10-15T09:40:00Z",
+  "scan_state": "complete",
+  "precision": "upper_bound",
+  "machine": {"charged_bytes": 10737418240, "cache_bytes": 2147483648, "image_size_upper_bound": 3221225472, "attempt_writable_bytes": 1073741824, "orphan_bytes": 1073741824, "unobserved_reservation_delta_bytes": 3221225472},
+  "workspaces": [{"workspace_id": "example", "referenced_bytes": 3221225472, "attempt_writable_bytes": 1073741824}],
+  "other_workspaces_referenced_bytes": 2147483648,
+  "cache": {"generation_count": 2, "charged_bytes": 2147483648, "live_pin_count": 3},
+  "retention": [{"job_id": "job_example", "attempt_id": "att_example", "due_at": "2026-10-15T10:00:00Z", "status": "failed", "operation_id": "op_example", "pending": true}],
+  "orphans": [{"orphan_id": "orphan_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "class": "container", "charged_bytes": 1073741824, "eligible_for_preview": false}],
+  "foreign": {"containers": 1, "volumes": 0, "images": 1},
+  "budget": {"configured": {"soft_bytes": 68719476736, "hard_bytes": 85899345920}, "effective": {"soft_bytes": 68719476736, "hard_bytes": 85899345920}, "reserved_bytes": 3221225472, "charged_bytes": 10737418240, "state": "below_soft"},
+  "truncated": false
+}

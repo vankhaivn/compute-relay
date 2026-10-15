@@ -31,9 +31,20 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		if old.SubmitStarted || (old.Phase != Local && old.Phase != Ready) || state.Cancellation != domain.CancellationNotRequested || state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted {
 			return Journal{}, state, "", ErrConflict
 		}
-		p := provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "Host health refuses new preparation or execution.").WithDetail(domain.ReasonDetail, "host_unhealthy").WithRecommendedAction(domain.RecommendedActionWait)
+		reason, message := a.RefusalReason, "Host health refuses new preparation or execution."
+		switch reason {
+		case "", "host_unhealthy":
+			reason = "host_unhealthy"
+		case "host_storage_limit":
+			message = "Host storage budget refuses new preparation or execution."
+		case "host_storage_unknown":
+			message = "Host storage observation is incomplete or stale."
+		default:
+			return Journal{}, state, "", ErrInvalid
+		}
+		p := provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, message).WithDetail(domain.ReasonDetail, reason).WithRecommendedAction(domain.RecommendedActionWait)
 		j.Problem = &p
-		if old.Plan == nil {
+		if old.Plan == nil && reason == "host_unhealthy" {
 			j.Phase = Failed
 			next.Orchestration = domain.OrchestrationFailed
 			next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable

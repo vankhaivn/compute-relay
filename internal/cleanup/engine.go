@@ -103,9 +103,17 @@ func (c Config) Valid() bool {
 
 type Engine struct {
 	repo     WorkRepository
+	storage  StorageRepository
 	resolver Resolver
 	config   Config
 	slots    chan struct{}
+}
+
+// WithStorage adds the sibling exact storage-target journal to this same
+// fenced cleanup worker. Ordinary attempt operations retain their own ledger.
+func (e *Engine) WithStorage(repo StorageRepository) *Engine {
+	e.storage = repo
+	return e
 }
 
 func New(repo WorkRepository, resolver Resolver, cfg Config) (*Engine, error) {
@@ -132,6 +140,9 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	}
 	w, err := e.repo.ClaimCleanup(ctx, worker.LeaseDuration)
 	if err != nil || w == nil {
+		if err == nil && e.storage != nil {
+			return e.runStorageOnce(ctx)
+		}
 		return false, err
 	}
 	if !w.Valid() {

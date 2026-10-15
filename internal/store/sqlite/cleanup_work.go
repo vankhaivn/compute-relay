@@ -220,6 +220,9 @@ func (s *Store) CompleteCleanup(ctx context.Context, w cleanup.Work, o cleanup.O
 			if err = releaseHostApplicationImagePinsOnCleanup(ctx, tx, before.Operation, resources, now); err != nil {
 				return err
 			}
+			if err = releaseAttemptStorageResourcesInTx(ctx, tx, before.Operation.WorkspaceID, before.Operation.JobID, before.Operation.AttemptID, now); err != nil {
+				return err
+			}
 		}
 		if err = releaseWorkLease(ctx, tx, cleanupLease(w.Lease), now); err != nil {
 			return err

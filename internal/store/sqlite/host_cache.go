@@ -14,6 +14,8 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hostcache"
+	"github.com/vankhaivn/compute-relay/internal/hostidentity"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 )
 
@@ -98,6 +100,13 @@ func pinHostCacheAdmission(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID
 			continue
 		}
 		seen[key] = true
+		fenced, err := storageContentFencedInTx(ctx, tx, storageScope(target), "cache", string(key.sha), key.bytes)
+		if err != nil {
+			return err
+		}
+		if fenced {
+			return hoststorage.ErrIneligible
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO host_cache_pins(workspace_id,job_id,attempt_id,installation_id,machine_id,engine_id,sha256,bytes,created_at)
 		 VALUES(?,?,?,?,?,?,?,?,?)`, w, job, attempt, target.installation, target.machine, target.engine, key.sha, key.bytes, now.Format(time.RFC3339Nano))
 		if err != nil {
@@ -170,7 +179,7 @@ func releaseHostCachePinsOnCleanup(ctx context.Context, tx *sql.Tx, op domain.Op
 		EngineID string `json:"engine_id"`
 	}
 	if json.Unmarshal([]byte(staging.Resource.Request.Remote.Resource), &remote) != nil ||
-		!domain.SHA256Digest(remote.ID).Valid() || !domain.SHA256Digest(remote.EngineID).Valid() {
+		!domain.SHA256Digest(remote.ID).Valid() || !storageNativeEngine.MatchString(remote.EngineID) {
 		return ErrCorrupt
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT installation_id,engine_id FROM host_cache_pins
@@ -184,7 +193,7 @@ func releaseHostCachePinsOnCleanup(ctx context.Context, tx *sql.Tx, op domain.Op
 			_ = rows.Close()
 			return dbError(err)
 		}
-		if installation != string(staging.Resource.Request.Remote.Identity.InstallationID) || engine != remote.EngineID {
+		if installation != string(staging.Resource.Request.Remote.Identity.InstallationID) || engine != hostidentity.Digest("docker-engine-id", remote.EngineID) {
 			_ = rows.Close()
 			return ErrCorrupt
 		}
@@ -364,7 +373,7 @@ func (s *Store) BeginWrite(ctx context.Context, owner hostcache.Attempt, generat
 	if !owner.Valid() {
 		return hostcache.ErrInvalid
 	}
-	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, _ time.Time) error {
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
 		g, err := cacheGenerationInTx(ctx, tx, generationID)
 		if err != nil {
 			return err
@@ -374,6 +383,18 @@ func (s *Store) BeginWrite(ctx context.Context, owner hostcache.Attempt, generat
 		}
 		if g.WriterPhase != hostcache.WriterIntent {
 			return hostcache.ErrUnknown
+		}
+		fenced, err := storageContentFencedInTx(ctx, tx, hoststorage.Scope{InstallationID: g.Key.InstallationID,
+			MachineID: g.Key.MachineID, EngineID: g.Key.EngineID}, "cache", string(g.Key.SHA256), g.Key.Bytes)
+		if err != nil {
+			return err
+		}
+		if fenced {
+			return hoststorage.ErrIneligible
+		}
+		if err := commitStorageReservationInTx(ctx, tx, hoststorage.Scope{InstallationID: g.Key.InstallationID,
+			MachineID: g.Key.MachineID, EngineID: g.Key.EngineID}, "cache", g.Key.SHA256, g.Key.Bytes, g.OperationID, now); err != nil {
+			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE host_cache_generations SET writer_phase='begun' WHERE generation_id=? AND state='claimed' AND writer_phase='intent'`, g.ID)
 		return dbError(err)

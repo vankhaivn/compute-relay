@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
@@ -40,6 +42,9 @@ func applicationImageFlow(t *testing.T, separate bool) (*dispatchFixture, schedu
 	requireNoError(t, err)
 	_, err = f.s.db.Exec(`INSERT INTO managed_resource_accounts(account_scope,resource_kind,resource_scope) VALUES(?,'machine',?)`, f.profile.AccountScope, f.profile.ResourceScope)
 	requireNoError(t, err)
+	info, err := f.s.Info(ctx)
+	requireNoError(t, err)
+	requireNoError(t, f.s.RecordStorageScan(ctx, hoststorage.Scan{Scope: hoststorage.Scope{InstallationID: domain.RuntimeInstallationID(info.InstallationID), MachineID: cacheMachine, EngineID: cacheEngine}, ObservedAt: f.clock.Now(), Objects: []hoststorage.Object{}}))
 	attachGate(t, f)
 	image, err := f.blobs.Put(ctx, domain.ObjectMetadata{WorkspaceID: "a", ID: "image", Bytes: -1}, bytes.NewReader([]byte("offline-image-archive")))
 	requireNoError(t, err)
@@ -166,5 +171,37 @@ func assertApplicationImagePlan(t *testing.T, f *dispatchFixture, id scheduler.I
 	journal := f.journal(t, id)
 	if journal.Plan == nil || journal.Plan.Job.Inputs == nil || journal.Plan.Job.Inputs.ApplicationImage == nil || *journal.Plan.Job.Inputs.ApplicationImage != image {
 		t.Fatalf("dispatch plan lost exact frozen image metadata: %+v", journal.Plan)
+	}
+}
+
+func TestApplicationImageStaleStorageScanHoldsAuthorizationUntilRefresh(t *testing.T) {
+	f, id, image := applicationImageFlow(t, false)
+	grant, _, _ := grantAuthorization(t, f, id)
+	f.clock.advance(3 * time.Minute)
+	worked, err := f.engine.RunOnce(t.Context(), "image-stale-storage")
+	if !worked || !errors.Is(err, hoststorage.ErrUnknown) {
+		t.Fatalf("stale storage refusal: worked=%v err=%v", worked, err)
+	}
+	if journal := f.journal(t, id); journal.Phase != dispatch.Local || journal.Plan != nil {
+		t.Fatalf("stale scan moved attempt beyond local queue: %+v", journal)
+	}
+	if state := f.state(t, id); state.Orchestration != domain.OrchestrationPreparing || state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted {
+		t.Fatalf("stale scan changed claimed, unsubmitted execution: %+v", state)
+	}
+	var consumed int
+	requireNoError(t, f.s.db.QueryRow(`SELECT count(*) FROM attempt_grants WHERE authorization_id=? AND consumed_at IS NOT NULL`, grant.AuthorizationID).Scan(&consumed))
+	if consumed != 0 || f.backend.Stats().PrepareCalls != 0 || f.backend.Stats().SubmitCalls != 0 {
+		t.Fatalf("stale scan consumed authority or mutated remote state: consumed=%d stats=%+v", consumed, f.backend.Stats())
+	}
+	info, err := f.s.Info(t.Context())
+	requireNoError(t, err)
+	requireNoError(t, f.s.RecordStorageScan(t.Context(), hoststorage.Scan{Scope: hoststorage.Scope{InstallationID: domain.RuntimeInstallationID(info.InstallationID), MachineID: cacheMachine, EngineID: cacheEngine}, ObservedAt: f.clock.Now(), Objects: []hoststorage.Object{}}))
+	// The refused claim retains the ordinary bounded dispatch backoff.
+	f.clock.advance(40 * time.Second)
+	applicationImageSubmitted(t, f, id)
+	assertApplicationImagePlan(t, f, id, image)
+	requireNoError(t, f.s.db.QueryRow(`SELECT count(*) FROM attempt_grants WHERE authorization_id=? AND consumed_at IS NOT NULL`, grant.AuthorizationID).Scan(&consumed))
+	if consumed != 1 || f.backend.Stats().PrepareCalls != 1 || f.backend.Stats().SubmitCalls != 1 {
+		t.Fatalf("refresh did not resume original authority once: consumed=%d stats=%+v", consumed, f.backend.Stats())
 	}
 }

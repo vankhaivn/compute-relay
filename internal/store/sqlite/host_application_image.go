@@ -11,7 +11,9 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostidentity"
 	"github.com/vankhaivn/compute-relay/internal/hostimages"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 )
 
 var _ hostimages.Repository = (*Store)(nil)
@@ -179,6 +181,27 @@ func (s *Store) BeginImageLoad(ctx context.Context, g hostimages.Generation, ima
 	}
 	var begun bool
 	err = s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		var elected bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM host_application_images
+		 WHERE generation_id=? AND operation_id=? AND state='preparing' AND prepare_lease_until>?)`,
+			g.ID, g.OperationID, now.Format(time.RFC3339Nano)).Scan(&elected); err != nil {
+			return dbError(err)
+		}
+		if !elected {
+			return nil
+		}
+		fenced, err := storageContentFencedInTx(ctx, tx, hoststorage.Scope{InstallationID: g.Key.InstallationID,
+			MachineID: g.Key.MachineID, EngineID: g.Key.EngineID}, "image", string(g.Key.ArchiveSHA256), g.Key.ArchiveBytes)
+		if err != nil {
+			return err
+		}
+		if fenced {
+			return hoststorage.ErrIneligible
+		}
+		if err := commitStorageReservationInTx(ctx, tx, hoststorage.Scope{InstallationID: g.Key.InstallationID,
+			MachineID: g.Key.MachineID, EngineID: g.Key.EngineID}, "image", g.Key.ArchiveSHA256, g.Key.ArchiveBytes, g.OperationID, now); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, `UPDATE host_application_images SET state='loading',expected_image_id=?,rootfs_diff_ids=?,loading_at=?
 		 WHERE generation_id=? AND operation_id=? AND state='preparing' AND prepare_lease_until>?`,
 			imageID, string(encodedDiffs), now.Format(time.RFC3339Nano), g.ID, g.OperationID, now.Format(time.RFC3339Nano))
@@ -300,6 +323,13 @@ func pinHostApplicationImageAdmission(ctx context.Context, tx *sql.Tx, w domain.
 		if target == nil {
 			return admission.ErrRequirements
 		}
+		fenced, err := storageContentFencedInTx(ctx, tx, storageScope(target), "image", string(ref.Object.SHA256), ref.Object.Bytes)
+		if err != nil {
+			return err
+		}
+		if fenced {
+			return hoststorage.ErrIneligible
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO host_application_image_pins
 		 (workspace_id,job_id,attempt_id,installation_id,machine_id,engine_id,archive_sha256,archive_bytes,object_id,created_at)
 		 VALUES(?,?,?,?,?,?,?,?,?,?)`, w, job, attempt, target.installation, target.machine, target.engine,
@@ -352,7 +382,7 @@ func releaseHostApplicationImagePinsOnCleanup(ctx context.Context, tx *sql.Tx, o
 		EngineID string `json:"engine_id"`
 	}
 	if json.Unmarshal([]byte(staging.Resource.Request.Remote.Resource), &remote) != nil ||
-		!domain.SHA256Digest(remote.ID).Valid() || !domain.SHA256Digest(remote.EngineID).Valid() ||
+		!domain.SHA256Digest(remote.ID).Valid() || !storageNativeEngine.MatchString(remote.EngineID) ||
 		!staging.Resource.Request.Remote.Identity.InstallationID.Valid() {
 		return ErrCorrupt
 	}
@@ -360,7 +390,7 @@ func releaseHostApplicationImagePinsOnCleanup(ctx context.Context, tx *sql.Tx, o
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM host_application_image_pins
 	 WHERE workspace_id=? AND job_id=? AND attempt_id=? AND released_at=''
 	 AND (installation_id!=? OR engine_id!=?))`, op.WorkspaceID, op.JobID, op.AttemptID,
-		staging.Resource.Request.Remote.Identity.InstallationID, remote.EngineID).Scan(&mismatch); err != nil {
+		staging.Resource.Request.Remote.Identity.InstallationID, hostidentity.Digest("docker-engine-id", remote.EngineID)).Scan(&mismatch); err != nil {
 		return dbError(err)
 	}
 	if mismatch {
