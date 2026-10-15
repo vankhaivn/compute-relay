@@ -69,7 +69,7 @@ func (a *managedKaggleAdapter) Profile(binding domain.ProviderBinding, accountSc
 }
 
 func (*managedKaggleAdapter) ValidateConfiguration(c connections.Configuration) error {
-	if c.MaxProcesses != 0 {
+	if c.MaxProcesses != 0 || c.HostHealth != nil {
 		return connections.ErrRequest
 	}
 	return c.Validate()

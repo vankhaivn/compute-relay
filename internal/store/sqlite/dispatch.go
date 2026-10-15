@@ -204,6 +204,9 @@ func checkHandle(work dispatch.Work, h dispatch.Handle) error {
 }
 
 func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now time.Time) error {
+	if err := checkHostNewWork(ctx, tx, work.Job, now); err != nil {
+		return err
+	}
 	if work.Job.Request.Spec().Expired(now) || work.Gate != nil && work.Gate.Expired(now) {
 		return admission.ErrExpired
 	}
@@ -252,6 +255,18 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 		}
 		if err = checkHandle(work, h); err != nil {
 			return err
+		}
+		if action.Kind == dispatch.RefuseNewWork {
+			if _, enabled := ctx.Value(hostEvidenceKey{}).(hostEvidence); !enabled {
+				return dispatch.ErrInvalid
+			}
+			err := checkHostNewWork(ctx, tx, work.Job, now)
+			if !errors.Is(err, admission.ErrHostUnhealthy) {
+				if err != nil {
+					return err
+				}
+				return dispatch.ErrPolicy
+			}
 		}
 		if action.Kind == dispatch.ExpireDispatch && !work.Job.Request.Spec().Expired(now) && (work.Gate == nil || !work.Gate.Expired(now)) {
 			return dispatch.ErrInvalid

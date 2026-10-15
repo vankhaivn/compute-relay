@@ -10,6 +10,8 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/hostwatchdog"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
@@ -54,6 +56,9 @@ func (c ManagedServeConfig) accelerator() string {
 }
 
 type managedServices struct {
+	guard          *managedHostHealthGuard
+	watchdog       *hostwatchdog.Service
+	health         *hosthealth.Service
 	secrets        *workloadsecret.Service
 	connections    *connections.Service
 	authorizations *executionauth.Service
@@ -91,6 +96,18 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return nil, ErrState
 	}
 	result := &managedServices{connections: service, authorizations: permits}
+	result.health, err = hosthealth.NewService(h.access, h.store, managedHealthSampler{credentials: service, collect: sshhost.CollectHealth}, clock{})
+	if err != nil {
+		return nil, ErrState
+	}
+	result.guard, err = h.newHostHealthGuard(result.health, clock{})
+	if err != nil {
+		return nil, ErrState
+	}
+	result.watchdog, err = hostwatchdog.New(h.access, h.store, sshhost.NewWatchdogRemote(service))
+	if err != nil {
+		return nil, ErrState
+	}
 	if vault == nil {
 		return result, nil // Unsupported protected storage never falls back or fails old jobs.
 	}
@@ -115,6 +132,7 @@ func (h *Host) composeManaged(ctx context.Context, config ManagedServeConfig, va
 		return nil, ErrState
 	}
 	result.dispatcher.WithSecrets(pool)
+	result.dispatcher.WithNewWorkGuard(result.guard)
 	collectionConfig := collection.DefaultConfig()
 	collectionConfig.Workers = config.MaxWorkers
 	result.collector, err = collection.New(h.store, resolver, h.results, clock{}, collectionConfig)

@@ -177,15 +177,12 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 			return err
 		}
 		key := receiptKey{w, "admission", createJobOperation, keyHash, string(req.Hash()), admission.CanonicalVersion, admission.ErrConflict}
-		prior, found, err := replayOrCreate(ctx, tx, key, nil)
+		prior, err := replayAdmission(ctx, tx, w, keyHash, req)
 		if err != nil {
 			return err
 		}
-		if found {
-			if json.Unmarshal([]byte(prior.raw), &receipt) != nil || receipt.JobID != prior.job || receipt.AttemptID != prior.attempt || !receipt.JobID.Valid() || !receipt.AttemptID.Valid() || receipt.Replay || receipt.Status != "queued" || receipt.CreatedAt.IsZero() || receipt.Links != admission.JobLinks(w, receipt.JobID) {
-				return ErrCorrupt
-			}
-			receipt.Replay = true
+		if prior != nil {
+			receipt = *prior
 			return nil
 		}
 		profile, refs, err := resolveJob(ctx, tx, w, req)
@@ -194,6 +191,9 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		}
 		if req.Spec().Expired(now) {
 			return admission.ErrExpired
+		}
+		if err = checkHostNewWork(ctx, tx, admission.Record{Job: domain.Job{WorkspaceID: w}, Profile: profile}, now); err != nil {
+			return err
 		}
 		var total, workspace int
 		err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(CASE WHEN j.workspace_id=? THEN 1 ELSE 0 END),0) FROM jobs j JOIN attempts a ON a.workspace_id=j.workspace_id AND a.job_id=j.job_id AND a.attempt_id=j.active_attempt_id WHERE a.orchestration NOT IN ('succeeded','failed','cancelled','timed_out')`, string(w)).Scan(&total, &workspace)

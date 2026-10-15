@@ -243,16 +243,18 @@ func shellCommand(env map[string]string, argv []string) (string, error) {
 }
 
 type boundedBuffer struct {
-	bytes.Buffer
-	limit int
+	buffer bytes.Buffer
+	limit  int
 }
 
+func (b *boundedBuffer) Bytes() []byte { return b.buffer.Bytes() }
+
 func (b *boundedBuffer) Write(p []byte) (int, error) {
-	if room := b.limit - b.Len(); room > 0 {
+	if room := b.limit - b.buffer.Len(); room > 0 {
 		if len(p) > room {
-			b.Buffer.Write(p[:room])
+			b.buffer.Write(p[:room])
 		} else {
-			b.Buffer.Write(p)
+			b.buffer.Write(p)
 		}
 	}
 	return len(p), nil

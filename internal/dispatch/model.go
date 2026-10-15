@@ -147,6 +147,12 @@ type Repository interface {
 type Resolver interface {
 	Resolve(provider.BindingSnapshot) (provider.Provider, error)
 }
+
+// NewWorkGuard runs only before a new preparation or start intent. Recovery,
+// observation, cancellation and collection never require new health authority.
+type NewWorkGuard interface {
+	BeforeNewWork(context.Context, admission.Record) (context.Context, error)
+}
 type Clock interface{ Now() time.Time }
 type systemClock struct{}
 
@@ -163,6 +169,7 @@ const (
 	Fault                 Kind = "fault"
 	PreventDispatch       Kind = "prevent_dispatch"
 	ExpireDispatch        Kind = "expire_dispatch"
+	RefuseNewWork         Kind = "refuse_new_work"
 	RequestReconciliation Kind = "request_reconciliation"
 )
 

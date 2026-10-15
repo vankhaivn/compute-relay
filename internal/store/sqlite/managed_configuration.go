@@ -7,6 +7,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/connections"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 )
 
 // configureManaged changes future admission policy in the accepting transaction.
@@ -20,6 +21,25 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 		if configuration.MaxProcesses == 0 {
 			configuration.MaxProcesses = prior.view.Configuration.MaxProcesses
 		}
+	}
+	var health any
+	var policy *hosthealth.Policy
+	if prior.view.ProviderType == "ssh" {
+		if prior.healthPolicy == nil {
+			return ErrCorrupt
+		}
+		effective, err := prior.healthPolicy.Apply(configuration.HostHealth)
+		if err != nil {
+			return connections.ErrRequest
+		}
+		policy = &effective
+		configuration.HostHealth = effective.Patch()
+		health, err = json.Marshal(effective)
+		if err != nil {
+			return ErrInvalid
+		}
+	} else if configuration.HostHealth != nil {
+		return connections.ErrRequest
 	}
 	profileName := ""
 	if prior.profile != "" {
@@ -59,15 +79,27 @@ func configureManaged(ctx context.Context, tx *sql.Tx, prior managedRecord, op c
 		if _, err = tx.ExecContext(ctx, `INSERT INTO profiles VALUES(?,?,1)`, profileName, profile.Binding.ConfigurationRevision); err != nil {
 			return dbError(err)
 		}
-		copied, err := tx.ExecContext(ctx, `INSERT INTO managed_profile_runtime(profile,revision,config) SELECT ?,?,config FROM managed_profile_runtime WHERE profile=? AND revision=?`, profileName, profile.Binding.ConfigurationRevision, oldBinding.Profile, oldBinding.ConfigurationRevision)
-		if err != nil {
+		var runtime []byte
+		if err := tx.QueryRowContext(ctx, `SELECT config FROM managed_profile_runtime WHERE profile=? AND revision=?`, oldBinding.Profile, oldBinding.ConfigurationRevision).Scan(&runtime); err != nil {
+			if err == sql.ErrNoRows {
+				return ErrCorrupt
+			}
 			return dbError(err)
 		}
-		if count, err := copied.RowsAffected(); err != nil || count != 1 {
-			return ErrCorrupt
+		if policy != nil {
+			runtime, err = hosthealth.FreezeRuntimePolicy(runtime, *policy)
+			if err != nil {
+				return ErrCorrupt
+			}
+		}
+		if runtime == nil {
+			runtime = []byte{}
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO managed_profile_runtime(profile,revision,config) VALUES(?,?,?)`, profileName, profile.Binding.ConfigurationRevision, runtime); err != nil {
+			return dbError(err)
 		}
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE managed_connections SET max_remote_wall_seconds=?,max_active_attempts=?,max_processes=?,current_profile=?,pending_operation='' WHERE connection_id=?`, configuration.MaxRemoteWallSeconds, configuration.MaxActiveAttempts, configuration.MaxProcesses, profileName, op.ConnectionID)
+	_, err := tx.ExecContext(ctx, `UPDATE managed_connections SET max_remote_wall_seconds=?,max_active_attempts=?,max_processes=?,host_health=?,current_profile=?,pending_operation='' WHERE connection_id=?`, configuration.MaxRemoteWallSeconds, configuration.MaxActiveAttempts, configuration.MaxProcesses, health, profileName, op.ConnectionID)
 	if err != nil {
 		return dbError(err)
 	}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "title": "Compute Relay host-watchdog-status v1alpha1",
+  "required": [
+    "status"
+  ],
+  "properties": {
+    "status": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "last_run",
+            "last_action"
+          ],
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "last_run": {
+              "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+            },
+            "last_action": {
+              "enum": [
+                "idle",
+                "unknown",
+                "unsupported",
+                "integrity_failed",
+                "critical_wait",
+                "stop_requested",
+                "stop_unknown",
+                "confirmed_inactive",
+                "ledger_full",
+                "attention_required"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

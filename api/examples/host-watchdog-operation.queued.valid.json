@@ -1,0 +1,10 @@
+{
+  "operation_id": "op_synthetic",
+  "connection_id": "con_synthetic",
+  "action": "install_host_watchdog",
+  "status": "queued",
+  "connection_revision": 2,
+  "created_at": "2026-10-15T00:00:00Z",
+  "replay": false,
+  "problem": null
+}

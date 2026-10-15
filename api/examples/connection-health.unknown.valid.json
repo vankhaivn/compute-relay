@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "resource_id": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "latest": null,
+  "guard": {
+    "level": "unknown",
+    "reasons": [
+      "health_not_observed"
+    ],
+    "refuse_new": true,
+    "stop": false
+  },
+  "history": [],
+  "policy": {
+    "warning_thermal_level": 1,
+    "critical_thermal_level": 2,
+    "warning_cpu_speed_percent": 90,
+    "critical_cpu_speed_percent": 50,
+    "warning_die_temperature_celsius": 90,
+    "critical_die_temperature_celsius": 95,
+    "low_battery_percent": 10,
+    "critical_duration_seconds": 30
+  }
+}

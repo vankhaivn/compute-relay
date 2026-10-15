@@ -1,0 +1,12 @@
+AppleRawCurrentCapacity = 7446
+AppleRawMaxCapacity = 7559
+PermanentFailureStatus = 0
+MaxCapacity = 7559
+CurrentCapacity = 7446
+BatteryInstalled = Yes
+CycleCount = 289
+DesignCapacity = 8790
+StateOfCharge = 99
+CycleCount = 289
+DesignCapacity = 8790
+Temperature = 3015

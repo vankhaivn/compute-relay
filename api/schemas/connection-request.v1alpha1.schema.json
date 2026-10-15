@@ -61,6 +61,9 @@
               "minimum": 1,
               "maximum": 65536,
               "description": "Maximum processes per container for an operator host."
+            },
+            "host_health": {
+              "$ref": "#/$defs/host_health"
             }
           }
         }
@@ -129,6 +132,9 @@
               "minimum": 1,
               "maximum": 65536,
               "description": "Maximum processes per container for an operator host."
+            },
+            "host_health": {
+              "$ref": "#/$defs/host_health"
             }
           }
         }
@@ -177,6 +183,9 @@
           }
         }
       ]
+    },
+    "host_health": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/host_health_configuration"
     }
   },
   "oneOf": [

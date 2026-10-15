@@ -1,0 +1,2 @@
+CPU usage: 1.16% user, 5.12% sys, 93.70% idle
+CPU usage: 0.9% user, 1.50% sys, 98.39% idle

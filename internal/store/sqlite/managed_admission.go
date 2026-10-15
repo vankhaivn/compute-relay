@@ -9,6 +9,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 )
 
 func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (connections.Record, error) {
@@ -75,6 +76,11 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			if in.Action == "install_image" && (prior.account == "" || prior.credential == "" || prior.view.Host == nil || prior.view.Host.Architecture != in.Installation.Architecture) {
 				return connections.ErrRequest
 			}
+			if in.Action == "remove" || in.Action == "replace_credential" {
+				if err = watchdogConnectionRetained(ctx, tx, prior); err != nil {
+					return err
+				}
+			}
 			if in.Action == "remove" {
 				if err = managedRemovalAllowed(ctx, tx, id); err != nil {
 					return err
@@ -82,6 +88,13 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			}
 			revision = prior.view.Revision + 1
 		default:
+			return connections.ErrRequest
+		}
+		providerType := in.ProviderType
+		if in.Action != "create" {
+			providerType = prior.view.ProviderType
+		}
+		if in.Configuration != nil && in.Configuration.HostHealth != nil && providerType != "ssh" {
 			return connections.ErrRequest
 		}
 		operationID, err := randomID("op_", 16)
@@ -96,7 +109,22 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 				wall = in.Configuration.MaxRemoteWallSeconds
 				maxActive, maxProcesses = in.Configuration.MaxActiveAttempts, in.Configuration.MaxProcesses
 			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at,max_remote_wall_seconds,max_active_attempts,max_processes) VALUES(?,?,?,?,?,'pending','enabled',?,?,?,?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp, wall, maxActive, maxProcesses)
+			var health any
+			if in.ProviderType == "ssh" {
+				var patch *hosthealth.PolicyPatch
+				if in.Configuration != nil {
+					patch = in.Configuration.HostHealth
+				}
+				policy, err := hosthealth.DefaultPolicy().Apply(patch)
+				if err != nil {
+					return connections.ErrRequest
+				}
+				health, err = json.Marshal(policy)
+				if err != nil {
+					return ErrInvalid
+				}
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO managed_connections(connection_id,workspace_id,provider_type,label,revision,authentication,new_work,pending_operation,updated_at,max_remote_wall_seconds,max_active_attempts,max_processes,host_health) VALUES(?,?,?,?,?,'pending','enabled',?,?,?,?,?,?)`, id, in.Workspace, in.ProviderType, in.Label, revision, operationID, stamp, wall, maxActive, maxProcesses, health)
 		} else {
 			newWork := prior.view.NewWork
 			authentication := prior.view.Authentication

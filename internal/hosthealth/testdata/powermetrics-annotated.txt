@@ -1,0 +1,3 @@
+Fan: 3241.52 rpm
+CPU die temperature: 100.29 C (power)
+GPU die temperature: 35.00 C

@@ -404,6 +404,53 @@
     },
     "provider_instance_id": {
       "$ref": "#/$defs/opaque_id"
+    },
+    "host_health_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "warning_thermal_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "critical_thermal_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "warning_cpu_speed_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "critical_cpu_speed_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "warning_die_temperature_celsius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 150
+        },
+        "critical_die_temperature_celsius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 150
+        },
+        "low_battery_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "critical_duration_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 900
+        }
+      }
     }
   }
 }

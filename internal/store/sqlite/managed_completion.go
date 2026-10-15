@@ -9,6 +9,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
@@ -184,6 +185,15 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 					return ErrInvalid
 				}
 				config := result.RuntimeConfig
+				if current.ProviderType == "ssh" {
+					if current.HostHealthPolicy == nil {
+						return ErrCorrupt
+					}
+					config, err = hosthealth.FreezeRuntimePolicy(config, *current.HostHealthPolicy)
+					if err != nil {
+						return ErrInvalid
+					}
+				}
 				if config == nil {
 					config = []byte{}
 				}

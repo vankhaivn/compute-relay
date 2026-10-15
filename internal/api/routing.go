@@ -70,7 +70,7 @@ func (h *handler) routes() {
 	add("POST", "objects", routePolicy{upload: true}, h.upload)
 	add("GET", "objects/{object}", routePolicy{}, h.object)
 	if h.config.Jobs != nil {
-		add("POST", "jobs", routePolicy{bodyLimit: admission.MaxRequestBytes}, h.jobs)
+		add("POST", "jobs", routePolicy{remote: h.config.Health != nil, bodyLimit: admission.MaxRequestBytes}, h.jobs)
 		add("POST", "jobs/validate", routePolicy{bodyLimit: admission.MaxRequestBytes}, h.jobs)
 		add("GET", "jobs/{job}", routePolicy{}, h.jobs)
 	}
@@ -80,6 +80,14 @@ func (h *handler) routes() {
 		add("GET", "connections/{connection}", routePolicy{}, h.connections)
 		add("POST", "connections/{connection}/actions", routePolicy{bodyLimit: connections.MaxRequestBytes}, h.connections)
 		add("GET", "connection-operations/{connectionOperation}", routePolicy{}, h.connections)
+	}
+	if h.config.HostWatchdog != nil {
+		add("POST", "connections/{connection}/host-watchdog/actions/{watchdogAction}", routePolicy{remote: true, bodyLimit: 4096}, h.watchdog)
+		add("GET", "connections/{connection}/host-watchdog", routePolicy{remote: true}, h.watchdog)
+		add("GET", "host-watchdog-operations/{watchdogOperation}", routePolicy{}, h.watchdog)
+	}
+	if h.config.Health != nil {
+		add("GET", "connections/{connection}/health", routePolicy{remote: true}, h.health)
 	}
 	if h.config.Authorizations != nil {
 		add("POST", "jobs/{job}/authorize", routePolicy{bodyLimit: executionauth.MaxRequestBytes}, h.authorizations)

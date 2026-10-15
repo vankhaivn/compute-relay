@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"slices"
 	"strings"
@@ -175,16 +176,28 @@ type Repository interface {
 }
 
 type Service struct {
-	access *auth.Service
-	repo   Repository
-	limits Limits
+	access    *auth.Service
+	repo      Repository
+	limits    Limits
+	preflight Preflight
 }
+
+// Preflight performs bounded read-only checks after authentication and exact
+// receipt replay, before the final local admission transaction.
+type Preflight interface {
+	PreflightAdmission(context.Context, domain.WorkspaceID, string, string, Request) (context.Context, *Receipt, error)
+}
+
+func (s *Service) WithPreflight(p Preflight) *Service { s.preflight = p; return s }
+
+// ErrHostUnhealthy retains the existing public resource-requirement error code.
+var ErrHostUnhealthy = errors.Join(ErrRequirements, errors.New("host health refuses new work"))
 
 func New(access *auth.Service, repo Repository, limits Limits) (*Service, error) {
 	if access == nil || repo == nil || !limits.Valid() {
 		return nil, ErrUnavailable
 	}
-	return &Service{access, repo, limits}, nil
+	return &Service{access: access, repo: repo, limits: limits}, nil
 }
 func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.WorkspaceID, key string, raw []byte) (Receipt, error) {
 	p, err := s.authorize(ctx, p, w, auth.Write)
@@ -201,6 +214,16 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	}
 	if err := req.Spec().CheckInputs(); err != nil {
 		return Receipt{}, err
+	}
+	if s.preflight != nil {
+		var prior *Receipt
+		ctx, prior, err = s.preflight.PreflightAdmission(ctx, w, p.TokenID(), k, req)
+		if err != nil {
+			return Receipt{}, err
+		}
+		if prior != nil {
+			return *prior, nil
+		}
 	}
 	return s.repo.AdmitJob(ctx, w, p.TokenID(), k, req, s.limits)
 }

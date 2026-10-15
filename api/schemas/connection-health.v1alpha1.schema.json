@@ -1,0 +1,1090 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay connection-health v1alpha1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "resource_id",
+    "latest",
+    "guard",
+    "history",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "resource_id": {
+      "type": "string",
+      "pattern": "^resource_[0-9a-f]{64}$"
+    },
+    "latest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/snapshot"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "guard": {
+      "$ref": "#/$defs/guard"
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/snapshot"
+      },
+      "maxItems": 120
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    }
+  },
+  "$defs": {
+    "platform_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "enum": [
+                "macos_intel",
+                "unsupported"
+              ]
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "thermal_level_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "cpu_speed_limit_percent_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "cpu_count_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "load_average_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "one",
+                "five",
+                "fifteen"
+              ],
+              "properties": {
+                "one": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000.0
+                },
+                "five": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000.0
+                },
+                "fifteen": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000.0
+                }
+              }
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "cpu_usage_percent_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "memory_total_bytes_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740992
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "memory_used_bytes_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740992
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "memory_free_percent_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "memory_pressure_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "warning",
+                "critical"
+              ]
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "gpu_usage_percent_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "docker_cpu_count_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "docker_memory_bytes_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740992
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "docker_data_free_bytes_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740992
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "power_source_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "enum": [
+                "ac",
+                "battery"
+              ]
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "battery_charge_percent_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "battery_charging_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "battery_temperature_celsius_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": -50.05,
+              "maximum": 100
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "battery_cycle_count_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "battery_health_percent_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 200
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "battery_condition_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "service_recommended",
+                "replace_soon",
+                "replace_now",
+                "service_battery"
+              ]
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "sleep_enabled_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "sudo_grant_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "enum": [
+                "absent",
+                "narrow",
+                "broader"
+              ]
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "cpu_die_temperature_celsius_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 150
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "gpu_die_temperature_celsius_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 150
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "fan_rpm_metric": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 30000
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/unavailable_metric"
+        }
+      ]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "observed_at",
+        "resource_id",
+        "platform",
+        "thermal_level",
+        "cpu_speed_limit_percent",
+        "cpu_count",
+        "load_average",
+        "cpu_usage_percent",
+        "memory_total_bytes",
+        "memory_used_bytes",
+        "memory_free_percent",
+        "memory_pressure",
+        "gpu_usage_percent",
+        "docker_cpu_count",
+        "docker_memory_bytes",
+        "docker_data_free_bytes",
+        "power_source",
+        "battery_charge_percent",
+        "battery_charging",
+        "battery_temperature_celsius",
+        "battery_cycle_count",
+        "battery_health_percent",
+        "battery_condition",
+        "sleep_enabled",
+        "sudo_grant",
+        "cpu_die_temperature_celsius",
+        "gpu_die_temperature_celsius",
+        "fan_rpm"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "resource_id": {
+          "type": "string",
+          "pattern": "^resource_[0-9a-f]{64}$"
+        },
+        "platform": {
+          "$ref": "#/$defs/platform_metric"
+        },
+        "thermal_level": {
+          "$ref": "#/$defs/thermal_level_metric"
+        },
+        "cpu_speed_limit_percent": {
+          "$ref": "#/$defs/cpu_speed_limit_percent_metric"
+        },
+        "cpu_count": {
+          "$ref": "#/$defs/cpu_count_metric"
+        },
+        "load_average": {
+          "$ref": "#/$defs/load_average_metric"
+        },
+        "cpu_usage_percent": {
+          "$ref": "#/$defs/cpu_usage_percent_metric"
+        },
+        "memory_total_bytes": {
+          "$ref": "#/$defs/memory_total_bytes_metric"
+        },
+        "memory_used_bytes": {
+          "$ref": "#/$defs/memory_used_bytes_metric"
+        },
+        "memory_free_percent": {
+          "$ref": "#/$defs/memory_free_percent_metric"
+        },
+        "memory_pressure": {
+          "$ref": "#/$defs/memory_pressure_metric"
+        },
+        "gpu_usage_percent": {
+          "$ref": "#/$defs/gpu_usage_percent_metric"
+        },
+        "docker_cpu_count": {
+          "$ref": "#/$defs/docker_cpu_count_metric"
+        },
+        "docker_memory_bytes": {
+          "$ref": "#/$defs/docker_memory_bytes_metric"
+        },
+        "docker_data_free_bytes": {
+          "$ref": "#/$defs/docker_data_free_bytes_metric"
+        },
+        "power_source": {
+          "$ref": "#/$defs/power_source_metric"
+        },
+        "battery_charge_percent": {
+          "$ref": "#/$defs/battery_charge_percent_metric"
+        },
+        "battery_charging": {
+          "$ref": "#/$defs/battery_charging_metric"
+        },
+        "battery_temperature_celsius": {
+          "$ref": "#/$defs/battery_temperature_celsius_metric"
+        },
+        "battery_cycle_count": {
+          "$ref": "#/$defs/battery_cycle_count_metric"
+        },
+        "battery_health_percent": {
+          "$ref": "#/$defs/battery_health_percent_metric"
+        },
+        "battery_condition": {
+          "$ref": "#/$defs/battery_condition_metric"
+        },
+        "sleep_enabled": {
+          "$ref": "#/$defs/sleep_enabled_metric"
+        },
+        "sudo_grant": {
+          "$ref": "#/$defs/sudo_grant_metric"
+        },
+        "cpu_die_temperature_celsius": {
+          "$ref": "#/$defs/cpu_die_temperature_celsius_metric"
+        },
+        "gpu_die_temperature_celsius": {
+          "$ref": "#/$defs/gpu_die_temperature_celsius_metric"
+        },
+        "fan_rpm": {
+          "$ref": "#/$defs/fan_rpm_metric"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "sudo_grant_broader"
+            ]
+          },
+          "maxItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "warning_thermal_level",
+        "critical_thermal_level",
+        "warning_cpu_speed_percent",
+        "critical_cpu_speed_percent",
+        "warning_die_temperature_celsius",
+        "critical_die_temperature_celsius",
+        "low_battery_percent",
+        "critical_duration_seconds"
+      ],
+      "properties": {
+        "warning_thermal_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "critical_thermal_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "warning_cpu_speed_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "critical_cpu_speed_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "warning_die_temperature_celsius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 150
+        },
+        "critical_die_temperature_celsius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 150
+        },
+        "low_battery_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "critical_duration_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 900
+        }
+      }
+    },
+    "guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "reasons",
+        "refuse_new",
+        "stop"
+      ],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "warning",
+            "critical",
+            "unknown",
+            "unsupported"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "health_policy_invalid",
+              "health_snapshot_invalid",
+              "health_core_metrics_unavailable",
+              "host_platform_unsupported",
+              "thermal_level_warning",
+              "thermal_level_critical",
+              "cpu_speed_warning",
+              "cpu_speed_critical",
+              "cpu_temperature_warning",
+              "cpu_temperature_critical",
+              "gpu_temperature_warning",
+              "gpu_temperature_critical",
+              "battery_low",
+              "critical_sustained",
+              "health_not_observed",
+              "health_not_reobserved",
+              "health_observation_failed",
+              "health_clock_changed",
+              "health_stale"
+            ]
+          },
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "sudo_grant_broader",
+              "system_sleep_enabled"
+            ]
+          },
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "refuse_new": {
+          "type": "boolean"
+        },
+        "stop": {
+          "type": "boolean"
+        },
+        "critical_since": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "level": {
+                "enum": [
+                  "ok",
+                  "unsupported"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refuse_new": {
+                "const": false
+              },
+              "stop": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "level": {
+                "enum": [
+                  "warning",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refuse_new": {
+                "const": true
+              },
+              "stop": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "level": {
+                "const": "critical"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "refuse_new": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "unavailable_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "unsupported"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "source_unavailable",
+            "source_missing_or_invalid",
+            "source_not_exposed",
+            "docker_vm_free_space_not_exposed",
+            "platform_unknown",
+            "platform_unsupported",
+            "sudo_grant_absent",
+            "output_limit",
+            "collection_timeout",
+            "command_failed"
+          ]
+        }
+      }
+    }
+  }
+}

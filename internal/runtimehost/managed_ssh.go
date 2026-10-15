@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/jsonwire"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -140,14 +141,15 @@ func (*managedSSHAdapter) ValidateConfiguration(c connections.Configuration) err
 }
 
 type managedSSHRuntimeConfig struct {
-	Version      int    `json:"schema_version"`
-	Image        string `json:"image"`
-	Architecture string `json:"architecture,omitempty"`
-	RecipeSHA256 string `json:"recipe_sha256,omitempty"`
-	CPUs         string `json:"cpus,omitempty"`
-	MemoryBytes  int64  `json:"memory_bytes,omitempty"`
-	MachineID    string `json:"machine_id,omitempty"`
-	EngineID     string `json:"engine_id,omitempty"`
+	Version      int                `json:"schema_version"`
+	Image        string             `json:"image"`
+	Architecture string             `json:"architecture,omitempty"`
+	RecipeSHA256 string             `json:"recipe_sha256,omitempty"`
+	CPUs         string             `json:"cpus,omitempty"`
+	MemoryBytes  int64              `json:"memory_bytes,omitempty"`
+	MachineID    string             `json:"machine_id,omitempty"`
+	EngineID     string             `json:"engine_id,omitempty"`
+	HostHealth   *hosthealth.Policy `json:"host_health,omitempty"`
 }
 
 func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
@@ -158,7 +160,7 @@ func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
 	}
 	switch config.Version {
 	case 1:
-		if jsonwire.Fields(fields, []string{"schema_version", "image"}, nil) != nil || !sshhost.ValidImage(config.Image) {
+		if jsonwire.Fields(fields, []string{"schema_version", "image"}, []string{"host_health"}) != nil || !sshhost.ValidImage(config.Image) {
 			return managedSSHRuntimeConfig{}, ErrRequest
 		}
 	case 2, 3:
@@ -169,7 +171,7 @@ func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
 				return managedSSHRuntimeConfig{}, ErrRequest
 			}
 		}
-		if jsonwire.Fields(fields, required, []string{"cpus", "memory_bytes"}) != nil ||
+		if jsonwire.Fields(fields, required, []string{"cpus", "memory_bytes", "host_health"}) != nil ||
 			!sshhost.ValidImageID(config.Image) || !sshhost.SupportedArchitecture(config.Architecture) || !domain.SHA256Digest(config.RecipeSHA256).Valid() ||
 			!sshhost.ValidResourceLimits(config.CPUs, config.MemoryBytes) {
 			return managedSSHRuntimeConfig{}, ErrRequest
@@ -177,6 +179,11 @@ func parseManagedSSHRuntimeConfig(raw []byte) (managedSSHRuntimeConfig, error) {
 	default:
 		return managedSSHRuntimeConfig{}, ErrRequest
 	}
+	policy, err := hosthealth.PolicyFromRuntime(raw)
+	if err != nil {
+		return managedSSHRuntimeConfig{}, ErrRequest
+	}
+	config.HostHealth = &policy
 	return config, nil
 }
 
