@@ -701,7 +701,7 @@ func (a *Adapter) verifyCachedReadiness(ctx context.Context, d docker, info cont
 	for name, source := range modules {
 		files["runner/relay_runner/"+name] = stagedFile{Bytes: int64(len(source)), SHA256: provider.Digest([]byte(source))}
 	}
-	if observedPreparationHash(info, planDigest, files) != verificationDigest {
+	if !preparationHashMatches(info, planDigest, files, verificationDigest) {
 		return ErrIdentity
 	}
 	return a.verifyStagedOnHost(ctx, d, info, identity, files)

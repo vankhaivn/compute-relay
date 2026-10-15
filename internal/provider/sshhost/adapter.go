@@ -460,7 +460,7 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 				err = ErrIdentity
 			}
 			if err == nil {
-				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON, bindings)
+				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON, bindings, "")
 				proof.Manifest = provider.Digest(manifestJSON)
 			}
 		}
@@ -675,7 +675,7 @@ func (a *Adapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, oper
 			if err != nil {
 				return err
 			}
-			verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings)
+			verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings, staged.Verification)
 			if err != nil || staged != (marker{Preparation: operation, Plan: plan.Digest(), Container: info.ID, EngineID: engine, Verification: verified, Manifest: provider.Digest(rawManifest), Cache: staged.Cache, ApplicationImage: applicationID}) {
 				return ErrIdentity
 			}

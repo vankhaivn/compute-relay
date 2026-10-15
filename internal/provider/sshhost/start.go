@@ -1,6 +1,7 @@
 package sshhost
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -64,6 +65,16 @@ func expectedStaging(plan provider.Plan, modules map[string]string, manifest []b
 // frozen job and complete runtime/input manifest. It contains no mutable file paths
 // outside this exact owned container and cannot be reused for another attempt.
 func observedPreparationHash(info containerInfo, planDigest domain.SHA256Digest, files map[string]stagedFile) domain.SHA256Digest {
+	return preparationHash(info, planDigest, files, true)
+}
+
+// preparationHashMatches preserves an original receipt only when the current
+// canonical proof or exact legacy proof matches; it never guesses mount orders.
+func preparationHashMatches(info containerInfo, planDigest domain.SHA256Digest, files map[string]stagedFile, recorded domain.SHA256Digest) bool {
+	return recorded.Valid() && (observedPreparationHash(info, planDigest, files) == recorded || preparationHash(info, planDigest, files, false) == recorded)
+}
+
+func preparationHash(info containerInfo, planDigest domain.SHA256Digest, files map[string]stagedFile, canonical bool) domain.SHA256Digest {
 	// Preserve the original v1 byte shape for stopped preparations made before
 	// cache mounts existed. Adding a field to containerInfo's HostConfig alone
 	// would otherwise change every legacy readiness revision on restart.
@@ -110,6 +121,15 @@ func observedPreparationHash(info containerInfo, planDigest domain.SHA256Digest,
 	if info.Config.Labels[labelPrefix+"application-image"] != "" {
 		version = "ssh-readiness/v3"
 	}
+	if canonical {
+		// Effective mount order is not part of the verified mount set and can
+		// change between Docker observations of the same stopped container.
+		info.Mounts = slices.Clone(info.Mounts)
+		slices.SortFunc(info.Mounts, func(a, b dockerMount) int {
+			return cmp.Compare(a.Destination, b.Destination)
+		})
+		version = "ssh-readiness/v4"
+	}
 	raw, _ := json.Marshal(struct {
 		Version    string
 		Container  string
@@ -139,7 +159,7 @@ func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
 
 // A separate, fixed verifier hashes the stopped container's archive on the
 // host. Only digests and sizes return over SSH; the target runs no code.
-func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte, bindings []cacheBinding) (domain.SHA256Digest, error) {
+func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte, bindings []cacheBinding, recorded domain.SHA256Digest) (domain.SHA256Digest, error) {
 	req, err := admission.Parse(plan.Job.Specification)
 	if err != nil || !validStoppedPolicy(info, req.Spec().Network.RemoteInternet == "required", len(req.Spec().WorkloadSecrets) > 0) {
 		return "", ErrIdentity
@@ -161,6 +181,12 @@ func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info contai
 	expected := expectedStaging(plan, modules, manifest, len(bindings) > 0)
 	if err := a.verifyStagedOnHost(ctx, d, info, plan.Job.Identity, expected); err != nil {
 		return "", err
+	}
+	if recorded != "" {
+		if !preparationHashMatches(info, plan.Digest(), expected, recorded) {
+			return "", ErrIdentity
+		}
+		return recorded, nil
 	}
 	return observedPreparationHash(info, plan.Digest(), expected), nil
 }
@@ -231,7 +257,7 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 				return ErrIdentity
 			}
 		}
-		verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings)
+		verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings, staged.Verification)
 		if err != nil {
 			return err
 		}
@@ -336,7 +362,7 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 			files["staging/"+input.Path] = stagedFile{input.Bytes, input.SHA256}
 		}
 	}
-	if observedPreparationHash(info, p.PlanSHA256, files) != p.VerificationSHA256 {
+	if !preparationHashMatches(info, p.PlanSHA256, files, p.VerificationSHA256) {
 		return ErrIdentity
 	}
 	// A stale/mismatched control file cannot be overwritten after a possible write.
