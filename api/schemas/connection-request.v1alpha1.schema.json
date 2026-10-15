@@ -185,51 +185,7 @@
       ]
     },
     "host_health": {
-      "type": "object",
-      "additionalProperties": false,
-      "minProperties": 1,
-      "properties": {
-        "warning_thermal_level": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 255
-        },
-        "critical_thermal_level": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 255
-        },
-        "warning_cpu_speed_percent": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 100
-        },
-        "critical_cpu_speed_percent": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 100
-        },
-        "warning_die_temperature_celsius": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 150
-        },
-        "critical_die_temperature_celsius": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 150
-        },
-        "low_battery_percent": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 100
-        },
-        "critical_duration_seconds": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 900
-        }
-      }
+      "$ref": "common.v1alpha1.schema.json#/$defs/host_health_configuration"
     }
   },
   "oneOf": [
