@@ -61,7 +61,7 @@ func TestGrantOrderingTagsAndContinuationsStayConservative(t *testing.T) {
 		{"additional_passwordless_after", "broader", []string{grantSamplerRule, "(root) NOPASSWD: /bin/sh"}},
 		{"passwordless_all_before", "broader", []string{"(ALL) NOPASSWD: ALL", grantSamplerRule}},
 		{"duplicate_sampler", "broader", []string{grantSamplerRule, grantSamplerRule}},
-		{"ordinary_admin_only", "broader", []string{"(ALL) ALL"}},
+		{"ordinary_admin_only", "absent", []string{"(ALL) ALL"}},
 		{"passwordless_tag_inherited", "broader", []string{grantSamplerRule + ", /bin/sh"}},
 		{"password_tag_then_passwordless", "broader", []string{"(ALL) PASSWD: ALL, NOPASSWD: /usr/bin/powermetrics"}},
 		{"passwordless_then_password_tag", "broader", []string{grantSamplerRule + ", PASSWD: /bin/sh"}},
@@ -79,6 +79,29 @@ func TestGrantOrderingTagsAndContinuationsStayConservative(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if got := ClassifyGrant(Sample{Status: Available, Data: []byte(grantListing("", test.rules...))}); got != test.want {
 				t.Fatal("grant classification", got, "want", test.want)
+			}
+		})
+	}
+}
+
+func TestGrantPasswordOnlyAndEmptyCompleteListingsAreAbsent(t *testing.T) {
+	for _, test := range []struct{ name, listing, want string }{
+		{"explicit_password_only", grantListing("authenticate, listpw=never", "(ALL) PASSWD: ALL"), "absent"},
+		{"ordinary_password_only", grantListing("authenticate, listpw=never", "(ALL) ALL"), "absent"},
+		{"default_authentication", grantListing("listpw=never", "(ALL) ALL"), "absent"},
+		{"several_password_only", grantListing("authenticate", "(root) PASSWD: ALL", "(ALL : ALL) ALL"), "absent"},
+		{"bare_complete_rule", "(ALL) PASSWD: ALL\n", "absent"},
+		{"empty_commands_with_defaults", grantListing("authenticate, listpw=never"), "absent"},
+		{"empty_commands_without_defaults", grantListing(""), "absent"},
+		{"unknown_defaults_password_only", grantListing("!authenticate", "(ALL) PASSWD: ALL"), "broader"},
+		{"unknown_defaults_empty", grantListing("exempt_group=admin"), "broader"},
+		{"incomplete_defaults_without_commands", "Matching Defaults entries for REDACTED on REDACTED:\n    authenticate, listpw=never\n", "broader"},
+		{"incomplete_commands_header", "User REDACTED may run the following commands on REDACTED\n", "broader"},
+		{"unparsed_successful_whitespace", " \n\t", "broader"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ClassifyGrant(Sample{Status: Available, Data: []byte(test.listing)}); got != test.want {
+				t.Fatal("passwordless authority classification", got, "want", test.want)
 			}
 		})
 	}

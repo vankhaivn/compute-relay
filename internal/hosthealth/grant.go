@@ -16,8 +16,8 @@ var (
 // ClassifyGrant describes passwordless command authority, not all listed access.
 // sudoers applies the last matching rule; listpw=any allows a passwordless listing
 // even when other rules require authentication. Recognize only complete simple
-// listings with one final sampler grant. Unknown Defaults, tags and wrapping stay
-// broader rather than implying that other listed commands require a password.
+// listings with one final sampler grant or only password-required access. Unknown
+// Defaults, tags and wrapping stay broader instead of implying authentication.
 func ClassifyGrant(sample Sample) string {
 	text := sourceText(sample)
 	if text == "" {
@@ -80,6 +80,9 @@ func ClassifyGrant(sample Sample) string {
 			return "narrow"
 		}
 		return "broader"
+	}
+	if commands || len(rules) != 0 {
+		return "absent"
 	}
 	return "broader"
 }
