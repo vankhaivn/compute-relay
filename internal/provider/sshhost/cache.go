@@ -658,7 +658,7 @@ func (a *Adapter) verifyCachedReadiness(ctx context.Context, d docker, info cont
 		} `json:"network"`
 		WorkloadSecrets []json.RawMessage `json:"workload_secrets"`
 	}
-	if json.Unmarshal(rawManifest, &manifest) != nil || !manifest.Bundle.SHA256.Valid() || manifest.Bundle.Bytes < 0 || len(manifest.Inputs) > 64 || !validStoppedPolicy(info, manifest.Network.RemoteInternet == "required", len(manifest.WorkloadSecrets) > 0) {
+	if json.Unmarshal(rawManifest, &manifest) != nil || !manifest.Bundle.SHA256.Valid() || manifest.Bundle.Bytes < 0 || len(manifest.Inputs) > 256 || !validStoppedPolicy(info, manifest.Network.RemoteInternet == "required", len(manifest.WorkloadSecrets) > 0) {
 		return ErrIdentity
 	}
 	objects := []stagedFile{{Bytes: manifest.Bundle.Bytes, SHA256: manifest.Bundle.SHA256}}

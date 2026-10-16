@@ -308,3 +308,20 @@ func TestDiskFullAdmissionLeavesNoPartialRows(t *testing.T) {
 		t.Fatal("disk failure consumed key")
 	}
 }
+
+func TestAdmissionStoresAndReloads256Inputs(t *testing.T) {
+	f := newAdmission(t)
+	ctx := context.Background()
+	inputs := make([]string, 256)
+	for i := range inputs {
+		inputs[i] = `{"name":"input-` + strconv.Itoa(i) + `","source":{"kind":"object","object_id":"data"},"target":"inputs/` + strconv.Itoa(i) + `.bin"}`
+	}
+	raw := strings.Replace(admissionJSON, `"inputs":[{"name":"data","source":{"kind":"object","object_id":"data"},"target":"data.txt"}]`, `"inputs":[`+strings.Join(inputs, ",")+`]`, 1)
+	r, err := f.service.Submit(ctx, f.p, "a", "many-inputs", []byte(raw))
+	requireNoError(t, err)
+	record, err := f.service.Get(ctx, f.p, "a", r.JobID)
+	requireNoError(t, err)
+	if len(record.Objects) != 257 || tableCount(t, f.s, "job_objects") != 257 {
+		t.Fatal("256-input job not stored completely", len(record.Objects))
+	}
+}

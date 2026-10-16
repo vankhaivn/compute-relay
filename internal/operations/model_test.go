@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 )
 
@@ -137,5 +139,27 @@ func TestOperationEffectsCannotInventTerminationOrRetryIdentity(t *testing.T) {
 	r.NewAttemptID = "other"
 	if r.Validate() == nil {
 		t.Fatal("cancel created a compute attempt")
+	}
+}
+
+func TestRetryInputsAcceptBundleImageAnd256Inputs(t *testing.T) {
+	attempt, err := domain.NewAttempt("attempt_1", "job_1", 1, time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt.State.Orchestration = domain.OrchestrationCancelled
+	attempt.State.Cancellation = domain.CancellationPrevented
+	attempt.State.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+	m := domain.ObjectMetadata{WorkspaceID: "w", ID: "o", Bytes: 3, SHA256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}
+	objects := []admission.FrozenObject{{Role: "bundle", Object: m}, {Role: "application_image", Object: m}}
+	for i := 0; i < 257; i++ {
+		objects = append(objects, admission.FrozenObject{Role: "input:" + strconv.Itoa(i), Object: m})
+	}
+	s := &Service{blobs: readFixture{data: []byte("abc")}}
+	if err := s.verify(context.Background(), "w", RetryInputs{Attempt: attempt, Objects: objects}); !errors.Is(err, ErrInputs) {
+		t.Fatal("259 retry objects accepted", err)
+	}
+	if err := s.verify(context.Background(), "w", RetryInputs{Attempt: attempt, Objects: objects[:258]}); err != nil {
+		t.Fatal("bundle, image and 256 inputs refused", err)
 	}
 }

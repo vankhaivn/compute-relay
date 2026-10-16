@@ -26,7 +26,7 @@ type FrozenInput struct {
 }
 
 func (s InputSnapshot) Validate(w domain.WorkspaceID) error {
-	if !s.Bundle.Valid() || s.Bundle.WorkspaceID != w || s.Bundle.Bytes > 100<<20 || len(s.Inputs) > 64 {
+	if !s.Bundle.Valid() || s.Bundle.WorkspaceID != w || s.Bundle.Bytes > 100<<20 || len(s.Inputs) > 256 {
 		return errors.New("invalid frozen input snapshot")
 	}
 	if image := s.ApplicationImage; image != nil && (!image.Valid() || image.WorkspaceID != w || image.Bytes < 1 || image.Bytes > 2<<30) {

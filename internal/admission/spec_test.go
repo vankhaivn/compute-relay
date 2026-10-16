@@ -165,6 +165,24 @@ func TestSpecRejectsInvalidAndContradictoryData(t *testing.T) {
 	}
 }
 
+func TestSpecAcceptsAtMost256Inputs(t *testing.T) {
+	withInputs := func(n int) []byte {
+		inputs := make([]Input, n)
+		for i := range inputs {
+			inputs[i] = Input{Name: fmt.Sprintf("input-%03d", i), Target: fmt.Sprintf("inputs/%03d.bin", i), Source: Source{Kind: "object", ObjectID: "data"}}
+		}
+		b, _ := json.Marshal(inputs)
+		return []byte(strings.Replace(validJob, `"inputs":[]`, `"inputs":`+string(b), 1))
+	}
+	req, err := Parse(withInputs(256))
+	if err != nil || len(req.Spec().Inputs) != 256 || req.Spec().CheckInputs() != nil {
+		t.Fatal("256 inputs refused", err)
+	}
+	if _, err = Parse(withInputs(257)); !errors.Is(err, ErrSpec) {
+		t.Fatal("257 inputs accepted", err)
+	}
+}
+
 func TestHTTPSInputRejectedForNewAdmissionAndReadableHistorically(t *testing.T) {
 	input, _ := json.Marshal([]Input{{Name: "x", Target: "x", Source: Source{Kind: "https", URL: "https://example.com/input"}}})
 	raw := strings.Replace(validJob, `"inputs":[]`, `"inputs":`+string(input), 1)
