@@ -115,12 +115,25 @@ func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, opera
 	return s.check(ctx, "observe", plan, operation)
 }
 
+// RecheckPrepare confirms already verified staging by identity, privacy, readiness and
+// exact file list without downloading it again. The remote runner rehashes every input.
+func (s *Stager) RecheckPrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+	if s == nil {
+		return provider.PreparationObservation{}, ErrConfig
+	}
+	return s.check(ctx, "recheck", plan, operation)
+}
+
 func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	var none provider.PreparationObservation
 	frozen := plan.Clone()
-	p, err := buildStagingPlan(s.config, s.policy, frozen, operation)
+	plans, err := buildStagingPlans(s.config, s.policy, frozen, operation)
 	if err != nil {
 		return none, err
+	}
+	p := plans[0]
+	if mode == "create" {
+		plans = plans[:1]
 	}
 	ctx, cancel := context.WithTimeout(parent, s.policy.Timeout)
 	defer cancel()
@@ -138,6 +151,11 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		// creating even a provider upload session. Uploads are rehashed by the client.
 		for _, object := range p.objects {
 			if err := verifyStagingInput(ctx, s.blobs, object); err != nil {
+				return none, err
+			}
+		}
+		for _, entry := range p.shared {
+			if err := verifyStagingInput(ctx, s.blobs, entry.object); err != nil {
 				return none, err
 			}
 		}
@@ -162,9 +180,17 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var err error
-		result, err = s.run(ctx, s.config, mode, secret, p, s.blobs)
-		return err
+		// An attempt prepared before shared inputs keeps its original layout; its
+		// pinned marker rejects every other candidate as invalid.
+		for _, candidate := range plans {
+			var err error
+			p = candidate
+			result, err = s.run(ctx, s.config, mode, secret, p, s.blobs)
+			if err != nil || result.Status != "invalid" {
+				return err
+			}
+		}
+		return nil
 	})
 	if provider.IsLocalStateError(err) {
 		return none, err

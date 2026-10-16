@@ -38,8 +38,8 @@ func newExecutionFixture(t *testing.T) *Executor {
 		t.Fatal(err)
 	}
 	stager.run = func(_ context.Context, _ Config, mode string, _ []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
-		if mode != "observe" {
-			t.Fatal("execution recreated staging")
+		if mode != "recheck" {
+			t.Fatal("execution did not use the metadata recheck")
 		}
 		return stageResponse(p, "ready"), nil
 	}
@@ -310,7 +310,7 @@ func TestExecutorStagesUnderPreparationBudgetBeforeBoundedSubmissionCall(t *test
 	e.stager.policy.Timeout = 5 * time.Second
 	e.stager.run = func(ctx context.Context, _ Config, mode string, _ []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
 		deadline, ok := ctx.Deadline()
-		if mode != "observe" || !ok || time.Until(deadline) < 3*time.Second || time.Until(deadline) > 5*time.Second {
+		if mode != "recheck" || !ok || time.Until(deadline) < 3*time.Second || time.Until(deadline) > 5*time.Second {
 			t.Fatal("staging verification inherited the shorter SDK-call budget")
 		}
 		return stageResponse(p, "ready"), nil

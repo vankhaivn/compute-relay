@@ -45,7 +45,7 @@ type executionRequest struct {
 	Slug         string              `json:"slug"`
 	Source       string              `json:"source"`
 	SourceSHA256 domain.SHA256Digest `json:"source_sha256"`
-	Dataset      string              `json:"dataset"`
+	Datasets     []string            `json:"datasets"`
 	WallSeconds  int64               `json:"wall_seconds"`
 	Internet     bool                `json:"internet"`
 	GPU          bool                `json:"gpu"`
@@ -63,6 +63,9 @@ type stagingReference struct {
 //go:embed execution_bootstrap.py
 var executionBootstrap string
 
+//go:embed execution_shared.py
+var executionSharedBootstrap string
+
 // buildExecutionRequest only constructs inert source. It does not import Python,
 // resolve credentials, inspect mutable URLs or execute the runner on this host.
 func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy ExecutionPolicy, plan provider.Plan, prepared provider.Prepared) (executionRequest, error) {
@@ -70,12 +73,22 @@ func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy Executi
 	if !policy.valid() || prepared.Validate(plan, prepared.PreparationID) != nil || !prepared.Ready || !prepared.Private {
 		return none, ErrConfig
 	}
-	stage, err := buildStagingPlan(c, stagingPolicy, plan, prepared.PreparationID)
+	stages, err := buildStagingPlans(c, stagingPolicy, plan, prepared.PreparationID)
 	if err != nil {
 		return none, err
 	}
 	var ref stagingReference
-	if closedObject([]byte(prepared.Resource), &ref) != nil || !positiveDecimal(ref.DatasetID) || ref.Version != 1 || ref.Reference != c.AccountName+"/"+stage.request.Slug || ref.Marker != stage.request.MarkerSHA256 {
+	if closedObject([]byte(prepared.Resource), &ref) != nil {
+		return none, ErrExecutionIdentity
+	}
+	// The pinned marker selects the layout the attempt was actually staged with.
+	var stage stagingPlan
+	for _, candidate := range stages {
+		if candidate.request.MarkerSHA256 == ref.Marker {
+			stage = candidate
+		}
+	}
+	if !positiveDecimal(ref.DatasetID) || ref.Version != 1 || stage.marker == nil || ref.Reference != c.AccountName+"/"+stage.request.Slug {
 		return none, ErrExecutionIdentity
 	}
 	manifest, spec, err := runnerplan.Build(plan)
@@ -90,16 +103,32 @@ func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy Executi
 	if err != nil {
 		return none, ErrConfig
 	}
-	payload, err := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"identity": plan.Job.Identity, "plan_sha256": plan.Digest(),
 		"preparation_id": prepared.PreparationID, "dataset_id": ref.DatasetID,
 		"dataset_owner": c.AccountName, "dataset_slug": stage.request.Slug, "marker_sha256": ref.Marker,
 		"manifest": manifest, "modules": modules, "remote_policy": map[string]any{"gpu": gpu, "machine_shape": policy.MachineShape},
-	})
+	}
+	datasets := []string{ref.Reference}
+	bootstrap, entry := executionBootstrap, "run_remote"
+	if len(stage.shared) > 0 {
+		slugs := make([]string, 0, len(stage.shared))
+		for _, shared := range stage.shared {
+			slugs = append(slugs, shared.request.Slug)
+			datasets = append(datasets, c.AccountName+"/"+shared.request.Slug)
+		}
+		files := make([][2]string, 0, len(stage.inputs))
+		for _, input := range stage.inputs {
+			files = append(files, [2]string{input.Slug, input.File})
+		}
+		fields["shared_datasets"], fields["input_files"] = slugs, files
+		bootstrap, entry = executionBootstrap+executionSharedBootstrap, "run_remote_shared"
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil || len(payload) > 1<<20 {
 		return none, ErrConfig
 	}
-	source := executionBootstrap + "\nrun_remote(json.loads(base64.b64decode(\"" + base64.StdEncoding.EncodeToString(payload) + "\", validate=True)))\n"
+	source := bootstrap + "\n" + entry + "(json.loads(base64.b64decode(\"" + base64.StdEncoding.EncodeToString(payload) + "\", validate=True)))\n"
 	if len(source) > maxKernelSource {
 		return none, ErrConfig
 	}
@@ -108,7 +137,7 @@ func buildExecutionRequest(c Config, stagingPolicy StagingPolicy, policy Executi
 	if err != nil {
 		return none, ErrConfig
 	}
-	return executionRequest{Protocol: 1, Owner: c.AccountName, Slug: "cre-" + string(provider.Digest(seed))[:40], Source: source, SourceSHA256: provider.Digest([]byte(source)), Dataset: ref.Reference, WallSeconds: plan.Job.WallSeconds, Internet: spec.Network.RemoteInternet == "required", GPU: gpu, MachineShape: policy.MachineShape}, nil
+	return executionRequest{Protocol: 1, Owner: c.AccountName, Slug: "cre-" + string(provider.Digest(seed))[:40], Source: source, SourceSHA256: provider.Digest([]byte(source)), Datasets: datasets, WallSeconds: plan.Job.WallSeconds, Internet: spec.Network.RemoteInternet == "required", GPU: gpu, MachineShape: policy.MachineShape}, nil
 }
 
 func positiveDecimal(value string) bool {

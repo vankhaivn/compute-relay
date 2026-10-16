@@ -24,12 +24,30 @@ func matchingKernel(kernel kaggleapi.Kernel, request executionRequest, expectedI
 		m.Reference != request.Owner+"/"+request.Slug || m.Slug != request.Slug || m.Version == nil || *m.Version != 1 ||
 		m.Language != "python" || m.Type != "script" || m.Private == nil || !*m.Private ||
 		m.GPU == nil || *m.GPU != request.GPU || m.TPU == nil || *m.TPU || m.Internet == nil || *m.Internet != request.Internet ||
-		len(m.DatasetSources) != 1 || m.DatasetSources[0] != request.Dataset ||
+		!sameDatasets(m.DatasetSources, request.Datasets) ||
 		len(m.KernelSources) != 0 || len(m.CompetitionSources) != 0 || len(m.ModelSources) != 0 ||
 		request.GPU && m.MachineShape != request.MachineShape {
 		return false
 	}
 	return provider.Digest([]byte(*blob.Source)) == request.SourceSHA256
+}
+
+// sameDatasets compares mounted dataset references as a set; Kaggle does not promise order.
+func sameDatasets(mounted, expected []string) bool {
+	if len(expected) == 0 || len(mounted) != len(expected) {
+		return false
+	}
+	want := make(map[string]bool, len(expected))
+	for _, name := range expected {
+		want[name] = true
+	}
+	for _, name := range mounted {
+		if !want[name] {
+			return false
+		}
+		delete(want, name)
+	}
+	return len(want) == 0
 }
 
 func execute(ctx context.Context, client *kaggleapi.Client, mode string, request executionRequest) executionResponse {
@@ -63,12 +81,16 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 		if mode != "submit" {
 			return empty("not_found")
 		}
-		datasetOwner, datasetSlug, ok := strings.Cut(request.Dataset, "/")
-		if !ok {
-			return reject("helper_failed")
+		datasets := make([]kaggleapi.Resource, 0, len(request.Datasets))
+		for _, dataset := range request.Datasets {
+			owner, slug, ok := strings.Cut(dataset, "/")
+			if !ok {
+				return reject("helper_failed")
+			}
+			datasets = append(datasets, kaggleapi.Resource{Owner: owner, Slug: slug})
 		}
 		receipt, err := client.SaveKernel(ctx, kaggleapi.SaveKernelRequest{Resource: resource, Source: request.Source,
-			Dataset: kaggleapi.Resource{Owner: datasetOwner, Slug: datasetSlug}, WallSeconds: int(request.WallSeconds),
+			Datasets: datasets, WallSeconds: int(request.WallSeconds),
 			Internet: request.Internet, GPU: request.GPU, MachineShape: request.MachineShape})
 		if err != nil {
 			var apiErr *kaggleapi.Error

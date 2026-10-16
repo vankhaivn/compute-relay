@@ -165,7 +165,7 @@ func TestPinnedProtocolFixtures(t *testing.T) {
 	if receipt.Reference != fixtureDataset.reference() {
 		t.Fatal(receipt)
 	}
-	saved, err := c.SaveKernel(ctx, SaveKernelRequest{Resource: fixtureKernel, Source: "print('fixture')\n", Dataset: fixtureDataset, WallSeconds: 60})
+	saved, err := c.SaveKernel(ctx, SaveKernelRequest{Resource: fixtureKernel, Source: "print('fixture')\n", Datasets: []Resource{fixtureDataset}, WallSeconds: 60})
 	requireOK(t, err)
 	if saved.ID != "42" || saved.Version != 1 {
 		t.Fatal(saved)

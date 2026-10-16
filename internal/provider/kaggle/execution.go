@@ -112,11 +112,11 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 	if e.used.Swap(true) {
 		return unknownExecution()
 	}
-	// Staging byte verification has its own bounded preparation budget. Do not
-	// charge it to the shorter API-call timeout before submission can begin.
-	// Recheck complete remote staging without creating anything. Equality includes
-	// the first-pinned numeric dataset ID, version, marker, privacy and readiness.
-	stage, err := e.stager.ReconcilePrepare(parent, e.plan, e.prepared.PreparationID)
+	// Readiness already downloaded and rehashed the attempt's staging, and the remote
+	// runner rehashes every input before use. Recheck it here by metadata only, under
+	// the preparation budget: equality includes the first-pinned numeric dataset ID,
+	// version, marker, privacy, readiness and the exact file list.
+	stage, err := e.stager.RecheckPrepare(parent, e.plan, e.prepared.PreparationID)
 	if err != nil {
 		if provider.IsLocalStateError(err) {
 			return unknownExecution()

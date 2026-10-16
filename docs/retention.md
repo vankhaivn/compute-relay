@@ -42,9 +42,9 @@ inactive/not-started execution. When a due rule becomes eligible, Relay admits a
 attempt-cleanup operation with the frozen workspace, job and attempt identity. The uncollected path
 sets the existing `discard_uncollected` authorization because the operator declared a maximum
 uncollected lifetime at admission. Cleanup removes the exact attempt container and its per-attempt
-staging through the existing engine. Shared cache volumes and reusable application images have
-separate lifecycles and are not removed by attempt retention. No separate remote deletion path is
-introduced.
+staging through the existing engine. Shared cache volumes, Kaggle shared input datasets and
+reusable application images have separate lifecycles and are not removed by attempt retention. No
+separate remote deletion path is introduced.
 
 The scheduler rechecks publication, remote activity, prior cleanup and operation state before it
 commits the cleanup request. A busy or ambiguous prior cleanup is deferred. A confirmed deletion

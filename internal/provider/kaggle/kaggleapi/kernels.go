@@ -62,7 +62,7 @@ func (c *Client) GetKernel(ctx context.Context, resource Resource) (Kernel, erro
 type SaveKernelRequest struct {
 	Resource     Resource
 	Source       string
-	Dataset      Resource
+	Datasets     []Resource
 	WallSeconds  int
 	Internet     bool
 	GPU          bool
@@ -76,14 +76,14 @@ type KernelReceipt struct {
 }
 
 // SaveKernel has no ID/update path. It sends an explicit finite private Python
-// script with one dataset and no TPU, competition, model or kernel sources.
+// script with the owner's datasets and no TPU, competition, model or kernel sources.
 // The caller must perform exact absent/identity checks and consume its durable
 // one-shot permit first. A receipt never proves execution or resource readiness.
 // GPU saves first recheck the free-only billing flag, as the pinned bridge does.
 // An unavailable/unverified quota produces ErrQuota with Sent=false for the save.
 func (c *Client) SaveKernel(ctx context.Context, request SaveKernelRequest) (KernelReceipt, error) {
 	op := kernelService + "SaveKernel"
-	if c == nil || c.state == nil || !request.Resource.valid() || !request.Dataset.valid() || request.Dataset.Owner != request.Resource.Owner ||
+	if c == nil || c.state == nil || !request.Resource.valid() || !ownedDatasets(request.Datasets, request.Resource.Owner) ||
 		request.Source == "" || len(request.Source) > 2<<20 || !utf8.ValidString(request.Source) ||
 		request.WallSeconds < 1 || request.WallSeconds > 86400 ||
 		request.GPU && request.MachineShape != "NvidiaTeslaT4" && request.MachineShape != "NvidiaTeslaP100" ||
@@ -117,7 +117,7 @@ func (c *Client) SaveKernel(ctx context.Context, request SaveKernelRequest) (Ker
 		Execution string   `json:"kernelExecutionType"`
 		Shape     string   `json:"machineShape,omitempty"`
 	}{request.Resource.reference(), request.Resource.Slug, request.Source, "python", "script", true,
-		request.GPU, false, request.Internet, []string{request.Dataset.reference()}, request.WallSeconds, "SAVE_AND_RUN_ALL", request.MachineShape}
+		request.GPU, false, request.Internet, datasetReferences(request.Datasets), request.WallSeconds, "SAVE_AND_RUN_ALL", request.MachineShape}
 	object, err := c.rpc(ctx, op, query, maxAccountBytes)
 	if err != nil {
 		return KernelReceipt{}, err
@@ -187,4 +187,29 @@ func (c *Client) DeleteKernel(ctx context.Context, resource Resource) error {
 		}
 	}
 	return nil
+}
+
+// maxKernelDatasets bounds the attempt dataset plus its shared input datasets.
+const maxKernelDatasets = 8
+
+func ownedDatasets(datasets []Resource, owner string) bool {
+	if len(datasets) == 0 || len(datasets) > maxKernelDatasets {
+		return false
+	}
+	seen := make(map[Resource]bool, len(datasets))
+	for _, dataset := range datasets {
+		if !dataset.valid() || dataset.Owner != owner || seen[dataset] {
+			return false
+		}
+		seen[dataset] = true
+	}
+	return true
+}
+
+func datasetReferences(datasets []Resource) []string {
+	references := make([]string, 0, len(datasets))
+	for _, dataset := range datasets {
+		references = append(references, dataset.reference())
+	}
+	return references
 }

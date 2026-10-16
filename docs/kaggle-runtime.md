@@ -39,6 +39,25 @@ match the frozen plan. Upload success is not readiness. A lost staging or submis
 leaves the original intent for observation; not-found alone never permits another create or submit.
 There is no automatic account/provider rotation, resubmission, CPU fallback or paid capacity.
 
+### Shared input datasets
+
+An input object of at least 256 MiB, such as an application runtime archive, is staged once per
+installation and account as its own private dataset named from its SHA-256 and byte count. Later
+attempts with the same bytes mount that dataset instead of uploading it again; a kernel mounts the
+attempt dataset plus at most 7 shared datasets, and further large inputs stay with the attempt.
+A missing shared dataset is created under the preparation that needs it, before that attempt's
+own dataset. An existing one is used only when its name, version 1, privacy, marker description,
+ready state and exact file list match; otherwise preparation stops without replacing it.
+
+Relay downloads and rehashes the attempt dataset once when it becomes ready. Shared datasets and
+the pre-submission recheck compare metadata only; the remote runner rehashes every input before
+use, so changed bytes still fail the attempt. Attempts staged before this layout keep their
+original marker and single mount.
+
+Shared datasets are not attempt resources: attempt cleanup and retention never delete them, and
+they count toward the account's dataset storage until deleted in Kaggle. Delete one only when no
+attempt that mounts it is waiting to start; the next attempt that needs it uploads it again.
+
 Kaggle uses the combined `/authorize` flow. Separate preparation/start, absolute execution deadlines
 and ephemeral workload secrets are unsupported requirements and are rejected before preparation.
 Read logs and job status for the original attempt. GPU success requires runner hardware evidence;

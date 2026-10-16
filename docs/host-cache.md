@@ -3,7 +3,8 @@
 Managed SSH jobs can reuse immutable input bytes on one verified Docker machine. Relay keeps the
 cache in labelled Docker volumes, keyed by installation, machine, engine, SHA-256 and byte count.
 LAN, Tailscale and other connection aliases to the same machine and engine share the same entries.
-Kaggle does not use this cache and continues to upload all job objects.
+Kaggle does not use this cache; it reuses large inputs through
+[shared input datasets](kaggle-runtime.md#shared-input-datasets) instead.
 
 ## Declare content identities
 

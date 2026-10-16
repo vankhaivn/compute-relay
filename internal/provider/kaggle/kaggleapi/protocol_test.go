@@ -357,7 +357,7 @@ func TestGPUSaveRequiresImmediateFreeOnlyQuota(t *testing.T) {
 				}
 				return response(200, "application/json", `{"ref":"fixture_user/fixture-run","versionNumber":1,"kernelId":42}`), nil
 			}, nil)
-			_, err := c.SaveKernel(context.Background(), SaveKernelRequest{Resource: fixtureKernel, Dataset: fixtureDataset,
+			_, err := c.SaveKernel(context.Background(), SaveKernelRequest{Resource: fixtureKernel, Datasets: []Resource{fixtureDataset},
 				Source: "print('fixture')\n", GPU: true, MachineShape: "NvidiaTeslaT4", WallSeconds: 60})
 			allowed := mode == "omitted-flag" || mode == "false" || mode == "lost-save"
 			if quotaReads != 1 || saves != map[bool]int{true: 1, false: 0}[allowed] {

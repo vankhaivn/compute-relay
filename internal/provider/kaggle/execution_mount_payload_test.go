@@ -30,7 +30,7 @@ func TestExecutionSourceCarriesDatasetMountIdentity(t *testing.T) {
 	if json.Unmarshal(raw, &payload) != nil {
 		t.Fatal("invalid execution bootstrap payload")
 	}
-	if payload.DatasetOwner != c.AccountName || payload.DatasetOwner+"/"+payload.DatasetSlug != request.Dataset {
-		t.Fatal("dataset mount identity is not bound to the staged reference", payload, request.Dataset)
+	if payload.DatasetOwner != c.AccountName || len(request.Datasets) != 1 || payload.DatasetOwner+"/"+payload.DatasetSlug != request.Datasets[0] {
+		t.Fatal("dataset mount identity is not bound to the staged reference", payload, request.Datasets)
 	}
 }

@@ -91,7 +91,8 @@ engine ID remain readable but are retained with `engine_identity_not_recorded`; 
 engine cannot retroactively prove the original one.
 
 The native Kaggle adapter checks unchanged private version-1 kernels and staging datasets on the
-original account. A validated synchronous deletion followed by the expected missing-name response
+original account. [Shared input datasets](kaggle-runtime.md#shared-input-datasets) are never an
+attempt cleanup target. A validated synchronous deletion followed by the expected missing-name response
 is stronger than an unauthenticated or ambiguous absence read. A 403 alone, including recovery
 after a lost acknowledgement, remains unknown and retains staging if execution deletion was not
 confirmed. Historical versions and physical provider garbage collection are outside this boundary.
