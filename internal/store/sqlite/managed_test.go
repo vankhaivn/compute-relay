@@ -102,7 +102,7 @@ type stateAdapter struct {
 }
 
 func (*stateAdapter) Descriptor() connections.Descriptor {
-	return connections.Descriptor{Type: "fixture", Label: "Synthetic provider", Fields: []connections.Field{{Name: "api_token", Label: "Token", Required: true, WriteOnly: true, MaxBytes: 8192}}, Capabilities: connections.Capabilities{Accelerators: []string{"cpu", "gpu"}, RemoteCancel: "unsupported", Quota: "supported"}}
+	return connections.Descriptor{Type: "fixture", Label: "Synthetic provider", Fields: []connections.Field{{Name: "api_token", Label: "Token", Required: true, WriteOnly: true, MaxBytes: 8192}}, Capabilities: connections.Capabilities{Accelerators: []string{"cpu", "gpu"}, RemoteCancel: "unsupported", Quota: "supported", MaxRemoteWallSeconds: 86400}}
 }
 func (*stateAdapter) Encode(fields map[string]string) ([]byte, error) {
 	return []byte(fields["api_token"]), nil

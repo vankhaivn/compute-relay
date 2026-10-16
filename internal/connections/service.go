@@ -41,7 +41,8 @@ func New(access *auth.Service, repo Repository, vault credentials.Vault, adapter
 		if !providerTypePattern.MatchString(d.Type) || service.adapters[d.Type] != nil || len(d.Fields) == 0 || len(d.Fields) > 16 {
 			return nil, ErrUnavailable
 		}
-		if d.Capabilities.Concurrency != nil && d.Capabilities.Concurrency.Validate() != nil {
+		if d.Capabilities.Concurrency != nil && d.Capabilities.Concurrency.Validate() != nil ||
+			d.Capabilities.MaxRemoteWallSeconds < 1 || d.Capabilities.MaxRemoteWallSeconds > domain.MaxRemoteWallSeconds {
 			return nil, ErrUnavailable
 		}
 		seen := map[string]bool{}
@@ -165,7 +166,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 	if replay && record.Stage != "waiting_secret" {
 		return record.Operation, nil
 	}
-	if req.Configuration != nil && (req.Configuration.MaxActiveAttempts != 0 || req.Configuration.MaxProcesses != 0 || req.Configuration.HostHealth != nil || req.Configuration.StorageBudget != nil) {
+	if req.Configuration != nil {
 		providerType := req.ProviderType
 		if connection != "" {
 			current, err := s.repo.ReadConnection(ctx, w, p.TokenID(), connection)
@@ -174,12 +175,18 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 			}
 			providerType = current.ProviderType
 		}
-		if (req.Configuration.HostHealth != nil || req.Configuration.StorageBudget != nil) && providerType != "ssh" {
+		// The contract ceiling is shared; each installed provider type advertises its own maximum.
+		if adapter := s.adapters[providerType]; adapter != nil && req.Configuration.MaxRemoteWallSeconds > adapter.Descriptor().Capabilities.MaxRemoteWallSeconds {
 			return Operation{}, ErrRequest
 		}
-		validator, ok := s.adapters[providerType].(ConfigurationValidator)
-		if !ok || validator.ValidateConfiguration(*req.Configuration) != nil {
-			return Operation{}, ErrRequest
+		if req.Configuration.MaxActiveAttempts != 0 || req.Configuration.MaxProcesses != 0 || req.Configuration.HostHealth != nil || req.Configuration.StorageBudget != nil {
+			if (req.Configuration.HostHealth != nil || req.Configuration.StorageBudget != nil) && providerType != "ssh" {
+				return Operation{}, ErrRequest
+			}
+			validator, ok := s.adapters[providerType].(ConfigurationValidator)
+			if !ok || validator.ValidateConfiguration(*req.Configuration) != nil {
+				return Operation{}, ErrRequest
+			}
 		}
 	}
 	var secret []byte

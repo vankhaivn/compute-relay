@@ -87,6 +87,18 @@ class SecretTests(Fixture):
             with self.subTest(change=change), self.assertRaises(contract.Failure):
                 contract.apply_start(copy.deepcopy(self.m), raw, json.dumps({**control, **change}).encode(), time.time())
 
+    def test_secret_expiry_bounds_start_not_a_multi_day_run(self):
+        self.m["timeouts"]["remote_wall_seconds"] = 604800
+        _, control, _ = self.prepare()
+        raw = json.dumps(self.m).encode()
+        control.update(manifest_sha256=hashlib.sha256(raw).hexdigest(), max_remote_wall_seconds=604800,
+                       execution_deadline=after(604800))
+        applied = copy.deepcopy(self.m)
+        contract.apply_start(applied, raw, json.dumps(control).encode(), time.time())
+        self.assertEqual(applied["timeouts"]["remote_wall_seconds"], 604800)
+        with self.assertRaises(contract.Failure):
+            contract.validate({**self.m, "timeouts": {**self.m["timeouts"], "remote_wall_seconds": 604801}})
+
     @unittest.skipUnless(sys.platform == "linux", "Linux receiver deadline")
     def test_receiver_is_bound_one_shot_and_files_are_private(self):
         _, control, root = self.prepare()

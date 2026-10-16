@@ -18,7 +18,7 @@
         "max_remote_wall_seconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 86400
+          "maximum": 604800
         },
         "authorize_private_staging": {
           "const": true
@@ -65,7 +65,7 @@
         "max_remote_wall_seconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 86400
+          "maximum": 604800
         },
         "created_at": {
           "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"

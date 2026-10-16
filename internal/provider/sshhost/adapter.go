@@ -34,6 +34,9 @@ import (
 // ProviderType is the managed connection and descriptor type of this adapter.
 const ProviderType = "ssh"
 
+// MaxWallSeconds bounds one attempt on an operator-owned host. A connection may lower it.
+const MaxWallSeconds = domain.MaxRemoteWallSeconds
+
 const (
 	Version          = "ssh-docker/1"
 	containerPrefix  = "compute-relay-"
@@ -140,7 +143,7 @@ var (
 
 func NewAdapter(config Config, binding provider.BindingSnapshot, creds ports.CredentialResolver, blobs StagingBlobs, clock ports.Clock) (*Adapter, error) {
 	if !binding.Valid() || binding.Binding.ProviderInstanceID != config.InstanceID || binding.CredentialRef != string(config.CredentialRef) ||
-		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > 86400 || config.MaxProcesses < 0 || config.MaxProcesses > 65536 {
+		creds == nil || blobs == nil || clock == nil || config.MaxWallSeconds < 1 || config.MaxWallSeconds > MaxWallSeconds || config.MaxProcesses < 0 || config.MaxProcesses > 65536 {
 		return nil, ErrRequest
 	}
 	if config.MachineID != "" && !domain.SHA256Digest(config.MachineID).Valid() ||
@@ -211,7 +214,8 @@ func Capabilities() provider.Capabilities {
 		LogsWhileRunning: domain.CapabilitySupportSupported, LogsAfterCompletion: true,
 		QuotaReporting: domain.CapabilitySupportUnsupported, ExecutionTimeout: true,
 		SeparateStart: true, EphemeralSecrets: true, AbsoluteDeadline: true,
-		RemoteNetworkControl: true, StrongIdentity: true, Accelerators: []string{"cpu"}}
+		RemoteNetworkControl: true, StrongIdentity: true, Accelerators: []string{"cpu"},
+		MaxWallSeconds: MaxWallSeconds}
 }
 
 // Verify proves the frozen binding and a reachable Docker daemon on the pinned host.

@@ -199,7 +199,7 @@ def validate(m):
             require(parsed.year > 1)
         except ValueError as exc:
             raise Failure() from exc
-    for key, maximum in (("remote_wall_seconds", 86400), ("setup_seconds", 21600), ("finalization_grace_seconds", 3600)):
+    for key, maximum in (("remote_wall_seconds", 604800), ("setup_seconds", 21600), ("finalization_grace_seconds", 3600)):
         integer(t[key], 1, maximum)
     require(t["setup_seconds"] + t["finalization_grace_seconds"] < t["remote_wall_seconds"])
     outputs = m["outputs"]
@@ -252,7 +252,8 @@ def apply_start(manifest, manifest_raw, control_raw, now):
         raw = secret["expires_at"]
         require(type(raw) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", raw))
         expires = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        require(expires.year > 1 and expires.timestamp() >= bounds["execution_deadline"])
+        # Expiry bounds one-shot delivery at start; delivered files stay for the attempt.
+        require(expires.year > 1 and expires.timestamp() >= bounds["start_before"])
     if now >= bounds["start_before"]:
         raise Failure("REMOTE_TIMEOUT", "execution", "Explicit start authority expired")
     budgets = manifest["timeouts"]

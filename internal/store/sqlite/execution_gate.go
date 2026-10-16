@@ -260,8 +260,12 @@ func loadExecutionGate(ctx context.Context, tx *sql.Tx, record admission.Record,
 			return nil, err
 		}
 		expires, _ := workloadsecret.CanonicalTime(secret.original.ExpiresAt)
-		if req.SecretAuthorizationID != secret.original.AuthorizationID || secret.original.ReadinessRevision != g.ReadyRevision || !matchSecretSlots(record.Request.Spec().WorkloadSecrets, secret.original.Metadata) || expires.Before(stop) || secret.original.CreatedAt.After(receipt.CreatedAt) {
+		if req.SecretAuthorizationID != secret.original.AuthorizationID || secret.original.ReadinessRevision != g.ReadyRevision || !matchSecretSlots(record.Request.Spec().WorkloadSecrets, secret.original.Metadata) || !receipt.CreatedAt.Before(expires) || secret.original.CreatedAt.After(receipt.CreatedAt) {
 			return nil, ErrCorrupt
+		}
+		// Secret expiry bounds the one-shot delivery at start, not the running workload.
+		if expires.Before(deadline) {
+			g.Start.StartBefore = expires.UTC().Format(time.RFC3339)
 		}
 		if receipt.Status == executionauth.Consumed {
 			if secret.current.Status != "consumed" || !secret.current.ConsumedAt.Equal(*receipt.ConsumedAt) {
@@ -325,7 +329,7 @@ func (s *Store) StartExecution(ctx context.Context, c executionauth.GateCommand,
 		if req.MaxRemoteWallSeconds <= r.Request.Spec().Timeouts.SetupSeconds+r.Request.Spec().Timeouts.FinalizationGraceSeconds || req.MaxRemoteWallSeconds > r.Request.Spec().Timeouts.RemoteWallSeconds || stop.After(now.Add(time.Duration(req.MaxRemoteWallSeconds)*time.Second)) || !r.Request.Spec().Deadline().IsZero() && stop.After(r.Request.Spec().Deadline()) {
 			return executionauth.ErrRequest
 		}
-		secret, err := secretForStart(ctx, tx, r, req.SecretAuthorizationID, req.ReadinessRevision, req.ExecutionDeadline, now)
+		secret, err := secretForStart(ctx, tx, r, req.SecretAuthorizationID, req.ReadinessRevision, now)
 		if err != nil {
 			return err
 		}

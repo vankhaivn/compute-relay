@@ -67,7 +67,7 @@ func commitGateStep(ctx context.Context, tx *sql.Tx, work *dispatch.Work, action
 		if g.Start.Secrets != nil {
 			secretID = g.Start.Secrets.AuthorizationID
 		}
-		secret, err := secretForStart(ctx, tx, work.Job, secretID, g.ReadyRevision, g.Start.ExecutionDeadline, now)
+		secret, err := secretForStart(ctx, tx, work.Job, secretID, g.ReadyRevision, now)
 		if err != nil {
 			return err
 		}

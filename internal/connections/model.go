@@ -48,6 +48,8 @@ type Capabilities struct {
 	SeparateStart    string                 `json:"separate_prepare_start,omitempty"`
 	AbsoluteDeadline string                 `json:"absolute_execution_deadline,omitempty"`
 	Concurrency      *ConcurrencyCapability `json:"concurrency,omitempty"`
+	// MaxRemoteWallSeconds is the provider's advertised ceiling for a connection or job wall budget.
+	MaxRemoteWallSeconds int64 `json:"max_remote_wall_seconds"`
 }
 
 // ProjectCapabilities preserves the managed connection wire contract from an
@@ -57,7 +59,8 @@ func ProjectCapabilities(c provider.Capabilities, scope string) Capabilities {
 		RemoteCleanup: string(c.Support(domain.CapabilityRemoteCleanup)), EphemeralSecrets: string(c.Support(domain.CapabilityEphemeralSecrets)),
 		Accelerators: append([]string{}, c.Accelerators...), RemoteCancel: string(c.Support(domain.CapabilityRemoteCancellation)),
 		Quota: string(c.QuotaReporting), SeparateStart: string(c.Support(domain.CapabilitySeparateStart)),
-		AbsoluteDeadline: string(c.Support(domain.CapabilityAbsoluteDeadline)),
+		AbsoluteDeadline:     string(c.Support(domain.CapabilityAbsoluteDeadline)),
+		MaxRemoteWallSeconds: c.MaxWallSeconds,
 	}
 	if scope != "" {
 		result.Concurrency = &ConcurrencyCapability{Support: "supported", Scope: scope, Minimum: 1, Maximum: 64, Default: 1}
@@ -126,7 +129,7 @@ func (c Configuration) Validate() error {
 	if c.StorageBudget != nil && !c.StorageBudget.Valid() {
 		return ErrRequest
 	}
-	if c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxActiveAttempts < 0 || c.MaxActiveAttempts > 64 || c.MaxProcesses < 0 || c.MaxProcesses > 65536 {
+	if c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > domain.MaxRemoteWallSeconds || c.MaxActiveAttempts < 0 || c.MaxActiveAttempts > 64 || c.MaxProcesses < 0 || c.MaxProcesses > 65536 {
 		return ErrRequest
 	}
 	return nil

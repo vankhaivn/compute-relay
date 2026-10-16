@@ -16,6 +16,9 @@ import (
 
 const maxKernelSource = 2 << 20
 
+// MaxWallSeconds is Kaggle's session ceiling; the provider enforces its own limit.
+const MaxWallSeconds int64 = 86400
+
 var ErrExecutionIdentity = errors.New("kernel identity, source, version or privacy does not match the recorded attempt")
 
 // ExecutionPolicy is immutable operator policy, not a field accepted from a job.
@@ -33,7 +36,7 @@ func DefaultExecutionPolicy() ExecutionPolicy {
 }
 func (p ExecutionPolicy) valid() bool {
 	return (p.MachineShape == "" || p.MachineShape == "NvidiaTeslaT4" || p.MachineShape == "NvidiaTeslaP100") &&
-		p.MaxWallSeconds > 0 && p.MaxWallSeconds <= 86400 && p.Timeout >= time.Second && p.Timeout <= 5*time.Minute
+		p.MaxWallSeconds > 0 && p.MaxWallSeconds <= MaxWallSeconds && p.Timeout >= time.Second && p.Timeout <= 5*time.Minute
 }
 
 type executionRequest struct {

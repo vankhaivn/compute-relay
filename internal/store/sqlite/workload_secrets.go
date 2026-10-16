@@ -316,7 +316,7 @@ func (s *Store) HasWorkloadSecretAuthorizations(ctx context.Context) (bool, erro
 	})
 }
 
-func secretForStart(ctx context.Context, tx *sql.Tx, r admission.Record, id domain.OperationID, revision domain.SHA256Digest, deadline string, now time.Time) (*workloadsecret.Receipt, error) {
+func secretForStart(ctx context.Context, tx *sql.Tx, r admission.Record, id domain.OperationID, revision domain.SHA256Digest, now time.Time) (*workloadsecret.Receipt, error) {
 	if len(r.Request.Spec().WorkloadSecrets) == 0 {
 		if id != "" {
 			return nil, workloadsecret.ErrRequest
@@ -335,8 +335,7 @@ func secretForStart(ctx context.Context, tx *sql.Tx, r admission.Record, id doma
 		return nil, err
 	}
 	until, _ := workloadsecret.CanonicalTime(secret.current.ExpiresAt)
-	stop, _ := workloadsecret.CanonicalTime(deadline)
-	if secret.current.AuthorizationID != id || secret.current.Status != "granted" || secret.current.ReadinessRevision != revision || until.Before(stop) || !matchSecretSlots(r.Request.Spec().WorkloadSecrets, secret.current.Metadata) {
+	if secret.current.AuthorizationID != id || secret.current.Status != "granted" || secret.current.ReadinessRevision != revision || !now.Before(until) || !matchSecretSlots(r.Request.Spec().WorkloadSecrets, secret.current.Metadata) {
 		return nil, workloadsecret.ErrUnavailable
 	}
 	return &secret.current, nil

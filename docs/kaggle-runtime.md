@@ -29,7 +29,8 @@ has been allocated. The adapter supplies no authoritative quota-reset timestamp.
 Upload a bounded [bundle and input objects](packaging-and-import.md), admit the job and authorize
 its exact attempt and wall limit. The adapter stages private attempt-owned data with a bound marker,
 checks readiness and original bytes, then submits the private kernel once after the durable
-intent barrier. Finite preparation and execution budgets apply. Remote internet is disabled unless
+intent barrier. Finite preparation and execution budgets apply; the Kaggle descriptor advertises
+a 86400-second wall maximum, and longer connections or jobs are refused. Remote internet is disabled unless
 both the selected policy permits it and the job requests it.
 
 Staging identity, account, numeric resource identity, version, source hash, nonce and privacy must

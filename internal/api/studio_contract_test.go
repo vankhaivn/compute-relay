@@ -77,7 +77,7 @@ func studioFields(t *testing.T, m map[string]any, fields map[string]string) {
 				valid = valid && n >= 1 && n <= 2147483647
 			}
 			if rule == "wall" {
-				valid = valid && n >= 1 && n <= 86400
+				valid = valid && n >= 1 && n <= 604800
 			}
 			if rule == "bytes" {
 				valid = valid && n <= 4*(1<<30)

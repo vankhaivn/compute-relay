@@ -47,8 +47,8 @@
             "max_remote_wall_seconds": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 86400,
-              "description": "Maximum remote wall time in seconds for future job admissions."
+              "maximum": 604800,
+              "description": "Maximum remote wall time in seconds for future job admissions. The provider type's advertised max_remote_wall_seconds also applies."
             },
             "max_active_attempts": {
               "type": "integer",
@@ -121,8 +121,8 @@
             "max_remote_wall_seconds": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 86400,
-              "description": "Maximum remote wall time in seconds for future job admissions."
+              "maximum": 604800,
+              "description": "Maximum remote wall time in seconds for future job admissions. The provider type's advertised max_remote_wall_seconds also applies."
             },
             "max_active_attempts": {
               "type": "integer",

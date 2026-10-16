@@ -148,6 +148,26 @@ Linux `CLOCK_BOOTTIME`; deadlines, setup and payload supervision are described i
 [execution deadline contract](execution-gates.md#execution-deadlines). Host sleep, VM clock behavior and reboot
 remain unqualified pending explicit live tests.
 
+### Multi-day attempts
+
+An SSH connection accepts `max_remote_wall_seconds` up to 604800 (seven days), the value the
+descriptor advertises; the startup default stays at most 86400. A job, preparation and start may
+use up to the connection's limit, and budgets stay finite: Relay never extends or resubmits an
+attempt. Behavior of other time-based limits during a seven-day attempt:
+
+| Limit | Effect on a running attempt |
+|---|---|
+| Workload secret (24 h maximum) | Bounds start only; the workload reads its files once. Expiry never touches the container's tmpfs or stops the workload. |
+| Worker leases | No lease spans the run. Each observation pass takes a fresh 30-second lease, renews it while working and yields it. Passes run about every 15 seconds, backing off to 120 seconds after failures, with no count limit. |
+| Observation failures | Five consecutive failed or unknown observations (a host or network outage of roughly 7–12 minutes) move the attempt to `needs_attention`. The container keeps running and capacity stays held, but observation stops until an explicit reconcile. |
+| Capacity holds | Depend on attempt state, never on age; a running attempt holds its machine slot until confirmed inactive. |
+| Host health | The 24-hour history only bounds evaluation. Stale or unknown health refuses new work and never stops running work. |
+| Inputs, cache and images | Objects referenced by a non-terminal attempt are never expired; cache and image pins are released only after confirmed cleanup. |
+| Logs | The runner keeps the first 20 MiB of each of stdout and stderr and mirrors at most 16 MiB per stream to Docker logs; later output is dropped behind a truncation marker. Keep long-running workloads' output sparse. |
+
+Application tokens that poll Relay must outlive the attempt (up to 30 days); Relay's own
+observation does not use them. Host sleep, reboot and engine restart remain unqualified.
+
 Each attempt gets one container named `compute-relay-cr-…`. Preparation checks
 the frozen image ID, recipe, platform, machine and Docker daemon identity; it fails if they are unavailable and never installs an
 image. Historical jobs admitted under the original digest-based policy retain that policy.
@@ -162,8 +182,8 @@ Hosts advertising `ephemeral_workload_secrets` can supply declared slot values a
 Values are base64 in the request and held only in process memory and a private 128 KiB tmpfs. Relay
 never stores them in the durable job or SQLite, or injects them through argv or environment. The
 `file_and_local_process_arguments` exposure lets the authorized workload pass a value to its own
-local tool arguments. Limits are eight slots, 8 KiB each, 32 KiB total and at most 24 hours,
-bounded by the execution deadline. After a Relay restart before start, explicitly replay the exact
+local tool arguments. Limits are eight slots, 8 KiB each, 32 KiB total and at most 24 hours.
+The expiry bounds delivery at start, not the run; delivered files stay for the attempt. After a Relay restart before start, explicitly replay the exact
 supply request; after consumption, replay cannot restore bytes and there is no automatic
 reinjection. Exact-known-value log and artifact filtering is best-effort protection against
 accidental exposure, not malicious encoding.

@@ -132,7 +132,7 @@ func (p *Basic) Describe() provider.Descriptor {
 		QuotaReporting:   domain.CapabilitySupportUnknown, ExecutionTimeout: true,
 		SeparateStart: s.SeparateStart, EphemeralSecrets: s.EphemeralSecrets,
 		AbsoluteDeadline: s.AbsoluteDeadline, RemoteNetworkControl: true,
-		StrongIdentity: true, Accelerators: []string{"cpu"}}
+		StrongIdentity: true, Accelerators: []string{"cpu"}, MaxWallSeconds: domain.MaxRemoteWallSeconds}
 	if p.complete {
 		c.RemoteCancellation = true
 		c.LogsWhileRunning = domain.CapabilitySupportSupported

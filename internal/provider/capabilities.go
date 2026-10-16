@@ -23,6 +23,8 @@ type Capabilities struct {
 	StrongIdentity       bool
 	Accelerators         []string
 	GPUShape             string
+	// MaxWallSeconds is the largest finite wall budget this adapter accepts.
+	MaxWallSeconds int64
 }
 
 func (c Capabilities) Support(name domain.CapabilityName) domain.CapabilitySupport {
@@ -73,5 +75,6 @@ func (c Capabilities) Support(name domain.CapabilityName) domain.CapabilitySuppo
 }
 
 func (c Capabilities) Valid() bool {
-	return c.BatchExecution && c.GPU.Valid() && c.LogsWhileRunning.Valid() && c.QuotaReporting.Valid()
+	return c.BatchExecution && c.GPU.Valid() && c.LogsWhileRunning.Valid() && c.QuotaReporting.Valid() &&
+		c.MaxWallSeconds >= 1 && c.MaxWallSeconds <= domain.MaxRemoteWallSeconds
 }

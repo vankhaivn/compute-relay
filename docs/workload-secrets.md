@@ -43,8 +43,10 @@ availability through readiness but cannot read a secret authorization. Values ar
    body. Supply authorizes neither staging nor compute. Its `202` receipt contains only identity,
    expiry and slot names; its `Location` supports a metadata-only GET.
 3. POST the explicit `/start` grant with the same attempt/readiness revision and the returned
-   `secret_authorization_id`. The required `execution_deadline` must be no later than the secret
-   expiry. Missing, revoked, expired or unavailable material prevents start.
+   `secret_authorization_id`. The secret expiry bounds the one-shot delivery: start must happen
+   before it, so Relay caps the start window at that expiry. The `execution_deadline` may be
+   later, up to the attempt's wall budget. Missing, revoked, expired or unavailable material
+   prevents start.
 4. Read the original attempt and its logs/results. A consumed secret receipt means the unique
    delivery/start intent was committed; it does not prove successful delivery or execution.
 
@@ -87,7 +89,11 @@ A stopped prepared container has an empty private 128 KiB tmpfs. Only the unique
 start can send the packet through fixed Docker exec stdin. The receiver verifies attempt, nonce,
 manifest, authorization, expiry and slot names, then writes files with mode `0400` under
 `CC_SECRET_DIR` (a non-secret path). Its one-shot marker prevents replacement. Slot files are
-removed before result export; the tmpfs disappears when the container stops. Docker documents
+removed before result export; the tmpfs disappears when the container stops. A long workload
+reads its files once at start. Expiry, revocation attempts and the memory sweep act only on
+undelivered material in Relay: nothing touches the container's tmpfs or the running workload
+when the authorization expires, so delivered files stay until result export or container stop,
+even during a multi-day attempt. Docker documents
 that tmpfs may be written to swap; host memory, VM snapshots and administrative access remain
 operator concerns. [Docker tmpfs documentation](https://docs.docker.com/engine/storage/tmpfs/)
 (reviewed 2026-10-12).

@@ -15,6 +15,8 @@ Optional policy flags are `--managed-machine-shape cpu|NvidiaTeslaT4|NvidiaTesla
 `--managed-max-wall-seconds 1..86400`, `--managed-max-workers 1..16`, and
 `--managed-allow-internet`. Defaults are CPU, 1800 seconds, two workers and internet disabled.
 They configure future profiles; each verified connection revision freezes its own policy.
+The startup wall default applies to every provider type, so it stays within Kaggle's one day;
+a connection configuration may raise its own limit (see below).
 Use `--managed-machine-shape cpu` for CPU-only execution. It sends GPU disabled and no GPU
 machine shape to Kaggle. This is an explicit configuration, never a fallback from an unavailable
 GPU. Changing the service flag does not rewrite saved connections or jobs; explicitly check a
@@ -73,8 +75,14 @@ discovers the account itself. The application does not need to ask for a provide
 The SSH descriptor takes the host, user and one login; see [SSH hosts](ssh-hosts.md).
 
 `POST /connections` accepts `provider_type`, `label` and `credentials`, with an optional
-`configuration` containing `max_remote_wall_seconds` from 1 through 86400. If omitted, the
-managed adapter's existing startup default applies. Creation still discovers and verifies the
+`configuration` containing `max_remote_wall_seconds`. If omitted, the managed adapter's existing
+startup default applies.
+
+Wall budgets are always finite. The contract ceiling is 604800 seconds (7 days); each provider
+descriptor also advertises its own `capabilities.max_remote_wall_seconds`, and a connection or
+job above it is refused before any change. Kaggle advertises 86400 seconds because Kaggle enforces
+its own session limit. An SSH Docker host advertises 604800 seconds for long, low-CPU work on an
+operator-owned machine. There is no open-ended execution, automatic extension or resubmission. Creation still discovers and verifies the
 account asynchronously.
 
 Under the same workspace prefix, `POST /connections/{id}/actions` accepts an `expected_revision`

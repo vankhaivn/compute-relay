@@ -33,7 +33,7 @@ type Request struct {
 }
 
 func (r Request) Validate() error {
-	if !r.AttemptID.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > 86400 || !r.AuthorizePrivateStaging || !r.AuthorizeCompute {
+	if !r.AttemptID.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > domain.MaxRemoteWallSeconds || !r.AuthorizePrivateStaging || !r.AuthorizeCompute {
 		return ErrRequest
 	}
 	return nil
@@ -82,7 +82,7 @@ type Receipt struct {
 }
 
 func (r Receipt) Validate() error {
-	if !r.AuthorizationID.Valid() || !r.WorkspaceID.Valid() || !r.JobID.Valid() || !r.AttemptID.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > 86400 || r.CreatedAt.IsZero() {
+	if !r.AuthorizationID.Valid() || !r.WorkspaceID.Valid() || !r.JobID.Valid() || !r.AttemptID.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > domain.MaxRemoteWallSeconds || r.CreatedAt.IsZero() {
 		return ErrRequest
 	}
 	if r.Status != Granted && r.Status != Consumed && r.Status != Revoked {

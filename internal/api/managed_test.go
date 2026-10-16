@@ -82,7 +82,7 @@ func (*managedAdapter) Descriptor() connections.Descriptor {
 	return connections.Descriptor{
 		Type: "fixture", Label: "Fixture provider",
 		Fields:       []connections.Field{{Name: "api_token", Label: "API token", Required: true, WriteOnly: true, MaxBytes: 8192}},
-		Capabilities: connections.Capabilities{Accelerators: []string{"cpu", "gpu"}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "supported"},
+		Capabilities: connections.Capabilities{Accelerators: []string{"cpu", "gpu"}, RemoteCancel: "unsupported", Quota: "supported", AbsoluteDeadline: "supported", MaxRemoteWallSeconds: 86400},
 	}
 }
 func (*managedAdapter) Encode(fields map[string]string) ([]byte, error) {
