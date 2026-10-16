@@ -1,5 +1,9 @@
 package domain
 
+// MaxRemoteWallSeconds is the provider-neutral ceiling for one finite remote wall budget.
+// Each provider advertises its own maximum, never above this value.
+const MaxRemoteWallSeconds int64 = 7 * 24 * 60 * 60
+
 // CapabilityName is a provider-neutral behavior exposed by a provider instance.
 type CapabilityName string
 

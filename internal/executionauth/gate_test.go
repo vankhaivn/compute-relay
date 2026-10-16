@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 func TestGateRequestsRejectImplicitAndMutableAuthority(t *testing.T) {
@@ -54,6 +56,11 @@ func TestGateExpiryAndReceiptSemantics(t *testing.T) {
 	g := Gate{Request: PrepareRequest{ReadyUntil: now.Add(time.Minute).Format(time.RFC3339)}}
 	if g.Expired(now) || !g.Expired(now.Add(time.Minute)) {
 		t.Fatal("hold boundary is not exclusive")
+	}
+	// A start window ends at its own bound even when the execution deadline is days away.
+	g.Start = &provider.StartAuthorization{ExecutionDeadline: now.Add(7 * 24 * time.Hour).Format(time.RFC3339), StartBefore: now.Add(30 * time.Second).Format(time.RFC3339)}
+	if g.Expired(now) || !g.Expired(now.Add(30*time.Second)) {
+		t.Fatal("start window does not bound expiry")
 	}
 	r := GateReceipt{AuthorizationID: "grant_1", WorkspaceID: "workspace_1", JobID: "job_1", AttemptID: "attempt_1", Kind: "prepare", Status: Granted, CreatedAt: now}
 	if r.Validate() != nil {

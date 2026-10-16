@@ -96,7 +96,7 @@ func Select(rows []Candidate, last domain.WorkspaceID, settings Settings, now ti
 	seen := map[int64]bool{}
 	for i, r := range rows {
 		if !r.Identity.Valid() || r.Sequence <= 0 || seen[r.Sequence] || r.State.Validate() != nil || !domain.ObjectID(r.AccountScope).Valid() ||
-			!r.ProviderInstanceID.Valid() || !r.Policy.Valid() || (r.Resource != "cpu" && r.Resource != "gpu") || r.WallSeconds < 1 || r.WallSeconds > 86400 ||
+			!r.ProviderInstanceID.Valid() || !r.Policy.Valid() || (r.Resource != "cpu" && r.Resource != "gpu") || r.WallSeconds < 1 || r.WallSeconds > domain.MaxRemoteWallSeconds ||
 			(!r.LeaseUntil.IsZero() && !ValidTime(r.LeaseUntil)) || (!r.NotBefore.IsZero() && !ValidTime(r.NotBefore)) {
 			return -1, View{}, ErrInvalid
 		}

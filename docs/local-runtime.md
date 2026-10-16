@@ -12,7 +12,8 @@ See [getting started](getting-started.md) for installation commands.
 ```
 
 Optional policy flags are `--managed-machine-shape cpu|NvidiaTeslaT4|NvidiaTeslaP100`,
-`--managed-max-wall-seconds 1..86400`, `--managed-max-workers 1..16`,
+`--managed-max-wall-seconds 1..86400` (a startup default for every provider type; an SSH
+connection configuration may allow up to 604800), `--managed-max-workers 1..16`,
 `--managed-allow-internet` and `--managed-credential-store file|keychain`.
 Defaults are CPU, 1800 seconds, two workers, internet disabled and file credentials for a new
 installation. Policy changes affect future selections; they do not rewrite admitted jobs.

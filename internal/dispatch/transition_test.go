@@ -259,7 +259,8 @@ func fixtureCapabilities() provider.Capabilities {
 		GPU: domain.CapabilitySupportUnsupported, PrivateInputStaging: true,
 		LogsWhileRunning: domain.CapabilitySupportUnsupported,
 		QuotaReporting:   domain.CapabilitySupportUnsupported,
-		ExecutionTimeout: true, RemoteNetworkControl: true, StrongIdentity: true}
+		ExecutionTimeout: true, RemoteNetworkControl: true, StrongIdentity: true,
+		MaxWallSeconds: domain.MaxRemoteWallSeconds}
 }
 func FuzzApplyNeverRepeatsMutation(f *testing.F) {
 	f.Add([]byte{0, 1, 2, 3, 4})

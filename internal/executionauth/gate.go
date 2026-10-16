@@ -47,7 +47,7 @@ type StartRequest struct {
 
 func (r StartRequest) Validate() error {
 	_, ok := canonicalTime(r.ExecutionDeadline)
-	if r.SecretAuthorizationID != "" && !r.SecretAuthorizationID.Valid() || !r.AttemptID.Valid() || !r.ReadinessRevision.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > 86400 || !ok || !r.AuthorizeCompute {
+	if r.SecretAuthorizationID != "" && !r.SecretAuthorizationID.Valid() || !r.AttemptID.Valid() || !r.ReadinessRevision.Valid() || r.MaxRemoteWallSeconds < 1 || r.MaxRemoteWallSeconds > domain.MaxRemoteWallSeconds || !ok || !r.AuthorizeCompute {
 		return ErrRequest
 	}
 	return nil
@@ -118,8 +118,9 @@ func (g Gate) Expired(now time.Time) bool {
 		return true
 	}
 	if g.Start != nil {
-		deadline, _ := canonicalTime(g.Start.ExecutionDeadline)
-		return !now.Before(deadline)
+		// StartBefore is the earliest of the hold, the execution deadline and secret expiry.
+		before, _ := canonicalTime(g.Start.StartBefore)
+		return !now.Before(before)
 	}
 	return false
 }

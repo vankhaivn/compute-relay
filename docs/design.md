@@ -120,6 +120,9 @@ an unsupported requirement fails before mutation. SSH fakehost contract tests ex
   capacity and a Docker endpoint can change independently of the SSH address.
 - Kaggle deletion is name-based despite immutable identity checks. Explicit cleanup authorization
   cannot eliminate the check/delete replacement race; uncertainty never permits repeating the RPC.
+- Wall budgets share one finite seven-day contract ceiling, and each adapter advertises its own
+  maximum: Kaggle enforces a one-day session, while an operator-owned SSH host can run long
+  low-CPU work. Workload-secret expiry bounds one-shot delivery at start, not the running attempt.
 - HTTP artifact completion uses a final verification trailer. Consumers must preserve and verify
   it; received bytes alone cannot establish successful delivery.
 

@@ -78,7 +78,8 @@
             "required": [
               "accelerators",
               "remote_cancel",
-              "quota"
+              "quota",
+              "max_remote_wall_seconds"
             ],
             "properties": {
               "accelerators": {
@@ -169,6 +170,12 @@
                   "unsupported",
                   "unknown"
                 ]
+              },
+              "max_remote_wall_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 604800,
+                "description": "Largest finite wall budget in seconds that a connection or job of this provider type accepts."
               }
             }
           },

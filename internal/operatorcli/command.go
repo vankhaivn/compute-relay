@@ -50,7 +50,8 @@ compute consent. Kaggle and SSH adapters are built in.
 New installations store credentials in private, unencrypted secrets.env;
 existing Keychain installations keep Keychain. The selected store is retained on restart.
 Managed shapes: cpu, NvidiaTeslaT4 or NvidiaTeslaP100.
-Wall limit: 1-86400 seconds; workers: 1-16; internet defaults to disabled.
+Wall limit: 1-86400 seconds (an SSH connection may allow up to 604800);
+workers: 1-16; internet defaults to disabled.
 Local shutdown is not remote cancellation. Validation is local schema validation,
 not admission.
 `

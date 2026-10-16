@@ -41,8 +41,10 @@ func (c ManagedServeConfig) validate() error {
 	if c.CredentialStore != "" && c.CredentialStore != "file" && c.CredentialStore != "keychain" {
 		return ErrRequest
 	}
+	// The startup wall default applies to every installed provider type, so it stays within
+	// the smallest advertised maximum. A connection configuration may raise it per provider.
 	if c.MachineShape != "cpu" && c.MachineShape != "NvidiaTeslaT4" && c.MachineShape != "NvidiaTeslaP100" ||
-		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > 86400 || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
+		c.MaxRemoteWallSeconds < 1 || c.MaxRemoteWallSeconds > kaggle.MaxWallSeconds || c.MaxWorkers < 1 || c.MaxWorkers > 16 {
 		return ErrRequest
 	}
 	return nil

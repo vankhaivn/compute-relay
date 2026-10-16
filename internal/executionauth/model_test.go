@@ -25,7 +25,7 @@ func TestParseStrictAndDigest(t *testing.T) {
 	for _, raw := range []string{
 		`null`, `{}`, requestJSON + `{}`, strings.Replace(requestJSON, `"attempt_id"`, `"Attempt_ID"`, 1),
 		strings.Replace(requestJSON, `"attempt_id":"attempt_1"`, `"attempt_id":"attempt_1","attempt_id":"attempt_1"`, 1),
-		strings.Replace(requestJSON, `:10`, `:0`, 1), strings.Replace(requestJSON, `:10`, `:86401`, 1), strings.Replace(requestJSON, `:10`, `:1.5`, 1),
+		strings.Replace(requestJSON, `:10`, `:0`, 1), strings.Replace(requestJSON, `:10`, `:604801`, 1), strings.Replace(requestJSON, `:10`, `:1.5`, 1),
 		strings.Replace(requestJSON, `:10`, `:null`, 1), strings.Replace(requestJSON, `:true`, `:false`, 1), strings.Replace(requestJSON, `:true`, `:null`, 1),
 		strings.Replace(requestJSON, `"attempt_1"`, `null`, 1), strings.Replace(requestJSON, `"attempt_1"`, `"\ud800"`, 1),
 		strings.Replace(requestJSON, `"attempt_id"`, `"extra":1,"attempt_id"`, 1),

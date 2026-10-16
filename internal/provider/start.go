@@ -51,12 +51,12 @@ func (s StartAuthorization) Equal(other StartAuthorization) bool {
 func (s StartAuthorization) Validate(p Prepared) error {
 	deadline, err := time.Parse(time.RFC3339, s.ExecutionDeadline)
 	before, beforeErr := time.Parse(time.RFC3339, s.StartBefore)
-	if !s.AuthorizationID.Valid() || !s.ReadinessRevision.Valid() || s.ReadinessRevision != p.ReadinessRevision() || s.MaxRemoteWallSeconds < 1 || s.MaxRemoteWallSeconds > 86400 || err != nil || beforeErr != nil || deadline.Year() < 2 || before.Year() < 2 || deadline.UTC().Format(time.RFC3339) != s.ExecutionDeadline || before.UTC().Format(time.RFC3339) != s.StartBefore || before.After(deadline) {
+	if !s.AuthorizationID.Valid() || !s.ReadinessRevision.Valid() || s.ReadinessRevision != p.ReadinessRevision() || s.MaxRemoteWallSeconds < 1 || s.MaxRemoteWallSeconds > domain.MaxRemoteWallSeconds || err != nil || beforeErr != nil || deadline.Year() < 2 || before.Year() < 2 || deadline.UTC().Format(time.RFC3339) != s.ExecutionDeadline || before.UTC().Format(time.RFC3339) != s.StartBefore || before.After(deadline) {
 		return errors.New("invalid explicit start authorization")
 	}
 	if s.Secrets != nil {
 		expires, ok := workloadsecret.CanonicalTime(s.Secrets.ExpiresAt)
-		if !s.Secrets.AuthorizationID.Valid() || !ok || expires.Before(deadline) || len(s.Secrets.Slots) == 0 || !workloadsecret.ValidSlots(s.Secrets.Slots) {
+		if !s.Secrets.AuthorizationID.Valid() || !ok || expires.Before(before) || len(s.Secrets.Slots) == 0 || !workloadsecret.ValidSlots(s.Secrets.Slots) {
 			return errors.New("invalid workload secret authorization")
 		}
 	}

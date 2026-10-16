@@ -62,13 +62,15 @@ current payload liveness or receiver health. Use normal job status for execution
 |---|---|
 | `attempt_id` | The exact prepared attempt. |
 | `readiness_revision` | The exact lowercase SHA-256 revision from readiness. |
-| `max_remote_wall_seconds` | At most the admitted wall budget, and greater than setup plus finalization budgets. |
+| `max_remote_wall_seconds` | At most the admitted wall budget (itself at most the provider's advertised maximum: 86400 for Kaggle, 604800 for SSH), and greater than setup plus finalization budgets. |
 | `execution_deadline` | Future whole-second UTC timestamp, at most this many wall seconds from authorization and no later than an original job deadline. |
 | `authorize_compute` | Must be `true`; grants one start only. |
 
 Preparation does not need the final execution deadline. Start tightens the execution window
 without rewriting the accepted job or staged manifest. Start must happen before both
-`ready_until` and `execution_deadline`; hold expiry only bounds start, not a running workload.
+`ready_until` and `execution_deadline`, and before the expiry of any required
+[workload secret](workload-secrets.md). Hold and secret expiry only bound start, not a running
+workload, so an SSH attempt may run until its deadline of up to seven days.
 Remote enforcement follows the [execution deadline contract](#execution-deadlines).
 
 Before start, the worker rechecks image, container policy and complete staged bytes, then
@@ -118,7 +120,8 @@ not schedule a start or authorize staging, compute, cancellation or cleanup.
 Use a future timestamp with this exact whole-second UTC spelling. Offsets, fractional seconds,
 empty strings and null are rejected. The version is the existing `compute-connector/v1alpha1`
 job contract. Omission retains the existing relative-only behavior and canonical request bytes.
-The finite relative wall budget and profile ceiling still apply; neither can exceed 24 hours.
+The finite relative wall budget and profile ceiling still apply; neither can exceed the provider's
+advertised maximum (24 hours on Kaggle, seven days on an SSH Docker host).
 
 ## Admission and start
 

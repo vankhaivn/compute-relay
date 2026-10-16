@@ -213,7 +213,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 			profile.MaxProcesses = record.Configuration.MaxProcesses
 		}
 	}
-	if profile.Validate() != nil {
+	if profile.Validate() != nil || profile.MaxRemoteWallSeconds > adapter.Descriptor().Capabilities.MaxRemoteWallSeconds {
 		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider")
 	}
 	runtimeConfig := verified.RuntimeConfig

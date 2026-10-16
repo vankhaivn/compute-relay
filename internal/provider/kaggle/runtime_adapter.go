@@ -106,7 +106,7 @@ func RuntimeCapabilities(shape string) provider.Capabilities {
 		RemoteCleanup: true, LogsWhileRunning: domain.CapabilitySupportUnknown,
 		LogsAfterCompletion: true, QuotaReporting: domain.CapabilitySupportSupported,
 		ExecutionTimeout: true, RemoteNetworkControl: true, StrongIdentity: true,
-		Accelerators: []string{"cpu"}}
+		Accelerators: []string{"cpu"}, MaxWallSeconds: MaxWallSeconds}
 	if shape != "cpu" && shape != "" {
 		c.GPU = domain.CapabilitySupportUnknown
 		c.GPUShape = shape

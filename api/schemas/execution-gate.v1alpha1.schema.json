@@ -56,7 +56,7 @@
         "max_remote_wall_seconds": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 86400
+          "maximum": 604800
         },
         "execution_deadline": {
           "type": "string",

@@ -40,8 +40,8 @@ func (job ResolvedJob) Validate() error {
 	if job.Binding.ProviderInstanceID != job.Identity.InstanceID {
 		return errors.New("job binding does not match submission instance")
 	}
-	if job.WallSeconds <= 0 || job.WallSeconds > 86400 {
-		return errors.New("resolved wall budget must be in 1..86400 seconds")
+	if job.WallSeconds <= 0 || job.WallSeconds > domain.MaxRemoteWallSeconds {
+		return errors.New("resolved wall budget exceeds the finite contract maximum")
 	}
 	if len(job.Specification) == 0 || len(job.Specification) > 1<<20 ||
 		!json.Valid(job.Specification) || strings.TrimSpace(string(job.Specification))[0] != '{' {
