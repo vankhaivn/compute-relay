@@ -324,7 +324,7 @@ func TestNativeCleanupChecksIdentityAndNeverRepeatsUncertainDelete(t *testing.T)
 				f.dataset, f.state = true, "COMPLETE"
 				f.stage = stagingRequest{Owner: f.owner, Slug: "crs-" + strings.Repeat("a", 40), MarkerSHA256: provider.Digest(marker), License: "other"}
 				f.staged["relay-stage.bin"] = marker
-				f.kernel = &executionRequest{Owner: f.owner, Slug: "cre-" + strings.Repeat("b", 40), Source: "original-source", Dataset: f.owner + "/" + f.stage.Slug}
+				f.kernel = &executionRequest{Owner: f.owner, Slug: "cre-" + strings.Repeat("b", 40), Source: "original-source", Datasets: []string{f.owner + "/" + f.stage.Slug}}
 				request := cleanupRequest{Protocol: 1, Owner: f.owner, Slug: f.stage.Slug, Kind: kind, ID: f.datasetID,
 					SHA256: f.stage.MarkerSHA256}
 				operation := "DeleteDataset"

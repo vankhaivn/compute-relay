@@ -225,10 +225,10 @@ func TestMutationRequestsRejectUnsafeLocalInputsBeforeSending(t *testing.T) {
 	calls := 0
 	c := newFixtureClient(t, func(*http.Request) (*http.Response, error) { calls++; return nil, errors.New("unexpected") }, nil)
 	for _, request := range []SaveKernelRequest{
-		{Resource: fixtureKernel, Dataset: fixtureDataset, Source: "fixture", WallSeconds: 0},
-		{Resource: fixtureKernel, Dataset: fixtureDataset, Source: "fixture", WallSeconds: 60, MachineShape: "NvidiaTeslaT4"},
-		{Resource: fixtureKernel, Dataset: fixtureDataset, Source: "fixture", WallSeconds: 60, GPU: true},
-		{Resource: fixtureKernel, Dataset: fixtureDataset, Source: fixtureToken, WallSeconds: 60},
+		{Resource: fixtureKernel, Datasets: []Resource{fixtureDataset}, Source: "fixture", WallSeconds: 0},
+		{Resource: fixtureKernel, Datasets: []Resource{fixtureDataset}, Source: "fixture", WallSeconds: 60, MachineShape: "NvidiaTeslaT4"},
+		{Resource: fixtureKernel, Datasets: []Resource{fixtureDataset}, Source: "fixture", WallSeconds: 60, GPU: true},
+		{Resource: fixtureKernel, Datasets: []Resource{fixtureDataset}, Source: fixtureToken, WallSeconds: 60},
 	} {
 		if _, err := c.SaveKernel(context.Background(), request); !errors.Is(err, ErrConfig) {
 			t.Fatal(err)

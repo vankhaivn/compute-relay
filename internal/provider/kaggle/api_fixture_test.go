@@ -52,12 +52,21 @@ type nativeFixture struct {
 	getDataset  int
 	getKernel   int
 	transferred int
+	shared      map[string]*fixtureDataset
+}
+
+// fixtureDataset is one shared input dataset; the attempt dataset keeps the fields above.
+type fixtureDataset struct {
+	id     string
+	stage  stagingRequest
+	staged map[string][]byte
+	state  string
 }
 
 func newNativeFixture(t *testing.T, owner string) *nativeFixture {
 	t.Helper()
 	return &nativeFixture{t: t, owner: owner, datasetID: "123", kernelID: "42", state: "RUNNING", staged: map[string][]byte{},
-		uploads: map[string]string{}, uploaded: map[string][]byte{}, outputs: map[string][]byte{}, logs: `[{"data":"first\nsecond\n"}]`,
+		uploads: map[string]string{}, uploaded: map[string][]byte{}, outputs: map[string][]byte{}, logs: `[{"data":"first\nsecond\n"}]`, shared: map[string]*fixtureDataset{},
 		quota: `{"gpuQuota":{"totalTimeAllowed":"108000s","timeUsed":"0s","timeReserved":"0s"}}`}
 }
 
@@ -82,6 +91,9 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		f.t.Fatal("invalid RPC body")
 	}
 	get := func(name string) string { var s string; _ = json.Unmarshal(payload[name], &s); return s }
+	if strings.HasPrefix(get("datasetSlug"), "crx-") || strings.HasPrefix(get("slug"), "crx-") {
+		return f.sharedAPI(op, payload, get)
+	}
 	switch op {
 	case "IntrospectToken":
 		return jsonResponse(200, `{"active":true,"username":"`+f.owner+`"}`), nil
@@ -117,9 +129,7 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		}
 		f.dataset = true
 		f.stage.Owner, f.stage.Slug, f.stage.License = get("ownerSlug"), get("slug"), get("licenseName")
-		for token, name := range f.uploads {
-			f.staged[name] = bytes.Clone(f.uploaded[token])
-		}
+		f.staged = f.created(payload)
 		f.stage.MarkerSHA256 = provider.Digest(f.staged["relay-stage.bin"])
 		if f.fault == "lost-create-ack" {
 			return nil, errors.New("SYNTHETIC_TOKEN")
@@ -157,7 +167,7 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		return f.json(map[string]any{"metadata": map[string]any{"id": id, "ref": r.Owner + "/" + r.Slug, "slug": r.Slug,
 			"currentVersionNumber": 1, "language": "python", "kernelType": "script", "isPrivate": f.fault != "public-kernel",
 			"enableGpu": r.GPU, "enableTpu": false, "enableInternet": r.Internet, "machineShape": r.MachineShape,
-			"datasetDataSources": []string{r.Dataset}}, "blob": map[string]any{"source": r.Source}}), nil
+			"datasetDataSources": r.Datasets}, "blob": map[string]any{"source": r.Source}}), nil
 	case "SaveKernel":
 		if f.kernel != nil || string(payload["isPrivate"]) != "true" || string(payload["enableTpu"]) != "false" {
 			f.t.Fatal("duplicate or unsafe kernel save")
@@ -168,7 +178,7 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		var datasets []string
 		_ = json.Unmarshal(payload["datasetDataSources"], &datasets)
 		f.kernel = &executionRequest{Owner: f.owner, Slug: strings.TrimPrefix(get("slug"), f.owner+"/"), Source: get("text"), GPU: gpu,
-			Internet: internet, MachineShape: get("machineShape"), Dataset: datasets[0]}
+			Internet: internet, MachineShape: get("machineShape"), Datasets: datasets}
 		if f.fault == "lost-save-ack" {
 			return nil, errors.New("SYNTHETIC_TOKEN")
 		}
@@ -199,6 +209,61 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		f.t.Fatal("unexpected RPC", op)
 		return nil, errors.New("unexpected RPC")
 	}
+}
+
+// created returns the uploaded files named by one CreateDataset call.
+func (f *nativeFixture) created(payload map[string]json.RawMessage) map[string][]byte {
+	var files []struct {
+		Token string `json:"token"`
+	}
+	if json.Unmarshal(payload["files"], &files) != nil {
+		f.t.Fatal("invalid dataset files")
+	}
+	staged := map[string][]byte{}
+	for _, file := range files {
+		staged[f.uploads[file.Token]] = bytes.Clone(f.uploaded[file.Token])
+	}
+	return staged
+}
+
+func (f *nativeFixture) sharedAPI(op string, payload map[string]json.RawMessage, get func(string) string) (*http.Response, error) {
+	slug := get("datasetSlug")
+	if op == "CreateDataset" {
+		slug = get("slug")
+	}
+	entry := f.shared[slug]
+	switch op {
+	case "GetDataset":
+		if entry == nil {
+			return jsonResponse(404, `{}`), nil
+		}
+		return f.json(map[string]any{"id": entry.id, "ref": f.owner + "/" + slug, "currentVersionNumber": 1, "isPrivate": true,
+			"description": stagingDescription(entry.stage.MarkerSHA256), "licenseName": stagingLicense(entry.stage.License), "lastUpdated": "fixture"}), nil
+	case "GetDatasetStatus":
+		return f.json(map[string]any{"status": entry.state}), nil
+	case "CreateDataset":
+		if string(payload["isPrivate"]) != "true" || entry != nil {
+			f.t.Fatal("non-private or duplicate shared dataset creation")
+		}
+		staged := f.created(payload)
+		entry = &fixtureDataset{id: strconv.Itoa(900 + len(f.shared)), staged: staged, state: "READY",
+			stage: stagingRequest{Owner: get("ownerSlug"), Slug: slug, License: get("licenseName"), MarkerSHA256: provider.Digest(staged[sharedMarkerFile])}}
+		f.shared[slug] = entry
+		if f.fault == "lost-shared-create" {
+			return nil, errors.New("SYNTHETIC_TOKEN")
+		}
+		return f.json(map[string]any{"ref": f.owner + "/" + slug}), nil
+	case "ListDatasetFiles":
+		files := []map[string]any{}
+		for name, data := range entry.staged {
+			files = append(files, map[string]any{"name": name, "totalBytes": len(data)})
+		}
+		return f.json(map[string]any{"datasetFiles": files}), nil
+	case "DownloadDataset":
+		f.t.Fatal("shared dataset bytes must not be downloaded")
+	}
+	f.t.Fatal("unexpected shared dataset RPC", op)
+	return nil, errors.New("unexpected RPC")
 }
 
 func (f *nativeFixture) json(value any) *http.Response {
