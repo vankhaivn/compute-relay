@@ -114,6 +114,19 @@ class ContractTests(Fixture):
             with self.assertRaises(contract.Failure):
                 contract.load(raw)
 
+    def test_input_count_limit(self):
+        for count in (256, 257):
+            m = copy.deepcopy(self.m)
+            m["inputs"] = [{"name": "input-%03d" % i, "path": "data", "target": "inputs/%03d.bin" % i,
+                            "bytes": 0, "sha256": sha(b"")} for i in range(count)]
+            m["input_manifest_sha256"] = contract.input_digest(m["inputs"])
+            raw = json.dumps(m).encode()
+            if count == 256:
+                self.assertEqual(len(contract.load(raw)[0]["inputs"]), 256)
+            else:
+                with self.assertRaises(contract.Failure):
+                    contract.load(raw)
+
     def test_validate_never_executes(self):
         p = self.base / "manifest.json"
         p.write_text(json.dumps(self.m))

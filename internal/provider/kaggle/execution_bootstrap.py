@@ -83,8 +83,8 @@ def run_remote(payload):
         raise RuntimeError("Compute Relay runner requires Linux")
     staging, marker = staging_paths(payload)
     with marker.open("rb") as stream:
-        raw = stream.read(65537)
-    if len(raw) > 65536 or hashlib.sha256(raw).hexdigest() != payload["marker_sha256"]:
+        raw = stream.read((2 << 20) + 1)
+    if len(raw) > 2 << 20 or hashlib.sha256(raw).hexdigest() != payload["marker_sha256"]:
         raise RuntimeError("Compute Relay staging identity changed")
     # The exact source bytes came from the build's checked runner asset lock.
     # Only these fixed modules are loaded; workload files cannot provide imports.

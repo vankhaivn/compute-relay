@@ -3,6 +3,7 @@ package kaggle
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
 func stagingFixture(t *testing.T) (Config, provider.Plan) {
@@ -99,5 +101,45 @@ func TestDefaultStagingBudgetFitsLimitOnOrdinaryUplink(t *testing.T) {
 	}
 	if dispatch.DefaultConfig().PreparationTimeout < policy.Timeout {
 		t.Fatal("dispatch preparation budget cuts staging before its own policy timeout")
+	}
+}
+
+// Worst case: 128-byte identities, 64-byte names and 1024-byte targets whose characters all
+// expand six times under JSON escaping.
+func TestStagingPlanFitsMaximalInputMarker(t *testing.T) {
+	maximal := func(t *testing.T, count int) (Config, provider.Plan, domain.OperationID) {
+		c, p := stagingFixture(t)
+		long := strings.Repeat("i", 128)
+		job := &p.Job
+		job.Identity.InstallationID, job.Identity.WorkspaceID, job.Identity.JobID, job.Identity.AttemptID = domain.RuntimeInstallationID(long), domain.WorkspaceID(long), domain.JobID(long), domain.AttemptID(long)
+		job.Identity.IntentID, job.Identity.ResourceKey, job.Identity.Nonce = domain.SubmissionIntentID(long), long, long
+		snapshot := job.Inputs.Clone()
+		snapshot.Bundle.WorkspaceID = job.Identity.WorkspaceID
+		snapshot.Inputs = nil
+		for i := 0; i < count; i++ {
+			snapshot.Inputs = append(snapshot.Inputs, provider.FrozenInput{
+				Name: fmt.Sprintf("n%03d", i) + strings.Repeat("x", 60), Target: fmt.Sprintf("%03d", i) + strings.Repeat("<", 1021),
+				Object: domain.ObjectMetadata{ID: "input", WorkspaceID: job.Identity.WorkspaceID, Bytes: 0, SHA256: provider.Digest(nil)}})
+		}
+		job.Inputs, job.Identity.InputManifestSHA256 = &snapshot, snapshot.InputDigest()
+		return c, p, domain.OperationID(long)
+	}
+	c, p, operation := maximal(t, 256)
+	if err := p.Job.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	stage, err := buildStagingPlan(c, DefaultStagingPolicy(), p, operation)
+	if err != nil {
+		t.Fatal("maximal 256-input plan refused", err)
+	}
+	if len(stage.marker) > maxMarkerBytes || len(stage.marker) < 3*maxMarkerBytes/4 || len(stage.request.Files) != kaggleapi.MaxStagingFiles {
+		t.Fatalf("marker %d bytes, %d files", len(stage.marker), len(stage.request.Files))
+	}
+	if maxStagingBytes != kaggleapi.MaxStagingBytes {
+		t.Fatal("staging byte bounds disagree")
+	}
+	c, p, operation = maximal(t, 257)
+	if _, err := buildStagingPlan(c, DefaultStagingPolicy(), p, operation); err == nil {
+		t.Fatal("257-input plan accepted")
 	}
 }

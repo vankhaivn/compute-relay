@@ -81,7 +81,7 @@ class ExecutionBootstrapTests(unittest.TestCase):
                 elif fault == "changed":
                     self.marker.write_bytes(b"different marker")
                 else:
-                    raw = b"x" * 65537
+                    raw = b"x" * ((2 << 20) + 1)
                     self.marker.write_bytes(raw)
                     self.payload["marker_sha256"] = hashlib.sha256(raw).hexdigest()
                 with self.assertRaises(RuntimeError):

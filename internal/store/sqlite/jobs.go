@@ -96,7 +96,7 @@ func readJobRecord(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id dom
 			rows.Close()
 			return admission.Record{}, dbError(err)
 		}
-		if !ref.Object.Valid() || refs[ref.Role] || len(refs) >= 66 {
+		if !ref.Object.Valid() || refs[ref.Role] || len(refs) >= 258 {
 			rows.Close()
 			return admission.Record{}, ErrCorrupt
 		}

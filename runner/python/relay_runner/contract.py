@@ -136,7 +136,7 @@ def validate(m):
     require(type(nonce) is str and re.fullmatch(r"[A-Za-z0-9._:-]{16,256}", nonce))
     require(type(m["input_manifest_sha256"]) is str and DIGEST.fullmatch(m["input_manifest_sha256"]))
     fields(m["bundle"], ("path", "bytes", "sha256"))
-    require(type(m["inputs"]) is list and len(m["inputs"]) <= 64)
+    require(type(m["inputs"]) is list and len(m["inputs"]) <= 256)
     limits = dict(DEFAULT_LIMITS)
     supplied = m.get("limits", {})
     fields(supplied, (), DEFAULT_LIMITS)

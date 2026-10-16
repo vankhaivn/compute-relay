@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,19 @@ func TestInputDigestMatchesRunnerCanonicalEncoding(t *testing.T) {
 	s.Inputs = nil
 	if s.InputDigest() != provider.Digest([]byte("[]")) {
 		t.Fatal("empty input manifest is not []")
+	}
+}
+func TestInputSnapshotAcceptsAtMost256Inputs(t *testing.T) {
+	s := provider.InputSnapshot{Bundle: domain.ObjectMetadata{ID: "code", WorkspaceID: "a", Bytes: 0, SHA256: provider.Digest(nil)}}
+	for i := 0; i < 257; i++ {
+		s.Inputs = append(s.Inputs, provider.FrozenInput{Name: fmt.Sprintf("input-%03d", i), Target: fmt.Sprintf("inputs/%03d.bin", i), Object: domain.ObjectMetadata{ID: "data", WorkspaceID: "a", Bytes: 0, SHA256: provider.Digest(nil)}})
+	}
+	if err := s.Validate("a"); err == nil {
+		t.Fatal("257 inputs accepted")
+	}
+	s.Inputs = s.Inputs[:256]
+	if err := s.Validate("a"); err != nil {
+		t.Fatal("256 inputs refused", err)
 	}
 }
 func TestFrozenRegistryRetainsRevisionAndRejectsBindingMismatch(t *testing.T) {

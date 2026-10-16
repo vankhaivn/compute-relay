@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-const MaxStagingBytes int64 = (4 << 30) + (100 << 20) + (64 << 10)
-const MaxStagingFiles = 66
+// Staging holds a marker of at most 2 MiB, the bundle and up to 256 inputs.
+const MaxStagingBytes int64 = (4 << 30) + (100 << 20) + (2 << 20)
+const MaxStagingFiles = 258
 
 // Resource names are not numeric identity. Get responses must still be compared
 // to the immutable ID/version/privacy evidence saved for the original attempt.

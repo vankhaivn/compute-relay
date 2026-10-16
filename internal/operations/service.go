@@ -135,7 +135,7 @@ func (s *Service) authorize(ctx context.Context, p auth.Principal, w domain.Work
 }
 
 func (s *Service) verify(ctx context.Context, w domain.WorkspaceID, inputs RetryInputs) error {
-	if inputs.Attempt.Validate() != nil || RetryAllowed(inputs.Attempt.State) != nil || len(inputs.Objects) == 0 || len(inputs.Objects) > 66 {
+	if inputs.Attempt.Validate() != nil || RetryAllowed(inputs.Attempt.State) != nil || len(inputs.Objects) == 0 || len(inputs.Objects) > 258 {
 		return ErrInputs
 	}
 	var total int64

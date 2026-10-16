@@ -64,5 +64,6 @@ metadata; preserve the returned object ID and reference that exact immutable obj
 Workspace ownership is checked again during admission. Later source edits never change an upload.
 
 Inputs use `source.kind: "object"`; upload them before admission. HTTPS sources are rejected.
+A job lists at most 256 inputs; each input object is at most 2 GiB and all inputs at most 4 GiB.
 Local import is unavailable. The control plane never downloads a job-supplied URL or accepts an
 unrestricted host-file selector. See [API contracts](../api/README.md) for upload/admission schemas.

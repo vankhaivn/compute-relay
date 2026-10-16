@@ -27,8 +27,9 @@ has been allocated. The adapter supplies no authoritative quota-reset timestamp.
 ## Stage and execute
 
 Upload a bounded [bundle and input objects](packaging-and-import.md), admit the job and authorize
-its exact attempt and wall limit. The adapter stages private attempt-owned data with a bound marker,
-checks readiness and original bytes, then submits the private kernel once after the durable
+its exact attempt and wall limit. The adapter stages private attempt-owned data with a bound marker
+(at most 2 MiB, enough for 256 inputs with maximal names and targets) in one dataset of up to 258
+files, checks readiness and original bytes, then submits the private kernel once after the durable
 intent barrier. Finite preparation and execution budgets apply; the Kaggle descriptor advertises
 a 86400-second wall maximum, and longer connections or jobs are refused. Remote internet is disabled unless
 both the selected policy permits it and the job requests it.
