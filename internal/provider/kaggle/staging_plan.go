@@ -10,7 +10,10 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-const maxStagingBytes int64 = (4 << 30) + (100 << 20) + (64 << 10)
+// The marker bound fits 256 inputs with 64-byte names and 1024-byte targets even when every
+// target character is JSON-escaped (about 1.56 MiB).
+const maxMarkerBytes = 2 << 20
+const maxStagingBytes int64 = (4 << 30) + (100 << 20) + maxMarkerBytes
 
 var (
 	ErrStaging         = errors.New("staging unresolved; inspect or reconcile the recorded identity, never repeat creation")
@@ -103,7 +106,7 @@ func buildStagingPlan(c Config, policy StagingPolicy, plan provider.Plan, operat
 		}{input.Name, input.Target, files[i+1].Name})
 	}
 	raw, err := json.Marshal(marker)
-	if err != nil || len(raw) > 64<<10 {
+	if err != nil || len(raw) > maxMarkerBytes {
 		return result, ErrConfig
 	}
 	var total int64 = int64(len(raw))

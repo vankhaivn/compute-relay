@@ -78,7 +78,7 @@ func cleanup(ctx context.Context, client *kaggleapi.Client, mode string, request
 			return result("active")
 		}
 	} else {
-		receipt, err := client.DownloadDatasetFile(ctx, resource, "relay-stage.bin", 64<<10, io.Discard)
+		receipt, err := client.DownloadDatasetFile(ctx, resource, "relay-stage.bin", maxMarkerBytes, io.Discard)
 		if err != nil {
 			return result("unknown")
 		}
