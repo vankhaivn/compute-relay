@@ -112,8 +112,8 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 	if e.used.Swap(true) {
 		return unknownExecution()
 	}
-	// Readiness already downloaded and rehashed the attempt's staging, and the remote
-	// runner rehashes every input before use. Recheck it here by metadata only, under
+	// Readiness checked the attempt's staging by metadata, and the remote runner
+	// rehashes every input before use. Recheck it here by metadata only, under
 	// the preparation budget: equality includes the first-pinned numeric dataset ID,
 	// version, marker, privacy, readiness and the exact file list.
 	stage, err := e.stager.RecheckPrepare(parent, e.plan, e.prepared.PreparationID)

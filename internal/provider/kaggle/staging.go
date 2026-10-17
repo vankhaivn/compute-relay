@@ -16,9 +16,11 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-const (
-	stagingVisibilityGrace = 5 * time.Second
-	stagingVisibilityPoll  = 250 * time.Millisecond
+// Kaggle may not answer reads of a just-created dataset for a while. The wait only reads
+// and polls gently; tests shorten it.
+var (
+	stagingVisibilityGrace = 2 * time.Minute
+	stagingVisibilityPoll  = 3 * time.Second
 )
 
 var errStagingVisibilityPending = errors.New("created staging dataset is not yet query-visible")
@@ -119,7 +121,7 @@ func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan,
 }
 
 // A miss is not permission to create/upload/version anything. This path does not
-// read local payload bytes; it verifies remote bytes against the original pins.
+// read local payload bytes; it checks remote metadata against the original pins.
 func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig
@@ -129,7 +131,7 @@ func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, opera
 }
 
 // RecheckPrepare confirms already verified staging by identity, privacy, readiness and
-// exact file list without downloading it again. The remote runner rehashes every input.
+// exact file list. The remote runner rehashes every input.
 func (s *Stager) RecheckPrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig
