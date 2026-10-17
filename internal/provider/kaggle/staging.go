@@ -16,9 +16,11 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
-const (
-	stagingVisibilityGrace = 5 * time.Second
-	stagingVisibilityPoll  = 250 * time.Millisecond
+// Kaggle may not answer reads of a just-created dataset for a while. The wait only reads
+// and polls gently; tests shorten it.
+var (
+	stagingVisibilityGrace = 2 * time.Minute
+	stagingVisibilityPoll  = 3 * time.Second
 )
 
 var errStagingVisibilityPending = errors.New("created staging dataset is not yet query-visible")

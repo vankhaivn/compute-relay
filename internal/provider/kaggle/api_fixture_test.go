@@ -30,6 +30,8 @@ func bytesResponse(data []byte) *http.Response {
 		Body: io.NopCloser(bytes.NewReader(data)), ContentLength: int64(len(data))}
 }
 
+const missingName403 = `{"error":{"code":403,"status":"PERMISSION_DENIED","message":"Permission 'datasets.get' was denied"}}`
+
 // This fixture speaks only the actual native HTTP protocol. It never bypasses
 // request encoding, signed-transfer handling, response validation or hashing.
 type nativeFixture struct {
@@ -53,6 +55,7 @@ type nativeFixture struct {
 	getKernel   int
 	transferred int
 	putFailures int
+	hiddenReads int // GetDataset answers of a created attempt dataset that deny its name.
 	shared      map[string]*fixtureDataset
 }
 
@@ -102,9 +105,13 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		return jsonResponse(200, f.quota), nil
 	case "GetDataset":
 		f.getDataset++
+		if f.dataset && f.hiddenReads > 0 {
+			f.hiddenReads--
+			return jsonResponse(403, missingName403), nil
+		}
 		if !f.dataset {
 			if f.fault == "missing-name-403" {
-				return jsonResponse(403, `{"error":{"code":403,"status":"PERMISSION_DENIED","message":"Permission 'datasets.get' was denied"}}`), nil
+				return jsonResponse(403, missingName403), nil
 			}
 			return jsonResponse(404, `{}`), nil
 		}
@@ -115,6 +122,9 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		return f.json(map[string]any{"id": id, "ref": f.owner + "/" + f.stage.Slug, "currentVersionNumber": 1, "isPrivate": f.fault != "public-dataset",
 			"description": stagingDescription(f.stage.MarkerSHA256), "licenseName": stagingLicense(f.stage.License), "lastUpdated": "fixture"}), nil
 	case "GetDatasetStatus":
+		if f.fault == "status-failed" {
+			return jsonResponse(500, `{}`), nil
+		}
 		state := "READY"
 		if f.fault == "pending-dataset" {
 			state = "BLOBS_RECEIVED"

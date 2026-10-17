@@ -208,6 +208,38 @@ func TestNativeStagingLostCreateAckAndObservationNeverUpload(t *testing.T) {
 	}
 }
 
+func TestNativeStagingWaitsReadOnlyUntilCreatedDatasetIsVisible(t *testing.T) {
+	shortVisibility(t, time.Minute, time.Millisecond)
+	p, plan, _, _, f := nativeRuntime(t, false)
+	f.fault, f.hiddenReads = "missing-name-403", 4
+	prepared, err := p.Prepare(context.Background(), plan, "prep")
+	if err != nil || !prepared.Ready || f.hiddenReads != 0 || f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 {
+		t.Fatal("a created dataset that became visible later failed or was staged again", prepared, err)
+	}
+}
+
+func TestNativeStagingNeverVisibleStopsWithoutAnotherCreate(t *testing.T) {
+	shortVisibility(t, 20*time.Millisecond, time.Millisecond)
+	p, plan, _, _, f := nativeRuntime(t, false)
+	f.fault, f.hiddenReads = "missing-name-403", 1<<30
+	_, err := p.Prepare(context.Background(), plan, "prep")
+	var problem domain.Problem
+	if !errors.As(err, &problem) || problem.Code != domain.CodeStagingFailed || problem.PublicDetails()[domain.ReasonDetail] != "staging_not_visible" ||
+		f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 || f.count("GetDataset") < 4 {
+		t.Fatal("an invisible created dataset was not observed read-only until the grace ended", err, f.calls)
+	}
+}
+
+func TestNativeStagingReadBackFailureNamesItsStep(t *testing.T) {
+	p, plan, _, _, f := nativeRuntime(t, false)
+	f.fault = "status-failed"
+	_, err := p.Prepare(context.Background(), plan, "prep")
+	var problem domain.Problem
+	if !errors.As(err, &problem) || problem.PublicDetails()[domain.ReasonDetail] != "staging_status_failed_http_500" || f.count("CreateDataset") != 1 {
+		t.Fatal("a failed read-back after creation lost its step", err)
+	}
+}
+
 func TestNativeStagingRejectsChangedCompleteCatalogAndIdentity(t *testing.T) {
 	for _, fault := range []string{"extra-staging-file", "corrupt-staging", "dataset-replaced", "public-dataset", "pending-dataset"} {
 		t.Run(fault, func(t *testing.T) {
