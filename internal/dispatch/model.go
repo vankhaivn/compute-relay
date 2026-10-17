@@ -183,6 +183,7 @@ type Action struct {
 	Submission         *provider.SubmissionOutcome
 	Observation        *provider.Observation
 	Code               domain.ErrorCode
+	Reason             string // closed adapter reason for a Fault, when known
 	StartAuthorization *provider.StartAuthorization
 	PreparationExpired bool
 }

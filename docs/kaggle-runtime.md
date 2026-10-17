@@ -37,6 +37,10 @@ both the selected policy permits it and the job requests it.
 Staging identity, account, numeric resource identity, version, source hash, nonce and privacy must
 match the frozen plan. Upload success is not readiness. A lost staging or submission response
 leaves the original intent for observation; not-found alone never permits another create or submit.
+A file upload that fails before its dataset is created is sent once more with a new ticket, since
+an unreferenced upload creates nothing. When preparation stops, the job's problem carries a closed
+`reason` naming the failed step and any HTTP status, such as `shared_create_failed_http_500`;
+later deferred reconciliations keep it.
 There is no automatic account/provider rotation, resubmission, CPU fallback or paid capacity.
 
 ### Shared input datasets
@@ -46,7 +50,8 @@ installation and account as its own private dataset named from its SHA-256 and b
 attempts with the same bytes mount that dataset instead of uploading it again; a kernel mounts the
 attempt dataset plus at most 7 shared datasets, and further large inputs stay with the attempt.
 A missing shared dataset is created under the preparation that needs it, before that attempt's
-own dataset. An existing one is used only when its name, version 1, privacy, marker description,
+own dataset. If its create response is lost, the preparation observes the exact dataset for a
+few seconds and continues only when it exists; it never creates it again. An existing one is used only when its name, version 1, privacy, marker description,
 ready state and exact file list match; otherwise preparation stops without replacing it.
 
 Relay downloads and rehashes the attempt dataset once when it becomes ready. Shared datasets and

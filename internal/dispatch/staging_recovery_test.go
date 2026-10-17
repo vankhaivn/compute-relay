@@ -89,3 +89,18 @@ func TestReconcileAmbiguousSubmissionStillCannotSubmitAgain(t *testing.T) {
 		}
 	}
 }
+
+func TestStagingFailureReasonSurvivesDeferredReconciliations(t *testing.T) {
+	w, plan, prep := fixtureWork(t)
+	j, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prep})
+	j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingFailed, Reason: "shared_create_failed_http_500"})
+	for j.Phase != Attention {
+		j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingNotReady})
+	}
+	if j.Problem.Code != domain.CodeStagingNotReady || j.Problem.PublicDetails()[domain.ReasonDetail] != "shared_create_failed_http_500" {
+		t.Fatal("deferred reconciliation lost the failed step", j.Problem)
+	}
+	if _, _, _, err := Apply(w.Journal, w.Job.Attempt.State, Action{Kind: Fault, Code: domain.CodeStagingFailed, Reason: "Not closed"}, time.Now()); !errors.Is(err, ErrInvalid) {
+		t.Fatal("an open reason was recorded", err)
+	}
+}

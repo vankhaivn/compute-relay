@@ -40,6 +40,8 @@ type stagingResponse struct {
 	Private       bool                `json:"private"`
 	VerifiedFiles int                 `json:"verified_files"`
 	VerifiedBytes int64               `json:"verified_bytes"`
+	// Reason names the step that left staging unresolved, as a closed public reason.
+	Reason string `json:"-"`
 }
 
 type stagingInvocation func(context.Context, Config, string, []byte, stagingPlan, StagingBlobs) (stagingResponse, error)
@@ -69,19 +71,29 @@ func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation doma
 	if s == nil || !s.allowCreate {
 		return provider.Prepared{}, ErrConfig
 	}
-	seen, err := s.check(ctx, "create", plan, operation)
+	seen, reason, err := s.check(ctx, "create", plan, operation)
 	if errors.Is(err, errStagingVisibilityPending) {
 		// Creation was acknowledged but the exact dataset is briefly unreadable.
 		// Poll reads only; never repeat upload tickets or CreateDataset.
 		seen, err = s.awaitCreatedVisibility(ctx, plan, operation)
+		reason = "staging_not_visible"
 	}
 	if err != nil {
 		return provider.Prepared{}, err
 	}
 	if seen.Status != provider.ReconciliationFound || seen.Prepared == nil {
-		return provider.Prepared{}, ErrStaging
+		return provider.Prepared{}, stagingFailure(reason)
 	}
 	return *seen.Prepared, nil
+}
+
+// stagingFailure carries the step that failed as the problem's public reason.
+func stagingFailure(reason string) error {
+	if reason == "" {
+		return ErrStaging
+	}
+	return provider.Problem(domain.CodeStagingFailed, domain.FailureStageProviderPreparation,
+		"Private staging creation did not complete; creation was not repeated.").WithDetail(domain.ReasonDetail, reason).WithCause(ErrStaging)
 }
 
 func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
@@ -89,7 +101,7 @@ func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan,
 	deadline := time.NewTimer(stagingVisibilityGrace)
 	defer deadline.Stop()
 	for {
-		seen, err := s.check(ctx, "observe", plan, operation)
+		seen, _, err := s.check(ctx, "observe", plan, operation)
 		if err != nil || seen.Status != provider.ReconciliationNotFound {
 			return seen, err
 		}
@@ -112,7 +124,8 @@ func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, opera
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig
 	}
-	return s.check(ctx, "observe", plan, operation)
+	seen, _, err := s.check(ctx, "observe", plan, operation)
+	return seen, err
 }
 
 // RecheckPrepare confirms already verified staging by identity, privacy, readiness and
@@ -121,15 +134,17 @@ func (s *Stager) RecheckPrepare(ctx context.Context, plan provider.Plan, operati
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig
 	}
-	return s.check(ctx, "recheck", plan, operation)
+	seen, _, err := s.check(ctx, "recheck", plan, operation)
+	return seen, err
 }
 
-func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+// check also returns the closed reason a create left staging unresolved with.
+func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, string, error) {
 	var none provider.PreparationObservation
 	frozen := plan.Clone()
 	plans, err := buildStagingPlans(s.config, s.policy, frozen, operation)
 	if err != nil {
-		return none, err
+		return none, "", err
 	}
 	p := plans[0]
 	if mode == "create" {
@@ -141,22 +156,22 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	case s.slot <- struct{}{}:
 		defer func() { <-s.slot }()
 	case <-ctx.Done():
-		return none, ctx.Err()
+		return none, "", ctx.Err()
 	}
 	if err := ctx.Err(); err != nil {
-		return none, err
+		return none, "", err
 	}
 	if mode == "create" {
 		// Reject every missing/corrupt local file BEFORE looking up a credential or
 		// creating even a provider upload session. Uploads are rehashed by the client.
 		for _, object := range p.objects {
 			if err := verifyStagingInput(ctx, s.blobs, object); err != nil {
-				return none, err
+				return none, "", err
 			}
 		}
 		for _, entry := range p.shared {
 			if err := verifyStagingInput(ctx, s.blobs, entry.object); err != nil {
-				return none, err
+				return none, "", err
 			}
 		}
 	}
@@ -193,15 +208,16 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		return nil
 	})
 	if provider.IsLocalStateError(err) {
-		return none, err
+		return none, "", err
 	}
 	if ctx.Err() != nil {
-		return none, ctx.Err()
+		return none, "", ctx.Err()
 	}
 	if err != nil || !called || violated {
-		return none, ErrStaging
+		return none, "", ErrStaging
 	} // Do not reflect secret-bearing callback or API errors.
-	return result.observation(p, frozen, operation)
+	seen, err := result.observation(p, frozen, operation)
+	return seen, result.Reason, err
 }
 
 func verifyStagingInput(ctx context.Context, blobs StagingBlobs, m domain.ObjectMetadata) (result error) {
@@ -239,6 +255,7 @@ func (r stagingResponse) observation(p stagingPlan, plan provider.Plan, operatio
 	if r.Protocol != 1 {
 		return none, ErrProtocol
 	}
+	r.Reason = ""
 	if r.Status == "pending" && r == (stagingResponse{Protocol: 1, Status: "pending"}) {
 		return none, errStagingVisibilityPending
 	}
