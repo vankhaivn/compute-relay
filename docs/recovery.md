@@ -92,6 +92,9 @@ blob format markers and separate input/result `.retention-id` bindings remain au
 
 ## Local retention
 
+The local input store holds at most 32 GiB and the result store 8 GiB. An upload that would
+exceed its store fails with `disk_limit_exceeded` until retention frees space.
+
 Default minimum windows are 24 hours for unreferenced inputs and seven days for safe completed
 references/verified results. These are eligibility windows, not deletion deadlines. Active/unknown
 execution, unresolved preparation/submission, incomplete collection, worker ownership, pending

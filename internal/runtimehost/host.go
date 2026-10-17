@@ -119,7 +119,9 @@ func open(ctx context.Context, path string, create bool) (_ *Host, err error) {
 		return nil, ErrState
 	}
 	defer inputRoot.Close()
-	h.inputs, err = blobfs.NewRoot(inputRoot, blobfs.Limits{MaxObjectBytes: 2 << 30, MaxTotalBytes: 8 << 30})
+	// Inputs stay at least seven days after their last use, so the store must hold several
+	// multi-GiB runtime and media objects at once.
+	h.inputs, err = blobfs.NewRoot(inputRoot, blobfs.Limits{MaxObjectBytes: 2 << 30, MaxTotalBytes: 32 << 30})
 	if err != nil {
 		return nil, ErrState
 	}
