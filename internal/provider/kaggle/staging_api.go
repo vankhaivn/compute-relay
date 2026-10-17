@@ -38,9 +38,10 @@ func stagingLicense(value string) string {
 	return value
 }
 
-// stage creates or observes one attempt's staging. "observe" downloads and rehashes the
-// attempt dataset; "recheck" compares the same metadata without downloading. Shared
-// datasets are always checked by metadata; the remote runner rehashes every input.
+// stage creates or observes one attempt's staging. Every mode checks metadata only: each
+// upload was SHA-checked against its frozen digest, the marker description pins this
+// preparation, and the remote runner rehashes every input before use. "create" and
+// "observe" also confirm the dataset did not change while it was read.
 func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stagingPlan, blobs StagingBlobs) (stagingResponse, error) {
 	empty := func(status string) stagingResponse { return stagingResponse{Protocol: 1, Status: status} }
 	failed := func(status, reason string) stagingResponse {
@@ -311,7 +312,7 @@ func matchingStaging(meta kaggleapi.Dataset, r stagingRequest) bool {
 
 // observeStaging names the step that left a result unknown, so a failed create read-back
 // reports it.
-func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingPlan, meta kaggleapi.Dataset, verifyBytes bool) stagingResponse {
+func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingPlan, meta kaggleapi.Dataset, confirmStable bool) stagingResponse {
 	empty := func(status string) stagingResponse { return stagingResponse{Protocol: 1, Status: status} }
 	unknown := func(reason string) stagingResponse {
 		return stagingResponse{Protocol: 1, Status: "unknown", Reason: reason}
@@ -356,16 +357,7 @@ func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingP
 	for _, file := range r.Files {
 		total += file.Bytes
 	}
-	if verifyBytes {
-		for _, file := range r.Files {
-			receipt, err := client.DownloadDatasetFile(ctx, resource, file.Name, file.Bytes, io.Discard)
-			if err != nil {
-				return unknown("staging_download_failed" + failureSuffix(err))
-			}
-			if receipt.Bytes != file.Bytes || hex.EncodeToString(receipt.SHA256[:]) != string(file.SHA256) {
-				return empty("invalid")
-			}
-		}
+	if confirmStable {
 		final, err := client.GetDataset(ctx, resource)
 		if err != nil {
 			return unknown("staging_readback_failed" + failureSuffix(err))

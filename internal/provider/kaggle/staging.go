@@ -121,7 +121,7 @@ func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan,
 }
 
 // A miss is not permission to create/upload/version anything. This path does not
-// read local payload bytes; it verifies remote bytes against the original pins.
+// read local payload bytes; it checks remote metadata against the original pins.
 func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig
@@ -131,7 +131,7 @@ func (s *Stager) ReconcilePrepare(ctx context.Context, plan provider.Plan, opera
 }
 
 // RecheckPrepare confirms already verified staging by identity, privacy, readiness and
-// exact file list without downloading it again. The remote runner rehashes every input.
+// exact file list. The remote runner rehashes every input.
 func (s *Stager) RecheckPrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if s == nil {
 		return provider.PreparationObservation{}, ErrConfig

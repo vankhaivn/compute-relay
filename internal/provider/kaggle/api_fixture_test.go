@@ -119,8 +119,12 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		if f.fault == "dataset-replaced" && f.getDataset > 2 {
 			id = "124"
 		}
+		marker := f.stage.MarkerSHA256
+		if f.fault == "changed-marker" {
+			marker = provider.Digest([]byte("another marker"))
+		}
 		return f.json(map[string]any{"id": id, "ref": f.owner + "/" + f.stage.Slug, "currentVersionNumber": 1, "isPrivate": f.fault != "public-dataset",
-			"description": stagingDescription(f.stage.MarkerSHA256), "licenseName": stagingLicense(f.stage.License), "lastUpdated": "fixture"}), nil
+			"description": stagingDescription(marker), "licenseName": stagingLicense(f.stage.License), "lastUpdated": "fixture"}), nil
 	case "GetDatasetStatus":
 		if f.fault == "status-failed" {
 			return jsonResponse(500, `{}`), nil
@@ -149,7 +153,11 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 	case "ListDatasetFiles":
 		files := []map[string]any{}
 		for name, data := range f.staged {
-			files = append(files, map[string]any{"name": name, "totalBytes": len(data)})
+			size := len(data)
+			if f.fault == "resized-staging-file" && name == "code.bin" {
+				size++
+			}
+			files = append(files, map[string]any{"name": name, "totalBytes": size})
 		}
 		if f.fault == "extra-staging-file" {
 			files = append(files, map[string]any{"name": "extra.bin", "totalBytes": 0})
@@ -160,9 +168,6 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		_, ok := f.staged[name]
 		if !ok {
 			return jsonResponse(404, `{}`), nil
-		}
-		if f.fault == "corrupt-staging" && name == "code.bin" {
-			return bytesResponse([]byte("changed")), nil
 		}
 		return f.redirect("staging/" + name), nil
 	case "GetKernel":

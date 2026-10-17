@@ -31,7 +31,8 @@ confirmed running/activity evidence.
 | Result expired | Preserve history. Do not refetch inputs or rerun compute to resurrect expired results. |
 | Identity/source/version/root mismatch | Stop and retain evidence; do not adopt a replacement or rewrite markers to bypass the check. |
 
-Staging readiness can require verification of every original input byte. Staging observation
+Staging readiness can require verification of every original input byte; Kaggle checks metadata
+and leaves the byte check to its remote runner. Staging observation
 and submission preparation use the finite preparation budget, constrained by any shorter parent
 deadline. Short provider control calls retain their separate control timeout; a staging timeout
 does not authorize another upload, creation or submission.

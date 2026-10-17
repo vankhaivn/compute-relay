@@ -240,8 +240,24 @@ func TestNativeStagingReadBackFailureNamesItsStep(t *testing.T) {
 	}
 }
 
+// Relay's own uploads are SHA-checked and the remote runner rehashes every input, so
+// readiness never reads the attempt's bytes back.
+func TestNativeStagingReadyByMetadataWithoutReadBack(t *testing.T) {
+	p, plan, _, blobs, f := nativeRuntime(t, false)
+	prepared, err := p.Prepare(context.Background(), plan, "prep")
+	if err != nil || !prepared.Ready || !prepared.Private || f.count("DownloadDataset") != 0 || f.transferred != 0 {
+		t.Fatal("fresh staging was not ready by metadata alone", prepared, err)
+	}
+	blobs.mode = "missing"
+	seen, err := p.ReconcilePrepare(context.Background(), plan, "prep")
+	if err != nil || seen.Status != provider.ReconciliationFound || seen.Prepared == nil || !seen.Prepared.Ready || seen.Prepared.Resource != prepared.Resource ||
+		f.count("DownloadDataset") != 0 || f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 {
+		t.Fatal("observation read bytes back or repeated staging", seen, err)
+	}
+}
+
 func TestNativeStagingRejectsChangedCompleteCatalogAndIdentity(t *testing.T) {
-	for _, fault := range []string{"extra-staging-file", "corrupt-staging", "dataset-replaced", "public-dataset", "pending-dataset"} {
+	for _, fault := range []string{"extra-staging-file", "resized-staging-file", "changed-marker", "dataset-replaced", "public-dataset", "pending-dataset"} {
 		t.Run(fault, func(t *testing.T) {
 			p, plan, _, _, f := nativeRuntime(t, false)
 			f.fault = fault
@@ -253,8 +269,8 @@ func TestNativeStagingRejectsChangedCompleteCatalogAndIdentity(t *testing.T) {
 			} else if err == nil {
 				t.Fatal("changed staging was accepted")
 			}
-			if f.count("CreateDataset") != 1 {
-				t.Fatal("staging retry after uncertainty")
+			if f.count("CreateDataset") != 1 || f.count("DownloadDataset") != 0 {
+				t.Fatal("staging retry after uncertainty or byte read-back")
 			}
 		})
 	}

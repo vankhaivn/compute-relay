@@ -29,7 +29,7 @@ has been allocated. The adapter supplies no authoritative quota-reset timestamp.
 Upload a bounded [bundle and input objects](packaging-and-import.md), admit the job and authorize
 its exact attempt and wall limit. The adapter stages private attempt-owned data with a bound marker
 (at most 2 MiB, enough for 256 inputs with maximal names and targets) in one dataset of up to 258
-files, checks readiness and original bytes, then submits the private kernel once after the durable
+files, checks readiness and the exact file list, then submits the private kernel once after the durable
 intent barrier. Finite preparation and execution budgets apply; the Kaggle descriptor advertises
 a 86400-second wall maximum, and longer connections or jobs are refused. Remote internet is disabled unless
 both the selected policy permits it and the job requests it.
@@ -56,9 +56,9 @@ own dataset. If its create response is lost, the preparation observes the exact 
 the same wait and continues only when it exists; it never creates it again. An existing one is used only when its name, version 1, privacy, marker description,
 ready state and exact file list match; otherwise preparation stops without replacing it.
 
-Relay downloads and rehashes the attempt dataset once when it becomes ready. Shared datasets and
-the pre-submission recheck compare metadata only; the remote runner rehashes every input before
-use, so changed bytes still fail the attempt. Attempts staged before this layout keep their
+Preparation never downloads staged bytes back: every upload is SHA-checked against its frozen digest,
+and readiness, recovery and the pre-submission recheck compare metadata only. The remote runner
+rehashes every input before use, so changed bytes still fail the attempt. Attempts staged before this layout keep their
 original marker and single mount.
 
 Shared datasets are not attempt resources: attempt cleanup and retention never delete them, and
