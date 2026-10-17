@@ -71,8 +71,12 @@ readiness, not account validity, GPU allocation or job success. A 202 is a durab
 See the [HTTP reference](../api/README.md).
 
 Dispatch, collection, cleanup and other background workers share an error policy: transient
-store errors back off and resume while HTTP keeps serving; invariant/corruption errors stop the
-runtime with `ErrState`. Renewed fenced leases prevent a stale worker from committing progress.
+store errors back off and resume while HTTP keeps serving; provider and transport failures become
+attempt or operation evidence, or wait for a later observation; invariant/corruption errors stop the
+runtime with `ErrState`. Serve then exits 1 and adds one stderr line after the generic diagnostic,
+naming the stopping worker and a closed error class, such as
+`Runtime stopped: service=dispatch class=state_corrupt.`; it never includes provider, path or OS
+text. Renewed fenced leases prevent a stale worker from committing progress.
 A lease expiring does not prove its callback stopped or release unknown remote capacity.
 
 Interrupt/SIGTERM stops new handlers and allows ten seconds for graceful completion, then closes

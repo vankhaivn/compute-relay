@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
@@ -14,10 +15,13 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
+	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
+	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
 type clock struct{}
@@ -151,18 +155,61 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	if err != nil {
 		return err
 	}
-	extra := []func(context.Context) error{func(ctx context.Context) error { return runRetention(ctx, sweeper, retentionInterval) }}
+	extra := []runtimeService{{"retention", func(ctx context.Context) error { return runRetention(ctx, sweeper, retentionInterval) }}}
 	if cleaner != nil {
-		extra = append(extra, cleaner.Run)
+		extra = append(extra, runtimeService{"cleanup", cleaner.Run})
 	}
 	if managed != nil {
-		extra = append(extra, func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) })
-		extra = append(extra, managed.guard.Run, managed.storageGuard.Run, managed.watchdog.Run)
+		extra = append(extra, runtimeService{"connection_operations", func(ctx context.Context) error { return runConnectionOperations(ctx, managed.connections) }},
+			runtimeService{"host_health", managed.guard.Run}, runtimeService{"host_storage", managed.storageGuard.Run},
+			runtimeService{"host_watchdog", managed.watchdog.Run})
 		if managed.secrets != nil {
-			extra = append(extra, managed.secrets.Run)
+			extra = append(extra, runtimeService{"workload_secrets", managed.secrets.Run})
 		}
 	}
 	return runProviderServices(ctx, server, listener, mode, listening, announce, dispatcher, collector, extra...)
+}
+
+// runtimeService pairs a background worker with the closed name reported if it stops serve.
+type runtimeService struct {
+	name string
+	run  func(context.Context) error
+}
+
+// ServiceStopped is ErrState with a bounded cause for the operator diagnostic. It holds
+// only a closed service name and error class, never provider, URL, path or OS text.
+type ServiceStopped struct{ Service, Class string }
+
+func (e ServiceStopped) Error() string        { return ErrState.Error() }
+func (e ServiceStopped) Is(target error) bool { return target == ErrState }
+func (e ServiceStopped) DiagnosticCause() string {
+	return "Runtime stopped: service=" + e.Service + " class=" + e.Class + "."
+}
+
+// stopClass maps a fatal service error to a closed class. Order prefers the most specific cause.
+func stopClass(err error) string {
+	for _, known := range []struct {
+		err   error
+		class string
+	}{
+		{sqlite.ErrCorrupt, "state_corrupt"}, {sqlite.ErrSchema, "state_schema"}, {sqlite.ErrDiskFull, "state_disk_full"},
+		{sqlite.ErrClosed, "state_closed"}, {sqlite.ErrUnavailable, "state_unavailable"}, {sqlite.ErrBusy, "state_busy"},
+		{sqlite.ErrInvalid, "state_rejected"}, {sqlite.ErrConflict, "state_rejected"},
+		{dispatch.ErrInvalid, "transition_rejected"}, {dispatch.ErrConflict, "transition_rejected"},
+		{ErrState, "runtime_state"},
+	} {
+		if errors.Is(err, known.err) {
+			return known.class
+		}
+	}
+	if provider.IsLocalStateError(err) {
+		return "local_state"
+	}
+	var problem *domain.Problem
+	if errors.As(err, &problem) {
+		return "provider_problem"
+	}
+	return "unclassified"
 }
 
 func runProviderServices(
@@ -174,9 +221,9 @@ func runProviderServices(
 	announce func(Listening) error,
 	dispatcher *dispatch.Engine,
 	collector *collection.Engine,
-	extra ...func(context.Context) error,
+	extra ...runtimeService,
 ) error {
-	services := append([]func(context.Context) error{dispatcher.Run, collector.Run}, extra...)
+	services := append([]runtimeService{{"dispatch", dispatcher.Run}, {"collection", collector.Run}}, extra...)
 	return runRuntimeServices(ctx, server, listener, mode, listening, announce, services)
 }
 
@@ -187,33 +234,38 @@ func runRuntimeServices(
 	mode string,
 	listening Listening,
 	announce func(Listening) error,
-	services []func(context.Context) error,
+	services []runtimeService,
 ) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	workers := make(chan error, len(services))
-	for _, run := range services {
-		go func(run func(context.Context) error) {
-			err := run(runCtx)
-			workers <- err
+	workers := make(chan struct{}, len(services))
+	var first sync.Once
+	var stopped *ServiceStopped
+	for _, service := range services {
+		go func(service runtimeService) {
+			defer func() { workers <- struct{}{} }()
+			err := service.run(runCtx)
+			// The first fatal error is recorded before cancelling, so it names the initiator.
+			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				first.Do(func() { stopped = &ServiceStopped{service.name, stopClass(err)} })
+			}
 			if err != nil && runCtx.Err() == nil {
 				cancel()
 			}
-		}(run)
+		}(service)
 	}
 	httpErr := serveHTTPMode(runCtx, server, listener, 10*time.Second, mode, func() error {
 		return announce(listening)
 	})
 	cancel()
-	var workerErr error
-	for i := 0; i < len(services); i++ {
-		err := <-workers
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			workerErr = errors.Join(workerErr, err)
-		}
+	for range services {
+		<-workers
 	}
-	if httpErr != nil || workerErr != nil {
-		return ErrState
+	if stopped != nil {
+		return *stopped
+	}
+	if httpErr != nil {
+		return ServiceStopped{"http", "listener"}
 	}
 	return nil
 }

@@ -97,7 +97,8 @@ func (e *Engine) runStorageOnce(ctx context.Context) (worked bool, resultErr err
 			return true, err
 		}
 		if w.State == "running" {
-			return true, err
+			// The deletion may have started; only a later observation may settle it.
+			return true, ErrDeferred
 		}
 		if err := stop(); err != nil {
 			return true, err

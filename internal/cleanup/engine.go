@@ -196,12 +196,13 @@ func failure(code domain.ErrorCode, message string, action domain.RecommendedAct
 	return Outcome{Effect: operations.Failed, Problem: &p}
 }
 
-// Run polls until ctx ends. Lost fences continue; transient store failures back off.
+// Run polls until ctx ends. Lost fences and deferred provider recovery continue;
+// transient store failures back off.
 func (e *Engine) Run(ctx context.Context) error {
 	return worker.Run(ctx, worker.Config{Workers: e.config.Workers, PollDelay: e.config.PollDelay, Drain: true}, func(ctx context.Context, _ int) (bool, error) {
 		return e.RunOnce(ctx)
 	}, func(err error) worker.Decision {
-		if errors.Is(err, ErrLeaseLost) {
+		if errors.Is(err, ErrLeaseLost) || errors.Is(err, ErrDeferred) {
 			return worker.Continue
 		}
 		return worker.Classify(err)

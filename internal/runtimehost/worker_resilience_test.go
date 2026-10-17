@@ -5,12 +5,16 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
 	"github.com/vankhaivn/compute-relay/internal/collection"
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
+	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hoststorage"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
@@ -103,7 +107,7 @@ func TestHTTPKeepsServingWhileWorkersRetryStoreFailures(t *testing.T) {
 			run := resilienceEngine(t, kind, fault)
 			ready, done := make(chan struct{}), make(chan error, 1)
 			go func() {
-				done <- runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { close(ready); return nil }, []func(context.Context) error{run})
+				done <- runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { close(ready); return nil }, []runtimeService{{kind, run}})
 			}()
 			select {
 			case <-ready:
@@ -155,10 +159,104 @@ func TestInvariantWorkerErrorsStopRuntime(t *testing.T) {
 			fault := &resilienceFault{failures: []error{sqlite.ErrCorrupt}, resumed: make(chan struct{})}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			err := runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { return nil }, []func(context.Context) error{resilienceEngine(t, kind, fault)})
-			if !errors.Is(err, ErrState) {
-				t.Fatal("corrupt state did not stop runtime safely", err)
+			err := runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { return nil }, []runtimeService{{kind, resilienceEngine(t, kind, fault)}})
+			var cause ServiceStopped
+			if !errors.Is(err, ErrState) || !errors.As(err, &cause) || cause != (ServiceStopped{kind, "state_corrupt"}) {
+				t.Fatal("corrupt state did not stop runtime with a named cause", err)
+			}
+			if got := cause.DiagnosticCause(); got != "Runtime stopped: service="+kind+" class=state_corrupt." {
+				t.Fatal(got)
 			}
 		})
+	}
+}
+
+type idleCleanup struct{ cleanup.WorkRepository }
+
+func (idleCleanup) ClaimCleanup(context.Context, time.Duration) (*cleanup.Work, error) {
+	return nil, nil
+}
+
+// interruptedStorageCleanup offers one running deletion whose lease the engine must not settle.
+type interruptedStorageCleanup struct {
+	claims    chan struct{}
+	completed chan struct{}
+}
+
+func (r interruptedStorageCleanup) ClaimStorageCleanup(context.Context, time.Duration) (*cleanup.StorageWork, error) {
+	select {
+	case r.claims <- struct{}{}:
+	default:
+	}
+	return &cleanup.StorageWork{
+		Lease:   cleanup.Lease{WorkspaceID: "a", OperationID: "op_1", Generation: 1, Fence: strings.Repeat("f", 64), Until: time.Now().Add(time.Minute)},
+		Binding: provider.BindingSnapshot{Binding: domain.ProviderBinding{Profile: "fixture", ProviderInstanceID: "fake_1", ConfigurationRevision: "one"}, AccountScope: "account", CredentialRef: "env:FIXTURE"},
+		Target: hoststorage.Target{Scope: hoststorage.Scope{InstallationID: "rt_1", MachineID: domain.SHA256Digest(strings.Repeat("a", 64)), EngineID: domain.SHA256Digest(strings.Repeat("b", 64))},
+			Class: hoststorage.Volume, ID: "relay-cache-example", Labels: map[string]string{"io.compute-relay.installation": "rt_1"}, Action: hoststorage.OrphanVolume},
+		State: "running",
+	}, nil
+}
+func (interruptedStorageCleanup) RenewStorageCleanup(context.Context, cleanup.StorageWork, time.Duration) (time.Time, error) {
+	return time.Now().Add(time.Minute), nil
+}
+func (interruptedStorageCleanup) BeginStorageCleanup(context.Context, cleanup.StorageWork) error {
+	return nil
+}
+func (r interruptedStorageCleanup) CompleteStorageCleanup(context.Context, cleanup.StorageWork, hoststorage.DeleteOutcome) error {
+	close(r.completed)
+	return nil
+}
+
+type unreachableProvider struct{ provider.Provider }
+
+func (unreachableProvider) Verify(context.Context, provider.BindingSnapshot) error {
+	return errors.New("SYNTHETIC_SSH_CONNECTION_RESET")
+}
+
+type unreachableResolver struct{}
+
+func (unreachableResolver) Resolve(provider.BindingSnapshot) (provider.Provider, error) {
+	return unreachableProvider{}, nil
+}
+
+func TestProviderOutageDuringCleanupRecoveryKeepsRuntimeServing(t *testing.T) {
+	listener := testListener(t)
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
+	storage := interruptedStorageCleanup{claims: make(chan struct{}), completed: make(chan struct{})}
+	cfg := cleanup.DefaultConfig()
+	cfg.PollDelay = time.Millisecond
+	engine, err := cleanup.New(idleCleanup{}, unreachableResolver{}, cfg)
+	requireNoError(t, err)
+	engine.WithStorage(storage)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { return nil },
+			[]runtimeService{{"cleanup", engine.Run}})
+	}()
+	// A second claim proves the provider failure deferred recovery instead of stopping the service.
+	for range 2 {
+		select {
+		case <-storage.claims:
+		case err := <-done:
+			t.Fatal("provider outage stopped the runtime", err)
+		case <-ctx.Done():
+			t.Fatal("cleanup did not retry recovery")
+		}
+	}
+	response, err := (&http.Client{Timeout: time.Second}).Get("http://" + listener.Addr().String() + "/readyz")
+	if err != nil {
+		t.Fatal("HTTP disappeared during provider outage", err)
+	}
+	_ = response.Body.Close()
+	select {
+	case <-storage.completed:
+		t.Fatal("an unverified provider settled an interrupted deletion")
+	default:
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal("runtime shutdown failed", err)
 	}
 }

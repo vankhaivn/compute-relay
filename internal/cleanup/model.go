@@ -7,4 +7,7 @@ import "errors"
 var (
 	ErrInvalid   = errors.New("invalid cleanup record")
 	ErrLeaseLost = errors.New("cleanup ownership expired or changed")
+	// ErrDeferred keeps an interrupted deletion running until its lease expires and a later
+	// claim can observe the provider again. It is not a failure of local state.
+	ErrDeferred = errors.New("cleanup recovery deferred until the provider is reachable")
 )
