@@ -23,15 +23,16 @@ requires current `execute` authority and its own `Idempotency-Key`.
 
 A `202` receipt records permission, not completed preparation. All input bytes must already be
 immutable local objects. The worker verifies the installed pinned image, creates a stopped
-container, stages the fixed runtime and ordinary input bytes, then reads back and hashes them.
+container, stages the fixed runtime and ordinary input bytes, then hashes them on the host.
 No workload, setup command or application probe runs. The byte limit covers bundle/input content;
 the fixed runner, manifest and control files add bounded overhead. No expanded bundle or workload
 output exists yet.
 
-Budget for both the upload and the complete read-back over SSH: a gigabyte input can need more
-than ten minutes on a slow link. Applications must explicitly request the larger budget (for
-example, 1800 seconds); existing 600-second grants stay unchanged. Keep `ready_until` far enough
-ahead for preparation and the second full verification before Start. The hold, any earlier parent
+A fixed verifier hashes the stopped container's files on the host, so only digests and sizes
+cross SSH, before readiness and again before Start. Budget mainly for the upload: a gigabyte input
+can need more than ten minutes on a slow link. Applications must explicitly request the larger
+budget (for example, 1800 seconds); existing 600-second grants stay unchanged. Keep `ready_until`
+far enough ahead for preparation and the second verification before Start. The hold, any earlier parent
 deadline and the finite execution deadline still apply; a larger preparation grant never starts
 compute or retries a failed transfer.
 
