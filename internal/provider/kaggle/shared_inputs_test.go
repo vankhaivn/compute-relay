@@ -3,6 +3,7 @@ package kaggle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -155,21 +156,29 @@ func TestNativeSharedInputChangedAfterReadinessStopsBeforeSave(t *testing.T) {
 	}
 }
 
-func TestNativeSharedInputLostCreateIsNeverRepeated(t *testing.T) {
-	p, plan, _, blobs, f := sharedRuntime(t)
+func TestNativeSharedInputLostCreateIsObservedNotRepeated(t *testing.T) {
+	p, plan, _, _, f := sharedRuntime(t)
 	f.fault = "lost-shared-create"
-	if _, err := p.Prepare(context.Background(), plan, "prep"); err == nil || f.count("CreateDataset") != 1 || f.dataset {
-		t.Fatal("attempt staging followed an unconfirmed shared dataset", err)
+	prepared, err := p.Prepare(context.Background(), plan, "prep")
+	if err != nil || !prepared.Ready || f.count("CreateDataset") != 2 || len(f.shared) != 1 || !f.dataset {
+		t.Fatal("a shared dataset created without acknowledgement was not observed once", prepared, err)
 	}
-	blobs.mode = "missing"
-	seen, err := p.ReconcilePrepare(context.Background(), plan, "prep")
-	if err != nil || seen.Status != provider.ReconciliationNotFound || f.count("CreateDataset") != 1 {
-		t.Fatal("recovery created staging", seen, err)
+}
+
+func TestNativeStagingUploadIsSentAgainOnceAndReportsItsStep(t *testing.T) {
+	p, plan, _, _, f := sharedRuntime(t)
+	f.putFailures = 1
+	if prepared, err := p.Prepare(context.Background(), plan, "prep"); err != nil || !prepared.Ready ||
+		f.count("StartBlobUpload") != 5 || f.count("CreateDataset") != 2 {
+		t.Fatal("a failed upload was not sent again with a new ticket", err)
 	}
 	q, plan2, _, _, g := sharedRuntime(t)
-	g.shared = f.shared
-	if _, err := q.Prepare(context.Background(), plan2, "prep"); err != nil || g.count("CreateDataset") != 1 {
-		t.Fatal("next attempt recreated the shared dataset", err)
+	g.putFailures = 2
+	_, err := q.Prepare(context.Background(), plan2, "prep")
+	var problem domain.Problem
+	if !errors.As(err, &problem) || !errors.Is(err, ErrStaging) || problem.Code != domain.CodeStagingFailed ||
+		problem.PublicDetails()[domain.ReasonDetail] != "shared_upload_failed_http_500" || g.count("StartBlobUpload") != 2 || g.count("CreateDataset") != 0 {
+		t.Fatal("upload failure was repeated beyond its bound or lost its step", err)
 	}
 }
 

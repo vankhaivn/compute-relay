@@ -283,6 +283,18 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		if j.Problem == nil {
 			return Journal{}, state, "", ErrInvalid
 		}
+		// Later deferred reconciliations keep the reason of the step that failed first.
+		reason := a.Reason
+		if reason == "" && old.Problem != nil && old.Problem.Stage == j.Problem.Stage {
+			reason = old.Problem.PublicDetails()[domain.ReasonDetail]
+		}
+		if reason != "" {
+			p := j.Problem.WithDetail(domain.ReasonDetail, reason)
+			if p.PublicDetails() == nil {
+				return Journal{}, state, "", ErrInvalid
+			}
+			j.Problem = &p
+		}
 		permanent := a.Code == domain.CodeRemoteIdentityMismatch || a.Code == domain.CodePrivateStagingUnavailable
 		if old.Plan == nil {
 			next.Orchestration = domain.OrchestrationBlocked

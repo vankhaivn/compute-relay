@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"strconv"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -41,6 +43,9 @@ func stagingLicense(value string) string {
 // datasets are always checked by metadata; the remote runner rehashes every input.
 func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stagingPlan, blobs StagingBlobs) (stagingResponse, error) {
 	empty := func(status string) stagingResponse { return stagingResponse{Protocol: 1, Status: status} }
+	failed := func(status, reason string) stagingResponse {
+		return stagingResponse{Protocol: 1, Status: status, Reason: reason}
+	}
 	if mode != "create" && mode != "observe" && mode != "recheck" {
 		return stagingResponse{}, ErrMode
 	}
@@ -48,14 +53,14 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 	resource := kaggleapi.Resource{Owner: r.Owner, Slug: r.Slug}
 	matched, err := accountMatches(ctx, client, r.Owner)
 	if err != nil {
-		return empty("unknown"), nil
+		return failed("unknown", "account_check_failed"+failureSuffix(err)), nil
 	}
 	if !matched {
 		return empty("invalid"), nil
 	}
 	meta, err := client.GetDataset(ctx, resource)
 	if err != nil && !kaggleapi.NameAbsent(err) {
-		return empty("unknown"), nil
+		return failed("unknown", "staging_lookup_failed"+failureSuffix(err)), nil
 	}
 	if err == nil {
 		return observeStaging(ctx, client, plan, meta, mode == "observe" || mode == "create"), nil
@@ -72,7 +77,7 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 			missing = append(missing, entry)
 		case "ready", "pending":
 		default:
-			return empty(state), nil
+			return failed(state, "shared_"+state), nil
 		}
 	}
 	progress := &uploadProgress{}
@@ -84,12 +89,22 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 	}
 	provider.ReportPreparationProgress(ctx, 0, progress.total)
 	for _, entry := range missing {
-		if status := createStaging(ctx, client, entry.request, entry.marker, []domain.ObjectMetadata{entry.object}, blobs, progress); status != "" {
-			return empty(status), nil
+		files, status, reason := uploadStaging(ctx, client, "shared", entry.request, entry.marker, []domain.ObjectMetadata{entry.object}, blobs, progress)
+		if status != "" {
+			return failed(status, reason), nil
+		}
+		// A lost acknowledgement is resolved by observing the exact shared dataset; it
+		// is never created again.
+		if err := createDataset(ctx, client, entry.request, files); err != nil && !sharedCreated(ctx, client, entry) {
+			return failed("unknown", "shared_create_failed"+failureSuffix(err)), nil
 		}
 	}
-	if status := createStaging(ctx, client, r, plan.marker, plan.objects, blobs, progress); status != "" {
-		return empty(status), nil
+	files, status, reason := uploadStaging(ctx, client, "staging", r, plan.marker, plan.objects, blobs, progress)
+	if status != "" {
+		return failed(status, reason), nil
+	}
+	if err := createDataset(ctx, client, r, files); err != nil {
+		return failed("unknown", "staging_create_failed"+failureSuffix(err)), nil
 	}
 	meta, err = client.GetDataset(ctx, resource)
 	if err != nil {
@@ -97,7 +112,7 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 403 && kaggleapi.NameAbsent(err) {
 			return empty("pending"), nil
 		}
-		return empty("unknown"), nil
+		return failed("unknown", "staging_lookup_failed"+failureSuffix(err)), nil
 	}
 	return observeStaging(ctx, client, plan, meta, true), nil
 }
@@ -106,43 +121,99 @@ type uploadProgress struct {
 	sent, total int64
 }
 
-// createStaging uploads a marker and its objects (same order as Files[1:]) and creates
-// one private dataset. It returns a non-empty status when creation did not complete.
-func createStaging(ctx context.Context, client *kaggleapi.Client, r stagingRequest, marker []byte, objects []domain.ObjectMetadata, blobs StagingBlobs, progress *uploadProgress) string {
+// stagingUploadTries bounds sends of one file. A failed upload creates no dataset and
+// its blob is never referenced, so the file is sent again with a new ticket.
+const stagingUploadTries = 2
+
+// uploadStaging uploads a marker and its objects (same order as Files[1:]). It returns
+// a non-empty status and closed reason when an upload did not complete.
+func uploadStaging(ctx context.Context, client *kaggleapi.Client, kind string, r stagingRequest, marker []byte, objects []domain.ObjectMetadata, blobs StagingBlobs, progress *uploadProgress) ([]*kaggleapi.UploadedBlob, string, string) {
 	files := make([]*kaggleapi.UploadedBlob, 0, len(r.Files))
 	for index, file := range r.Files {
-		ticket, err := client.StartBlobUpload(ctx, file.Name, file.Bytes)
-		if err != nil {
-			return "unknown"
-		}
-		var source io.ReadCloser
-		if index == 0 {
-			source = io.NopCloser(bytes.NewReader(marker))
-		} else {
-			object := objects[index-1]
-			source, err = blobs.Open(ctx, object.WorkspaceID, object.ID)
-			if err != nil {
-				return "unknown"
-			}
-			source = &stagingProgressReader{ReadCloser: source, ctx: ctx, sent: &progress.sent, total: progress.total, remaining: file.Bytes}
-		}
 		digest, err := hex.DecodeString(string(file.SHA256))
 		if err != nil || len(digest) != sha256.Size {
-			_ = source.Close()
-			return "invalid"
+			return nil, "invalid", kind + "_file_invalid"
 		}
-		uploaded, err := client.UploadBlob(ctx, ticket, source, [sha256.Size]byte(digest))
-		if err != nil {
-			return "unknown"
+		open := func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(marker)), nil }
+		if index > 0 {
+			object := objects[index-1]
+			open = func() (io.ReadCloser, error) {
+				source, err := blobs.Open(ctx, object.WorkspaceID, object.ID)
+				if err != nil {
+					return nil, err
+				}
+				return &stagingProgressReader{ReadCloser: source, ctx: ctx, sent: &progress.sent, total: progress.total, remaining: file.Bytes}, nil
+			}
+		}
+		sent := progress.sent
+		var uploaded *kaggleapi.UploadedBlob
+		reason := ""
+		for try := 0; try < stagingUploadTries && uploaded == nil && ctx.Err() == nil; try++ {
+			progress.sent = sent
+			ticket, err := client.StartBlobUpload(ctx, file.Name, file.Bytes)
+			if err != nil {
+				reason = kind + "_upload_start_failed" + failureSuffix(err)
+				continue
+			}
+			source, err := open()
+			if err != nil {
+				return nil, "unknown", kind + "_source_unavailable"
+			}
+			// UploadedBlob exists only after complete bytes, matching SHA256, exact EOF
+			// and successful source Close. No create can follow an uncertain local source.
+			if uploaded, err = client.UploadBlob(ctx, ticket, source, [sha256.Size]byte(digest)); err != nil {
+				reason = kind + "_upload_failed" + failureSuffix(err)
+			}
+		}
+		if uploaded == nil {
+			if reason == "" {
+				reason = kind + "_upload_failed" + failureSuffix(ctx.Err())
+			}
+			return nil, "unknown", reason
 		}
 		files = append(files, uploaded)
 	}
-	// UploadedBlob exists only after complete bytes, matching SHA256, exact EOF
-	// and successful source Close. No create can follow an uncertain local source.
+	return files, "", ""
+}
+
+// createDataset creates one private dataset from uploaded files.
+func createDataset(ctx context.Context, client *kaggleapi.Client, r stagingRequest, files []*kaggleapi.UploadedBlob) error {
 	_, err := client.CreateDataset(ctx, kaggleapi.CreateDatasetRequest{Resource: kaggleapi.Resource{Owner: r.Owner, Slug: r.Slug},
 		License: r.License, Description: stagingDescription(r.MarkerSHA256), Files: files})
-	if err != nil {
-		return "unknown"
+	return err
+}
+
+// sharedCreated observes, within the visibility grace, whether a shared dataset whose
+// create was not acknowledged exists with its exact identity.
+func sharedCreated(ctx context.Context, client *kaggleapi.Client, entry sharedInput) bool {
+	deadline := time.Now().Add(stagingVisibilityGrace)
+	for {
+		switch observeShared(ctx, client, entry) {
+		case "ready", "pending":
+			return true
+		case "invalid":
+			return false
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(stagingVisibilityPoll):
+		}
+	}
+}
+
+// failureSuffix adds the provider HTTP status or a timeout to a closed reason; it
+// never includes provider, URL or OS text.
+func failureSuffix(err error) string {
+	var apiErr *kaggleapi.Error
+	switch {
+	case errors.As(err, &apiErr) && apiErr.StatusCode >= 100 && apiErr.StatusCode <= 599:
+		return "_http_" + strconv.Itoa(apiErr.StatusCode)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "_timeout"
 	}
 	return ""
 }

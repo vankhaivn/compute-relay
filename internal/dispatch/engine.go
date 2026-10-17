@@ -239,7 +239,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			if errors.Is(err, admission.ErrExpired) {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
-			return s.fail(domain.CodeStagingFailed)
+			return s.failWith(domain.CodeStagingFailed, problemReason(err))
 		}
 		return s.prepared(prepared)
 	case Staging:
@@ -419,6 +419,20 @@ func control[T any](ctx context.Context, limit time.Duration, fn func(context.Co
 	}
 	return fn(bounded)
 }
+
+// problemReason returns the closed public reason an adapter problem carries, if any.
+func problemReason(err error) string {
+	var value domain.Problem
+	if errors.As(err, &value) {
+		return value.PublicDetails()[domain.ReasonDetail]
+	}
+	var pointer *domain.Problem
+	if errors.As(err, &pointer) && pointer != nil {
+		return pointer.PublicDetails()[domain.ReasonDetail]
+	}
+	return ""
+}
+
 func errorCode(err error, fallback domain.ErrorCode) domain.ErrorCode {
 	var pointer *domain.Problem
 	if errors.As(err, &pointer) && pointer != nil && problem(pointer.Code, false) != nil {
@@ -474,11 +488,13 @@ func (s *session) prepared(p provider.Prepared) error {
 	}
 	return s.commit(Action{Kind: PreparationSeen, Prepared: &p})
 }
-func (s *session) fail(code domain.ErrorCode) error {
+func (s *session) fail(code domain.ErrorCode) error { return s.failWith(code, "") }
+
+func (s *session) failWith(code domain.ErrorCode, reason string) error {
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.commit(Action{Kind: Fault, Code: code}); err != nil {
+	if err := s.commit(Action{Kind: Fault, Code: code, Reason: reason}); err != nil {
 		return err
 	}
 	return s.work().Journal.Problem

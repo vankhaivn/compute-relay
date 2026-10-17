@@ -52,6 +52,7 @@ type nativeFixture struct {
 	getDataset  int
 	getKernel   int
 	transferred int
+	putFailures int
 	shared      map[string]*fixtureDataset
 }
 
@@ -288,6 +289,10 @@ func (f *nativeFixture) storage(r *http.Request) (*http.Response, error) {
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			return nil, err
+		}
+		if f.putFailures > 0 {
+			f.putFailures--
+			return jsonResponse(500, `{}`), nil
 		}
 		f.uploaded[key] = data
 		return jsonResponse(200, `{}`), nil
