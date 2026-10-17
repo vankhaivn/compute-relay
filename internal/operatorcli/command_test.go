@@ -72,6 +72,24 @@ func TestOperatorActionErrorsAndReceiptWriterAreNotReflected(t *testing.T) {
 	}
 }
 
+type boundedCause struct{}
+
+func (boundedCause) Error() string { return "SYNTHETIC_PRIVATE_PATH" }
+func (boundedCause) DiagnosticCause() string {
+	return "Runtime stopped: service=dispatch class=state_corrupt."
+}
+
+func TestOperatorActionErrorsReportOnlyBoundedCause(t *testing.T) {
+	var out, diagnostic bytes.Buffer
+	code := Run(context.Background(), []string{"serve", "--root", "run"}, &out, &diagnostic, func(context.Context, Request, io.Writer) error {
+		return errors.Join(boundedCause{}, errors.New("SYNTHETIC_CLOSE_FAILURE"))
+	})
+	lines := strings.Split(strings.TrimSpace(diagnostic.String()), "\n")
+	if code != 1 || len(lines) != 2 || lines[1] != "Runtime stopped: service=dispatch class=state_corrupt." || strings.Contains(diagnostic.String(), "SYNTHETIC") {
+		t.Fatal(code, diagnostic.String())
+	}
+}
+
 func TestManagedServeParserDefaultsAndExplicitPolicy(t *testing.T) {
 	base := []string{"serve", "--root", "run"}
 	for _, backend := range []string{"file", "keychain"} {

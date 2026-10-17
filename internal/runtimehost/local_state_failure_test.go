@@ -603,13 +603,11 @@ func TestPreparationProgressAndProviderFailuresStopRuntimeAfterCallbackJoins(t *
 	server := &http.Server{Handler: http.NotFoundHandler()}
 	done, workerErr := make(chan error, 1), make(chan error, 1)
 	go func() {
-		done <- runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { return nil }, []func(context.Context) error{
-			func(ctx context.Context) error {
-				err := engine.Run(ctx)
-				workerErr <- err
-				return err
-			},
-		})
+		done <- runRuntimeServices(ctx, server, listener, "managed-workers", Listening{}, func(Listening) error { return nil }, []runtimeService{{"dispatch", func(ctx context.Context) error {
+			err := engine.Run(ctx)
+			workerErr <- err
+			return err
+		}}})
 	}()
 	select {
 	case <-p.sampled:

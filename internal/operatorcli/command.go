@@ -75,6 +75,11 @@ func Run(ctx context.Context, args []string, out, diagnostic io.Writer, perform 
 	}
 	if err := perform(ctx, request, out); err != nil {
 		_, _ = io.WriteString(diagnostic, "Local command did not complete. Preserve state and inspect any receipt; an error does not undo committed changes or prove remote work stopped.\n")
+		// Only errors built from closed values expose a cause; raw error text is never printed.
+		var cause interface{ DiagnosticCause() string }
+		if errors.As(err, &cause) {
+			_, _ = io.WriteString(diagnostic, cause.DiagnosticCause()+"\n")
+		}
 		return 1
 	}
 	return 0

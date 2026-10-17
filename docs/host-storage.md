@@ -75,9 +75,10 @@ An orphan is a labelled object with no matching durable record. Inventory can of
 orphan ID and eligibility summary, but never its Docker identity. Removing an orphan requires a
 separate explicit preview and apply operation with a fresh idempotency key, a current matching
 fingerprint, verified management authority and a second exact identity/reference check. The cleanup
-worker records a receipt for the exact target. Attempt containers that match a job ledger use the
-ordinary attempt-cleanup route instead. Missing ledger objects are recorded as observed absences,
-not as completed deletions.
+worker records a receipt for the exact target. If the host is unreachable while an interrupted
+removal is recovered, the operation stays `running` and is observed again after its lease expires.
+Attempt containers that match a job ledger use the ordinary attempt-cleanup route instead. Missing
+ledger objects are recorded as observed absences, not as completed deletions.
 
 Use a `manage` token for orphan preview and apply. All paths below are relative to
 `/v1/workspaces/{workspace}`:

@@ -112,3 +112,37 @@ func TestStorageEngineKeepsLocalFailuresAndUnknownDeleteSeparate(t *testing.T) {
 		})
 	}
 }
+
+func TestStorageEngineDefersInterruptedDeletionWhileProviderIsUnreachable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		wantErr error
+	}{
+		{name: "provider_outage", err: errors.New("SYNTHETIC_SSH_CONNECTION_RESET"), wantErr: ErrDeferred},
+		{name: "local_state", err: provider.LocalStateError{Err: errors.New("local state failed")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			work := storageStubWork(t)
+			work.State = "running"
+			repo := &storageStubRepository{work: work}
+			adapter := &storageStubProvider{verifyErr: tc.err}
+			engine, err := New(&stubRepo{}, stubResolver{p: adapter}, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine.WithStorage(repo)
+			worked, err := engine.RunOnce(context.Background())
+			want := tc.wantErr
+			if want == nil {
+				want = tc.err
+			}
+			if !worked || !errors.Is(err, want) || adapter.deletes != 0 || len(repo.completed) != 0 {
+				t.Fatalf("work=%v err=%v deletes=%d outcomes=%v", worked, err, adapter.deletes, repo.completed)
+			}
+			if strings.Contains(err.Error(), "SYNTHETIC") {
+				t.Fatal("raw provider text escaped", err)
+			}
+		})
+	}
+}

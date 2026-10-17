@@ -132,10 +132,11 @@ func TestManagedRuntimeShutdownWaitsForEveryWorker(t *testing.T) {
 	defer cancel()
 	started, exited := make(chan struct{}, 3), make(chan struct{}, 3)
 	release := make(chan struct{})
-	services := make([]func(context.Context) error, 3)
+	services := make([]runtimeService, 3)
 	for i := range services {
 		index := i
-		services[i] = func(ctx context.Context) error {
+		services[i].name = "worker"
+		services[i].run = func(ctx context.Context) error {
 			started <- struct{}{}
 			<-ctx.Done()
 			if index == 2 {
@@ -175,13 +176,15 @@ func TestManagedWorkerFailureClosesHTTPAndOtherWorkersWithoutRawError(t *testing
 	listener := testListener(t)
 	server := &http.Server{Handler: http.NotFoundHandler()}
 	stopped := make(chan struct{})
-	services := []func(context.Context) error{
-		func(context.Context) error { return errors.New("SYNTHETIC_SECRET") },
-		func(ctx context.Context) error { <-ctx.Done(); close(stopped); return ctx.Err() },
+	services := []runtimeService{
+		{"collection", func(context.Context) error { return errors.New("SYNTHETIC_SECRET") }},
+		{"dispatch", func(ctx context.Context) error { <-ctx.Done(); close(stopped); return ctx.Err() }},
 	}
 	err := runRuntimeServices(context.Background(), server, listener, "managed-workers", Listening{}, func(Listening) error { return nil }, services)
-	if err != ErrState {
-		t.Fatal("raw worker error escaped", err)
+	var cause ServiceStopped
+	if !errors.Is(err, ErrState) || !errors.As(err, &cause) || cause != (ServiceStopped{"collection", "unclassified"}) ||
+		strings.Contains(err.Error(), "SYNTHETIC") || strings.Contains(cause.DiagnosticCause(), "SYNTHETIC") {
+		t.Fatal("raw worker error escaped or cause was not bounded", err)
 	}
 	select {
 	case <-stopped:
