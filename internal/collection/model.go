@@ -31,10 +31,11 @@ var (
 type Failure struct {
 	Code    domain.ErrorCode
 	Invalid bool
+	Reason  string
 }
 
 func (f Failure) Error() string                         { return "collection failed: " + string(f.Code) }
-func failure(code domain.ErrorCode, invalid bool) error { return Failure{code, invalid} }
+func failure(code domain.ErrorCode, invalid bool) error { return Failure{Code: code, Invalid: invalid} }
 
 // Lease is an internal capability. Wall-clock expiry never changes remote state.
 type Lease struct {

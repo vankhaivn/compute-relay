@@ -112,7 +112,15 @@ func collectionFailure(err error) Failure {
 	f := Failure{Code: domain.CodeArtifactCollectionFailed}
 	var known Failure
 	if errors.As(err, &known) {
-		return known
+		f = known
+	} else {
+		var problem domain.Problem
+		if errors.As(err, &problem) && problem.Code == domain.CodeArtifactCollectionFailed {
+			f.Reason = problem.Details[domain.ReasonDetail]
+		}
+	}
+	if f.Code != domain.CodeArtifactCollectionFailed || !domain.ValidCollectionReason(f.Reason) {
+		f.Reason = ""
 	}
 	return f
 }
@@ -131,11 +139,11 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, er
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, ErrUnavailable
+		return nil, Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_binding_unavailable"}
 	}
 	src = p
 	if src == nil {
-		return nil, ErrUnavailable
+		return nil, Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_binding_unavailable"}
 	}
 	if err := src.Verify(ctx, w.Binding); err != nil {
 		if provider.IsLocalStateError(err) {
@@ -163,7 +171,7 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 		if provider.IsLocalStateError(err) {
 			return Snapshot{}, err
 		}
-		return Snapshot{}, ErrUnavailable
+		return Snapshot{}, collectionFailure(err)
 	}
 	if len(catalog) > e.config.MaxFiles {
 		return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
@@ -204,7 +212,7 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 		if provider.IsLocalStateError(err) {
 			return Snapshot{}, err
 		}
-		return Snapshot{}, ErrUnavailable
+		return Snapshot{}, collectionFailure(err)
 	}
 	if !writer.matches(*manifestFile, result) {
 		return Snapshot{}, failure(domain.CodeArtifactDigestMismatch, true)
@@ -342,7 +350,7 @@ func (e *Engine) transfer(ctx context.Context, src provider.Provider, remote pro
 		result, err := src.Fetch(ctx, remote, artifact, checked, artifact.Bytes, progress)
 		if err != nil {
 			var progressErr progressWriteError
-			final = ErrUnavailable
+			final = collectionFailure(err)
 			if provider.IsLocalStateError(err) || errors.As(err, &progressErr) {
 				final = err
 			}

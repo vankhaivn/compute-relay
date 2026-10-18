@@ -19,7 +19,7 @@ import (
 func runArtifacts(ctx context.Context, _ Config, mode string, token []byte, request artifactRequest, dst io.Writer) ([]byte, error) {
 	client, err := nativeClient(token)
 	if err != nil {
-		return nil, err
+		return nil, artifactFailure("artifact_credential_unavailable")
 	}
 	defer client.Close()
 	return artifacts(ctx, client, mode, request, dst)
@@ -27,25 +27,37 @@ func runArtifacts(ctx context.Context, _ Config, mode string, token []byte, requ
 
 func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, request artifactRequest, dst io.Writer) ([]byte, error) {
 	if mode != "catalog" && mode != "fetch" || mode == "catalog" && request.Target != nil || mode == "fetch" && (request.Target == nil || dst == nil) {
-		return nil, ErrArtifactTransfer
+		return nil, artifactFailure("artifact_request_invalid")
 	}
 	r := request.Execution
 	resource := kaggleapi.Resource{Owner: r.Owner, Slug: r.Slug}
-	matched, err := accountMatches(ctx, client, r.Owner)
-	if err != nil || !matched {
-		return nil, ErrArtifactTransfer
+	account, err := client.IntrospectToken(ctx)
+	if err != nil {
+		return nil, artifactFailure("artifact_account_read_failed")
+	}
+	if !account.Active {
+		return nil, artifactFailure("artifact_credential_unavailable")
+	}
+	if account.Username != r.Owner {
+		return nil, artifactFailure("artifact_account_mismatch")
 	}
 	check := func() error {
 		kernel, err := client.GetKernel(ctx, resource)
-		if err != nil || !matchingKernel(kernel, r, r.KernelID) {
-			return ErrArtifactTransfer
+		if err != nil {
+			return artifactFailure("artifact_remote_read_failed")
+		}
+		if !matchingKernel(kernel, r, r.KernelID) {
+			return artifactFailure("artifact_remote_identity_mismatch")
 		}
 		return nil
 	}
 	terminal := func() error {
 		state, err := client.KernelSessionStatus(ctx, resource)
-		if err != nil || state != kaggleapi.KernelComplete && state != kaggleapi.KernelError {
-			return ErrArtifactTransfer
+		if err != nil {
+			return artifactFailure("artifact_status_read_failed")
+		}
+		if state != kaggleapi.KernelComplete && state != kaggleapi.KernelError {
+			return artifactFailure("artifact_not_terminal")
 		}
 		return nil
 	}
@@ -56,13 +68,16 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 		}
 		return artifactEntry{path, receipt.Bytes, domainDigest(receipt.SHA256[:])}, nil
 	}
-	if check() != nil || terminal() != nil {
-		return nil, ErrArtifactTransfer
+	if err := check(); err != nil {
+		return nil, err
+	}
+	if err := terminal(); err != nil {
+		return nil, err
 	}
 	var manifest bytes.Buffer
 	manifestFile, err := download(artifactManifest, runnerplan.MaxManifestBytes, &manifest)
 	if err != nil {
-		return nil, ErrArtifactTransfer
+		return nil, artifactDownloadFailure("artifact_manifest_download_failed", err)
 	}
 	selected, err := selectArtifacts(manifest.Bytes(), request)
 	if err != nil {
@@ -73,7 +88,12 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 		for _, file := range selected {
 			total += file.Bytes
 		}
-		for _, path := range []string{"control/stdout.log", "control/stderr.log", "control/environment.json"} {
+		for _, control := range []struct{ path, reason string }{
+			{"control/stdout.log", "artifact_stdout_download_failed"},
+			{"control/stderr.log", "artifact_stderr_download_failed"},
+			{"control/environment.json", "artifact_environment_download_failed"},
+		} {
+			path := control.path
 			cap, _ := artifactControlLimit(path)
 			file, err := download(path, min(cap, request.MaxBytes-total), io.Discard)
 			if err != nil {
@@ -81,10 +101,10 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 				if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
 					continue
 				}
-				return nil, ErrArtifactTransfer
+				return nil, artifactDownloadFailure(control.reason, err)
 			}
 			if len(selected) >= request.MaxFiles {
-				return nil, ErrArtifactTransfer
+				return nil, artifactFailure("artifact_file_limit")
 			}
 			total += file.Bytes
 			selected = append(selected, file)
@@ -93,10 +113,10 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 		target := *request.Target
 		if target.Path == artifactManifest {
 			if manifestFile != target {
-				return nil, ErrArtifactTransfer
+				return nil, artifactFailure("artifact_target_mismatch")
 			}
 			if n, err := dst.Write(manifest.Bytes()); err != nil || n != manifest.Len() {
-				return nil, ErrArtifactTransfer
+				return nil, artifactFailure("artifact_write_failed")
 			}
 		} else {
 			_, control := artifactControlLimit(target.Path)
@@ -105,17 +125,23 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 				found = found || file == target
 			}
 			if !found {
-				return nil, ErrArtifactTransfer
+				return nil, artifactFailure("artifact_target_mismatch")
 			}
 			actual, err := download(target.Path, target.Bytes, dst)
-			if err != nil || actual != target {
-				return nil, ErrArtifactTransfer
+			if err != nil {
+				return nil, artifactDownloadFailure("artifact_download_failed", err)
+			}
+			if actual != target {
+				return nil, artifactFailure("artifact_digest_mismatch")
 			}
 		}
 	}
 	// Complete payload bytes do not bypass final terminal and identity checks.
-	if terminal() != nil || check() != nil {
-		return nil, ErrArtifactTransfer
+	if err := terminal(); err != nil {
+		return nil, err
+	}
+	if err := check(); err != nil {
+		return nil, err
 	}
 	if mode == "fetch" {
 		return nil, nil
@@ -133,16 +159,25 @@ func domainDigest(raw []byte) domain.SHA256Digest {
 
 func selectArtifacts(raw []byte, request artifactRequest) ([]artifactEntry, error) {
 	manifest, err := runnerplan.ParseResult(request.Identity, raw)
-	if err != nil || len(manifest.Artifacts) >= request.MaxFiles || int64(len(raw)) > request.MaxBytes {
-		return nil, ErrArtifactTransfer
+	if err != nil {
+		return nil, artifactFailure("artifact_manifest_invalid")
+	}
+	if len(manifest.Artifacts) >= request.MaxFiles {
+		return nil, artifactFailure("artifact_file_limit")
+	}
+	if int64(len(raw)) > request.MaxBytes {
+		return nil, artifactFailure("artifact_byte_limit")
 	}
 	selected := []artifactEntry{{artifactManifest, int64(len(raw)), provider.Digest(raw)}}
 	counts, sizes := make([]int, len(request.Outputs)), make([]int64, len(request.Outputs))
 	total := int64(len(raw))
 	for _, file := range manifest.Artifacts {
 		path := "outputs/" + file.Path
-		if !artifactSafePath(path) || file.Bytes < 0 || file.Bytes > request.MaxBytes-total {
-			return nil, ErrArtifactTransfer
+		if !artifactSafePath(path) || file.Bytes < 0 {
+			return nil, artifactFailure("artifact_path_invalid")
+		}
+		if file.Bytes > request.MaxBytes-total {
+			return nil, artifactFailure("artifact_byte_limit")
 		}
 		match := -1
 		for i, output := range request.Outputs {
@@ -152,12 +187,12 @@ func selectArtifacts(raw []byte, request artifactRequest) ([]artifactEntry, erro
 			}
 		}
 		if match < 0 {
-			return nil, ErrArtifactTransfer
+			return nil, artifactFailure("artifact_output_undeclared")
 		}
 		counts[match]++
 		sizes[match] += file.Bytes
 		if limit := request.Outputs[match].MaxBytes; limit != 0 && sizes[match] > limit {
-			return nil, ErrArtifactTransfer
+			return nil, artifactFailure("artifact_byte_limit")
 		}
 		total += file.Bytes
 		selected = append(selected, artifactEntry{path, file.Bytes, file.SHA256})
@@ -165,9 +200,16 @@ func selectArtifacts(raw []byte, request artifactRequest) ([]artifactEntry, erro
 	if manifest.Phase == "completed" {
 		for i, output := range request.Outputs {
 			if output.Required && counts[i] == 0 {
-				return nil, ErrArtifactTransfer
+				return nil, artifactFailure("artifact_output_missing")
 			}
 		}
 	}
 	return selected, nil
+}
+
+func artifactDownloadFailure(reason string, err error) error {
+	if errors.Is(err, kaggleapi.ErrLimit) {
+		return artifactFailure("artifact_byte_limit")
+	}
+	return artifactFailure(reason)
 }

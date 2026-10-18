@@ -74,6 +74,12 @@ include rehashed reused blobs; received bytes count only new stream bytes in the
 generation and can be null when unsupported. Full counts can precede verification failure.
 Only a committed `available` publication is readable. There is no partial-byte range resume.
 
+A failed collection preserves a bounded provider-neutral `details.reason` on the job condition and
+collection operation when the adapter identifies the failed step (for example,
+`artifact_manifest_download_failed` or `artifact_credential_unavailable`). Provider messages,
+responses and underlying error text are not stored in those public problems. Retry still requests
+collection for the original attempt and never reruns compute.
+
 A verified failure manifest/log can be available when the payload failed. Provider terminal status,
 result availability and hardware release remain separate. See [recovery](recovery.md) for pin,
 publication and retention uncertainty and [compatibility](compatibility.md) for evidence limits.
