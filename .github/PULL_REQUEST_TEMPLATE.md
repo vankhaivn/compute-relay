@@ -1,24 +1,22 @@
 ## Change
 
-Describe the concrete problem and resulting behavior. Link the issue when applicable.
+What problem this solves and the resulting behavior. Link the issue.
 
 ## Validation
 
-List exact commands/results, unrun checks with reasons and remaining risks.
-Distinguish offline tests, host checks and authorized live-provider evidence.
+Exact commands and results; checks not run and why; remaining risks. Mark offline tests, host
+checks and authorized live runs separately.
 
 ```text
 ./scripts/check.sh — not run
 ```
 
-## Compatibility and effects
+## Effects
 
-Describe public/API/schema/installation impact and any required operator actions.
-Summarize authorized finite compute/quota/deletion effects without credentials or private logs.
+API, schema or installation impact and any operator action needed. Authorized compute, quota or
+deletion used (no credentials or private logs).
 
-- [ ] Relevant docs and examples match the resulting behavior.
-- [ ] Safety invariants in `CLAUDE.md` and `docs/design.md` are preserved.
-- [ ] No credentials, private inputs, account exports or sensitive logs are included.
-- [ ] No unauthorized provider mutation, paid capacity or deployment is introduced.
-- [ ] PR title and focused commits follow `docs/development.md#commit-convention`.
-- [ ] Breaking behavior has `!` and a `BREAKING CHANGE:` footer where required.
+- [ ] Docs and examples match the new behavior.
+- [ ] Design invariants in `docs/design.md` still hold.
+- [ ] No credentials, private data or unauthorized provider effects.
+- [ ] Title and commits follow `docs/development.md#commit-convention`.

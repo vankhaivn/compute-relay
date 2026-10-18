@@ -1,54 +1,26 @@
 # Security policy
 
-## Supported versions
+Compute Relay is pre-release; fixes target `main`.
 
-Compute Relay has no released runtime version yet. Security fixes currently target the default branch. A version support table will be added before the first release.
+## Reporting
 
-## Reporting a vulnerability
+Do not open a public issue for a vulnerability, credential exposure or private-data incident. Use
+GitHub private vulnerability reporting on the **Security** tab, or contact the owner privately via
+their GitHub profile first.
 
-Do not open a public issue for a vulnerability, credential exposure, or private-data incident.
+Include the affected commit, component, reproduction steps, impact and prerequisites, and whether
+credentials, tokens, private data or remote resources are affected. Redact tokens, account IDs,
+sensitive URLs and artifact contents; never send live credentials.
 
-Use GitHub's private vulnerability reporting entry on the repository **Security** tab when it is available. If that channel is unavailable, contact the repository owner privately through the contact information on their GitHub profile before sending sensitive details. Share only the minimum information needed to establish a private channel.
+High-priority areas: credential or token disclosure, cross-workspace access, path traversal or
+host-file access, command injection, archive extraction, SSRF into private or metadata addresses,
+artifact mix-ups across jobs, duplicate compute after ambiguous outcomes, cleanup of resources Relay
+does not own, unsafe network exposure. Provider-side vulnerabilities go to the provider.
 
-A useful report includes:
+## Leaked credentials
 
-- affected commit or version;
-- component and deployment context;
-- reproduction steps or a minimal proof of concept;
-- realistic impact and prerequisites;
-- whether provider credentials, workspace tokens, private data, or remote resources may be affected; and
-- any safe mitigation already identified.
+1. Revoke or rotate at the source immediately — this matters more than rewriting Git history.
+2. Keep only sanitized evidence.
+3. Check bundles, provider resources, caches and exports for copies.
 
-Do not include live credentials or third-party private data. Redact tokens, account identifiers, URLs with sensitive query strings, and artifact contents.
-
-## Scope priorities
-
-High-priority areas include:
-
-- provider credential or runtime-token disclosure;
-- cross-workspace authorization bypass;
-- arbitrary host-file access or path traversal;
-- command injection on the runtime host;
-- archive extraction and provider-download vulnerabilities;
-- SSRF into local, private, link-local, or metadata endpoints;
-- artifact identity confusion across jobs or attempts;
-- unsafe duplicate compute submission after ambiguous outcomes;
-- destructive cleanup of resources not owned by the connector; and
-- unsafe default network exposure.
-
-Provider service vulnerabilities should be reported to the provider. Reports about this repository should explain how project code or documentation creates the risk.
-
-## Credential incidents
-
-If a credential appears in a commit, issue, pull request, log, or artifact:
-
-1. revoke or rotate it at the source immediately;
-2. treat removal from Git history as secondary to revocation;
-3. preserve only sanitized evidence needed for investigation; and
-4. review generated bundles, provider resources, caches, and diagnostic exports for copies.
-
-The project will not ask users to paste provider secrets into chat or public issue threads.
-
-## Disclosure
-
-Maintainers will acknowledge a valid private report when practicable, investigate impact, coordinate a fix, and credit reporters who request recognition. No response-time or bounty promise is made at this pre-release stage.
+Reports are acknowledged when practicable; there is no response-time promise or bounty.
