@@ -27,6 +27,34 @@ const artifactFileLimit = provider.MaxArtifactFiles
 
 var ErrArtifactTransfer = errors.New("artifact verification failed; retain the original attempt and result pin")
 
+// artifactFailure exposes only a closed stage reason. Raw provider/OS text is
+// intentionally excluded even from the wrapped cause.
+func artifactFailure(reason string) domain.Problem {
+	if !domain.ValidCollectionReason(reason) {
+		reason = "artifact_read_failed"
+	}
+	return provider.Problem(domain.CodeArtifactCollectionFailed, domain.FailureStageResults,
+		"artifact collection did not verify; retain the original attempt").
+		WithDetail(domain.ReasonDetail, reason).WithCause(ErrArtifactTransfer)
+}
+
+func boundedArtifactFailure(err error) error {
+	var problem domain.Problem
+	if errors.As(err, &problem) && problem.Code == domain.CodeArtifactCollectionFailed &&
+		domain.ValidCollectionReason(problem.PublicDetails()[domain.ReasonDetail]) {
+		return artifactFailure(problem.PublicDetails()[domain.ReasonDetail])
+	}
+	return artifactFailure("artifact_read_failed")
+}
+
+func artifactContextFailure(err error) error {
+	reason := "artifact_runtime_stopped"
+	if errors.Is(err, context.DeadlineExceeded) {
+		reason = "artifact_call_timeout"
+	}
+	return artifactFailure(reason).WithCause(err)
+}
+
 // ArtifactPolicy bounds this read-only component; it does not alter a frozen job.
 type ArtifactPolicy struct {
 	MaxFiles int
@@ -170,11 +198,11 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 		return none, ErrConfig
 	}
 	if err := a.executor.checkOperationalReference(ref); err != nil {
-		return none, err
+		return none, artifactFailure("artifact_remote_identity_mismatch")
 	}
 	ctx, leave, err := a.enter(parent)
 	if err != nil {
-		return none, err
+		return none, artifactContextFailure(err)
 	}
 	defer leave()
 	raw, err := a.call(ctx, "catalog", ref, nil, nil)
@@ -183,30 +211,33 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 	}
 	files, err := decodeArtifactCatalog(raw)
 	if err != nil {
-		return none, err
+		return none, artifactFailure("artifact_catalog_invalid")
 	}
 	var total int64
 	seen := map[string]bool{}
 	hasManifest := false
 	if len(files) > a.policy.MaxFiles {
-		return none, ErrArtifactTransfer
+		return none, artifactFailure("artifact_file_limit")
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	for _, f := range files {
-		if !a.allowed(f.Path) || f.Bytes < 0 || !f.SHA256.Valid() || f.Bytes > a.policy.MaxBytes-total {
-			return none, ErrArtifactTransfer
+		if !a.allowed(f.Path) || f.Bytes < 0 || !f.SHA256.Valid() {
+			return none, artifactFailure("artifact_catalog_invalid")
+		}
+		if f.Bytes > a.policy.MaxBytes-total {
+			return none, artifactFailure("artifact_byte_limit")
 		}
 		if limit, ok := artifactControlLimit(f.Path); ok && f.Bytes > limit {
-			return none, ErrArtifactTransfer
+			return none, artifactFailure("artifact_byte_limit")
 		}
 		key := strings.ToLower(f.Path)
 		parts := strings.Split(key, "/")
 		if seen[key] {
-			return none, ErrArtifactTransfer
+			return none, artifactFailure("artifact_catalog_invalid")
 		}
 		for i := 1; i < len(parts); i++ {
 			if seen[strings.Join(parts[:i], "/")] {
-				return none, ErrArtifactTransfer
+				return none, artifactFailure("artifact_catalog_invalid")
 			}
 		}
 		seen[key] = true
@@ -218,12 +249,12 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 		parts := strings.Split(key, "/")
 		for i := 1; i < len(parts); i++ {
 			if seen[strings.Join(parts[:i], "/")] {
-				return none, ErrArtifactTransfer
+				return none, artifactFailure("artifact_catalog_invalid")
 			}
 		}
 	}
 	if !hasManifest {
-		return none, ErrArtifactTransfer
+		return none, artifactFailure("artifact_catalog_invalid")
 	}
 
 	result := make([]provider.Artifact, 0, len(files))
@@ -239,17 +270,17 @@ func (a *ArtifactReader) ListArtifacts(parent context.Context, ref provider.Remo
 func (a *ArtifactReader) Fetch(parent context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	var none provider.TransferResult
 	if a == nil || dst == nil || file.Validate(ref) != nil || !a.allowed(file.Path) || limit < file.Bytes || file.Bytes > a.policy.MaxBytes {
-		return none, ErrArtifactTransfer
+		return none, artifactFailure("artifact_request_invalid")
 	}
 	if n, ok := artifactControlLimit(file.Path); ok && file.Bytes > n {
-		return none, ErrArtifactTransfer
+		return none, artifactFailure("artifact_byte_limit")
 	}
 	if err := a.executor.checkOperationalReference(ref); err != nil {
-		return none, err
+		return none, artifactFailure("artifact_remote_identity_mismatch")
 	}
 	ctx, leave, err := a.enter(parent)
 	if err != nil {
-		return none, err
+		return none, artifactContextFailure(err)
 	}
 	defer leave()
 	ctx, cancel := context.WithCancel(ctx)
@@ -274,12 +305,15 @@ func (a *ArtifactReader) Fetch(parent context.Context, ref provider.RemoteRefere
 	if provider.IsLocalStateError(err) {
 		return none, err
 	}
-	if err != nil || checked.failed || checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
-		return none, ErrArtifactTransfer
+	if err != nil {
+		return none, err
+	}
+	if checked.failed || checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
+		return none, artifactFailure("artifact_digest_mismatch")
 	}
 	if file.Path == artifactManifest {
 		if _, err := runnerplan.ParseResult(ref.Identity, manifest.Bytes()); err != nil {
-			return none, ErrArtifactTransfer
+			return none, artifactFailure("artifact_manifest_invalid")
 		}
 	}
 	return provider.TransferResult{Bytes: file.Bytes, SHA256: file.SHA256}, nil
@@ -313,7 +347,7 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 	defer func() {
 		if recover() != nil {
 			raw = nil
-			err = ErrUnavailable
+			err = artifactFailure("artifact_read_failed")
 		}
 	}()
 	request := a.request
@@ -321,7 +355,7 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 	request.Target = target
 	var recorded kernelReference
 	if closedObject([]byte(ref.Resource), &recorded) != nil {
-		return nil, ErrExecutionIdentity
+		return nil, artifactFailure("artifact_remote_identity_mismatch")
 	}
 	request.Execution.KernelID = recorded.KernelID
 	called, violated := false, false
@@ -332,11 +366,11 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 		}
 		called = true
 		if len(token) == 0 || len(token) > credentials.MaxBytes {
-			return ErrConfig
+			return artifactFailure("artifact_credential_unavailable")
 		}
 		for _, b := range token {
 			if b < 33 || b > 126 {
-				return ErrConfig
+				return artifactFailure("artifact_credential_unavailable")
 			}
 		}
 		if ctx.Err() != nil {
@@ -350,13 +384,19 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 		return nil, err
 	}
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, artifactContextFailure(ctx.Err())
 	}
-	if err != nil || !called || violated {
-		return nil, ErrUnavailable
+	if !called {
+		return nil, artifactFailure("artifact_credential_unavailable")
+	}
+	if violated {
+		return nil, artifactFailure("artifact_request_invalid")
+	}
+	if err != nil {
+		return nil, boundedArtifactFailure(err)
 	}
 	if mode == "fetch" && len(raw) != 0 {
-		return nil, ErrProtocol
+		return nil, artifactFailure("artifact_catalog_invalid")
 	}
 	return raw, nil
 }

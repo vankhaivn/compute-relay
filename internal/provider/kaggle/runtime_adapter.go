@@ -278,14 +278,20 @@ func (p *RuntimeAdapter) Observe(ctx context.Context, ref provider.RemoteReferen
 func (p *RuntimeAdapter) ListArtifacts(ctx context.Context, ref provider.RemoteReference) ([]provider.Artifact, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
-		return nil, err
+		if provider.IsLocalStateError(err) {
+			return nil, err
+		}
+		return nil, artifactFailure("artifact_binding_unavailable")
 	}
 	return c.artifacts.ListArtifacts(ctx, ref)
 }
 func (p *RuntimeAdapter) Fetch(ctx context.Context, ref provider.RemoteReference, file provider.Artifact, dst io.Writer, limit int64, progress func(int64) error) (provider.TransferResult, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
-		return provider.TransferResult{}, err
+		if provider.IsLocalStateError(err) {
+			return provider.TransferResult{}, err
+		}
+		return provider.TransferResult{}, artifactFailure("artifact_binding_unavailable")
 	}
 	return c.artifacts.Fetch(ctx, ref, file, dst, limit, progress)
 }

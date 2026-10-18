@@ -341,6 +341,9 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 	})
 }
 func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collection.Failure) error {
+	if f.Reason != "" && (f.Code != domain.CodeArtifactCollectionFailed || !domain.ValidCollectionReason(f.Reason)) {
+		return collection.ErrInvalid
+	}
 	switch f.Code {
 	case domain.CodeArtifactCollectionFailed, domain.CodeArtifactMissing, domain.CodeArtifactDigestMismatch, domain.CodeResultManifestMissing, domain.CodeRemoteIdentityMismatch:
 	default:
@@ -367,6 +370,9 @@ func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collect
 		p, err := domain.NewProblem(f.Code, "Collection did not verify; recover this attempt's artifacts without rerunning compute.", stage)
 		if err != nil {
 			return err
+		}
+		if f.Reason != "" {
+			p = p.WithDetail(domain.ReasonDetail, f.Reason)
 		}
 		p = p.WithRetrySemantics(!f.Invalid, true).WithRecommendedAction(domain.RecommendedActionCollect)
 		if f.Code == domain.CodeRemoteIdentityMismatch {
