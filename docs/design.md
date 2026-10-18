@@ -1,171 +1,98 @@
 # Design
 
-Compute Relay is a finite batch control plane for one trusted operator's applications.
-The application owns workload meaning and external sessions; Relay owns durable orchestration,
-provider boundaries and verified result bytes. Go serves local HTTP/JSON; SQLite holds metadata;
-private filesystem roots hold input/result bytes; the embedded Python runner executes remotely.
+Relay serves one trusted operator's applications. The application owns what a job means and any
+external sessions; Relay owns durable orchestration, provider boundaries and verified result bytes.
+Go serves the API, SQLite holds metadata, private directories hold input and result bytes, and the
+embedded Python runner executes remotely.
 
 ## Invariants
 
-1. Admission commits local identity, not compute consent. Each attempt needs finite explicit authority.
-2. Commit a one-shot mutation intent before a provider call. After uncertainty, observe the original
-   resource only; never infer permission to repeat from a missing response or a not-found read.
-3. Preserve original jobs, attempts, requests, receipts and resource evidence. An explicit retry
-   creates a new attempt and requires new authority; it does not rewrite the earlier one.
-4. Freeze provider, account, selection, policy, resource and input identities. Credential rotation
-   must verify the same account. No provider/account/CPU fallback or automatic paid capacity.
-5. Fence every worker claim and renew its lease. Stale owners cannot mutate durable progress;
-   lease expiry alone does not prove a provider call or callback stopped.
-6. Reserve shared account/machine capacity conservatively, including prepared holds and uncertain
-   activity. Confirmed inactivity is independent of cancellation intent, local expiry and results.
-7. Verify a complete bounded artifact catalog and exact manifest, bytes, EOF and source completion.
-   Publish the whole result set atomically; complete temporary bytes alone are not results.
-8. Credentials are write-only and isolated from jobs, logs, fixtures, SQLite and Git. Preserve the
-   selected vault and native identity; access failure never creates a backend fallback.
-9. Host keys, native machine/Docker identity and frozen container/image policy must match. Remote
-   cleanup is exact-target, explicit and separately fenced; no prefix/age deletion of remote data.
-10. Unknown remains unknown. Execution, cancellation, result availability, cleanup and hardware
-    release are distinct facts. A 202 is only a committed local receipt.
-11. Tombstones expire inventory without erasing history. Delete local bytes only against exact
-    committed tombstones and original root bindings. Preserve ambiguous recovery material.
-12. No automatic submission, restaging, start, cleanup, quota evasion or billing after ambiguity.
-    CI remains offline; live effects need exact authorization and finite budgets.
-13. Host health is time-bounded observation, not compute authority. Stale, missing or post-restart
-    evidence is `unknown`: refuse new admission, preparation and start, but never stop running work.
-    Warning also refuses only new work. Stop Relay-owned attempts only after consecutively measured
-    critical health for the frozen duration or a confirmed low-battery condition. Never retry or
-    resubmit after a health stop. The optional host watchdog uses a separate one-shot receipt,
-    verifies its frozen artifact, and filters stops to exact Relay-owned container labels; it never
-    changes host power, sleep or fan settings.
-14. Remote storage has three lifecycles: immutable shared cache entries, frozen application images,
-    and per-attempt data. Cache keys include installation, verified machine, Docker engine,
-    SHA-256 and byte count; attempts pin exact generations and mount verified entries read-only.
-    Image archives and derived labelled image IDs remain distinct identities. No mutable persistent
-    workspace, host-filesystem cache, host package install, Dockerfile build or registry pull is
-    introduced by these paths.
-15. Remote attempt data is deleted only by the existing exact-identity cleanup engine. Optional
-    retention is frozen at admission: the after-collection clock starts only at durable verified
-    publication; an uncollected maximum starts only for a terminal, inactive or never-started
-    attempt. Omission preserves explicit-cleanup behavior. Unknown activity or deletion remains
-    unknown and does not authorize a retry or early removal.
-16. SSH storage accounting is per installation, verified machine and engine. Charge physical
-    objects once, keep workspace references as logical attribution, and retain reservations through
-    uncertainty. A fresh complete observation gates new writes; soft-limit eviction requires zero
-    references and exact removal evidence. The hard limit is an admission/mutation gate, not a
-    quota or reason to stop running work. Inventory inspects only installation-filtered objects;
-    orphan deletion needs explicit preview, apply and an exact operation receipt.
+These rules hold for every change. Breaking one needs an explicit design decision.
+
+1. **Admission is not consent.** Each attempt needs its own finite authorization, consumed once.
+2. **Intent before mutation.** Record a one-shot intent before any provider call. After
+   uncertainty, only observe the original resource; a missing response or "not found" never permits
+   repeating the call.
+3. **History is preserved.** Jobs, attempts, requests and receipts are never rewritten. A retry is a
+   new attempt with new authority.
+4. **Bindings are frozen.** Provider, account, machine, selection, image and input identities are
+   fixed at admission. Credential replacement must reach the same account. No automatic
+   provider/account/CPU fallback or paid capacity.
+5. **Workers are fenced.** Every claim has a renewable lease with a fence; stale owners cannot write
+   progress. An expired lease does not prove a remote call stopped.
+6. **Capacity is reserved conservatively.** Prepared and uncertain attempts hold shared
+   account/machine capacity until inactivity is confirmed.
+7. **Unknown stays unknown.** Execution, cancellation, result availability, cleanup and hardware
+   release are separate facts. A 202 is only a local receipt.
+8. **Results are all-or-nothing.** Publish a complete, bounded, hash-verified artifact set
+   atomically; complete temporary bytes are not results.
+9. **Credentials stay in the vault.** Never in jobs, logs, fixtures, SQLite or Git. Access failure
+   never falls back to another backend.
+10. **Deletion is exact.** Remote cleanup targets recorded identities only, never prefixes or age.
+    Local deletion follows committed tombstones; history remains.
+11. **Health and storage only gate new work.** Unknown health or storage refuses new work but never
+    stops running work. Only sustained measured critical health or low battery stops Relay-owned
+    containers, without retry.
+12. **CI is offline.** Live effects need explicit authorization and a finite budget.
+
+## Execution path
+
+```mermaid
+flowchart LR
+  A[Admission] --> G[Finite grant consumed]
+  G --> SI[[Staging intent]] --> R[Readiness observed]
+  R --> XI[[Submission intent]] --> O[Execution observed]
+  O --> P[Collection pin] --> V[Verified publication]
+  SI -. uncertain .-> OBS[Observe original only]
+  XI -. uncertain .-> OBS
+```
+
+Double boxes are intent barriers: once committed, recovery never recreates the resource or
+redelivers secrets. SSH can split the grant into prepare and start with a readiness revision.
+
+No transaction spans network or blob I/O. Idempotent receipts, consume-once grants and fenced leases
+each use one shared mechanism. Workers retry transient local errors; corruption stops the runtime.
 
 ## Domain
 
 | Entity | Purpose |
 |---|---|
-| Installation | One exclusive owner of state, identity markers, blob roots and selected credential vault. |
-| Workspace / token | Application namespace and current scoped authority under the trusted operator. |
-| Connection | Managed provider identity, credential reference, revision and verified account/machine facts. |
-| Selection / profile | Immutable policy and accelerator offered for admission; later configuration creates a new selection. |
-| Object / bundle | Immutable workspace-owned input bytes, with bounded size/digest and safe logical paths. |
-| Cache generation | Immutable, machine-scoped Docker volume for one verified content digest and byte count; workspace pins protect live attempts. |
-| Application image | Workspace archive identity plus its separately verified, derived and Relay-labelled Docker image ID. |
-| Retention deadline | Frozen policy deadline linked to the original attempt and an ordinary exact cleanup operation. |
-| Storage scope | Installation, verified machine and Docker engine identity shared across connection aliases. |
-| Inventory / orphan | Bounded installation-filtered observation; an orphan requires explicit preview and apply, while absence is only observation evidence. |
-| Job | Accepted canonical specification, input/output declarations and original admission receipt. |
-| Attempt | One explicit execution history with frozen binding, nonce, finite budgets and remote evidence. |
-| Authorization | Consume-once execution, preparation, start or workload-secret grant for an exact attempt. |
-| Operation / receipt | Durable requested action and immutable replay identity; cleanup is an operation kind. |
-| Intent / resource | One-shot external mutation barrier and original staging/execution/deletion identity. |
-| Lease | Renewable owner/generation/fence for dispatch, collection and cleanup work. |
-| Publication | Atomically committed verified artifact set for one attempt and immutable result pin. |
-| Tombstone | Irreversible inventory expiry and exact local-byte deletion authority; metadata remains. |
+| Installation | Exclusive owner of state, markers, blob roots and the selected vault. |
+| Workspace / token | Application namespace and scoped authority. |
+| Connection | Provider login, revision and verified account/machine facts. |
+| Selection / profile | Immutable policy offered for admission; reconfiguration creates a new one. |
+| Object / bundle | Immutable workspace-owned input bytes. |
+| Job | Accepted spec, inputs, outputs and admission receipt. |
+| Attempt | One execution history with frozen binding, nonce, budgets and remote evidence. |
+| Authorization | Consume-once grant: execution, preparation, start or workload secret. |
+| Operation / receipt | Durable requested action with immutable replay identity. |
+| Intent / resource | One-shot mutation barrier and the original remote identity. |
+| Lease | Renewable owner/generation/fence for dispatch, collection and cleanup. |
+| Publication | Atomically committed verified artifact set. |
+| Tombstone | Irreversible inventory expiry; metadata remains. |
+| Cache generation / application image / storage scope | SSH host storage objects, scoped to installation + machine + engine ([SSH storage](ssh-storage.md)). |
 
-Public enums preserve independent orchestration, execution, collection and release evidence.
-Provider-specific identity interpretation belongs inside adapters. Workspaces separate applications,
-not mutually hostile tenants. Same-user processes, workload code and host administrators are trusted.
+## Decisions
 
-## Durable boundaries
+- **SQLite plus separate blob roots** keeps commits small; recovery needs both, plus markers and
+  credentials.
+- **One managed `serve` path.** An empty installation makes no provider calls.
+- **Native Go Kaggle client.** Python is only the remote runner and development tooling.
+- **File vault by default** (unencrypted, private permissions); existing Keychain installations keep
+  Keychain. No silent migration.
+- **SSH pins host key, machine ID and Docker engine ID**, because two addresses can reach the same
+  machine and a Docker endpoint can change independently.
+- **Kaggle deletes by name.** The check-then-delete race cannot be closed; uncertainty never repeats
+  the delete.
+- **Wall budgets** share a 7-day contract ceiling; each adapter advertises its own maximum (Kaggle
+  1 day, SSH 7 days).
+- **Download completion uses a trailer**, so received bytes alone never count as success.
 
-SQLite uses short immediate transactions and owns local transaction time. True provider/progress
-observation timestamps remain evidence. No transaction spans network or blob I/O. Idempotent
-receipts, consume-once grants and fenced renewable leases each use one shared mechanism.
+## Fault catalog
 
-The ordinary path is admission → finite grant → staging intent → readiness observation → submission
-intent → execution observation → collection pin → verified publication. SSH can split preparation
-and start with a readiness revision; unused secret material is memory-only and consumed with start.
-After a committed mutation barrier, recovery never recreates resources or redelivers secrets.
-
-Identical request/key replay returns the original receipt under current authority. A changed request
-conflicts. An exact replay is not a new authorization or proof of current remote success.
-Workers retry transient local errors with backoff; corruption/invariant errors stop the runtime.
-They join admitted callbacks at shutdown rather than claiming completion while effects may continue.
-
-Provider adapters implement one 14-method Provider contract. One Start path accepts optional
-start authority and workload-secret material; ListArtifacts returns a complete bounded catalog;
-one Fetch path supports an optional progress callback. Exact observation/control and cleanup stay
-inside the same port. Typed capabilities preserve supported/unsupported/unknown semantics;
-an unsupported requirement fails before mutation. SSH fakehost contract tests exercise a real adapter.
-
-## Decisions and consequences
-
-- SQLite plus separate blob roots keeps local commit boundaries small. Whole-installation recovery
-  must preserve both stores, markers and credentials; a database snapshot alone is insufficient.
-- One managed serve composition removes parallel policy/configuration paths. An empty installation
-  performs no provider calls. Existing explicit rows are retired by sequential migration, preserving
-  remote evidence and requiring attention instead of initiating remote actions.
-- The Kaggle adapter uses native Go HTTPS. Python is only the embedded remote runner/development
-  toolchain. Historical SDK transport evidence does not qualify the native implementation.
-- New installations default to an unencrypted private file vault. Existing macOS Keychain entries
-  keep their exact native identity. A changed executable may require macOS access permission;
-  continuity does not mean silent ACL migration or permission to export/recreate credentials.
-- SSH pins native host and Docker engine identities, because two network paths can reach the same
-  capacity and a Docker endpoint can change independently of the SSH address.
-- Kaggle deletion is name-based despite immutable identity checks. Explicit cleanup authorization
-  cannot eliminate the check/delete replacement race; uncertainty never permits repeating the RPC.
-- Wall budgets share one finite seven-day contract ceiling, and each adapter advertises its own
-  maximum: Kaggle enforces a one-day session, while an operator-owned SSH host can run long
-  low-CPU work. Workload-secret expiry bounds one-shot delivery at start, not the running attempt.
-- HTTP artifact completion uses a final verification trailer. Consumers must preserve and verify
-  it; received bytes alone cannot establish successful delivery.
-
-## Fault cases
-
-The [JSON catalog](../internal/devtool/fault-matrix.json) owns exact scenario/test identities.
-Catalog validation checks exact test references; the full Go suite runs the referenced cases.
-These qualify offline failure behavior, not live-provider or host power-loss guarantees.
-HTTPS ingestion is removed, so its redirect scenario is covered by rejecting HTTPS admission.
-The CLI-effect case also applies to SSH Docker commands; native Kaggle uses direct HTTPS.
-
-| Case | Fault |
-|---|---|
-| FM01 | Client loses the admission response and repeats its idempotency key. |
-| FM02 | Same key is reused with a different specification. |
-| FM03 | Runtime crashes immediately before/after writing submission intent. |
-| FM04 | Provider accepts a submission but the response is lost. |
-| FM05 | An ambiguous resource cannot be rediscovered conclusively. |
-| FM06 | Provider state is unknown or changes format. |
-| FM07 | A stale poll arrives after a terminal observation. |
-| FM08 | Runtime restarts while a remote attempt is active. |
-| FM09 | Output collection fails halfway through a large file. |
-| FM10 | A required output is missing or has the wrong digest. |
-| FM11 | A complete bounded output catalog contains multiple entries. |
-| FM12 | A cancellation request races with completion. |
-| FM13 | Cancellation is unsupported or lacks a usable session identity. |
-| FM14 | Local deadline expires while remote activity is unknown. |
-| FM15 | Quota is missing, stale, exhausted, or consumed by external activity. |
-| FM16 | Input staging succeeds but readiness is delayed. |
-| FM17 | A URL redirects into a private network destination. |
-| FM18 | A bundle contains traversal, links, duplicates, or excessive expanded size. |
-| FM19 | A workspace references another workspace's object/artifact. |
-| FM20 | The state directory is opened by a second runtime process. |
-| FM21 | Disk runs out during upload, collection, or database commit. |
-| FM22 | Provider credentials rotate or the configured account changes. |
-| FM23 | A managed remote resource is manually modified outside the runtime. |
-| FM24 | Cleanup is retried after the remote resource is already absent. |
-| FM25 | A CLI exits nonzero after a possible remote side effect. |
-| FM26 | Storage eviction races new references or a deleted identity reappears. |
-| FM27 | Retention crosses restart, races collection, or follows an uncertain provider view. |
-| FM28 | Inventory finds foreign objects or orphan cleanup loses its acknowledgement. |
-
-Do not weaken a scenario or assertion to obtain a pass. Changed test locations must update the
-catalog and retain the behavior. Run `./scripts/check.sh`; see [development](development.md).
-Use [recovery](recovery.md), [artifact delivery](artifact-delivery.md) and
-[remote cleanup](remote-cleanup.md) for operator procedures, not ad-hoc resets or new submissions.
+[`internal/devtool/fault-matrix.json`](../internal/devtool/fault-matrix.json) lists 28 failure
+scenarios (lost responses, crashes around intents, stale polls, partial downloads, cancel races,
+disk full, credential rotation, eviction races, orphan cleanup…) and the tests that cover each.
+`./scripts/check.sh` validates the references and runs the tests. These qualify offline behavior,
+not live providers or power loss. Never weaken a scenario to get a pass; moving a test means
+updating the catalog.

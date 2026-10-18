@@ -1,32 +1,30 @@
 # Contributing
 
-Read [CLAUDE.md](CLAUDE.md), [design](docs/design.md) and the relevant [topic](docs/README.md).
-Preserve public behavior and safety semantics unless the task deliberately changes them.
+Read [design](docs/design.md) and the doc for the area you change. Keep public behavior and the
+design invariants unless the change deliberately alters them.
 
-Branch from `main` under `feat/`, `fix/`, `docs/`, `test/`, `refactor/` or `chore/`.
-Use focused [Conventional Commits](docs/development.md#commit-convention) and a Conventional PR title.
-Keep a fix with its regression tests. No AI authorship or attribution in Git text.
-An approved change permits normal branch push and opening a PR. Stop for owner review;
-merge, rebase, force push, main push, tags, deploys and CI/CD triggers need explicit permission.
+## Workflow
 
-```sh
-./scripts/setup-git-hooks.sh
-./scripts/check.sh
-```
+1. Branch from `main` as `feat/`, `fix/`, `docs/`, `test/`, `refactor/` or `chore/`.
+2. Commit per the [commit convention](docs/development.md#commit-convention); keep each fix with
+   its regression tests.
+3. Run `./scripts/check.sh` (see [Development](docs/development.md)).
+4. Open a PR with a Conventional title. List the checks you ran and their results, checks you did
+   not run and why, any authorized live effects, and remaining risks.
 
-The hook checks commit subjects; the check command covers formatting, Go and Python tests,
-schemas and the fault matrix. See [development](docs/development.md) for pinned tools and CI.
-State exact checks/results, unrun checks with reasons, authorized external effects and risks
-in the PR. Offline fixtures are not live-provider evidence. Preserve uncertain state and original
-binaries rather than retrying remote mutations to manufacture success.
+The owner reviews and merges. Merge, rebase, force-push, pushing to `main`, tags, deploys and
+CI dispatch need explicit permission.
 
-Issue titles are plain sentences without a type prefix. A bug states the observed symptom;
-a feature starts with an imperative verb. Explain the concrete problem, proposed behavior,
-then `Acceptance:` with observable outcomes and required checks. Keep raw private run data,
-credentials, account exports and runtime databases off Git. Report vulnerabilities privately
-through [SECURITY.md](SECURITY.md).
+## Issues
 
-Update the existing topic when behavior changes. Put essential design reasons in
-[design](docs/design.md), provider limits in provider guides and PR-specific evidence in the PR.
-Avoid development diaries, duplicated plans and speculative support claims.
-Contributions use [Apache-2.0](LICENSE); preserve third-party notices and terms.
+Plain-sentence titles, no type prefix: a bug states the symptom, a feature starts with a verb.
+Describe the problem and the proposed behavior, then `Acceptance:` with observable outcomes and
+required checks. Report vulnerabilities privately per [SECURITY.md](SECURITY.md).
+
+## Docs
+
+Update the existing topic when behavior changes — one document per topic, current behavior only.
+Put design reasons in [design](docs/design.md), evidence in the PR, and leave out development
+history. Never commit credentials, account exports, databases or raw run logs.
+
+Contributions are licensed under [Apache-2.0](LICENSE).

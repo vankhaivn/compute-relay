@@ -1,70 +1,58 @@
 # Controlled receiver fixture
 
-`receiver.py` is an optional Linux fixture for an operator-authorized qualification. It is
-not part of the job, the Relay provider or an external media platform. Download the exact
-MediaMTX release in [`receiver.lock.json`](receiver.lock.json), verify the archive and both
-extracted member hashes, and preserve its MIT `LICENSE`. Do not use a floating image or install
-the receiver into the workload container.
+`receiver.py` is an optional RTMPS receiver for an authorized live test of the example. It is not
+part of the job or of Relay. It wraps the MediaMTX release pinned in
+[`receiver.lock.json`](receiver.lock.json): verify the archive and both member hashes, keep its MIT
+`LICENSE`, and never use a floating image or install it in the workload container.
 
-Stage `receiver.py`, the verified `mediamtx` executable and `LICENSE` under `/fixture` in a
-separate owned container based on an existing compatible Linux amd64 Python image. Run as
-`65534:65534`, with at most one CPU, 512 MiB memory and 128 PIDs. Drop all capabilities, enable
-`no-new-privileges`, disable automatic restart, and bound the Docker log driver. With the
-`local` driver, `max-size=1m,max-file=2` retains at most two rotated files. The staged files
-must be readable, and `mediamtx` executable, by that user.
+## Container setup
 
-Mount two private tmpfs directories, owned by that user with mode `0700` and flags
-`rw,noexec,nosuid,nodev`: `/private` (64 KiB) and `/data` (128 MiB). Publish container TCP
-1936 only on the target host's loopback, for example `127.0.0.1:19360:1936`. Confirm that the
-workload's configured hostname reaches this private listener on the target Docker engine.
-The fixture keeps its HTTP API and metrics inside the receiver container's loopback and
-disables other media protocols. Do not expose the fixture as a public service.
+Run it in its own container from an existing Linux amd64 Python image, with `receiver.py`,
+`mediamtx` and `LICENSE` staged under `/fixture`:
 
-Start exactly one supervisor with an absolute UTC Unix timestamp, no more than nine hours
-ahead:
+| Setting | Value |
+|---|---|
+| User | `65534:65534` |
+| Limits | 1 CPU, 512 MiB, 128 PIDs |
+| Hardening | drop all capabilities, `no-new-privileges`, no restart |
+| Logs | `local` driver, `max-size=1m,max-file=2` |
+| tmpfs (`0700`, `rw,noexec,nosuid,nodev`) | `/private` 64 KiB, `/data` 128 MiB |
+| Port | container 1936 on host loopback only, e.g. `127.0.0.1:19360:1936` |
+
+Never expose it publicly. Confirm the workload's hostname reaches this listener on the target engine.
+
+## Use
 
 ```sh
 python3 -E -s /fixture/receiver.py supervise --end-at END_UNIX_SECONDS
 ```
 
-Within 30 seconds, invoke `receiver.py deliver` in that container with a JSON object on stdin
-containing exactly `key_pem`, `cert_pem`, and `password`. Use a freshly generated synthetic
-certificate/key and a random alphanumeric password of 32–128 characters. The certificate's
-SAN must match the RTMPS hostname. Supply the public certificate as the workload's CA input;
-keep the key and password in memory or protected temporary storage. Do not put their values
-in Docker arguments, labels, environment variables, logs or ordinary workload inputs.
+`END_UNIX_SECONDS` is at most nine hours ahead. Within 30 s, run `receiver.py deliver` in the same
+container with JSON on stdin containing exactly `key_pem`, `cert_pem` and `password` — a fresh
+synthetic certificate whose SAN matches the RTMPS hostname, and a random 32–128 character
+alphanumeric password. Give the certificate to the workload as its CA input; never put the key or
+password in Docker arguments, labels, env, logs or workload inputs.
 
-Delivery is one-shot. It writes the key, certificate and MediaMTX configuration only inside
-`/private`, then starts one receiver process. The supervisor uses wall time and Linux
-`CLOCK_BOOTTIME`; it stops the receiver at its deadline, upon signal, or if `/data` exceeds
-112 MiB. Child diagnostics are discarded. fMP4 recording segments have a minimum duration
-of 15 seconds and a retention target of 60 seconds; the tmpfs limit remains the hard bound.
-The synthetic publisher is `relay-publisher`, path `finite-test`, with credentials supplied
-in RTMPS query parameters `user` and `pass` as documented by the pinned MediaMTX release.
-
-Available in-container actions:
+The supervisor starts one receiver (publisher `relay-publisher`, path `finite-test`, credentials in
+query parameters `user` and `pass`) and stops it at the deadline, on signal, or when `/data` exceeds
+112 MiB.
 
 | Action | Effect |
 |---|---|
-| `observe` | Read only the fixed path's readiness, codec tracks and byte counters. |
-| `records` | List retained recording names, sizes and modification times. |
-| `sample` | Copy the previous completed segment to `/data/sample.mp4`, bounded to 16 MiB. |
-| `stall` | Send `SIGSTOP` to the exact receiver child for an explicitly authorized fault test. |
-| `disconnect` | Terminate that child for an explicitly authorized disconnect test. |
+| `observe` | Path readiness, codec tracks, byte counters |
+| `records` | Retained recording names, sizes, times |
+| `sample` | Copy the previous complete segment to `/data/sample.mp4` (≤16 MiB) |
+| `stall` | `SIGSTOP` the receiver (authorized fault test) |
+| `disconnect` | Terminate the receiver (authorized fault test) |
 
-Export a sample through a bounded read in `docker exec` while the container is running;
-Docker archive copy may not expose tmpfs contents. Compare H.264/AAC codec properties and
-compressed payload hashes with the original input across several loops. A remuxer may
-insert H.264 SPS/PPS parameter sets into keyframes: verify those against the original codec
-configuration before normalizing packet hashes. Measure received media time against elapsed
-time. For TLS negatives, separately supply an unrelated CA and a certificate with a different
-SAN; neither may publish media.
+## Checks to perform
 
-For watchdog tests, first establish advancing media, stop the application and Relay, and
-then stall or disconnect this receiver. Inspect the original workload identity until it is
-confirmed inactive; do not replace it from an observation timeout. Restore Relay, retrieve
-verified results, scan retained output for the synthetic credential, and clean up only the
-exact stopped workload and receiver containers. Preserve failures and unrelated resources.
+- Export samples with a bounded read through `docker exec` (archive copy may miss tmpfs). Compare
+  codec properties and payload hashes with the source across loops; verify inserted SPS/PPS against
+  the original codec config before normalizing hashes. Compare received media time with wall time.
+- TLS negatives: an unrelated CA and a wrong-SAN certificate must both fail to publish.
+- Watchdog: with media advancing, stop the application and Relay, then stall or disconnect the
+  receiver. Wait until the original workload is confirmed inactive, restore Relay, retrieve verified
+  results, scan them for the synthetic credential, and clean up only the exact containers involved.
 
-The fixture does not test public routing, host suspend, reboot, engine restart or any
-platform's session-finalization behavior.
+Not covered: public routing, host suspend, reboot, engine restart, platform session finalization.
