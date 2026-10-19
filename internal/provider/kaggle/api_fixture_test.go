@@ -105,6 +105,11 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		return jsonResponse(200, f.quota), nil
 	case "GetDataset":
 		f.getDataset++
+		if f.fault == "throttle-before-create" && f.getDataset == 1 || f.fault == "throttle-after-create" && f.getDataset == 2 {
+			response := jsonResponse(429, `{}`)
+			response.Header.Set("Retry-After", "0")
+			return response, nil
+		}
 		if f.dataset && f.hiddenReads > 0 {
 			f.hiddenReads--
 			return jsonResponse(403, missingName403), nil

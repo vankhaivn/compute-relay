@@ -3,6 +3,7 @@ package kaggleapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,7 +73,8 @@ func NameAbsent(err error) bool {
 
 // Options' transports are trusted injection seams for offline fixtures. Production
 // defaults use separate transports with TLS verification, no proxy, compression,
-// keep-alive reuse or retries. Timeouts can only reduce the fixed upper bounds.
+// keep-alive reuse or implicit transport retries. Timeouts can only reduce
+// the fixed upper bounds.
 type Options struct {
 	APITransport     http.RoundTripper
 	StorageTransport http.RoundTripper
@@ -89,13 +91,15 @@ type Client struct {
 }
 
 type clientState struct {
-	mu       sync.RWMutex
-	token    []byte
-	api      http.RoundTripper
-	storage  http.RoundTripper
-	request  time.Duration
-	transfer time.Duration
-	logs     time.Duration
+	mu            sync.RWMutex
+	token         []byte
+	api           http.RoundTripper
+	storage       http.RoundTripper
+	request       time.Duration
+	transfer      time.Duration
+	logs          time.Duration
+	cooldowns     *readCooldowns
+	credentialKey [sha256.Size]byte
 }
 
 func (Client) String() string   { return "Kaggle API client" }
@@ -117,14 +121,16 @@ func New(token []byte, options Options) (*Client, error) {
 	if !ok {
 		return nil, ErrConfig
 	}
+	cooldowns := &readCooldowns{}
 	if options.APITransport == nil {
+		cooldowns = sharedReadCooldowns
 		options.APITransport = transport()
 	}
 	if options.StorageTransport == nil {
 		options.StorageTransport = transport()
 	}
 	return &Client{state: &clientState{token: bytes.Clone(token), api: options.APITransport, storage: options.StorageTransport,
-		request: request, transfer: transfer, logs: logs}}, nil
+		request: request, transfer: transfer, logs: logs, cooldowns: cooldowns, credentialKey: sha256.Sum256(token)}}, nil
 }
 
 func timeout(value, fallback, maximum time.Duration) (time.Duration, bool) {
@@ -239,16 +245,30 @@ func (c *Client) rpc(parent context.Context, op string, payload any, limit int64
 	if c == nil || c.state == nil {
 		return nil, failure(op, ErrConfig, 0, false)
 	}
+	response, err := c.rpcResponse(parent, op, payload)
+	if err != nil {
+		return nil, err
+	}
+	defer response.cancel()
+	return decodeRPC(response.ctx, op, response.response, limit)
+}
+
+func (c *Client) sendRPC(parent context.Context, op string, payload any) (*rpcResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, c.state.request)
-	defer cancel()
 	request, err := c.apiRequest(ctx, op, payload)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	response, err := roundTrip(ctx, c.state.api, request, op)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
+	return &rpcResponse{response, ctx, cancel}, nil
+}
+
+func decodeRPC(ctx context.Context, op string, response *http.Response, limit int64) (map[string]json.RawMessage, error) {
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, httpFailure(ctx, op, response)

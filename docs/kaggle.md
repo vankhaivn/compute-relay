@@ -21,6 +21,7 @@ changing the flag, run a connection `check` to get a selection for it.
 | Inputs | Up to 256 inputs, staged in one private attempt dataset with a marker file (≤2 MiB). Inputs of 256 MiB or more go to [shared datasets](#shared-input-datasets). |
 | Staging checks | Uploads are SHA-checked against the frozen digest; readiness and recovery compare metadata only, and the runner rehashes every input before use. |
 | Staging visibility | Kaggle may hide a new dataset for a while; Relay polls read-only for up to 2 minutes, then stops with `staging_not_visible`. |
+| Rate limits | Metadata reads honor HTTP 429 `Retry-After` (seconds or HTTP date), with up to three sends per read. Missing or invalid delays use 30 s then 60 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. |
 | GPU quota | A GPU authorization needs fresh, sufficient known quota. Connections to one account share it. No reset time is reported. |
 | Internet | Disabled unless the policy allows it **and** the job requests it. |
 | GPU proof | Success requires the runner's hardware evidence, not just a requested GPU or a quota deduction. |
@@ -31,8 +32,14 @@ changing the flag, run a connection `check` to get a selection for it.
 | Cleanup | Explicit; never touches shared datasets. Deletion is by owner/name, so a resource replaced between check and delete could be deleted instead. A 403 alone (for example after a lost acknowledgement) stays `unknown`. |
 
 A lost staging or submission response leaves the original intent for observation; a "not found"
-read never triggers another create or submit. The only resend is a file upload that failed before
-its dataset was created, sent once more with a new ticket.
+read never triggers another create or submit. Mutations never retry because of HTTP 429. A file
+upload that failed before its dataset was created can be sent once more with a new ticket.
+
+Rate-limit cooldowns are shared by clients using the same credential and RPC in the running Relay.
+Short control calls that cannot wait return 429 without sending another request; preparation can
+wait within its existing authorization budget. Restart clears this in-memory cooldown, so the
+first subsequent 429 establishes it again. Previously stopped staging remains observation-only:
+this does not recreate an absent dataset or automatically authorize a new attempt.
 
 Temporary verification outages are `PROVIDER_UNREACHABLE`; malformed responses are
 `PROVIDER_STATE_UNKNOWN`. After confirmed submission, both keep read-only observation active
