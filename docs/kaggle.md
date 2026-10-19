@@ -34,6 +34,12 @@ A lost staging or submission response leaves the original intent for observation
 read never triggers another create or submit. The only resend is a file upload that failed before
 its dataset was created, sent once more with a new ticket.
 
+Temporary verification outages are `PROVIDER_UNREACHABLE`; malformed responses are
+`PROVIDER_STATE_UNKNOWN`. After confirmed submission, both keep read-only observation active
+with bounded calls and backoff, even after repeated failures or a Relay restart. Rejected credentials,
+denied access, unavailable local credentials and account mismatches keep distinct problem codes and
+attention gates. Existing attempts already parked for attention need an explicit reconcile.
+
 ## Shared input datasets
 
 An input of at least 256 MiB (for example an application runtime archive) is staged once per

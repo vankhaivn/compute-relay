@@ -328,3 +328,38 @@ func TestPassDelayPacesSubmittedAttempts(t *testing.T) {
 		t.Fatal("retry ceiling changed")
 	}
 }
+
+func TestSubmittedUnknownObservationsRemainRecoverable(t *testing.T) {
+	j, s := readyFixture(t)
+	j, s = apply(t, j, s, Action{Kind: BeginSubmission})
+	remote := provider.RemoteReference{Identity: j.Plan.Job.Identity, Resource: "exec", Version: "v1"}
+	j, s = apply(t, j, s, Action{Kind: SubmissionSeen, Submission: &provider.SubmissionOutcome{Status: provider.SubmissionAccepted, Remote: &remote}})
+	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	for n := 0; n < MaxFailures+3; n++ {
+		obs := provider.Observation{Remote: remote, Execution: domain.ExecutionUnknown, RemoteActivity: domain.RemoteActivityUnknown, ReleaseEvidence: domain.ReleaseEvidenceNotObservable, RawState: "unknown", ObservedAt: at.Add(time.Duration(n) * time.Second)}
+		j, s = apply(t, j, s, Action{Kind: ObservationSeen, Observation: &obs})
+		if !j.Recoverable() || s.Orchestration != domain.OrchestrationReconciling || !scheduler.HoldsAccount(s, true) {
+			t.Fatal("unknown observation stopped recovery")
+		}
+	}
+	if j.Failures != MaxFailures {
+		t.Fatal("failure count is not bounded", j.Failures)
+	}
+}
+
+func TestSubmittedConfirmedAuthenticationFailureNeedsAttention(t *testing.T) {
+	for _, code := range []domain.ErrorCode{domain.CodeProviderAuthFailed, domain.CodeProviderAccessDenied, domain.CodeRemoteIdentityMismatch} {
+		t.Run(string(code), func(t *testing.T) {
+			j, s := readyFixture(t)
+			j, s = apply(t, j, s, Action{Kind: BeginSubmission})
+			remote := provider.RemoteReference{Identity: j.Plan.Job.Identity, Resource: "exec", Version: "v1"}
+			j, s = apply(t, j, s, Action{Kind: SubmissionSeen, Submission: &provider.SubmissionOutcome{Status: provider.SubmissionAccepted, Remote: &remote}})
+			for n := 0; n < MaxFailures && j.Recoverable(); n++ {
+				j, s = apply(t, j, s, Action{Kind: Fault, Code: code})
+			}
+			if j.Recoverable() || j.Phase != Attention || s.Orchestration != domain.OrchestrationNeedsAttention || !scheduler.HoldsAccount(s, true) || j.Problem.Code != code {
+				t.Fatal("confirmed failure was hidden", j, s)
+			}
+		})
+	}
+}

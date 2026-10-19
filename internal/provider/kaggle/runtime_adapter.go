@@ -117,16 +117,29 @@ func RuntimeCapabilities(shape string) provider.Capabilities {
 
 func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if p == nil || expected != p.binding {
-		return ErrRuntimeBinding
+		return provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "The frozen provider binding does not match.")
 	}
 	r, err := p.preflight.Check(ctx, ReadOnly)
 	if provider.IsLocalStateError(err) {
 		return err
 	}
-	if err != nil || r.Local != "ready" || r.Authentication != "verified" || r.AccountBinding != "matched" {
-		return ErrUnavailable
+	if err == nil && r.Local == "ready" && r.Authentication == "verified" && r.AccountBinding == "matched" {
+		return nil
 	}
-	return nil
+	code, stage := domain.CodeProviderUnreachable, domain.FailureStageObservation
+	switch {
+	case errors.Is(err, ErrProtocol) || r.Problem == "invalid_response":
+		code = domain.CodeProviderStateUnknown
+	case r.Problem == "credential_rejected":
+		code, stage = domain.CodeProviderAuthFailed, domain.FailureStageAuthentication
+	case r.Problem == "access_denied":
+		code, stage = domain.CodeProviderAccessDenied, domain.FailureStageAuthentication
+	case r.Problem == "account_mismatch":
+		code = domain.CodeRemoteIdentityMismatch
+	case r.Problem == "credential_unavailable" || err == nil && r.Local != "ready":
+		code, stage = domain.CodeConfigurationInvalid, domain.FailureStageLocalRuntime
+	}
+	return provider.Problem(code, stage, "The frozen provider account could not be verified.")
 }
 
 func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {

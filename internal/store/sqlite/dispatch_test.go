@@ -54,6 +54,14 @@ type probeProvider struct {
 	store       *Store
 	losePrepare bool
 	rejectQuota bool
+	verifyError error
+}
+
+func (p *probeProvider) Verify(ctx context.Context, binding provider.BindingSnapshot) error {
+	if p.verifyError != nil {
+		return p.verifyError
+	}
+	return p.Bound.Verify(ctx, binding)
 }
 
 func (p *probeProvider) Prepare(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.Prepared, error) {
@@ -392,5 +400,47 @@ func TestDispatchDiskFullRollsBackIntentAndBarrier(t *testing.T) {
 	}
 	if stats := f.backend.Stats(); stats.PrepareCalls != 0 || stats.SubmitCalls != 0 {
 		t.Fatal(stats)
+	}
+}
+
+func TestSubmittedObservationRecoversAfterDisconnectAndRestart(t *testing.T) {
+	f := newDispatchFixture(t, fake.DefaultScenario())
+	id := f.seed(t, "a", 1, false, "manual")
+	for n := 0; n < 2; n++ {
+		requireNoError(t, f.step(t))
+	}
+	original := f.journal(t, id)
+	if original.Phase != dispatch.Submitted || original.Remote == nil {
+		t.Fatal("not submitted", original.Phase)
+	}
+	f.adapter.verifyError = provider.Problem(domain.CodeProviderUnreachable, domain.FailureStageObservation, "fixture unavailable")
+	for n := 0; n < dispatch.MaxFailures+3; n++ {
+		var problem *domain.Problem
+		if err := f.step(t); !errors.As(err, &problem) || problem.Code != domain.CodeProviderUnreachable {
+			t.Fatal("failure classification lost", err)
+		}
+		j := f.journal(t, id)
+		if !j.Recoverable() || *j.Remote != *original.Remote || f.state(t, id).Orchestration != domain.OrchestrationReconciling {
+			t.Fatal("observation parked or identity changed", j.Phase)
+		}
+	}
+	// The provider finishes while the controller cannot observe it.
+	requireNoError(t, f.adapter.Advance(*original.Remote))
+	requireNoError(t, f.adapter.Advance(*original.Remote))
+	f.restart(t)
+	requireNoError(t, f.step(t))
+	j, state := f.journal(t, id), f.state(t, id)
+	if j.Phase != dispatch.Collectible || j.Failures != 0 || j.Problem != nil || state.Execution != domain.ExecutionSucceeded || state.Result != domain.ResultNotAvailable {
+		t.Fatal("original run did not recover", j.Phase, state)
+	}
+	stats := f.backend.Stats()
+	if stats.PrepareCalls != 1 || stats.SubmitCalls != 1 || stats.Executions != 1 || stats.FetchCalls != 0 || stats.CleanupCalls != 0 {
+		t.Fatal("recovery repeated an effect", stats)
+	}
+	var attempts, grants int
+	requireNoError(t, f.s.db.QueryRow("SELECT count(*) FROM attempts").Scan(&attempts))
+	requireNoError(t, f.s.db.QueryRow("SELECT count(*) FROM attempt_grants").Scan(&grants))
+	if attempts != 1 || grants != 1 {
+		t.Fatal("recovery created authority", attempts, grants)
 	}
 }

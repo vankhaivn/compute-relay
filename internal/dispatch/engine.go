@@ -100,8 +100,8 @@ func (e *Engine) Run(ctx context.Context) error {
 }
 
 // A submitted remote run is observed at most every 15 seconds; control requests still wake it
-// at once. Unresolved outcomes after submission start from 30 seconds, so the ones that park an
-// attempt for attention span several minutes rather than a brief provider or network outage.
+// at once. Unresolved outcomes after submission start from 30 seconds. Known remote runs
+// remain observable through transient outages with bounded calls and backoff.
 const (
 	submittedPollFloor  = 15 * time.Second
 	submittedRetryFloor = 30 * time.Second
@@ -177,8 +177,15 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.providerFailure(err, domain.CodeConfigurationInvalid)
 	}
 	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, p.Verify(c, binding) })
-	if err != nil || p.Describe().InstanceID != binding.Binding.ProviderInstanceID {
-		return s.providerFailure(err, domain.CodeProviderAuthFailed)
+	if err != nil {
+		code := errorCode(err, domain.CodeProviderAuthFailed)
+		if errors.Is(err, context.DeadlineExceeded) {
+			code = domain.CodeProviderUnreachable
+		}
+		return s.providerFailure(err, code)
+	}
+	if p.Describe().InstanceID != binding.Binding.ProviderInstanceID {
+		return s.fail(domain.CodeRemoteIdentityMismatch)
 	}
 	// Explicit durable job cancellation is separate from Run's shutdown context.
 	// It shares this lease, the frozen binding and the one-shot mutation discipline.

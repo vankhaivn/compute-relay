@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
@@ -34,4 +35,68 @@ func TestRuntimePreparePlanCheckDoesNotRepeatGPUQuotaRead(t *testing.T) {
 		t.Fatal("changed binding accepted", err)
 	}
 
+}
+
+func TestRuntimeVerifyPreservesFailureClass(t *testing.T) {
+	for _, tc := range []struct {
+		name, authentication, account string
+		code                          domain.ErrorCode
+	}{
+		{"provider_unavailable", "unavailable", "not_checked", domain.CodeProviderUnreachable},
+		{"credential_rejected", "failed", "not_checked", domain.CodeProviderAuthFailed},
+		{"credential_unavailable", "failed", "not_checked", domain.CodeConfigurationInvalid},
+		{"access_denied", "unavailable", "not_checked", domain.CodeProviderAccessDenied},
+		{"account_mismatch", "verified", "mismatch", domain.CodeRemoteIdentityMismatch},
+		{"invalid_response", "unavailable", "not_checked", domain.CodeProviderStateUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testConfig(t)
+			resolver, _ := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "synthetic-token", true })
+			preflight, err := New(c, resolver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preflight.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+				r := baseline(ReadOnly)
+				r.Authentication, r.AccountBinding, r.Problem = tc.authentication, tc.account, tc.name
+				return r, nil
+			}
+			adapter := &RuntimeAdapter{preflight: preflight}
+			var problem domain.Problem
+			if err := adapter.Verify(context.Background(), adapter.binding); !errors.As(err, &problem) || problem.Code != tc.code {
+				t.Fatalf("Verify: %v; expected %s", err, tc.code)
+			}
+		})
+	}
+}
+
+func TestRuntimeVerifyTransportAndQuotaUncertainty(t *testing.T) {
+	c := testConfig(t)
+	resolver, _ := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "synthetic-token", true })
+	preflight, err := New(c, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &RuntimeAdapter{preflight: preflight}
+	for _, cause := range []error{errors.New("private-response-canary"), context.DeadlineExceeded} {
+		preflight.run = func(context.Context, Config, Mode, []byte) (Report, error) { return Report{}, cause }
+		var problem domain.Problem
+		if err := adapter.Verify(context.Background(), adapter.binding); !errors.As(err, &problem) || problem.Code != domain.CodeProviderUnreachable || strings.Contains(err.Error(), "canary") {
+			t.Fatal("transport failure mislabeled or exposed", err)
+		}
+	}
+	preflight.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+		r := verified()
+		r.Quota, r.Problem = "unavailable", "quota_unavailable"
+		return r, nil
+	}
+	if err := adapter.Verify(context.Background(), adapter.binding); err != nil {
+		t.Fatal("quota loss blocked existing run", err)
+	}
+	changed := adapter.binding
+	changed.AccountScope = "other"
+	var problem domain.Problem
+	if err := adapter.Verify(context.Background(), changed); !errors.As(err, &problem) || problem.Code != domain.CodeRemoteIdentityMismatch {
+		t.Fatal("binding mismatch hidden", err)
+	}
 }
