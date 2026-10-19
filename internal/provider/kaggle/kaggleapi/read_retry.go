@@ -2,102 +2,23 @@ package kaggleapi
 
 import (
 	"context"
-	"crypto/sha256"
 	"net/http"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
 )
 
 const readTries = 3
 
-// Fresh clients resolving the same credential share server cooldowns. Neither
-// credentials nor provider headers are retained. Restart clears this advisory state.
-var sharedReadCooldowns = &readCooldowns{}
-
-type readKey struct {
-	credential [sha256.Size]byte
-	operation  string
-}
-
-type readCooldowns struct {
-	mu    sync.Mutex
-	until map[readKey]time.Time
-	now   func() time.Time
-	sleep func(context.Context, time.Duration) error
-}
-
-func (r *readCooldowns) clock() time.Time {
-	if r.now != nil {
-		return r.now()
-	}
-	return time.Now()
-}
-
-func (r *readCooldowns) remaining(key readKey) time.Duration {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.until[key].Sub(r.clock())
-}
-
-func (r *readCooldowns) remember(key readKey, delay time.Duration) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := r.clock()
-	if r.until == nil {
-		r.until = make(map[readKey]time.Time)
-	}
-	for key, until := range r.until {
-		if !until.After(now) {
-			delete(r.until, key)
-		}
-	}
-	// Bound memory even if an operator cycles through many credentials.
-	if len(r.until) >= 1024 && r.until[key].IsZero() {
-		return false
-	}
-	if until := now.Add(delay); until.After(r.until[key]) {
-		r.until[key] = until
-	}
-	return true
-}
-
-func (r *readCooldowns) wait(ctx context.Context, key readKey) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return failure(key.operation, err, 0, false)
-		}
-		delay := r.remaining(key)
-		if delay <= 0 {
-			return nil
-		}
-		if deadline, ok := ctx.Deadline(); ok && !r.clock().Add(delay).Before(deadline) {
-			return failure(key.operation, ErrHTTP, http.StatusTooManyRequests, false)
-		}
-		sleep := r.sleep
-		if sleep == nil {
-			sleep = waitRead
-		}
-		if err := sleep(ctx, delay); err != nil {
-			return failure(key.operation, err, 0, false)
-		}
-		// Another concurrent read may have extended the cooldown while we waited.
-	}
-}
-
-func waitRead(ctx context.Context, delay time.Duration) error {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
 func retryDelay(header string, now time.Time, attempt int) time.Duration {
-	if seconds, err := strconv.ParseUint(header, 10, 32); err == nil {
+	header = strings.TrimSpace(header)
+	if header != "" && strings.IndexFunc(header, func(r rune) bool { return r < '0' || r > '9' }) == -1 {
+		seconds, err := strconv.ParseUint(header, 10, 64)
+		// Saturating avoids overflow without shortening a valid server cooldown.
+		const maximum = time.Duration(1<<63 - 1)
+		if err != nil || seconds > uint64(maximum/time.Second) {
+			return maximum
+		}
 		return time.Duration(seconds) * time.Second
 	}
 	if at, err := http.ParseTime(header); err == nil {
@@ -124,34 +45,46 @@ type rpcResponse struct {
 }
 
 func (c *Client) rpcResponse(parent context.Context, op string, payload any) (*rpcResponse, error) {
-	if !retryableRead(op) {
-		return c.sendRPC(parent, op, payload)
+	tries := 1
+	if retryableRead(op) {
+		tries = readTries
 	}
-	// Waiting does not consume an individual HTTP request's timeout. Preparation
-	// can use its existing budget; short control calls return 429 without sending.
+	return c.requestResponse(parent, op, tries, func(ctx context.Context) (*rpcResponse, error) {
+		return c.sendRPC(ctx, op, payload)
+	})
+}
+
+// Waiting uses the caller budget, capped at one hour; each actual HTTP request
+// gets a fresh timeout. Mutations share admission but always receive one send.
+func (c *Client) requestResponse(parent context.Context, op string, tries int, send func(context.Context) (*rpcResponse, error)) (*rpcResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, time.Hour)
-	key := readKey{c.state.credentialKey, op}
-	for attempt := 0; attempt < readTries; attempt++ {
-		if err := c.state.cooldowns.wait(ctx, key); err != nil {
-			cancel()
-			return nil, err
-		}
-		response, err := c.sendRPC(ctx, op, payload)
+	scope := c.requestScope()
+	for attempt := 0; attempt < tries; attempt++ {
+		release, err := c.state.pacing.acquire(ctx, scope, op)
 		if err != nil {
 			cancel()
 			return nil, err
 		}
+		response, err := send(ctx)
+		if err != nil {
+			release()
+			cancel()
+			return nil, err
+		}
 		if response.response.StatusCode != http.StatusTooManyRequests {
+			release()
 			requestCancel := response.cancel
 			response.cancel = func() { requestCancel(); cancel() }
 			return response, nil
 		}
-		delay := retryDelay(response.response.Header.Get("Retry-After"), c.state.cooldowns.clock(), attempt)
-		remembered := c.state.cooldowns.remember(key, delay)
+		delay := retryDelay(response.response.Header.Get("Retry-After"), c.state.pacing.clock(), attempt)
+		err = c.state.pacing.remember(scope, delay)
 		_ = response.response.Body.Close()
 		response.cancel()
-		if !remembered {
-			break
+		release()
+		if err != nil {
+			cancel()
+			return nil, failure(op, ErrPacingState, 0, true)
 		}
 	}
 	cancel()

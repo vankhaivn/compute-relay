@@ -10,10 +10,10 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
-func runCleanup(parent context.Context, _ Config, mode string, token []byte, request cleanupRequest) (cleanupResponse, error) {
+func runCleanup(parent context.Context, config Config, mode string, token []byte, request cleanupRequest) (cleanupResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
-	client, err := nativeClient(token)
+	client, err := nativeClient(token, config)
 	if err != nil {
 		return cleanupResponse{}, err
 	}

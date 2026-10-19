@@ -9,6 +9,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
 var (
@@ -42,11 +43,13 @@ func (r DiscoveryResult) Quota() provider.QuotaObservation {
 func (DiscoveryResult) String() string   { return "Kaggle discovery result (private)" }
 func (DiscoveryResult) GoString() string { return "Kaggle discovery result (private)" }
 
-func NewDiscovery(clock ports.Clock) (*Discovery, error) {
+func NewDiscovery(clock ports.Clock, pacing *kaggleapi.RequestPacer) (*Discovery, error) {
 	if clock == nil {
 		return nil, ErrConfig
 	}
-	return &Discovery{clock: clock, slot: make(chan struct{}, 1), run: runDiscovery}, nil
+	return &Discovery{clock: clock, slot: make(chan struct{}, 1), run: func(ctx context.Context, token []byte) (discoveryResponse, error) {
+		return runDiscovery(ctx, token, pacing)
+	}}, nil
 }
 
 // Discover makes at most one authentication and one quota request, with a minute

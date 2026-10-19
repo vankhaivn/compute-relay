@@ -119,7 +119,7 @@ func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSn
 	if p == nil || expected != p.binding {
 		return provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "The frozen provider binding does not match.")
 	}
-	r, err := p.preflight.Check(ctx, ReadOnly)
+	r, err := p.preflight.check(ctx, ReadOnly, false)
 	if provider.IsLocalStateError(err) {
 		return err
 	}

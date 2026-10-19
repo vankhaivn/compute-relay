@@ -154,6 +154,7 @@ func TestMalformedOrUnboundedLogsFailWithoutRawDetails(t *testing.T) {
 			r.Body = &unreadBody{t}
 			return r, nil
 		}, nil)
+		c.state.pacing, _ = fakeCooldowns()
 		_, err := c.ReadLogs(context.Background(), fixtureKernel, KernelRunning, LogRequest{})
 		var failure *Error
 		if !errors.As(err, &failure) || failure.StatusCode != status || strings.Contains(fmt.Sprint(err), fixtureToken) {

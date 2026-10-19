@@ -59,19 +59,14 @@ func (c *Client) ReadLogs(parent context.Context, resource Resource, state Kerne
 	if len(token) == 0 {
 		return LogReplay{}, failure(logOperation, ErrConfig, 0, false)
 	}
-	ctx, cancel := context.WithTimeout(parent, c.state.logs)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+"kernels/logs/stream/"+resource.Owner+"/"+resource.Slug, nil)
-	if err != nil {
-		return LogReplay{}, failure(logOperation, ErrConfig, 0, false)
-	}
-	request.Header.Set("Authorization", "Bearer "+string(token))
-	request.Header.Set("Accept", "text/event-stream, */*")
-	request.Header.Set("Accept-Encoding", "identity")
-	response, err := roundTrip(ctx, c.state.api, request, logOperation)
+	result, err := c.requestResponse(parent, logOperation, readTries, func(ctx context.Context) (*rpcResponse, error) {
+		return c.sendLogRequest(ctx, resource, token)
+	})
 	if err != nil {
 		return LogReplay{}, err
 	}
+	defer result.cancel()
+	response, ctx := result.response, result.ctx
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
 		return LogReplay{}, failure(logOperation, ErrHTTP, response.StatusCode, true)
@@ -112,6 +107,24 @@ func (c *Client) ReadLogs(parent context.Context, resource Resource, state Kerne
 	}
 	return LogReplay{Text: reader.output, Offset: reader.consumed, Prefix: hex.EncodeToString(reader.digest.Sum(nil)),
 		Availability: availability, Truncated: reader.truncated, Ended: reader.ended}, nil
+}
+
+func (c *Client) sendLogRequest(parent context.Context, resource Resource, token []byte) (*rpcResponse, error) {
+	ctx, cancel := context.WithTimeout(parent, c.state.logs)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+"kernels/logs/stream/"+resource.Owner+"/"+resource.Slug, nil)
+	if err != nil {
+		cancel()
+		return nil, failure(logOperation, ErrConfig, 0, false)
+	}
+	request.Header.Set("Authorization", "Bearer "+string(token))
+	request.Header.Set("Accept", "text/event-stream, */*")
+	request.Header.Set("Accept-Encoding", "identity")
+	response, err := roundTrip(ctx, c.state.api, request, logOperation)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return &rpcResponse{response, ctx, cancel}, nil
 }
 
 func validDigest(text string) bool {

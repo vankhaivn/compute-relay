@@ -21,7 +21,8 @@ changing the flag, run a connection `check` to get a selection for it.
 | Inputs | Up to 256 inputs, staged in one private attempt dataset with a marker file (≤2 MiB). Inputs of 256 MiB or more go to [shared datasets](#shared-input-datasets). |
 | Staging checks | Uploads are SHA-checked against the frozen digest; readiness and recovery compare metadata only, and the runner rehashes every input before use. |
 | Staging visibility | Kaggle may hide a new dataset for a while; Relay polls read-only for up to 2 minutes, then stops with `staging_not_visible`. |
-| Rate limits | Metadata reads honor HTTP 429 `Retry-After` (seconds or HTTP date), with up to three sends per read. Missing or invalid delays use 30 s then 60 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. |
+| Request pacing | API requests are admitted at least 500 ms apart per configured account, plus 0–100 ms jitter, and at least 100 ms apart across the provider. Concurrent callers share admission through response headers. |
+| Rate limits | Metadata, logs and download tickets honor HTTP 429 `Retry-After` (seconds or HTTP date), with up to three sends per read. Missing or invalid delays use 30 s then 60 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. |
 | GPU quota | A GPU authorization needs fresh, sufficient known quota. Connections to one account share it. No reset time is reported. |
 | Internet | Disabled unless the policy allows it **and** the job requests it. |
 | GPU proof | Success requires the runner's hardware evidence, not just a requested GPU or a quota deduction. |
@@ -35,11 +36,24 @@ A lost staging or submission response leaves the original intent for observation
 read never triggers another create or submit. Mutations never retry because of HTTP 429. A file
 upload that failed before its dataset was created can be sent once more with a new ticket.
 
-Rate-limit cooldowns are shared by clients using the same credential and RPC in the running Relay.
-Short control calls that cannot wait return 429 without sending another request; preparation can
-wait within its existing authorization budget. Restart clears this in-memory cooldown, so the
-first subsequent 429 establishes it again. Previously stopped staging remains observation-only:
-this does not recreate an absent dataset or automatically authorize a new attempt.
+Rate-limit cooldowns apply across all API endpoints and clients for the same account, including
+credential replacement. A limit before account discovery applies provider-wide. Mutations share
+pacing and record 429 cooldowns but still send at most once. Storage-host transfers keep their own
+bounded transfer policy; no partial transfer is retried by this gate.
+
+Managed Relay retains account/provider cooldown deadlines in the private
+`state/kaggle-api-cooldowns.json` file under its existing installation lock. It contains no tokens,
+credential fingerprints or provider response text. Restart retains the deadline. Invalid or
+unwritable pacing state refuses further API requests; preserve the state directory for diagnosis.
+Standalone native clients share only process-local pacing. Short calls that cannot wait return 429
+without sending; preparation can wait within its existing authorization budget. Previously stopped
+staging remains observation-only and never recreates an absent dataset or authorizes a new attempt.
+
+Runtime binding verification reads fresh account identity without fetching quota. Explicit connection
+checks and GPU admission still read fresh quota. An ordinary verified state observation uses five
+API reads; a verified log page uses six. Both retain separate account verification at each credential
+resolution and kernel identity checks before and after status/log reads; no identity results are
+cached across calls.
 
 Temporary verification outages are `PROVIDER_UNREACHABLE`; malformed responses are
 `PROVIDER_STATE_UNKNOWN`. After confirmed submission, both keep read-only observation active

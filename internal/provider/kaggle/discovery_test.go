@@ -15,7 +15,7 @@ import (
 
 func discoveryFixture(t *testing.T) *Discovery {
 	t.Helper()
-	d, err := NewDiscovery(&stagingClock{at: time.Now().UTC()})
+	d, err := NewDiscovery(&stagingClock{at: time.Now().UTC()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestDiscoveryConfigurationAndVaultBindings(t *testing.T) {
 			t.Fatal("invalid reference accepted")
 		}
 	}
-	if _, err := NewDiscovery(nil); err != ErrConfig {
+	if _, err := NewDiscovery(nil, nil); err != ErrConfig {
 		t.Fatal("missing clock accepted", err)
 	}
 }

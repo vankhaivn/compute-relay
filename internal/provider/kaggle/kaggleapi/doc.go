@@ -6,7 +6,8 @@
 // false kernel flags remain explicit. The existing Relay Python bridge fixtures
 // provide representative responses; they are not live captures of this client.
 //
-// Mutating RPCs send once. Allowlisted metadata reads retry HTTP 429 at most twice,
+// API requests share account/provider pacing and HTTP 429 cooldowns. Mutations
+// send once; metadata, logs and download tickets retry HTTP 429 at most twice,
 // honoring Retry-After within the caller's budget (at most one hour overall).
 // Calls never use cookies, environment proxies or automatic redirects. File downloads may explicitly
 // exchange one API Location header for one request to an approved storage host.

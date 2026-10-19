@@ -16,8 +16,8 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
 )
 
-func runArtifacts(ctx context.Context, _ Config, mode string, token []byte, request artifactRequest, dst io.Writer) ([]byte, error) {
-	client, err := nativeClient(token)
+func runArtifacts(ctx context.Context, config Config, mode string, token []byte, request artifactRequest, dst io.Writer) ([]byte, error) {
+	client, err := nativeClient(token, config)
 	if err != nil {
 		return nil, artifactFailure("artifact_credential_unavailable")
 	}

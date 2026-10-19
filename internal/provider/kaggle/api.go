@@ -11,10 +11,10 @@ import (
 
 // Every credential resolution owns one short-lived native client. Its private
 // credential copy is erased before the resolver releases the original bytes.
-func nativeClient(token []byte) (*kaggleapi.Client, error) {
+func nativeClient(token []byte, config Config) (*kaggleapi.Client, error) {
 	// A 2 GiB input needs almost 29 minutes at the staging policy's 10 Mbit/s
 	// reference rate. The enclosing operation still owns the complete budget.
-	return kaggleapi.New(token, kaggleapi.Options{TransferTimeout: 30 * time.Minute})
+	return kaggleapi.New(token, kaggleapi.Options{TransferTimeout: 30 * time.Minute, Pacing: config.Pacing, AccountScope: config.AccountName})
 }
 
 func accountMatches(ctx context.Context, client *kaggleapi.Client, owner string) (bool, error) {
@@ -39,8 +39,8 @@ func quotaResponse(ctx context.Context, client *kaggleapi.Client) monitorRespons
 	return result
 }
 
-func runDiscovery(ctx context.Context, token []byte) (discoveryResponse, error) {
-	client, err := nativeClient(token)
+func runDiscovery(ctx context.Context, token []byte, pacing *kaggleapi.RequestPacer) (discoveryResponse, error) {
+	client, err := nativeClient(token, Config{Pacing: pacing})
 	if err != nil {
 		return discoveryResponse{}, err
 	}
@@ -71,22 +71,22 @@ func discover(ctx context.Context, client *kaggleapi.Client) discoveryResponse {
 	return result
 }
 
-func runPreflight(ctx context.Context, config Config, mode Mode, token []byte) (Report, error) {
+func runPreflight(ctx context.Context, config Config, mode Mode, token []byte, checkQuota bool) (Report, error) {
 	if mode == Local {
 		return baseline(Local), nil
 	}
 	if mode != ReadOnly {
 		return Report{}, ErrMode
 	}
-	client, err := nativeClient(token)
+	client, err := nativeClient(token, config)
 	if err != nil {
 		return Report{}, err
 	}
 	defer client.Close()
-	return preflight(ctx, client, config.AccountName), nil
+	return preflight(ctx, client, config.AccountName, checkQuota), nil
 }
 
-func preflight(ctx context.Context, client *kaggleapi.Client, owner string) Report {
+func preflight(ctx context.Context, client *kaggleapi.Client, owner string, checkQuota bool) Report {
 	r := baseline(ReadOnly)
 	account, err := client.IntrospectToken(ctx)
 	if err != nil {
@@ -113,6 +113,9 @@ func preflight(ctx context.Context, client *kaggleapi.Client, owner string) Repo
 		return r
 	}
 	r.AccountBinding = "matched"
+	if !checkQuota {
+		return r
+	}
 	quota := quotaResponse(ctx, client)
 	if quota.Status == "unavailable" {
 		r.Quota, r.Problem = "unavailable", "quota_unavailable"

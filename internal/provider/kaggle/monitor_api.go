@@ -8,8 +8,8 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
-func runMonitor(ctx context.Context, _ Config, mode string, token []byte, request monitorRequest) (monitorResponse, error) {
-	client, err := nativeClient(token)
+func runMonitor(ctx context.Context, config Config, mode string, token []byte, request monitorRequest) (monitorResponse, error) {
+	client, err := nativeClient(token, config)
 	if err != nil {
 		return monitorResponse{}, err
 	}

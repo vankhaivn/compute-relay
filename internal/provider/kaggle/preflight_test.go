@@ -34,7 +34,7 @@ func TestPreflightLocalNeverResolvesAndReadOnlyUsesFreshCredential(t *testing.T)
 	}
 	original := c
 	c.AccountName = "changed"
-	p.run = func(_ context.Context, c Config, m Mode, b []byte) (Report, error) {
+	p.run = func(_ context.Context, c Config, m Mode, b []byte, _ bool) (Report, error) {
 		if c != original {
 			t.Fatal("mutable config")
 		}
@@ -70,7 +70,7 @@ func TestPreflightLocalNeedsNoCredentialOrNetwork(t *testing.T) {
 	c := testConfig(t)
 	resolver, _ := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { t.Fatal("credential read"); return "", false })
 	p, _ := New(c, resolver)
-	p.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+	p.run = func(context.Context, Config, Mode, []byte, bool) (Report, error) {
 		t.Fatal("local check performed a network request")
 		return Report{}, nil
 	}
@@ -84,7 +84,7 @@ func TestPreflightRejectsSecretAndSanitizesErrors(t *testing.T) {
 		c := testConfig(t)
 		resolver, _ := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return value, true })
 		p, _ := New(c, resolver)
-		p.run = func(_ context.Context, _ Config, m Mode, _ []byte) (Report, error) {
+		p.run = func(_ context.Context, _ Config, m Mode, _ []byte, _ bool) (Report, error) {
 			if m != Local {
 				t.Fatal("bad token dispatched")
 			}
@@ -98,7 +98,7 @@ func TestPreflightRejectsSecretAndSanitizesErrors(t *testing.T) {
 	c := testConfig(t)
 	resolver, _ := fixtureCredentials([]ports.CredentialRef{c.CredentialRef}, func(string) (string, bool) { return "SYNTHETIC_CANARY", true })
 	p, _ := New(c, resolver)
-	p.run = func(_ context.Context, _ Config, m Mode, _ []byte) (Report, error) {
+	p.run = func(_ context.Context, _ Config, m Mode, _ []byte, _ bool) (Report, error) {
 		if m == Local {
 			return baseline(Local), nil
 		}
@@ -116,7 +116,7 @@ func TestPreflightCancellationAndSerializedChecks(t *testing.T) {
 	release := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
-	p.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+	p.run = func(context.Context, Config, Mode, []byte, bool) (Report, error) {
 		close(entered)
 		<-release
 		return verified(), nil
@@ -156,7 +156,7 @@ func TestPreflightRejectsIgnoredCredentialCallbackViolations(t *testing.T) {
 				t.Fatal(err)
 			}
 			calls := 0
-			p.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+			p.run = func(context.Context, Config, Mode, []byte, bool) (Report, error) {
 				calls++
 				return verified(), nil
 			}

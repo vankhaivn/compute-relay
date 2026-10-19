@@ -15,6 +15,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
 const (
@@ -36,11 +37,13 @@ var (
 // Config is immutable, non-secret instance configuration. AccountName is a
 // conservative canonical subset, not a claim about all upstream username rules.
 // No arbitrary command, endpoint, environment override or credential value exists.
+// Pacing is a host-owned runtime dependency and is never serialized.
 type Config struct {
-	InstanceID    string              `json:"instance_id"`
-	Revision      string              `json:"revision"`
-	AccountName   string              `json:"account_name"`
-	CredentialRef ports.CredentialRef `json:"credential_ref"`
+	InstanceID    string                  `json:"instance_id"`
+	Revision      string                  `json:"revision"`
+	AccountName   string                  `json:"account_name"`
+	CredentialRef ports.CredentialRef     `json:"credential_ref"`
+	Pacing        *kaggleapi.RequestPacer `json:"-"`
 }
 
 func (c Config) Validate() error {
@@ -145,7 +148,7 @@ func closedObject(raw []byte, target any) error {
 	return nil
 }
 
-type invocation func(context.Context, Config, Mode, []byte) (Report, error)
+type invocation func(context.Context, Config, Mode, []byte, bool) (Report, error)
 type Preflight struct {
 	config   Config
 	resolver ports.CredentialResolver
@@ -165,6 +168,10 @@ func New(c Config, resolver ports.CredentialResolver) (*Preflight, error) {
 // One invocation at a time per instance; a 60-second budget includes
 // waiting for the slot, credential resolution and the two read-only API requests.
 func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
+	return p.check(ctx, mode, true)
+}
+
+func (p *Preflight) check(ctx context.Context, mode Mode, checkQuota bool) (Report, error) {
 	if p == nil {
 		return Report{}, ErrConfig
 	}
@@ -207,7 +214,7 @@ func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 		}
 		invoked = true
 		var runErr error
-		r, runErr = p.run(ctx, p.config, ReadOnly, secret)
+		r, runErr = p.run(ctx, p.config, ReadOnly, secret, checkQuota)
 		return runErr
 	})
 	if provider.IsLocalStateError(err) {
@@ -226,7 +233,12 @@ func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 		r.Problem = "credential_unavailable"
 		return r, nil
 	}
-	if !invoked || violated || !r.valid(ReadOnly) {
+	// Validate the private binding-only result without inventing quota evidence.
+	validated := r
+	if !checkQuota && validated.Quota == "not_checked" && validated.Problem == "none" {
+		validated.Quota = "unknown"
+	}
+	if !invoked || violated || !validated.valid(ReadOnly) {
 		return Report{}, ErrProtocol
 	}
 	return r, nil
