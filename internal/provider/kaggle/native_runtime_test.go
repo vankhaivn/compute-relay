@@ -208,6 +208,24 @@ func TestNativeStagingLostCreateAckAndObservationNeverUpload(t *testing.T) {
 	}
 }
 
+func TestNativeStagingRecoversRateLimitedReadsWithoutRepeatingUploads(t *testing.T) {
+	for _, fault := range []string{"throttle-before-create", "throttle-after-create"} {
+		t.Run(fault, func(t *testing.T) {
+			p, plan, _, blobs, f := nativeRuntime(t, false)
+			f.fault = fault
+			prepared, err := p.Prepare(context.Background(), plan, "prep")
+			if err != nil || !prepared.Ready || !prepared.Private || f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 {
+				t.Fatal("rate-limited metadata read stranded staging or repeated mutations", prepared, err, f.calls)
+			}
+			blobs.mode = "missing"
+			seen, err := p.ReconcilePrepare(context.Background(), plan, "prep")
+			if err != nil || seen.Status != provider.ReconciliationFound || seen.Prepared == nil || seen.Prepared.Resource != prepared.Resource || f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 {
+				t.Fatal("subsequent reconciliation changed the original staging", seen, err, f.calls)
+			}
+		})
+	}
+}
+
 func TestNativeStagingWaitsReadOnlyUntilCreatedDatasetIsVisible(t *testing.T) {
 	shortVisibility(t, time.Minute, time.Millisecond)
 	p, plan, _, _, f := nativeRuntime(t, false)
