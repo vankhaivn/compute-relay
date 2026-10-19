@@ -15,8 +15,8 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
-func runStaging(ctx context.Context, _ Config, mode string, token []byte, plan stagingPlan, blobs StagingBlobs) (stagingResponse, error) {
-	client, err := nativeClient(token)
+func runStaging(ctx context.Context, config Config, mode string, token []byte, plan stagingPlan, blobs StagingBlobs) (stagingResponse, error) {
+	client, err := nativeClient(token, config)
 	if err != nil {
 		return stagingResponse{}, err
 	}

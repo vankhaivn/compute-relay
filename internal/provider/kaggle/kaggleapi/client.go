@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,6 +82,8 @@ type Options struct {
 	RequestTimeout   time.Duration
 	TransferTimeout  time.Duration
 	LogTimeout       time.Duration
+	Pacing           *RequestPacer
+	AccountScope     string
 }
 
 // Client owns a copy of the caller's credential. Close erases that copy. Supply
@@ -98,7 +101,8 @@ type clientState struct {
 	request       time.Duration
 	transfer      time.Duration
 	logs          time.Duration
-	cooldowns     *readCooldowns
+	pacing        *RequestPacer
+	accountScope  string
 	credentialKey [sha256.Size]byte
 }
 
@@ -106,7 +110,7 @@ func (Client) String() string   { return "Kaggle API client" }
 func (Client) GoString() string { return "Kaggle API client" }
 
 func New(token []byte, options Options) (*Client, error) {
-	if !validToken(token) {
+	if !validToken(token) || options.AccountScope != "" && !accountName.MatchString(options.AccountScope) {
 		return nil, ErrConfig
 	}
 	request, ok := timeout(options.RequestTimeout, 15*time.Second, 30*time.Second)
@@ -121,16 +125,21 @@ func New(token []byte, options Options) (*Client, error) {
 	if !ok {
 		return nil, ErrConfig
 	}
-	cooldowns := &readCooldowns{}
+	pacing := options.Pacing
+	if pacing == nil {
+		pacing = &RequestPacer{}
+		if options.APITransport == nil {
+			pacing = sharedRequestPacer
+		}
+	}
 	if options.APITransport == nil {
-		cooldowns = sharedReadCooldowns
 		options.APITransport = transport()
 	}
 	if options.StorageTransport == nil {
 		options.StorageTransport = transport()
 	}
 	return &Client{state: &clientState{token: bytes.Clone(token), api: options.APITransport, storage: options.StorageTransport,
-		request: request, transfer: transfer, logs: logs, cooldowns: cooldowns, credentialKey: sha256.Sum256(token)}}, nil
+		request: request, transfer: transfer, logs: logs, pacing: pacing, accountScope: options.AccountScope, credentialKey: sha256.Sum256(token)}}, nil
 }
 
 func timeout(value, fallback, maximum time.Duration) (time.Duration, bool) {
@@ -187,6 +196,15 @@ func (c *Client) credential() []byte {
 	c.state.mu.RLock()
 	defer c.state.mu.RUnlock()
 	return bytes.Clone(c.state.token)
+}
+
+func (c *Client) requestScope() string {
+	c.state.mu.RLock()
+	defer c.state.mu.RUnlock()
+	if c.state.accountScope != "" {
+		return c.state.accountScope
+	}
+	return "token:" + hex.EncodeToString(c.state.credentialKey[:])
 }
 
 func (c *Client) apiRequest(ctx context.Context, op string, payload any) (*http.Request, error) {

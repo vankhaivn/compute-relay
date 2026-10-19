@@ -335,13 +335,13 @@ func (f *nativeFixture) count(operation string) int {
 }
 
 func (f *nativeFixture) bind(p *RuntimeAdapter) {
-	p.preflight.run = func(ctx context.Context, c Config, _ Mode, token []byte) (Report, error) {
+	p.preflight.run = func(ctx context.Context, c Config, _ Mode, token []byte, checkQuota bool) (Report, error) {
 		client, err := f.client(token)
 		if err != nil {
 			return Report{}, err
 		}
 		defer client.Close()
-		return preflight(ctx, client, c.AccountName), nil
+		return preflight(ctx, client, c.AccountName, checkQuota), nil
 	}
 	p.stager.run = func(ctx context.Context, _ Config, mode string, token []byte, plan stagingPlan, blobs StagingBlobs) (stagingResponse, error) {
 		client, err := f.client(token)

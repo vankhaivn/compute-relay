@@ -233,22 +233,21 @@ func (c *Client) download(parent context.Context, op string, payload any, limit 
 	}
 	ctx, cancel := context.WithTimeout(parent, c.state.transfer)
 	defer cancel()
-	request, err := c.apiRequest(ctx, op, payload)
+	result, err := c.requestResponse(ctx, op, readTries, func(ctx context.Context) (*rpcResponse, error) {
+		return c.sendDownload(ctx, op, payload)
+	})
 	if err != nil {
 		return TransferReceipt{}, err
 	}
-	request.Header.Set("Accept", "application/octet-stream")
-	response, err := roundTrip(ctx, c.state.api, request, op)
-	if err != nil {
-		return TransferReceipt{}, err
-	}
+	defer result.cancel()
+	response := result.response
 	if response.StatusCode == 302 || response.StatusCode == 303 || response.StatusCode == 307 {
 		locations := response.Header.Values("Location")
 		_ = response.Body.Close() // Never consume an API redirect's body.
 		if len(locations) != 1 {
 			return TransferReceipt{}, failure(op, ErrResponse, response.StatusCode, true)
 		}
-		request, err = storageRequest(ctx, http.MethodGet, locations[0], nil, 0, false, kernel)
+		request, err := storageRequest(ctx, http.MethodGet, locations[0], nil, 0, false, kernel)
 		if err != nil {
 			return TransferReceipt{}, failure(op, ErrResponse, response.StatusCode, true)
 		}
@@ -264,14 +263,30 @@ func (c *Client) download(parent context.Context, op string, payload any, limit 
 	if response.StatusCode != 200 {
 		return TransferReceipt{}, failure(op, ErrHTTP, response.StatusCode, true)
 	}
-	result, err := copyBounded(ctx, response, limit, destination)
+	receipt, err := copyBounded(ctx, response, limit, destination)
 	if err == nil && response.Body.Close() != nil {
 		err = ErrTransport
 	}
 	if err != nil {
 		return TransferReceipt{}, failure(op, err, response.StatusCode, true)
 	}
-	return result, nil
+	return receipt, nil
+}
+
+func (c *Client) sendDownload(parent context.Context, op string, payload any) (*rpcResponse, error) {
+	ctx, cancel := context.WithTimeout(parent, c.state.transfer)
+	request, err := c.apiRequest(ctx, op, payload)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/octet-stream")
+	response, err := roundTrip(ctx, c.state.api, request, op)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return &rpcResponse{response, ctx, cancel}, nil
 }
 
 func storageRequest(ctx context.Context, method, location string, body io.Reader, size int64, upload, kernel bool) (*http.Request, error) {

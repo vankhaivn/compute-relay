@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/blobfs"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 	"github.com/vankhaivn/compute-relay/internal/statefs"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
@@ -41,13 +42,14 @@ type Status struct {
 // Administrative commands require exclusive host access, not a token granting
 // an application an HTTP administration route.
 type Host struct {
-	secretPool *workloadsecret.Pool
-	root       *statefs.Root
-	store      *sqlite.Store
-	inputs     *blobfs.Store
-	results    *blobfs.Store
-	access     *auth.Service
-	identity   layout
+	secretPool     *workloadsecret.Pool
+	kaggleRequests *kaggleapi.RequestPacer
+	root           *statefs.Root
+	store          *sqlite.Store
+	inputs         *blobfs.Store
+	results        *blobfs.Store
+	access         *auth.Service
+	identity       layout
 }
 
 func Initialize(ctx context.Context, path string) (status Status, err error) {
@@ -110,6 +112,10 @@ func open(ctx context.Context, path string, create bool) (_ *Host, err error) {
 		return nil, ErrState
 	}
 	defer stateRoot.Close()
+	h.kaggleRequests, err = kaggleapi.OpenRequestPacer(stateRoot)
+	if err != nil {
+		return nil, ErrState
+	}
 	h.store, err = sqlite.OpenRoot(ctx, stateRoot, sqlite.DefaultOptions(), h.identity.InstallationID)
 	if err != nil {
 		return nil, ErrState
@@ -171,6 +177,9 @@ func (h *Host) Close() error {
 		return nil
 	}
 	var err error
+	if h.kaggleRequests != nil {
+		err = errors.Join(err, h.kaggleRequests.Close())
+	}
 	if h.results != nil {
 		err = errors.Join(err, h.results.Close())
 	}

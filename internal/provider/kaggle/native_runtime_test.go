@@ -485,7 +485,7 @@ func TestNativeDiscoveryAndPreflightShareReadOnlyQuotaPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		result := discover(context.Background(), client)
-		report := preflight(context.Background(), client, f.owner)
+		report := preflight(context.Background(), client, f.owner, true)
 		_ = client.Close()
 		if !result.valid() || result.Status != "verified" || result.Account != f.owner || !report.valid(ReadOnly) || report.Authentication != "verified" || f.count("IntrospectToken") != 2 || f.count("GetAcceleratorQuotaStatistics") != 2 || len(f.calls) != 4 {
 			t.Fatal("read-only evidence paths diverged", result, report)

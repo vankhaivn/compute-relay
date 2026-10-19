@@ -56,7 +56,7 @@ func TestRuntimeVerifyPreservesFailureClass(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			preflight.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+			preflight.run = func(context.Context, Config, Mode, []byte, bool) (Report, error) {
 				r := baseline(ReadOnly)
 				r.Authentication, r.AccountBinding, r.Problem = tc.authentication, tc.account, tc.name
 				return r, nil
@@ -79,13 +79,13 @@ func TestRuntimeVerifyTransportAndQuotaUncertainty(t *testing.T) {
 	}
 	adapter := &RuntimeAdapter{preflight: preflight}
 	for _, cause := range []error{errors.New("private-response-canary"), context.DeadlineExceeded} {
-		preflight.run = func(context.Context, Config, Mode, []byte) (Report, error) { return Report{}, cause }
+		preflight.run = func(context.Context, Config, Mode, []byte, bool) (Report, error) { return Report{}, cause }
 		var problem domain.Problem
 		if err := adapter.Verify(context.Background(), adapter.binding); !errors.As(err, &problem) || problem.Code != domain.CodeProviderUnreachable || strings.Contains(err.Error(), "canary") {
 			t.Fatal("transport failure mislabeled or exposed", err)
 		}
 	}
-	preflight.run = func(context.Context, Config, Mode, []byte) (Report, error) {
+	preflight.run = func(context.Context, Config, Mode, []byte, bool) (Report, error) {
 		r := verified()
 		r.Quota, r.Problem = "unavailable", "quota_unavailable"
 		return r, nil

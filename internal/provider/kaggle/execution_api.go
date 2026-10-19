@@ -9,8 +9,8 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
-func runExecution(ctx context.Context, _ Config, mode string, token []byte, request executionRequest) (executionResponse, error) {
-	client, err := nativeClient(token)
+func runExecution(ctx context.Context, config Config, mode string, token []byte, request executionRequest) (executionResponse, error) {
+	client, err := nativeClient(token, config)
 	if err != nil {
 		return executionResponse{}, err
 	}
@@ -103,21 +103,17 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 			return empty("unknown")
 		}
 		id = string(receipt.ID)
-	} else {
-		if !matchingKernel(kernel, request, id) {
-			return empty("invalid")
+		// Submission needs new identity proof; an existing resource already has
+		// the pre-status proof from the first GetKernel above.
+		kernel, err = client.GetKernel(ctx, resource)
+		if err != nil {
+			return empty("unknown")
 		}
-		id = string(kernel.Metadata.ID)
-	}
-	// A receipt is not identity or execution proof. Existing exact resources are
-	// observed through the same path and never saved or versioned again.
-	kernel, err = client.GetKernel(ctx, resource)
-	if err != nil {
-		return empty("unknown")
 	}
 	if !matchingKernel(kernel, request, id) {
 		return empty("invalid")
 	}
+	id = string(kernel.Metadata.ID)
 	state, err := client.KernelSessionStatus(ctx, resource)
 	if err != nil {
 		state = kaggleapi.KernelUnknown

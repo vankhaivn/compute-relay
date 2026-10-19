@@ -42,6 +42,11 @@ func (c *Client) IntrospectToken(ctx context.Context) (Account, error) {
 	if !result.Active {
 		return Account{}, nil
 	}
+	c.state.mu.Lock()
+	if c.state.accountScope == "" {
+		c.state.accountScope = result.Username
+	}
+	c.state.mu.Unlock()
 	return Account{Active: result.Active, Username: result.Username}, nil
 }
 

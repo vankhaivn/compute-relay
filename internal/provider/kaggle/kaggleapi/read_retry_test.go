@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-func fakeCooldowns() (*readCooldowns, *[]time.Duration) {
+func fakeCooldowns() (*RequestPacer, *[]time.Duration) {
 	now := time.Now()
 	var waits []time.Duration
-	return &readCooldowns{now: func() time.Time { return now }, sleep: func(_ context.Context, delay time.Duration) error {
+	return &RequestPacer{now: func() time.Time { return now }, sleep: func(_ context.Context, delay time.Duration) error {
 		waits = append(waits, delay)
 		now = now.Add(delay)
 		return nil
@@ -37,7 +37,7 @@ func TestReadHonorsLongServerCooldownBeforeRecovering(t *testing.T) {
 		return response(200, "application/json", `{"id":123,"ref":"fixture_user/fixture-stage"}`), nil
 	}, nil)
 	gate, waits := fakeCooldowns()
-	c.state.cooldowns = gate
+	c.state.pacing = gate
 	dataset, err := c.GetDataset(context.Background(), fixtureDataset)
 	if err != nil || dataset.ID != "123" || calls != 2 || len(*waits) != 1 || (*waits)[0] != 1910*time.Second {
 		t.Fatalf("read did not recover after server cooldown: %v, calls=%d, waits=%v", err, calls, *waits)
@@ -53,7 +53,7 @@ func TestCooldownSurvivesFreshClientAndShortControlBudget(t *testing.T) {
 	})
 	for range 2 {
 		c := newFixtureClient(t, api, nil)
-		c.state.cooldowns = gate
+		c.state.pacing = gate
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		_, err := c.GetDataset(ctx, fixtureDataset)
 		cancel()
@@ -66,13 +66,16 @@ func TestCooldownSurvivesFreshClientAndShortControlBudget(t *testing.T) {
 	if calls != 1 {
 		t.Fatal("fresh client ignored active cooldown", calls)
 	}
-	// A dataset limit must not block unrelated account verification.
+	// A server cooldown also blocks other endpoints for the same credential.
 	c := newFixtureClient(t, func(*http.Request) (*http.Response, error) {
-		return response(200, "application/json", `{"active":true,"username":"fixture_user"}`), nil
+		t.Fatal("account verification bypassed the shared server cooldown")
+		return nil, nil
 	}, nil)
-	c.state.cooldowns = gate
-	if _, err := c.IntrospectToken(context.Background()); err != nil {
-		t.Fatal("dataset cooldown blocked independent account read", err)
+	c.state.pacing = gate
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := c.IntrospectToken(ctx); !errors.Is(err, ErrHTTP) {
+		t.Fatal("account read lost shared cooldown", err)
 	}
 }
 
@@ -87,7 +90,7 @@ func TestReadRateLimitRetriesAreFiniteAndSanitized(t *testing.T) {
 				return r, nil
 			}, nil)
 			gate, waits := fakeCooldowns()
-			c.state.cooldowns = gate
+			c.state.pacing = gate
 			_, err := c.GetDataset(context.Background(), fixtureDataset)
 			var apiErr *Error
 			if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 || calls != 3 {
@@ -143,9 +146,18 @@ func TestReadCooldownCancellationAndHTTPDate(t *testing.T) {
 	}, nil)
 	gate, _ := fakeCooldowns()
 	gate.sleep = func(ctx context.Context, _ time.Duration) error { cancel(); return ctx.Err() }
-	c.state.cooldowns = gate
+	c.state.pacing = gate
 	_, err := c.GetDataset(ctx, fixtureDataset)
 	if !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatal("cancelled wait sent another read", err, calls)
+	}
+}
+
+func TestRetryAfterDoesNotShortenLongOrOverflowingSeconds(t *testing.T) {
+	now := time.Now()
+	for _, header := range []string{"86400", "4294967296", "18446744073709551616"} {
+		if got := retryDelay(header, now, 0); got < 24*time.Hour {
+			t.Fatal("long server cooldown fell back to a short delay", header, got)
+		}
 	}
 }
