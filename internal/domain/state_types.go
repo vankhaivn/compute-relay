@@ -207,7 +207,8 @@ var cancellationTransitions = map[CancellationState]map[CancellationState]struct
 	CancellationPrevented: {},
 	CancellationConfirmed: {},
 	CancellationTooLate:   {},
-	CancellationManual:    setOf(CancellationConfirmed, CancellationTooLate),
+	// Requested requires repository proof that no earlier stop invocation began.
+	CancellationManual: setOf(CancellationRequested, CancellationConfirmed, CancellationTooLate),
 }
 
 // RemoteActivityState records whether this attempt has or may have active remote compute.

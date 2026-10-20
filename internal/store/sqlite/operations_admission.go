@@ -169,13 +169,13 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		if now.Before(target.Attempt.UpdatedAt) {
 			return ErrCorrupt
 		}
-		// Coalesce an attempt's cancellation intent (including terminal/manual
-		// outcomes), and an already-pending read/collection request. Distinct HTTP
-		// keys never multiply in-flight actions against the same attempt.
+		// Coalesce pending work and settled/started cancellations. A terminal
+		// preflight failure did not consume the stop permit: an explicit new key
+		// may create another request, preserving all prior operations and receipts.
 		var existing string
 		query := `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind=? AND status IN ('accepted','running')`
 		if c.Kind == domain.OperationCancel {
-			query = `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind=?`
+			query = `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind=? AND (status IN ('accepted','running','succeeded') OR cancel_started=1) ORDER BY operation_seq DESC LIMIT 1`
 		} else if c.Kind == domain.OperationCleanup {
 			query = `SELECT operation_id FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind=? AND status IN ('accepted','running','succeeded') ORDER BY operation_seq DESC LIMIT 1`
 		}

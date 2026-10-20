@@ -140,6 +140,9 @@ func Dial(ctx context.Context, target Target, credential Credential) (*Client, e
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", target.address())
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, errors.Join(ErrUnavailable, ctx.Err())
+		}
 		return nil, ErrUnavailable
 	}
 	deadline := time.Now().Add(handshakeTimeout)
@@ -155,6 +158,8 @@ func Dial(ctx context.Context, target Target, credential Credential) (*Client, e
 		switch {
 		case mismatch:
 			return nil, ErrHostKeyMismatch
+		case ctx.Err() != nil:
+			return nil, errors.Join(ErrUnavailable, ctx.Err())
 		case presented != "" && strings.Contains(err.Error(), "unable to authenticate"):
 			return nil, ErrCredentialReject
 		}
@@ -188,6 +193,9 @@ func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, 
 	}
 	session, err := c.conn.NewSession()
 	if err != nil {
+		if ctx.Err() != nil {
+			return Result{}, errors.Join(ErrUnavailable, ctx.Err())
+		}
 		return Result{}, ErrUnavailable
 	}
 	defer session.Close()
@@ -198,6 +206,9 @@ func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, 
 	}
 	done := make(chan error, 1)
 	if err = session.Start(command); err != nil {
+		if ctx.Err() != nil {
+			return Result{}, errors.Join(ErrUnavailable, ctx.Err())
+		}
 		return Result{}, ErrUnavailable
 	}
 	go func() { done <- session.Wait() }()
@@ -215,6 +226,9 @@ func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, 
 		return Result{Stderr: stderr.Bytes()}, nil
 	case errors.As(err, &exit):
 		return Result{ExitCode: exit.ExitStatus(), Stderr: stderr.Bytes()}, nil
+	}
+	if ctx.Err() != nil {
+		return Result{Stderr: stderr.Bytes()}, errors.Join(ErrUnavailable, ctx.Err())
 	}
 	return Result{Stderr: stderr.Bytes()}, ErrUnavailable
 }

@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
+	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hostcache"
 	"github.com/vankhaivn/compute-relay/internal/hostimages"
@@ -221,9 +222,31 @@ func Capabilities() provider.Capabilities {
 // Verify proves the frozen binding and a reachable Docker daemon on the pinned host.
 func (a *Adapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if a == nil || expected != a.binding {
-		return ErrBinding
+		return verificationError(ErrBinding)
 	}
-	return a.withDocker(ctx, func(d docker, _ Endpoint) error { return d.ping(ctx) })
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return verificationError(a.withDocker(ctx, func(d docker, _ Endpoint) error { return d.ping(ctx) }))
+}
+
+// verificationError translates read-only verification failures at the provider boundary.
+// Keep local control failures intact and publish only fixed diagnostic messages.
+func verificationError(err error) error {
+	if err == nil || provider.IsLocalStateError(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	code, stage := domain.CodeProviderStateUnknown, domain.FailureStageObservation
+	message := "SSH host verification could not confirm the remote state"
+	switch {
+	case errors.Is(err, ErrBinding), errors.Is(err, ErrHostKeyMismatch), errors.Is(err, errResourceChanged):
+		code, message = domain.CodeRemoteIdentityMismatch, "SSH host does not match the frozen identity"
+	case errors.Is(err, ErrCredentialReject), errors.Is(err, credentials.ErrUnavailable), errors.Is(err, credentials.ErrUnconfigured), errors.Is(err, credentials.ErrUnsupported):
+		code, stage, message = domain.CodeProviderAuthFailed, domain.FailureStageAuthentication, "SSH host credential could not be used"
+	case errors.Is(err, ErrUnavailable):
+		code, message = domain.CodeProviderUnreachable, "SSH host could not be reached"
+	}
+	return provider.Problem(code, stage, message).WithCause(err)
 }
 
 func (a *Adapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {

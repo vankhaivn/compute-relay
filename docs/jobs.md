@@ -123,3 +123,16 @@ key is a conflict.
 All control requests take `{"attempt_id": …}` and an `Idempotency-Key`. A status of `unknown` stays
 unknown until the provider confirms otherwise — a timeout or cancel request is not proof that
 remote work stopped.
+
+Cancellation recovery uses the same attempt and frozen provider identity:
+
+| Previous request | New explicit cancel with a new key |
+|---|---|
+| Still accepted or running | Returns the existing operation. |
+| Failed or manual-required before any provider stop invocation began | Creates a new operation; verification and worker fencing still apply. |
+| Stop invocation began, including a lost response | Returns the existing operation; use `reconcile` to observe the original resource. |
+| Already succeeded | Returns the settled operation without another stop. |
+
+Reusing an old key always returns its original receipt, even after the operation settles; read
+`GET /operations/{id}` for its current outcome. A fresh key cannot override an identity mismatch
+or an active cleanup. Recovery never creates a new compute attempt or execution authorization.

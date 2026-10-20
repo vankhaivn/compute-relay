@@ -133,7 +133,21 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 		}
 		return finishControl(ctx, tx, r, domain.OperationSucceeded, operations.DispatchPrevented, nil, now)
 	}
-	if state.Cancellation != domain.CancellationNotRequested {
+	if state.Cancellation == domain.CancellationManual {
+		// Only durable proof of an uninvoked terminal request permits recovery.
+		// This transaction also fences older callbacks through controlState below.
+		var uninvoked, unsafe bool
+		if err = tx.QueryRowContext(ctx, `SELECT
+ COALESCE(MAX(cancel_started=0 AND status IN ('failed','manual_required')),0),
+ COALESCE(MAX(cancel_started=1 OR status IN ('accepted','running','succeeded')),0)
+ FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind='cancel' AND operation_id!=?`,
+			string(target.Job.WorkspaceID), string(target.Job.ID), string(target.Attempt.ID), string(r.Operation.ID)).Scan(&uninvoked, &unsafe); err != nil {
+			return r, dbError(err)
+		}
+		if !uninvoked || unsafe {
+			return r, operations.ErrState
+		}
+	} else if state.Cancellation != domain.CancellationNotRequested {
 		return r, operations.ErrState
 	}
 	state.Cancellation = domain.CancellationRequested
@@ -141,8 +155,8 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 	if _, err = controlState(ctx, tx, r, target.Attempt, state, domain.EventCancellationRequested, now); err != nil {
 		return r, err
 	}
-	// Attention is not permission to call Submit again. Only safe identity observation
-	// is re-enabled; permanent identity/privacy failures still require intervention.
+	// Reopen the original identity's recovery path, never submission. Cancellation
+	// still requires verified bindings and the durable one-shot stop permit.
 	if work.Journal.Phase == dispatch.Attention {
 		next, _, _, applyErr := dispatch.Apply(work.Journal, state, dispatch.Action{Kind: dispatch.RequestReconciliation}, now)
 		if applyErr != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,56 @@ func TestDialClassifiesRejectedAndUnreachableHosts(t *testing.T) {
 	_ = server.Close()
 	if _, err := Dial(context.Background(), closed, Credential{Password: []byte("secret")}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("closed listener: %v", err)
+	}
+}
+
+func TestDialPreservesCancelledAndExpiredContext(t *testing.T) {
+	server := newTestServer(t)
+	server.Password = "secret"
+	for _, expired := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(t.Context())
+		cause := context.Canceled
+		if expired {
+			cancel()
+			ctx, cancel = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+			cause = context.DeadlineExceeded
+		} else {
+			cancel()
+		}
+		_, err := Dial(ctx, server.target(), Credential{Password: []byte("secret")})
+		cancel()
+		if !errors.Is(err, cause) || !errors.Is(err, ErrUnavailable) {
+			t.Fatal("dial replaced caller context or transport contract", err)
+		}
+	}
+}
+
+func TestDialPreservesCancellationDuringHandshake(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := Dial(ctx, Target{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port, User: "fixture"}, Credential{Password: []byte("secret")})
+		done <- err
+	}()
+	peer, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrUnavailable) {
+			t.Fatal("handshake lost cancellation or transport identity", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handshake ignored cancellation")
 	}
 }
 
