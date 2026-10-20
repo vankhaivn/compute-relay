@@ -110,3 +110,16 @@ removes them. Restarting Relay deletes nothing.
 | Job waits on `resource_reservation_unresolved` | Older active work must be confirmed inactive first. Do not clear state. |
 | Preparation fails after deleting an image | Restore the exact image; a new image only affects future selections. |
 | Credential store unavailable | Keep the runtime and vault; fix file permissions or Keychain access. Do not reset. |
+
+Job preflight verification reports provider-neutral problem codes separately from connection
+check reasons above:
+
+| Problem code | Meaning |
+|---|---|
+| `PROVIDER_UNREACHABLE` | SSH transport could not reach the pinned host. |
+| `PROVIDER_AUTH_FAILED` | SSH credentials were refused or could not be read from the selected vault. |
+| `REMOTE_IDENTITY_MISMATCH` | Frozen binding, host key, or confirmed machine/Docker engine identity differs. Intervention is required. |
+| `PROVIDER_STATE_UNKNOWN` | Docker or identity reads could not establish remote state; this is not proof of a changed identity. |
+
+Network and Docker outages do not establish an authentication failure. Unknown state retains
+capacity; only confirmed inactivity releases compute capacity, independently of remote cleanup.

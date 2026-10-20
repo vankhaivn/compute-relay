@@ -189,7 +189,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if unconfirmedPreparation(work.Journal) {
 			return s.endUnconfirmedPreparation(err)
 		}
-		code := errorCode(err, domain.CodeProviderAuthFailed)
+		// Adapters classify known causes. An untyped failure proves neither
+		// authentication refusal nor a changed frozen identity.
+		code := errorCode(err, domain.CodeProviderStateUnknown)
 		if errors.Is(err, context.DeadlineExceeded) {
 			code = domain.CodeProviderUnreachable
 		}

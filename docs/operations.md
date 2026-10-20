@@ -132,6 +132,8 @@ flowchart LR
 | Submission rejected before reaching the provider | Read `problem.details.reason`, fix the cause, retry explicitly. |
 | Temporary observation outage after confirmed submission | Relay keeps observing the same run with backoff, including after restart. No resubmission. |
 | Remote state active or unknown | Capacity stays reserved. Do not delete; reconcile if the attempt requires attention. |
+| Cancellation ended before its provider stop invocation began | Restore connectivity or credentials, then explicitly cancel the same attempt with a new key. Relay preserves the old receipt and verifies the frozen identity again. |
+| Cancellation may already have invoked the provider | Reconcile the original attempt. A fresh cancel key cannot grant another stop invocation. |
 | Cancellation unsupported or target missing | Termination stays manual-required/unknown. |
 | Finished, results missing, or `collection.state=awaiting_request` | `POST /jobs/{id}/collect` for the same attempt — not a compute retry. |
 | Collection failed and committed | One new collect request with a new key. |

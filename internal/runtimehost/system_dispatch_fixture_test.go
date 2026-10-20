@@ -499,7 +499,7 @@ func installSystemMatrixProvider(t *testing.T, f *managedTestFixture, e *systemD
 	p := &systemMatrixProbe{mode: mode}
 	e.verify = func(context.Context, provider.BindingSnapshot) error {
 		if p.wrongAccount {
-			return errors.New("private-account-canary")
+			return provider.Problem(domain.CodeProviderAuthFailed, domain.FailureStageAuthentication, "Fixture credentials do not match the frozen account.").WithCause(errors.New("private-account-canary"))
 		}
 		return nil
 	}

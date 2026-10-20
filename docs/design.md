@@ -12,9 +12,10 @@ These rules hold for every change. Breaking one needs an explicit design decisio
 1. **Admission is not consent.** Each attempt needs its own finite authorization, consumed once.
 2. **Intent before mutation.** Record a one-shot intent before any provider call. After
    uncertainty, only observe the original resource; a missing response or "not found" never permits
-   repeating the call.
-3. **History is preserved.** Jobs, attempts, requests and receipts are never rewritten. A retry is a
-   new attempt with new authority.
+   repeating the call. Explicit cancellation recovery may create a new request only when no prior
+   stop invocation began; a durable constraint allows at most one stop invocation per attempt.
+3. **History is preserved.** Jobs, attempts, requests and receipts are never rewritten. A compute
+   retry is a new attempt with new authority; cancellation recovery retains the original attempt.
 4. **Bindings are frozen.** Provider, account, machine, selection, image and input identities are
    fixed at admission. Credential replacement must reach the same account. No automatic
    provider/account/CPU fallback or paid capacity.
@@ -25,7 +26,8 @@ These rules hold for every change. Breaking one needs an explicit design decisio
    prevents submission before it starts. Unknown staging existence and cleanup eligibility
    remain separate; releasing compute capacity never proves a staging resource absent.
 7. **Unknown stays unknown.** Execution, cancellation, result availability, cleanup and hardware
-   release are separate facts. A 202 is only a local receipt.
+   release are separate facts. A 202 is only a local receipt. Unclassified provider verification
+   failures remain state-unknown; adapters must establish specific authentication or identity failures.
 8. **Results are all-or-nothing.** Publish a complete, bounded, hash-verified artifact set
    atomically; complete temporary bytes are not results.
 9. **Credentials stay in the vault.** Never in jobs, logs, fixtures, SQLite or Git. Access failure

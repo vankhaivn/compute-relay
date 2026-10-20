@@ -14,6 +14,15 @@ import (
 
 var ErrResourceIdentity = errors.New("SSH scheduling resource identity unavailable or changed")
 
+var errResourceChanged = errors.New("SSH scheduling resource identity changed")
+
+// resourceReadError retains transport and context causes without publishing their text.
+type resourceReadError struct{ cause error }
+
+func (resourceReadError) Error() string        { return ErrResourceIdentity.Error() }
+func (e resourceReadError) Unwrap() error      { return e.cause }
+func (resourceReadError) Is(target error) bool { return target == ErrResourceIdentity }
+
 var (
 	linuxMachineID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	platformUUID   = regexp.MustCompile(`(?m)^\s*"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})"\s*$`)
@@ -28,7 +37,10 @@ func resourceDigest(kind, native string) string {
 func readIdentity(ctx context.Context, exec executor, limit int64, args ...string) ([]byte, error) {
 	var out bytes.Buffer
 	result, err := exec.Run(ctx, nil, args, nil, &limitedWriter{w: &out, limit: limit})
-	if err != nil || result.ExitCode != 0 {
+	if err != nil {
+		return nil, resourceReadError{err}
+	}
+	if result.ExitCode != 0 {
 		return nil, ErrResourceIdentity
 	}
 	return out.Bytes(), nil
@@ -44,15 +56,21 @@ func machineIdentity(ctx context.Context, exec executor) (string, error) {
 	switch strings.TrimSpace(string(raw)) {
 	case "Linux":
 		raw, err = readIdentity(ctx, exec, 64, "/bin/cat", "/etc/machine-id")
+		if err != nil {
+			return "", err
+		}
 		id := strings.TrimSpace(string(raw))
-		if err != nil || !linuxMachineID.MatchString(id) || id == strings.Repeat("0", 32) {
+		if !linuxMachineID.MatchString(id) || id == strings.Repeat("0", 32) {
 			return "", ErrResourceIdentity
 		}
 		return resourceDigest("linux-machine-id", id), nil
 	case "Darwin":
 		raw, err = readIdentity(ctx, exec, 64<<10, "/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice")
+		if err != nil {
+			return "", err
+		}
 		matches := platformUUID.FindAllSubmatch(raw, -1)
-		if err != nil || len(matches) != 1 {
+		if len(matches) != 1 {
 			return "", ErrResourceIdentity
 		}
 		id := strings.ToLower(string(matches[0][1]))
@@ -87,7 +105,10 @@ func (d docker) localResource(ctx context.Context) (docker, error) {
 			args = append(args, "--", values[0])
 		}
 		result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 4096}, args...)
-		if err != nil || result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &host) != nil {
+		if err != nil {
+			return docker{}, resourceReadError{err}
+		}
+		if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &host) != nil {
 			return docker{}, ErrResourceIdentity
 		}
 	}
@@ -102,8 +123,11 @@ func (d docker) localResource(ctx context.Context) (docker, error) {
 func (d docker) engineIdentity(ctx context.Context) (string, error) {
 	var out bytes.Buffer
 	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 1024}, "info", "--format", "{{json .ID}}")
+	if err != nil {
+		return "", resourceReadError{err}
+	}
 	var native string
-	if err != nil || result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &native) != nil || len(native) < 8 || len(native) > 256 || !safeArg.MatchString(native) {
+	if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &native) != nil || len(native) < 8 || len(native) > 256 || !safeArg.MatchString(native) {
 		return "", ErrResourceIdentity
 	}
 	return resourceDigest("docker-engine-id", native), nil
@@ -111,12 +135,18 @@ func (d docker) engineIdentity(ctx context.Context) (string, error) {
 
 func (d docker) verifyResource(ctx context.Context, machine, engine string) error {
 	actual, err := machineIdentity(ctx, d.exec)
-	if err != nil || actual != machine {
-		return ErrResourceIdentity
+	if err != nil {
+		return err
+	}
+	if actual != machine {
+		return errors.Join(ErrResourceIdentity, errResourceChanged)
 	}
 	actual, err = d.engineIdentity(ctx)
-	if err != nil || engine != "" && actual != engine {
-		return ErrResourceIdentity
+	if err != nil {
+		return err
+	}
+	if engine != "" && actual != engine {
+		return errors.Join(ErrResourceIdentity, errResourceChanged)
 	}
 	return nil
 }
