@@ -46,6 +46,28 @@ re-checked the bytes, hash and your authority. A client must:
 
 Do not follow redirects or proxies; HTTP/2 and generic proxies are not qualified.
 
+## Release local results
+
+After durably importing a verified result, a consumer can explicitly waive the seven-day local
+retention window. `POST /release-results` requires an operate token, an `Idempotency-Key` and one
+exact verified output:
+
+```json
+{"attempt_id": "att_example", "artifact_id": "art_example", "sha256": "<64 lowercase hex characters>"}
+```
+
+This expires the **whole local result set** for that attempt, including logs and manifests.
+Active, unknown, recovering or locally busy work is refused. It does not delete inputs, metadata,
+provider resources or results belonging to another attempt.
+
+The response names the workspace, job, attempt and output, with `released_at`, `files`, `bytes`,
+`pending_files` and `reclaimed_bytes`. HTTP 200 means all files are reclaimed; HTTP 202 means
+deletion is still pending. Tombstones commit before file deletion, so downloads return 410
+immediately. Repeat the original key and body after a lost response or partial deletion; the
+ordinary retention worker also finishes pending deletion after a restart. Reusing a key for
+another target returns 409. Already expired results can be acknowledged through the same exact
+identity. Availability is advertised by the `result_release` feature.
+
 ## Cleanup
 
 Remote data stays until you delete it (or a [retention rule](#automatic-remote-retention) does).

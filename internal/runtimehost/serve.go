@@ -21,6 +21,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/retention"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
@@ -123,6 +124,14 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	cfg := api.DefaultConfig()
 	cfg.Listen = listener.Addr().String()
 	cfg.Jobs, cfg.Operations, cfg.Results, cfg.Cleanup = jobs, controls, results, cleanups
+	sweeper, err := h.retentionSweeper()
+	if err != nil {
+		return err
+	}
+	cfg.ResultReleases, err = retention.NewReleaser(h.access, h.store, sweeper)
+	if err != nil {
+		return ErrState
+	}
 	cfg.Logs, err = joblogs.NewReader(h.access, h.store, logResolver)
 	if err != nil {
 		return ErrState
@@ -150,10 +159,6 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		return serveHTTPMode(ctx, server, listener, 10*time.Second, mode, func() error {
 			return announce(listening)
 		})
-	}
-	sweeper, err := h.retentionSweeper()
-	if err != nil {
-		return err
 	}
 	extra := []runtimeService{{"retention", func(ctx context.Context) error { return runRetention(ctx, sweeper, retentionInterval) }}}
 	if cleaner != nil {

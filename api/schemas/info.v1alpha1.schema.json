@@ -48,7 +48,8 @@
           "job_cleanup",
           "separate_prepare_start",
           "ephemeral_workload_secrets",
-          "job_cleanup_preview"
+          "job_cleanup_preview",
+          "result_release"
         ]
       }
     },

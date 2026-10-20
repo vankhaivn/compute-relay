@@ -237,26 +237,50 @@ func expireResult(ctx context.Context, tx *sql.Tx, item retentionItem, now time.
 	if err != nil {
 		return 0, err
 	}
-	var count, tracked, expired int
-	var at string
-	if err := tx.QueryRowContext(ctx, `SELECT p.file_count,count(r.inventory_seq),COALESCE(sum(r.expired_at IS NOT NULL),0),COALESCE(max(r.recorded_at),'') FROM collection_publications p JOIN artifacts a ON a.workspace_id=p.workspace_id AND a.job_id=p.job_id AND a.attempt_id=p.attempt_id LEFT JOIN retention_inventory r ON r.kind='result' AND r.workspace_id=a.workspace_id AND r.object_id=a.object_id AND r.bytes=a.bytes AND r.sha256=a.sha256 WHERE p.workspace_id=? AND p.job_id=? AND p.attempt_id=? GROUP BY p.file_count`, string(m.WorkspaceID), string(job), string(attempt)).Scan(&count, &tracked, &expired, &at); err != nil {
-		return 0, dbError(err)
-	}
-	if count < 1 || count > collection.MaxFiles || tracked != count || expired != 0 {
-		return 0, ErrCorrupt
-	}
-	recorded, err := time.Parse(time.RFC3339Nano, at)
+	inventory, err := resultRetentionInventory(ctx, tx, m.WorkspaceID, job, attempt)
 	if err != nil {
+		return 0, err
+	}
+	if inventory.expired != 0 {
 		return 0, ErrCorrupt
 	}
-	decision, err := p.Assess(now, recorded, []retention.Reference{ref})
+	decision, err := p.Assess(now, inventory.recorded, []retention.Reference{ref})
 	if err != nil {
 		return 0, err
 	}
 	if !decision.Eligible {
 		return 0, nil
 	}
-	a, _, err := loadAttempt(ctx, tx, m.WorkspaceID, job, attempt)
+	return tombstoneResult(ctx, tx, m.WorkspaceID, job, attempt, inventory.count, now)
+}
+
+type resultInventory struct {
+	count, expired int
+	recorded       time.Time
+}
+
+func resultRetentionInventory(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID) (resultInventory, error) {
+	var r resultInventory
+	var tracked int
+	var at string
+	if err := tx.QueryRowContext(ctx, `SELECT p.file_count,count(r.inventory_seq),COALESCE(sum(r.expired_at IS NOT NULL),0),COALESCE(max(r.recorded_at),'') FROM collection_publications p JOIN artifacts a ON a.workspace_id=p.workspace_id AND a.job_id=p.job_id AND a.attempt_id=p.attempt_id LEFT JOIN retention_inventory r ON r.kind='result' AND r.workspace_id=a.workspace_id AND r.object_id=a.object_id AND r.bytes=a.bytes AND r.sha256=a.sha256 WHERE p.workspace_id=? AND p.job_id=? AND p.attempt_id=? GROUP BY p.file_count`, w, job, attempt).Scan(&r.count, &tracked, &r.expired, &at); err != nil {
+		return r, dbError(err)
+	}
+	if r.count < 1 || r.count > collection.MaxFiles || tracked != r.count || r.expired != 0 && r.expired != r.count {
+		return r, ErrCorrupt
+	}
+	var err error
+	r.recorded, err = time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return r, ErrCorrupt
+	}
+	return r, nil
+}
+
+// tombstoneResult runs only after the caller checks the entire immutable inventory
+// and release eligibility in this transaction.
+func tombstoneResult(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID, count int, now time.Time) (int, error) {
+	a, _, err := loadAttempt(ctx, tx, w, job, attempt)
 	if err != nil {
 		return 0, err
 	}
@@ -273,7 +297,7 @@ func expireResult(ctx context.Context, tx *sql.Tx, item retentionItem, now time.
 	if err != nil {
 		return 0, ErrInvalid
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE attempts SET state=?,orchestration=?,revision=?,updated_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND revision=?`, string(raw), string(next.State.Orchestration), next.Revision, next.UpdatedAt.Format(time.RFC3339Nano), string(m.WorkspaceID), string(job), string(attempt), a.Revision)
+	res, err := tx.ExecContext(ctx, `UPDATE attempts SET state=?,orchestration=?,revision=?,updated_at=? WHERE workspace_id=? AND job_id=? AND attempt_id=? AND revision=?`, string(raw), string(next.State.Orchestration), next.Revision, next.UpdatedAt.Format(time.RFC3339Nano), w, job, attempt, a.Revision)
 	if err != nil {
 		return 0, dbError(err)
 	}
@@ -282,13 +306,13 @@ func expireResult(ctx context.Context, tx *sql.Tx, item retentionItem, now time.
 		return 0, retention.ErrChanged
 	}
 	stamp := now.UTC().Format(time.RFC3339Nano)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO retention_expirations VALUES(?,?,?,?)`, string(m.WorkspaceID), string(job), string(attempt), stamp); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO retention_expirations VALUES(?,?,?,?)`, w, job, attempt, stamp); err != nil {
 		return 0, dbError(err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE retention_inventory SET expired_at=? WHERE kind='result' AND workspace_id=? AND object_id IN(SELECT object_id FROM artifacts WHERE workspace_id=? AND job_id=? AND attempt_id=?) AND expired_at IS NULL`, stamp, string(m.WorkspaceID), string(m.WorkspaceID), string(job), string(attempt)); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE retention_inventory SET expired_at=? WHERE kind='result' AND workspace_id=? AND object_id IN(SELECT object_id FROM artifacts WHERE workspace_id=? AND job_id=? AND attempt_id=?) AND expired_at IS NULL`, stamp, w, w, job, attempt); err != nil {
 		return 0, dbError(err)
 	}
-	if err := controlEvent(ctx, tx, m.WorkspaceID, job, attempt, "", domain.EventResultExpired, now); err != nil {
+	if err := controlEvent(ctx, tx, w, job, attempt, "", domain.EventResultExpired, now); err != nil {
 		return 0, err
 	}
 	return count, nil

@@ -44,6 +44,13 @@ func TestPolicyConservativePinsAndWindows(t *testing.T) {
 			if err != nil || d.Reason != tc.want || d.Eligible != (tc.want == "retention_elapsed") {
 				t.Fatalf("decision = %+v, %v", d, err)
 			}
+			wantBlocker := tc.want
+			if wantBlocker == "retention_elapsed" || wantBlocker == "retention_window" {
+				wantBlocker = ""
+			}
+			if r.ReleaseBlocker() != wantBlocker {
+				t.Fatal("explicit release changed safety guards", r.ReleaseBlocker(), wantBlocker)
+			}
 		})
 	}
 	p := DefaultPolicy()

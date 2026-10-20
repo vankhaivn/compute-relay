@@ -52,6 +52,21 @@ type Reference struct {
 	RecoveryRequired bool
 }
 
+// ReleaseBlocker applies to both age-based expiry and an explicit consumer release.
+// An explicit release may waive the age window, never unresolved work.
+func (r Reference) ReleaseBlocker() string {
+	if r.Busy {
+		return "local_work"
+	}
+	if !r.State.Orchestration.Terminal() || (r.State.RemoteActivity != domain.RemoteActivityInactive && r.State.RemoteActivity != domain.RemoteActivityNotStarted) {
+		return "active_or_unresolved"
+	}
+	if r.RecoveryRequired || (r.State.Execution.Terminal() && r.State.Result != domain.ResultAvailable && r.State.Result != domain.ResultExpired) {
+		return "recovery_required"
+	}
+	return ""
+}
+
 type Decision struct {
 	Eligible  bool
 	Reason    string
@@ -70,14 +85,8 @@ func (p Policy) Assess(now, recordedAt time.Time, refs []Reference) (Decision, e
 		if r.State.Validate() != nil || r.UpdatedAt.IsZero() || r.UpdatedAt.After(now) {
 			return Decision{}, ErrInvalid
 		}
-		if r.Busy {
-			return Decision{Reason: "local_work"}, nil
-		}
-		if !r.State.Orchestration.Terminal() || (r.State.RemoteActivity != domain.RemoteActivityInactive && r.State.RemoteActivity != domain.RemoteActivityNotStarted) {
-			return Decision{Reason: "active_or_unresolved"}, nil
-		}
-		if r.RecoveryRequired || (r.State.Execution.Terminal() && r.State.Result != domain.ResultAvailable && r.State.Result != domain.ResultExpired) {
-			return Decision{Reason: "recovery_required"}, nil
+		if reason := r.ReleaseBlocker(); reason != "" {
+			return Decision{Reason: reason}, nil
 		}
 		if t := r.UpdatedAt.Add(p.CompletedFor); t.After(due) {
 			due = t

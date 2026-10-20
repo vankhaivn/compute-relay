@@ -115,6 +115,9 @@ func (h *handler) routes() {
 	add("GET", "jobs/{job}/artifacts", routePolicy{query: true}, h.artifacts)
 	add("GET", "jobs/{job}/artifacts/{artifact}", routePolicy{query: true}, h.artifacts)
 	add("GET", "jobs/{job}/artifacts/{artifact}/content", routePolicy{query: true, download: true}, h.artifacts)
+	if h.config.ResultReleases != nil {
+		add("POST", "jobs/{job}/release-results", routePolicy{bodyLimit: 1024}, h.releaseResults)
+	}
 	if h.config.Operations != nil {
 		for _, action := range []string{"cancel", "retry", "reconcile", "collect"} {
 			add("POST", "jobs/{job}/"+action, routePolicy{bodyLimit: operations.MaxRequestBytes}, h.controls)

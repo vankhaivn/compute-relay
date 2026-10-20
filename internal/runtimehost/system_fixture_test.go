@@ -29,6 +29,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/fake"
+	"github.com/vankhaivn/compute-relay/internal/retention"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 	"github.com/vankhaivn/compute-relay/internal/testsupport"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
@@ -372,6 +373,10 @@ func (f *managedTestFixture) startHTTP(t *testing.T) {
 	cfg.Operations, err = operations.New(f.host.access, f.host.store, f.host.inputs, admission.DefaultLimits())
 	requireNoError(t, err)
 	cfg.Results, err = collection.NewReader(f.host.access, f.host.store, f.host.results)
+	requireNoError(t, err)
+	sweeper, err := retention.NewSweeper(f.host.store, f.host.inputs, f.host.results)
+	requireNoError(t, err)
+	cfg.ResultReleases, err = retention.NewReleaser(f.host.access, f.host.store, sweeper)
 	requireNoError(t, err)
 	cfg.Cleanup, err = cleanup.NewService(f.host.access, f.host.store, nil)
 	requireNoError(t, err)

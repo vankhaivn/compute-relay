@@ -64,18 +64,7 @@ func (s *Sweeper) SweepOnce(ctx context.Context, policy Policy, after int64, lim
 	defer s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	inputID, err := s.inputs.RetentionIdentity(ctx)
-	if err != nil {
-		return SweepReport{}, after, err
-	}
-	resultID, err := s.results.RetentionIdentity(ctx)
-	if err != nil {
-		return SweepReport{}, after, err
-	}
-	if inputID == resultID || !domain.ObjectID(inputID).Valid() || !domain.ObjectID(resultID).Valid() {
-		return SweepReport{}, after, ErrInvalid
-	}
-	if err := s.repo.BindRetentionStores(ctx, inputID, resultID); err != nil {
+	if err := s.bind(ctx); err != nil {
 		return SweepReport{}, after, err
 	}
 	report, err := s.repo.ExpireRetention(ctx, policy, limit)
@@ -119,4 +108,19 @@ func (s *Sweeper) SweepOnce(ctx context.Context, policy Policy, after int64, lim
 		}
 	}
 	return report, page.NextAfter, errors.Join(failures...)
+}
+
+func (s *Sweeper) bind(ctx context.Context) error {
+	inputID, err := s.inputs.RetentionIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	resultID, err := s.results.RetentionIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	if inputID == resultID || !domain.ObjectID(inputID).Valid() || !domain.ObjectID(resultID).Valid() {
+		return ErrInvalid
+	}
+	return s.repo.BindRetentionStores(ctx, inputID, resultID)
 }

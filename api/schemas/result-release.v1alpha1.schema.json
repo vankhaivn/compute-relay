@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay local result release v1alpha1",
+  "description": "Explicitly expire one verified attempt result set. Runtime admission also checks active/recovery pins. Deletion counters must be consistent with the immutable inventory.",
+  "oneOf": [{"$ref": "#/$defs/request"}, {"$ref": "#/$defs/receipt"}],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempt_id", "artifact_id", "sha256"],
+      "properties": {
+        "attempt_id": {"$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"},
+        "artifact_id": {"$ref": "common.v1alpha1.schema.json#/$defs/artifact_id"},
+        "sha256": {"$ref": "common.v1alpha1.schema.json#/$defs/sha256"}
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace_id", "job_id", "attempt_id", "artifact_id", "sha256", "released_at", "files", "bytes", "pending_files", "reclaimed_bytes"],
+      "properties": {
+        "workspace_id": {"$ref": "common.v1alpha1.schema.json#/$defs/workspace_id"},
+        "job_id": {"$ref": "common.v1alpha1.schema.json#/$defs/job_id"},
+        "attempt_id": {"$ref": "common.v1alpha1.schema.json#/$defs/attempt_id"},
+        "artifact_id": {"$ref": "common.v1alpha1.schema.json#/$defs/artifact_id"},
+        "sha256": {"$ref": "common.v1alpha1.schema.json#/$defs/sha256"},
+        "released_at": {"$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"},
+        "files": {"type": "integer", "minimum": 1, "maximum": 10004},
+        "bytes": {"type": "integer", "minimum": 0},
+        "pending_files": {"type": "integer", "minimum": 0, "maximum": 10004},
+        "reclaimed_bytes": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

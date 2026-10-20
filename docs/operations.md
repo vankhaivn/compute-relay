@@ -110,6 +110,9 @@ Anything still in use (active or unknown execution, pending collection or operat
 references) is kept regardless of age. Expiry writes a tombstone first; history and metadata stay,
 and new downloads return HTTP 410. The sweep runs at startup and hourly. Local retention never
 deletes remote data — see [remote retention](results-and-cleanup.md#automatic-remote-retention).
+An explicit [consumer release](results-and-cleanup.md#release-local-results) can waive the age
+window for an exact verified result. It keeps the same active-work guards and durable tombstones;
+the hourly sweep also recovers any pending file deletion from that release.
 
 ## Recovery
 

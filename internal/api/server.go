@@ -34,6 +34,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
+	"github.com/vankhaivn/compute-relay/internal/retention"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -47,6 +48,7 @@ type Config struct {
 	Connections    *connections.Service   // Optional live management; handlers never invoke providers.
 	Authorizations *executionauth.Service // Optional durable managed-attempt consent.
 	Results        *collection.Reader     // nil disables published artifact reads; no provider fallback.
+	ResultReleases *retention.Releaser    // Exact local result release; no provider effects.
 	Operations     *operations.Service    // nil disables durable controls; never use an in-memory fallback.
 	Cleanup        *cleanup.Service       // nil disables explicit remote cleanup admission; requires Operations.
 	Jobs           *admission.Service     // nil disables durable job routes; never use a memory fallback.
@@ -71,6 +73,7 @@ const FeatureManualResultCollection = "manual_result_collection"
 // request is applied only by a separately composed provider worker.
 const FeatureJobCleanup = "job_cleanup"
 const FeatureJobCleanupPreview = "job_cleanup_preview"
+const FeatureResultRelease = "result_release"
 
 func DefaultConfig() Config {
 	return Config{
@@ -285,6 +288,9 @@ func (h *handler) info(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.config.Results != nil {
 		features = append(features, "artifact_list", "artifact_metadata", "artifact_download")
+	}
+	if h.config.ResultReleases != nil {
+		features = append(features, FeatureResultRelease)
 	}
 	respond(w, 200, map[string]any{"api_version": "compute-connector/v1alpha1", "runtime_version": buildinfo.Current().Version, "implementation_status": "implemented-offline", "features": features, "job_admission": admissionStatus})
 }
