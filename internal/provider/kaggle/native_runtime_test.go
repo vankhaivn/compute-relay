@@ -502,3 +502,21 @@ func TestNativeDiscoveryAndPreflightShareReadOnlyQuotaPath(t *testing.T) {
 		t.Fatal("failed discovery retained account", result)
 	}
 }
+
+func TestNativeUnconfirmedStagingErrorsDoNotProveAbsenceOrRepeatCreation(t *testing.T) {
+	for _, fault := range []string{"lookup-denied", "lookup-throttled", "missing-name-403"} {
+		t.Run(fault, func(t *testing.T) {
+			p, plan, _, blobs, f := nativeRuntime(t, false)
+			f.fault = fault
+			before := blobs.reads
+			seen, err := p.ReconcilePrepare(t.Context(), plan, "prep")
+			want := provider.ReconciliationUnknown
+			if fault == "missing-name-403" {
+				want = provider.ReconciliationNotFound
+			}
+			if err != nil || seen.Status != want || seen.Prepared != nil || blobs.reads != before || f.count("CreateDataset") != 0 || f.count("StartBlobUpload") != 0 || f.count("SaveKernel") != 0 || f.count("DeleteDataset") != 0 {
+				t.Fatal("uncertain metadata caused a mutation or invented confirmation", seen, err, f.calls)
+			}
+		})
+	}
+}

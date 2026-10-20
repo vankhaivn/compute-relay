@@ -98,3 +98,8 @@ Optionally declare at admission when Relay should run that same cleanup by itsel
 Give at least one field. Without `retention`, nothing is cleaned automatically. Retention never
 stops running work, never acts while remote activity is possible, never repeats an unknown
 deletion, and leaves shared cache, application images and Kaggle shared datasets alone.
+
+An unsubmitted attempt that ends with `staging_unconfirmed` releases compute capacity without
+claiming its staging dataset is absent. Empty resource references remain `creation_unresolved`
+and cannot authorize deletion. Recorded partial staging retains the normal exact-attempt cleanup
+guards; a terminal state alone never permits name guessing or shared dataset deletion.

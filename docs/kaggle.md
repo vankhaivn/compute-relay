@@ -33,7 +33,16 @@ changing the flag, run a connection `check` to get a selection for it.
 | Cleanup | Explicit; never touches shared datasets. Deletion is by owner/name, so a resource replaced between check and delete could be deleted instead. A 403 alone (for example after a lost acknowledgement) stays `unknown`. |
 
 A lost staging or submission response leaves the original intent for observation; a "not found"
-read never triggers another create or submit. Mutations never retry because of HTTP 429. A file
+read never triggers another create or submit. When staging has never acquired a confirmed dataset
+identity, one reconciliation pass uses the control-call budget (one minute by default). If that
+pass cannot confirm the resource, the unsubmitted attempt ends as `failed` with reason
+`staging_unconfirmed`, releasing its account slot. A 403, 429 or timeout still means unknown,
+not absent. A recorded private dataset that is still processing remains a separate pending state.
+Historical attention attempts follow the same bound after an explicit reconciliation request.
+
+Terminalization preserves the original intent and unknown resource evidence. Cleanup cannot delete
+an unconfirmed dataset by guessing its name; confirmed partial resources use the existing exact
+attempt cleanup, and shared input datasets remain untouched. Mutations never retry because of HTTP 429. A file
 upload that failed before its dataset was created can be sent once more with a new ticket.
 
 Rate-limit cooldowns apply across all API endpoints and clients for the same account, including
