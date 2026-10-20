@@ -99,6 +99,10 @@ func (e *Engine) Run(ctx context.Context) error {
 	})
 }
 
+// PreparationObservationGrace bounds recovery after the first failed preparation.
+// It starts after uploads and survives restarts through the journal.
+const PreparationObservationGrace = 2 * time.Minute
+
 // A submitted remote run is observed at most every 15 seconds; control requests still wake it
 // at once. Unresolved outcomes after submission start from 30 seconds. Known remote runs
 // remain observable through transient outages with bounded calls and backoff.
@@ -158,6 +162,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		// Deterministic per-attempt jitter spreads observations while remaining reproducible.
 		if len(w.Handle.Claim.Fence) > 0 {
 			delay += time.Duration(w.Handle.Claim.Fence[0]%4) * delay / 10
+		}
+		if unconfirmedPreparation(w.Journal) && w.Journal.PreparationObservationStarted != nil {
+			delay = min(delay, max(0, w.Journal.PreparationObservationStarted.Add(PreparationObservationGrace).Sub(e.clock.Now())))
 		}
 		resultErr = errors.Join(resultErr, e.repo.YieldDispatch(cleanup, w.Handle, delay))
 	}()
@@ -578,6 +585,10 @@ func (s *session) endUnconfirmedPreparation(cause error) error {
 	}
 	if err := s.ctx.Err(); err != nil {
 		return err
+	}
+	j := s.work().Journal
+	if j.PreparationObservationStarted == nil || s.e.clock.Now().Before(j.PreparationObservationStarted.Add(PreparationObservationGrace)) {
+		return s.fail(domain.CodeStagingNotReady)
 	}
 	if err := s.commit(Action{Kind: EndUnconfirmedPreparation}); err != nil {
 		return err

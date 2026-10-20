@@ -91,7 +91,7 @@ func (p *collectionProvider) Fetch(ctx context.Context, remote provider.RemoteRe
 		check, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		var pins int
-		if err := p.store.db.QueryRowContext(check, "SELECT count(*) FROM collection_snapshots").Scan(&pins); err != nil || pins != 1 {
+		if err := p.store.db.QueryRowContext(check, "SELECT count(*) FROM collection_snapshots WHERE workspace_id=? AND job_id=? AND attempt_id=?", remote.Identity.WorkspaceID, remote.Identity.JobID, remote.Identity.AttemptID).Scan(&pins); err != nil || pins != 1 {
 			return provider.TransferResult{}, errors.New("payload transfer without committed pin or outside-SQL boundary")
 		}
 		switch mode {

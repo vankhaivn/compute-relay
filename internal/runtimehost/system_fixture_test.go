@@ -24,6 +24,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
+	"github.com/vankhaivn/compute-relay/internal/localstorage"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/ports"
@@ -375,6 +376,9 @@ func (f *managedTestFixture) startHTTP(t *testing.T) {
 	cfg.Results, err = collection.NewReader(f.host.access, f.host.store, f.host.results)
 	requireNoError(t, err)
 	sweeper, err := retention.NewSweeper(f.host.store, f.host.inputs, f.host.results)
+	requireNoError(t, err)
+	cfg.LocalStorage = localstorage.New(f.host.root.Path)
+	cfg.InputReleases, err = retention.NewInputReleaser(f.host.access, f.host.store, sweeper)
 	requireNoError(t, err)
 	cfg.ResultReleases, err = retention.NewReleaser(f.host.access, f.host.store, sweeper)
 	requireNoError(t, err)

@@ -49,7 +49,9 @@
           "separate_prepare_start",
           "ephemeral_workload_secrets",
           "job_cleanup_preview",
-          "result_release"
+          "result_release",
+          "input_release",
+          "local_storage"
         ]
       }
     },

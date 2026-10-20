@@ -181,12 +181,19 @@ func managedScope(w http.ResponseWriter, r *http.Request, p auth.Principal, work
 // Read into one bounded allocation so secret-bearing bodies leave no abandoned
 // growth buffers. The caller clears successful reads; every failure clears here.
 func readManagedRequest(w http.ResponseWriter, r *http.Request, limit int) ([]byte, string, bool) {
+	return readManagedJSON(w, r, limit, true)
+}
+
+func readManagedJSON(w http.ResponseWriter, r *http.Request, limit int, needKey bool) ([]byte, string, bool) {
 	media, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" || len(r.Header.Values("Content-Type")) != 1 || len(r.Header.Values("Content-Encoding")) != 0 || len(params) > 1 || len(params) == 1 && !strings.EqualFold(params["charset"], "utf-8") {
 		respondError(w, r, 415, domain.CodeInvalidRequest, domain.FailureStageValidation, "send an unencoded JSON request")
 		return nil, "", false
 	}
 	keys := r.Header.Values("Idempotency-Key")
+	if !needKey {
+		keys = []string{"read-only-preview"}
+	}
 	if len(keys) != 1 {
 		jobError(w, r, admission.ErrKey)
 		return nil, "", false

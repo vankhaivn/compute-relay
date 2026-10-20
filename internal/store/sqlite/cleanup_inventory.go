@@ -169,6 +169,14 @@ func (s *Store) PlanCleanup(ctx context.Context, w domain.WorkspaceID, token str
 		result = cleanup.PreviewPlan{WorkspaceID: w, JobID: job, AttemptID: attempt, Revision: target.Attempt.Revision,
 			Binding:   provider.BindingSnapshot{Binding: target.Profile.Binding, AccountScope: target.Profile.AccountScope, CredentialRef: target.Profile.CredentialRef},
 			Resources: resources, Eligible: eligibility == nil, Reason: cleanupReason(eligibility)}
+		work, err := controlWork(ctx, tx, target)
+		if err != nil {
+			return err
+		}
+		if errors.Is(eligibility, operations.ErrState) && target.Attempt.State.Orchestration.Terminal() && !work.Journal.SubmitStarted && work.Journal.Plan != nil && work.Journal.Prepared == nil {
+			plan := work.Journal.Plan.Clone()
+			result.UnconfirmedPlan, result.PreparationID = &plan, work.Journal.PreparationID
+		}
 		for _, r := range resources {
 			if r.Reason != "" {
 				result.Eligible, result.Reason = false, r.Reason

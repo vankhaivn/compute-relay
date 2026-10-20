@@ -284,6 +284,9 @@ func TestDefaultsHaveNoProxyCompressionOrConnectionRetry(t *testing.T) {
 		!api.DisableCompression || !storage.DisableCompression || api.TLSHandshakeTimeout == 0 || api.ResponseHeaderTimeout == 0 {
 		t.Fatal("unsafe production transport")
 	}
+	if api.ResponseHeaderTimeout < c.state.createRequest || storage.ResponseHeaderTimeout != 10*time.Second || c.state.request != 15*time.Second {
+		t.Fatal("create acknowledgement or ordinary request header budgets regressed")
+	}
 	for _, options := range []Options{{RequestTimeout: time.Minute}, {TransferTimeout: time.Hour}, {LogTimeout: 3 * time.Second}, {RequestTimeout: -1}} {
 		if _, err := New([]byte(fixtureToken), options); !errors.Is(err, ErrConfig) {
 			t.Fatal("unbounded timeout accepted")
@@ -292,6 +295,31 @@ func TestDefaultsHaveNoProxyCompressionOrConnectionRetry(t *testing.T) {
 	for _, token := range [][]byte{nil, []byte("a b"), []byte("a\n"), []byte{0xff}, bytes.Repeat([]byte{'a'}, maxTokenBytes+1)} {
 		if _, err := New(token, Options{}); !errors.Is(err, ErrConfig) {
 			t.Fatal("invalid token accepted")
+		}
+	}
+}
+
+func TestCreateAcknowledgementHasItsOwnBoundedRequestBudget(t *testing.T) {
+	for _, configured := range []time.Duration{0, 5 * time.Second} {
+		calls := 0
+		c, err := New([]byte(fixtureToken), Options{RequestTimeout: configured, APITransport: fixtureTransport(func(r *http.Request) (*http.Response, error) {
+			calls++
+			deadline, ok := r.Context().Deadline()
+			remaining := time.Until(deadline)
+			want := 2 * time.Minute
+			if configured > 0 {
+				want = configured
+			}
+			if !ok || remaining <= 0 || remaining > want || remaining < want-time.Second {
+				t.Fatal("unexpected create acknowledgement deadline", remaining, want)
+			}
+			return response(200, "application/json", `{}`), nil
+		})})
+		requireOK(t, err)
+		_, err = c.rpc(context.Background(), datasetService+"CreateDataset", struct{}{}, maxAccountBytes)
+		c.Close()
+		if err != nil || calls != 1 {
+			t.Fatal("create request was repeated", calls, err)
 		}
 	}
 }

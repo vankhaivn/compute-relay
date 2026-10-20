@@ -197,8 +197,8 @@ func TestNativeGPUQuotaCheckedImmediatelyBeforeSave(t *testing.T) {
 func TestNativeStagingLostCreateAckAndObservationNeverUpload(t *testing.T) {
 	p, plan, _, blobs, f := nativeRuntime(t, false)
 	f.fault = "lost-create-ack"
-	if _, err := p.Prepare(context.Background(), plan, "prep"); err == nil {
-		t.Fatal("lost creation acknowledgement established readiness")
+	if prepared, err := p.Prepare(context.Background(), plan, "prep"); err != nil || !prepared.Ready {
+		t.Fatal("exact observation did not resolve lost creation acknowledgement", err)
 	}
 	blobs.mode = "missing"
 	before := blobs.reads
@@ -237,14 +237,18 @@ func TestNativeStagingWaitsReadOnlyUntilCreatedDatasetIsVisible(t *testing.T) {
 }
 
 func TestNativeStagingNeverVisibleStopsWithoutAnotherCreate(t *testing.T) {
-	shortVisibility(t, 20*time.Millisecond, time.Millisecond)
-	p, plan, _, _, f := nativeRuntime(t, false)
-	f.fault, f.hiddenReads = "missing-name-403", 1<<30
-	_, err := p.Prepare(context.Background(), plan, "prep")
-	var problem domain.Problem
-	if !errors.As(err, &problem) || problem.Code != domain.CodeStagingFailed || problem.PublicDetails()[domain.ReasonDetail] != "staging_not_visible" ||
-		f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 || f.count("GetDataset") < 4 {
-		t.Fatal("an invisible created dataset was not observed read-only until the grace ended", err, f.calls)
+	for _, fault := range []string{"missing-name-403", "lost-create-ack"} {
+		t.Run(fault, func(t *testing.T) {
+			shortVisibility(t, 20*time.Millisecond, time.Millisecond)
+			p, plan, _, _, f := nativeRuntime(t, false)
+			f.fault, f.hiddenReads = fault, 1<<30
+			_, err := p.Prepare(context.Background(), plan, "prep")
+			var problem domain.Problem
+			if !errors.As(err, &problem) || problem.Code != domain.CodeStagingFailed || problem.PublicDetails()[domain.ReasonDetail] != "staging_not_visible" ||
+				f.count("CreateDataset") != 1 || f.count("StartBlobUpload") != 3 || f.count("GetDataset") < 4 {
+				t.Fatal("an invisible created dataset was not observed read-only until the grace ended", err, f.calls)
+			}
+		})
 	}
 }
 

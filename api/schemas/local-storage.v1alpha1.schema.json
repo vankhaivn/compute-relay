@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "inputs_bytes",
+    "results_bytes",
+    "database_bytes",
+    "other_bytes",
+    "total_bytes",
+    "measured_at"
+  ],
+  "properties": {
+    "inputs_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "results_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "database_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "other_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "measured_at": {
+      "$ref": "common.v1alpha1.schema.json#/$defs/rfc3339"
+    }
+  }
+}

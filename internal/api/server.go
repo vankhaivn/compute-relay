@@ -32,6 +32,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/hostwatchdog"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
+	"github.com/vankhaivn/compute-relay/internal/localstorage"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/retention"
@@ -48,10 +49,12 @@ type Config struct {
 	Connections    *connections.Service   // Optional live management; handlers never invoke providers.
 	Authorizations *executionauth.Service // Optional durable managed-attempt consent.
 	Results        *collection.Reader     // nil disables published artifact reads; no provider fallback.
-	ResultReleases *retention.Releaser    // Exact local result release; no provider effects.
-	Operations     *operations.Service    // nil disables durable controls; never use an in-memory fallback.
-	Cleanup        *cleanup.Service       // nil disables explicit remote cleanup admission; requires Operations.
-	Jobs           *admission.Service     // nil disables durable job routes; never use a memory fallback.
+	InputReleases  *retention.InputReleaser
+	LocalStorage   *localstorage.Reader
+	ResultReleases *retention.Releaser // Exact local result release; no provider effects.
+	Operations     *operations.Service // nil disables durable controls; never use an in-memory fallback.
+	Cleanup        *cleanup.Service    // nil disables explicit remote cleanup admission; requires Operations.
+	Jobs           *admission.Service  // nil disables durable job routes; never use a memory fallback.
 	Listen         string
 	MaxJSONBytes   int64
 	MaxUploadBytes int64
@@ -74,6 +77,8 @@ const FeatureManualResultCollection = "manual_result_collection"
 const FeatureJobCleanup = "job_cleanup"
 const FeatureJobCleanupPreview = "job_cleanup_preview"
 const FeatureResultRelease = "result_release"
+const FeatureInputRelease = "input_release"
+const FeatureLocalStorage = "local_storage"
 
 func DefaultConfig() Config {
 	return Config{
@@ -288,6 +293,12 @@ func (h *handler) info(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.config.Results != nil {
 		features = append(features, "artifact_list", "artifact_metadata", "artifact_download")
+	}
+	if h.config.InputReleases != nil {
+		features = append(features, FeatureInputRelease)
+	}
+	if h.config.LocalStorage != nil {
+		features = append(features, FeatureLocalStorage)
 	}
 	if h.config.ResultReleases != nil {
 		features = append(features, FeatureResultRelease)

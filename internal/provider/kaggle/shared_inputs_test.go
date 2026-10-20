@@ -275,3 +275,27 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(raw)
 }
+
+func TestCleanupDiscoveryDoesNotRequireSharedInputReadiness(t *testing.T) {
+	p, plan, saved, blobs, f := sharedRuntime(t)
+	if _, err := p.Prepare(t.Context(), plan, "prep"); err != nil {
+		t.Fatal(err)
+	}
+	// Its private attempt dataset remains exact, but an independent shared input
+	// has disappeared before late cleanup discovery.
+	f.shared = map[string]*fixtureDataset{}
+	beforeCreate, beforeUpload, beforeReads := f.count("CreateDataset"), f.count("StartBlobUpload"), blobs.reads
+	blobs.mode = "missing"
+	seen, err := p.ObserveStagingCleanup(t.Context(), plan, "prep")
+	if err != nil || seen.Status != provider.ReconciliationFound || seen.Prepared == nil || seen.Prepared.Ready || !seen.Prepared.Private {
+		t.Fatal("missing shared input blocked ownership discovery", seen, err)
+	}
+	*saved = *seen.Prepared
+	out, err := p.CleanupResource(t.Context(), provider.CleanupResourceRequest{CleanupRequest: provider.CleanupRequest{Remote: provider.RemoteReference{Identity: plan.Job.Identity, Resource: saved.Resource, Version: "prepared"}, LedgerID: "res_fixture", CreationOperationID: "prep", Mode: provider.CleanupDryRun}, Purpose: "staging", OwnershipOperationID: "prep", PlanSHA256: plan.Digest()})
+	if err != nil || !out.WouldDelete {
+		t.Fatal("confirmed staging stayed uncleanable", out, err)
+	}
+	if f.count("CreateDataset") != beforeCreate || f.count("StartBlobUpload") != beforeUpload || f.count("DeleteDataset") != 0 || blobs.reads != beforeReads {
+		t.Fatal("cleanup discovery created, uploaded or deleted", f.calls)
+	}
+}

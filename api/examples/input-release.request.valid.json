@@ -1,0 +1,11 @@
+{
+  "jobs": [
+    {
+      "job_id": "job_example",
+      "attempt_id": "att_example",
+      "artifact_id": "art_example",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "preview_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

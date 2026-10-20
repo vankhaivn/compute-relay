@@ -50,6 +50,7 @@ type Reference struct {
 	UpdatedAt        time.Time
 	Busy             bool
 	RecoveryRequired bool
+	InputReleased    bool // Input-only explicit age waiver; never bypasses ReleaseBlocker.
 }
 
 // ReleaseBlocker applies to both age-based expiry and an explicit consumer release.

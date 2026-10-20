@@ -115,6 +115,13 @@ func (h *handler) routes() {
 	add("GET", "jobs/{job}/artifacts", routePolicy{query: true}, h.artifacts)
 	add("GET", "jobs/{job}/artifacts/{artifact}", routePolicy{query: true}, h.artifacts)
 	add("GET", "jobs/{job}/artifacts/{artifact}/content", routePolicy{query: true, download: true}, h.artifacts)
+	if h.config.LocalStorage != nil {
+		add("GET", "local-storage", routePolicy{query: true}, h.localStorage)
+	}
+	if h.config.InputReleases != nil {
+		add("POST", "input-release-preview", routePolicy{bodyLimit: inputReleaseBodyLimit}, h.inputRelease)
+		add("POST", "input-releases", routePolicy{bodyLimit: inputReleaseBodyLimit}, h.inputRelease)
+	}
 	if h.config.ResultReleases != nil {
 		add("POST", "jobs/{job}/release-results", routePolicy{bodyLimit: 1024}, h.releaseResults)
 	}

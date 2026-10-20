@@ -68,6 +68,40 @@ ordinary retention worker also finishes pending deletion after a restart. Reusin
 another target returns 409. Already expired results can be acknowledged through the same exact
 identity. Availability is advertised by the `result_release` feature.
 
+## Release local inputs
+
+After durably importing results, preview exact collected jobs with
+`POST /v1/workspaces/{w}/input-release-preview` (read scope, no idempotency key):
+
+```json
+{"jobs":[{"job_id":"job_example","attempt_id":"att_example","artifact_id":"art_example","sha256":"<64 lowercase hex characters>"}]}
+```
+
+Supply 1–100 exact attempts, each through one verified `output` artifact. The output metadata
+remains usable after result release. The response includes normalized `jobs`, `files`,
+`releasable_bytes`, `preview_sha256`, `workspace_id` and `measured_at`; shared inputs count once.
+It contains no host paths or unbounded file list. No deletion or release is recorded by preview.
+
+Confirm with `POST /v1/workspaces/{w}/input-releases` (operate scope, `Idempotency-Key`), sending
+the same `jobs` plus `preview_sha256`. The server rechecks the entire inventory transactionally;
+a changed preview returns 409 and requires a new preview. Job order is immaterial. Unknown fields,
+duplicate attempts and mismatched output identities are rejected.
+
+Only requested collected attempts waive their seven-day input window. Every referencing attempt
+must be inactive, settled and free of local work; another attempt's window remains in effect
+unless that exact attempt was also explicitly released. Requested attempts' consent persists, so
+the ordinary sweep can release shared bytes once the remaining references become eligible.
+New retries never inherit another attempt's waiver. This action does not release results or
+remote resources, and preserves job and input metadata.
+
+The receipt returns `workspace_id`, `jobs`, `preview_sha256`, `released_at`, `files`, `bytes`,
+`pending_files` and `reclaimed_bytes`. Counters describe only the exact objects tombstoned by this
+confirmation, not shared objects that remain pinned. HTTP 200 means no pending files; HTTP 202
+means deletion remains pending. Up to 100 files are drained per request. Replay the original key
+and body to recover a lost response or continue deletion; the hourly sweep also recovers pending
+tombstones after restart. Reusing a key with a changed body returns 409. Availability is advertised
+by `input_release`. Requests are capped at 64 KiB and inventory scans at 100,000 objects/references.
+
 ## Cleanup
 
 Remote data stays until you delete it (or a [retention rule](#automatic-remote-retention) does).
@@ -122,6 +156,10 @@ stops running work, never acts while remote activity is possible, never repeats 
 deletion, and leaves shared cache, application images and Kaggle shared datasets alone.
 
 An unsubmitted attempt that ends with `staging_unconfirmed` releases compute capacity without
-claiming its staging dataset is absent. Empty resource references remain `creation_unresolved`
-and cannot authorize deletion. Recorded partial staging retains the normal exact-attempt cleanup
-guards; a terminal state alone never permits name guessing or shared dataset deletion.
+claiming its staging dataset is absent. Cleanup preview may observe the original frozen Kaggle
+staging identity after the attempt settles. Exact discovery records its numeric ID and marker,
+making it eligible for ordinary cleanup without changing the failed state or permitting compute.
+An exact HTTP 404 displays `absent`; it does not create a deletion target or durable absence
+receipt. A private-name 403 remains unknown. Empty references stay `creation_unresolved`, retaining
+local input pins until confirmed cleanup; a terminal state never permits guessing or shared
+dataset deletion.

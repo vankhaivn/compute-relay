@@ -1,0 +1,8 @@
+{
+  "inputs_bytes": 123,
+  "results_bytes": 456,
+  "database_bytes": 78,
+  "other_bytes": 9,
+  "total_bytes": 666,
+  "measured_at": "2026-10-21T00:00:00Z"
+}

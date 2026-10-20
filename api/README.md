@@ -29,6 +29,9 @@ request returns the original receipt, and a changed request with the same key co
 | `POST /jobs/{id}/workload-secrets`, `…/{a}/revoke`; `GET …/{a}` | execute | [Prepare and start](../docs/prepare-start.md#3-supply-secrets-optional) |
 | `GET /jobs/{id}/logs`, `/artifacts`, `/artifacts/{a}`, `/artifacts/{a}/content` | read | [Results](../docs/results-and-cleanup.md#download) |
 | `POST /jobs/{id}/cancel`, `/retry`, `/reconcile`, `/collect`, `/cleanup`; `GET /cleanup` | operate | [Jobs](../docs/jobs.md#observe-and-control), [Results](../docs/results-and-cleanup.md) |
+| `POST /jobs/{id}/release-results` | operate | [Result release](../docs/results-and-cleanup.md#release-local-results) |
+| `POST /input-release-preview`, `/input-releases` | read / operate | [Input release](../docs/results-and-cleanup.md#release-local-inputs) |
+| `GET /local-storage` | read | [Local inventory](../docs/operations.md#local-storage-inventory) |
 | `GET /operations/{id}` | read | [Results](../docs/results-and-cleanup.md#cleanup) |
 | `GET /providers`, `GET /connections[/{id}]`, `GET /connection-operations/{id}` | read | [Connections](../docs/connections.md) |
 | `POST /connections`, `POST /connections/{id}/actions` | manage | [Connections](../docs/connections.md) |

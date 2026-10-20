@@ -47,7 +47,7 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 	failed := func(status, reason string) stagingResponse {
 		return stagingResponse{Protocol: 1, Status: status, Reason: reason}
 	}
-	if mode != "create" && mode != "observe" && mode != "recheck" {
+	if mode != "create" && mode != "observe" && mode != "recheck" && mode != "cleanup_observe" {
 		return stagingResponse{}, ErrMode
 	}
 	r := plan.request
@@ -64,9 +64,16 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 		return failed("unknown", "staging_lookup_failed"+failureSuffix(err)), nil
 	}
 	if err == nil {
-		return observeStaging(ctx, client, plan, meta, mode == "observe" || mode == "create"), nil
+		return observeStaging(ctx, client, plan, meta, mode == "observe" || mode == "create", mode == "cleanup_observe"), nil
 	}
 	if mode != "create" {
+		// Missing-name 403 is useful before creation, but proves no absence for cleanup.
+		if mode == "cleanup_observe" {
+			var failure *kaggleapi.Error
+			if !errors.As(err, &failure) || failure.StatusCode != 404 {
+				return empty("unknown"), nil
+			}
+		}
 		return empty("not_found"), nil
 	}
 	// Shared datasets come first, so an attempt dataset exists only after every shared
@@ -105,17 +112,13 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 		return failed(status, reason), nil
 	}
 	if err := createDataset(ctx, client, r, files); err != nil {
-		return failed("unknown", "staging_create_failed"+failureSuffix(err)), nil
+		return failed("pending", "staging_create_failed"+failureSuffix(err)), nil
 	}
 	meta, err = client.GetDataset(ctx, resource)
 	if err != nil {
-		var apiErr *kaggleapi.Error
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 403 && kaggleapi.NameAbsent(err) {
-			return empty("pending"), nil
-		}
-		return failed("unknown", "staging_lookup_failed"+failureSuffix(err)), nil
+		return failed("pending", "staging_lookup_failed"+failureSuffix(err)), nil
 	}
-	return observeStaging(ctx, client, plan, meta, true), nil
+	return observeStaging(ctx, client, plan, meta, true, false), nil
 }
 
 type uploadProgress struct {
@@ -312,7 +315,7 @@ func matchingStaging(meta kaggleapi.Dataset, r stagingRequest) bool {
 
 // observeStaging names the step that left a result unknown, so a failed create read-back
 // reports it.
-func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingPlan, meta kaggleapi.Dataset, confirmStable bool) stagingResponse {
+func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingPlan, meta kaggleapi.Dataset, confirmStable, cleanupOnly bool) stagingResponse {
 	empty := func(status string) stagingResponse { return stagingResponse{Protocol: 1, Status: status} }
 	unknown := func(reason string) stagingResponse {
 		return stagingResponse{Protocol: 1, Status: "unknown", Reason: reason}
@@ -325,6 +328,18 @@ func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingP
 	result := stagingResponse{Protocol: 1, Status: "pending", DatasetID: string(meta.ID), Owner: r.Owner,
 		Slug: r.Slug, Version: 1, MarkerSHA256: r.MarkerSHA256, Private: meta.Private != nil && *meta.Private}
 	if !result.Private {
+		return result
+	}
+	if cleanupOnly {
+		// Cleanup needs ownership, not executable readiness. Shared datasets may
+		// already be absent; they are independent resources and never cleanup targets.
+		final, err := client.GetDataset(ctx, resource)
+		if err != nil {
+			return unknown("staging_readback_failed" + failureSuffix(err))
+		}
+		if !matchingStaging(final, r) || final.ID != meta.ID || final.Private == nil || !*final.Private || final.LastUpdated != meta.LastUpdated {
+			return empty("invalid")
+		}
 		return result
 	}
 	for _, entry := range plan.shared {

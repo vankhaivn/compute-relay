@@ -99,6 +99,7 @@ type clientState struct {
 	api           http.RoundTripper
 	storage       http.RoundTripper
 	request       time.Duration
+	createRequest time.Duration
 	transfer      time.Duration
 	logs          time.Duration
 	pacing        *RequestPacer
@@ -133,13 +134,17 @@ func New(token []byte, options Options) (*Client, error) {
 		}
 	}
 	if options.APITransport == nil {
-		options.APITransport = transport()
+		options.APITransport = transport(2 * time.Minute)
 	}
 	if options.StorageTransport == nil {
-		options.StorageTransport = transport()
+		options.StorageTransport = transport(10 * time.Second)
+	}
+	createRequest := options.RequestTimeout
+	if createRequest == 0 {
+		createRequest = 2 * time.Minute
 	}
 	return &Client{state: &clientState{token: bytes.Clone(token), api: options.APITransport, storage: options.StorageTransport,
-		request: request, transfer: transfer, logs: logs, pacing: pacing, accountScope: options.AccountScope, credentialKey: sha256.Sum256(token)}}, nil
+		request: request, createRequest: createRequest, transfer: transfer, logs: logs, pacing: pacing, accountScope: options.AccountScope, credentialKey: sha256.Sum256(token)}}, nil
 }
 
 func timeout(value, fallback, maximum time.Duration) (time.Duration, bool) {
@@ -161,12 +166,12 @@ func validToken(token []byte) bool {
 	return true
 }
 
-func transport() *http.Transport {
+func transport(headerTimeout time.Duration) *http.Transport {
 	return &http.Transport{
 		Proxy:                  nil,
 		DialContext:            (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
 		TLSHandshakeTimeout:    5 * time.Second,
-		ResponseHeaderTimeout:  10 * time.Second,
+		ResponseHeaderTimeout:  headerTimeout,
 		DisableCompression:     true,
 		DisableKeepAlives:      true,
 		MaxResponseHeaderBytes: 64 << 10,
@@ -272,7 +277,13 @@ func (c *Client) rpc(parent context.Context, op string, payload any, limit int64
 }
 
 func (c *Client) sendRPC(parent context.Context, op string, payload any) (*rpcResponse, error) {
-	ctx, cancel := context.WithTimeout(parent, c.state.request)
+	budget := c.state.request
+	// Dataset creation can persist uploaded blobs before answering. Give its one
+	// send a bounded acknowledgement budget; reads retain their short deadlines.
+	if op == datasetService+"CreateDataset" {
+		budget = c.state.createRequest
+	}
+	ctx, cancel := context.WithTimeout(parent, budget)
 	request, err := c.apiRequest(ctx, op, payload)
 	if err != nil {
 		cancel()

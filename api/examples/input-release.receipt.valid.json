@@ -1,0 +1,17 @@
+{
+  "workspace_id": "app",
+  "jobs": [
+    {
+      "job_id": "job_example",
+      "attempt_id": "att_example",
+      "artifact_id": "art_example",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "files": 1,
+  "bytes": 123,
+  "preview_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "released_at": "2026-10-21T00:00:00Z",
+  "pending_files": 0,
+  "reclaimed_bytes": 123
+}

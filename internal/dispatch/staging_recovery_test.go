@@ -18,9 +18,9 @@ func TestReconcilePreSubmissionUsesOriginalStagingIntent(t *testing.T) {
 			if phase == Ready {
 				j, state = readyFixture(t)
 			} else if phase == Attention {
-				for i := 0; i < MaxFailures; i++ {
-					j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingFailed})
-				}
+				j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingFailed})
+				// A journal written before the observation grace was introduced.
+				j.Phase, state.Orchestration = Attention, domain.OrchestrationNeedsAttention
 			}
 			old := j
 			j, state = apply(t, j, state, Action{Kind: RequestReconciliation})
@@ -94,10 +94,10 @@ func TestStagingFailureReasonSurvivesDeferredReconciliations(t *testing.T) {
 	w, plan, prep := fixtureWork(t)
 	j, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prep})
 	j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingFailed, Reason: "shared_create_failed_http_500"})
-	for j.Phase != Attention {
+	for i := 0; i < MaxFailures+2; i++ {
 		j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingNotReady})
 	}
-	if j.Problem.Code != domain.CodeStagingNotReady || j.Problem.PublicDetails()[domain.ReasonDetail] != "shared_create_failed_http_500" {
+	if j.Phase != Staging || j.PreparationObservationStarted == nil || j.Problem.Code != domain.CodeStagingNotReady || j.Problem.PublicDetails()[domain.ReasonDetail] != "shared_create_failed_http_500" {
 		t.Fatal("deferred reconciliation lost the failed step", j.Problem)
 	}
 	if _, _, _, err := Apply(w.Journal, w.Job.Attempt.State, Action{Kind: Fault, Code: domain.CodeStagingFailed, Reason: "Not closed"}, time.Now()); !errors.Is(err, ErrInvalid) {

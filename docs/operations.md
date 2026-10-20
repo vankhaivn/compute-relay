@@ -113,6 +113,26 @@ deletes remote data — see [remote retention](results-and-cleanup.md#automatic-
 An explicit [consumer release](results-and-cleanup.md#release-local-results) can waive the age
 window for an exact verified result. It keeps the same active-work guards and durable tombstones;
 the hourly sweep also recovers any pending file deletion from that release.
+Exact collected attempts can also [release their inputs](results-and-cleanup.md#release-local-inputs)
+through preview and confirmation, retaining every shared-reference and active-work guard.
+A cancelled, inactive attempt whose explicit uncollected discard completed with all remote
+resource deletions/absences confirmed no longer pins inputs for result recovery. Its seven-day
+input window starts at that cleanup completion; its historical attention/result state remains.
+The same input-only rule covers a terminal preparation that never submitted compute once exact
+staging cleanup is confirmed. It preserves pending readiness and the failed history; discovery
+alone, failed cleanup and unknown cleanup keep inputs pinned.
+
+## Local storage inventory
+
+`GET /v1/workspaces/{w}/local-storage` requires read scope and the `local_storage` capability.
+It returns `inputs_bytes`, `results_bytes`, `database_bytes`, `other_bytes`, `total_bytes` and
+`measured_at`. Sizes are logical regular-file bytes under this Relay installation; database bytes
+include WAL/SHM files, other bytes include remaining state/markers, and symlinks are not followed.
+No paths, file contents or credentials are exposed. The snapshot is cached for one minute;
+`?refresh=true` forces a fresh measurement. A disappearing file during measurement is omitted;
+other filesystem errors return 503 without a partial total. Applications must use this API rather
+than walking or deleting Relay's runtime directories.
+
 
 ## Recovery
 
@@ -131,7 +151,7 @@ flowchart LR
 | Lost response to a request | Resend the identical request with the **same** key; then read state. |
 | Error before Relay recorded intent | Nothing external happened; check state, then retry the local step. |
 | Remote call uncertain after intent was recorded | Relay observes the original resource only. Wait; do not resubmit. |
-| Staging stalled before submission | `POST /jobs/{id}/reconcile` observes the original staging. Without a previously confirmed resource, one bounded unsuccessful pass ends the attempt with `staging_unconfirmed`; a new attempt requires explicit intent. Confirmed pending staging stays distinct. |
+| Staging stalled before submission | `POST /jobs/{id}/reconcile` observes the original staging. Without a confirmed resource, Relay observes for a durable two-minute grace from the first preparation fault, then ends with `staging_unconfirmed` if still unresolved. Restart resumes reads; a new attempt requires explicit intent. Confirmed pending staging stays distinct. |
 | Submission rejected before reaching the provider | Read `problem.details.reason`, fix the cause, retry explicitly. |
 | Temporary observation outage after confirmed submission | Relay keeps observing the same run with backoff, including after restart. No resubmission. |
 | Remote state active or unknown | Capacity stays reserved. Do not delete; reconcile if the attempt requires attention. |

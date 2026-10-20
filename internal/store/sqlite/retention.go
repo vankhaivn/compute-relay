@@ -100,6 +100,15 @@ func retentionReference(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, j
 }
 
 func retentionInputReferences(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id domain.ObjectID) ([]retention.Reference, error) {
+	return retentionInputReferencesReleased(ctx, tx, w, id, nil)
+}
+
+type inputReleaseAttempt struct {
+	job     domain.JobID
+	attempt domain.AttemptID
+}
+
+func retentionInputReferencesReleased(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, id domain.ObjectID, selected map[inputReleaseAttempt]bool) ([]retention.Reference, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT a.job_id,a.attempt_id FROM job_objects j JOIN attempts a ON a.workspace_id=j.workspace_id AND a.job_id=j.job_id WHERE j.workspace_id=? AND j.object_id=? ORDER BY a.job_id,a.attempt_id LIMIT ?`, string(w), string(id), retention.MaxReferences+1)
 	if err != nil {
 		return nil, dbError(err)
@@ -130,6 +139,59 @@ func retentionInputReferences(ctx context.Context, tx *sql.Tx, w domain.Workspac
 		r, err := retentionReference(ctx, tx, w, k.job, k.attempt)
 		if err != nil {
 			return nil, err
+		}
+		var cleanupBusy bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM operations WHERE workspace_id=? AND job_id=? AND attempt_id=? AND kind='cleanup' AND status IN ('accepted','running'))`, w, k.job, k.attempt).Scan(&cleanupBusy); err != nil {
+			return nil, dbError(err)
+		}
+		r.Busy = r.Busy || cleanupBusy
+		// Confirmed cleanup can end input-only recovery after a cancelled result
+		// discard or a terminal preparation that never submitted execution.
+		cancelled := r.State.Execution == domain.ExecutionCancelled && r.State.Cancellation == domain.CancellationConfirmed && r.State.RemoteActivity == domain.RemoteActivityInactive
+		unsubmitted := r.State.Orchestration.Terminal() && r.State.Execution == domain.ExecutionNotSubmitted && r.State.RemoteActivity == domain.RemoteActivityNotStarted
+		if !r.Busy && unsubmitted {
+			target, err := controlTarget(ctx, tx, w, k.job, k.attempt)
+			if err != nil {
+				return nil, err
+			}
+			work, err := controlWork(ctx, tx, target)
+			if errors.Is(err, operations.ErrUnresolved) {
+				unsubmitted = false
+			} else if err != nil {
+				return nil, err
+			} else {
+				unsubmitted = work.Journal.Plan != nil && !work.Journal.SubmitStarted
+			}
+		}
+		if !r.Busy && (cancelled || unsubmitted) {
+			var at sql.NullString
+			err := tx.QueryRowContext(ctx, `SELECT max(json_extract(o.record,'$.Operation.UpdatedAt')) FROM operations o
+             WHERE o.workspace_id=? AND o.job_id=? AND o.attempt_id=? AND o.kind='cleanup' AND o.status='succeeded'
+             AND (? OR json_extract(o.request_json,'$.discard_uncollected')=1)
+             AND EXISTS(SELECT 1 FROM cleanup_resources c WHERE c.workspace_id=o.workspace_id AND c.operation_id=o.operation_id)
+             AND NOT EXISTS(SELECT 1 FROM cleanup_resources c WHERE c.workspace_id=o.workspace_id AND c.operation_id=o.operation_id AND c.state NOT IN ('deleted','absent'))`, w, k.job, k.attempt, unsubmitted).Scan(&at)
+			if err != nil {
+				return nil, dbError(err)
+			}
+			if at.Valid {
+				if cancelled {
+					r.State.Orchestration = domain.OrchestrationCancelled
+					r.State.Result = domain.ResultExpired
+				}
+				r.RecoveryRequired = false
+				r.UpdatedAt, err = time.Parse(time.RFC3339Nano, at.String)
+				if err != nil {
+					return nil, ErrCorrupt
+				}
+			}
+		}
+		var released bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM input_released_jobs WHERE workspace_id=? AND job_id=? AND attempt_id=?)`, w, k.job, k.attempt).Scan(&released); err != nil {
+			return nil, dbError(err)
+		}
+		if (released || selected[inputReleaseAttempt{k.job, k.attempt}]) && r.ReleaseBlocker() == "" {
+			// The input-specific assessor ignores this reference's age only.
+			r.InputReleased = true
 		}
 		refs = append(refs, r)
 	}
@@ -206,7 +268,7 @@ func expireInput(ctx context.Context, tx *sql.Tx, item retentionItem, now time.T
 	if err != nil {
 		return 0, err
 	}
-	decision, err := p.Assess(now, item.recorded, refs)
+	decision, err := assessInputRetention(p, now, item.recorded, refs)
 	if err != nil {
 		return 0, err
 	}

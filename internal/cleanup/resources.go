@@ -35,14 +35,16 @@ type ResourceRepository interface {
 }
 
 type PreviewPlan struct {
-	WorkspaceID domain.WorkspaceID
-	JobID       domain.JobID
-	AttemptID   domain.AttemptID
-	Revision    uint64
-	Binding     provider.BindingSnapshot
-	Resources   []Resource
-	Eligible    bool
-	Reason      string
+	WorkspaceID     domain.WorkspaceID
+	JobID           domain.JobID
+	AttemptID       domain.AttemptID
+	Revision        uint64
+	Binding         provider.BindingSnapshot
+	Resources       []Resource
+	Eligible        bool
+	Reason          string
+	UnconfirmedPlan *provider.Plan
+	PreparationID   domain.OperationID
 }
 
 func (p PreviewPlan) Fingerprint() domain.SHA256Digest {
@@ -72,4 +74,13 @@ type Preview struct {
 	Eligible    bool               `json:"eligible"`
 	Reason      string             `json:"reason"`
 	Resources   []ResourcePreview  `json:"resources"`
+}
+
+// PreparationRepository records late identity evidence without reopening an attempt.
+type PreparationRepository interface {
+	RecordCleanupPreparation(context.Context, domain.WorkspaceID, string, domain.JobID, domain.AttemptID, PreviewPlan, provider.Prepared) error
+}
+
+type StagingObserver interface {
+	ObserveStagingCleanup(context.Context, provider.Plan, domain.OperationID) (provider.PreparationObservation, error)
 }

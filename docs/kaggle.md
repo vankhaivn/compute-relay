@@ -20,7 +20,8 @@ changing the flag, run a connection `check` to get a selection for it.
 | Wall time | At most 86400 s (Kaggle's session limit). |
 | Inputs | Up to 256 inputs, staged in one private attempt dataset with a marker file (≤2 MiB). Inputs of 256 MiB or more go to [shared datasets](#shared-input-datasets). |
 | Staging checks | Uploads are SHA-checked against the frozen digest; readiness and recovery compare metadata only, and the runner rehashes every input before use. |
-| Staging visibility | Kaggle may hide a new dataset for a while; Relay polls read-only for up to 2 minutes, then stops with `staging_not_visible`. |
+| Staging visibility | After an acknowledged or uncertain create, Relay polls the exact owner/slug, version 1 and marker for up to 2 minutes. Dispatch retains a separate durable two-minute observation grace from its first preparation fault. |
+| Create acknowledgement | CreateDataset has one send and up to 2 minutes to answer; ordinary metadata requests retain a 15-second deadline. Caller budgets can shorten both. |
 | Request pacing | API requests are admitted at least 500 ms apart per configured account, plus 0–100 ms jitter, and at least 100 ms apart across the provider. Concurrent callers share admission through response headers. |
 | Rate limits | Metadata, logs and download tickets honor HTTP 429 `Retry-After` (seconds or HTTP date), with up to three sends per read. Missing or invalid delays use 30 s then 60 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. |
 | GPU quota | A GPU authorization needs fresh, sufficient known quota. Connections to one account share it. No reset time is reported. |
@@ -34,16 +35,23 @@ changing the flag, run a connection `check` to get a selection for it.
 
 A lost staging or submission response leaves the original intent for observation; a "not found"
 read never triggers another create or submit. When staging has never acquired a confirmed dataset
-identity, one reconciliation pass uses the control-call budget (one minute by default). If that
-pass cannot confirm the resource, the unsubmitted attempt ends as `failed` with reason
+identity, reconciliation reads use the control-call budget (one minute by default) within a
+durable two-minute grace starting at the first preparation fault, after upload. A restart does
+not reset that grace or permit uploading again. If observation still cannot confirm the resource,
+the unsubmitted attempt ends as `failed` with reason
 `staging_unconfirmed`, releasing its account slot. A 403, 429 or timeout still means unknown,
 not absent. A recorded private dataset that is still processing remains a separate pending state.
-Historical attention attempts follow the same bound after an explicit reconciliation request.
+Historical attention attempts without a saved grace start it on their first unsuccessful
+observation after an explicit reconciliation request.
 
-Terminalization preserves the original intent and unknown resource evidence. Cleanup cannot delete
-an unconfirmed dataset by guessing its name; confirmed partial resources use the existing exact
-attempt cleanup, and shared input datasets remain untouched. Mutations never retry because of HTTP 429. A file
-upload that failed before its dataset was created can be sent once more with a new ticket.
+Terminalization preserves the original intent and unknown resource evidence. Cleanup preview can
+observe this settled attempt using its frozen staging plan. Exact discovery records the numeric
+identity for ordinary cleanup without reopening the failed attempt. An exact HTTP 404 displays
+`absent`; it creates no deletion target or durable absence receipt. Missing-name 403 remains
+unknown. Until identity is confirmed, the ledger stays `creation_unresolved` and local input pins
+remain. Confirmed partial resources use exact-attempt cleanup; shared inputs remain untouched.
+Mutations never retry because of HTTP 429. A file upload that failed before its dataset was created
+can be sent once more with a new ticket.
 
 Rate-limit cooldowns apply across all API endpoints and clients for the same account, including
 credential replacement. A limit before account discovery applies provider-wide. Mutations share

@@ -145,3 +145,13 @@ func (r cleanupResponse) valid() bool {
 	}
 	return false
 }
+
+// ObserveStagingCleanup resolves only the original preparation after compute has
+// ended. NotFound requires exact HTTP 404; a private-name 403 stays unknown.
+func (p *RuntimeAdapter) ObserveStagingCleanup(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
+	if p == nil || p.stager == nil || plan.Job.Binding != p.binding.Binding {
+		return provider.PreparationObservation{}, ErrRuntimeBinding
+	}
+	seen, _, err := p.stager.check(ctx, "cleanup_observe", plan, operation)
+	return seen, err
+}

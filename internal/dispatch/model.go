@@ -42,23 +42,27 @@ const (
 // Journal is INTERNAL recovery evidence, not a public status response. Request URLs
 // are deliberately absent. Plans and remote references must not be logged wholesale.
 type Journal struct {
-	Version            int64                        `json:"version"`
-	Phase              Phase                        `json:"phase"`
-	Plan               *provider.Plan               `json:"plan,omitempty"`
-	PreparationID      domain.OperationID           `json:"preparation_id,omitempty"`
-	Prepared           *provider.Prepared           `json:"prepared,omitempty"`
-	SubmitStarted      bool                         `json:"submit_started"`
-	StartAuthorization *provider.StartAuthorization `json:"start_authorization,omitempty"`
-	Remote             *provider.RemoteReference    `json:"remote,omitempty"`
-	Observation        *provider.Observation        `json:"observation,omitempty"`
-	Problem            *domain.Problem              `json:"problem,omitempty"`
-	Failures           int                          `json:"failures"`
+	Version                       int64                        `json:"version"`
+	Phase                         Phase                        `json:"phase"`
+	Plan                          *provider.Plan               `json:"plan,omitempty"`
+	PreparationID                 domain.OperationID           `json:"preparation_id,omitempty"`
+	PreparationObservationStarted *time.Time                   `json:"preparation_observation_started,omitempty"`
+	Prepared                      *provider.Prepared           `json:"prepared,omitempty"`
+	SubmitStarted                 bool                         `json:"submit_started"`
+	StartAuthorization            *provider.StartAuthorization `json:"start_authorization,omitempty"`
+	Remote                        *provider.RemoteReference    `json:"remote,omitempty"`
+	Observation                   *provider.Observation        `json:"observation,omitempty"`
+	Problem                       *domain.Problem              `json:"problem,omitempty"`
+	Failures                      int                          `json:"failures"`
 }
 
 func (j Journal) Recoverable() bool {
 	return j.Phase == Staging || j.Phase == Ready || j.Phase == Submitting || j.Phase == Submitted
 }
 func (j Journal) Valid() bool {
+	if j.PreparationObservationStarted != nil && (!scheduler.ValidTime(*j.PreparationObservationStarted) || j.Plan == nil) {
+		return false
+	}
 	if j.StartAuthorization != nil && (!j.SubmitStarted || j.Prepared == nil || j.StartAuthorization.Validate(*j.Prepared) != nil) {
 		return false
 	}

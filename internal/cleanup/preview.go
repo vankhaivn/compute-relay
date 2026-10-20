@@ -38,7 +38,6 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	if len(plan.Resources) > operations.MaxCleanupResources || plan.WorkspaceID != w || plan.JobID != job || plan.AttemptID != attempt {
 		return Preview{}, ErrInvalid
 	}
-	result := Preview{WorkspaceID: w, JobID: job, AttemptID: attempt, ObservedAt: s.clock.Now().UTC(), Eligible: plan.Eligible, Reason: plan.Reason, Resources: make([]ResourcePreview, 0, len(plan.Resources))}
 	var adapter provider.Provider
 	if s.previewResolver != nil {
 		adapter, _ = s.previewResolver.Resolve(plan.Binding)
@@ -52,8 +51,35 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 		}
 		return bindingErr == nil
 	}
+	// Resolve only a settled attempt's original staging intent, with metadata reads.
+	// Exact discovery enriches cleanup evidence; it never reopens dispatch.
+	absent := false
+	if observer, ok := adapter.(StagingObserver); ok && plan.UnconfirmedPlan != nil && verified() {
+		seen, observeErr := observer.ObserveStagingCleanup(ctx, plan.UnconfirmedPlan.Clone(), plan.PreparationID)
+		if observeErr == nil && seen.Validate(*plan.UnconfirmedPlan, plan.PreparationID) == nil {
+			switch seen.Status {
+			case provider.ReconciliationFound:
+				if recorder, ok := repo.(PreparationRepository); ok && seen.Prepared.Private {
+					if err := recorder.RecordCleanupPreparation(ctx, w, p.TokenID(), job, attempt, plan, *seen.Prepared); err != nil {
+						return Preview{}, err
+					}
+					plan, err = repo.PlanCleanup(ctx, w, p.TokenID(), job, attempt, discard)
+					if err != nil {
+						return Preview{}, err
+					}
+				}
+			case provider.ReconciliationNotFound:
+				absent = true
+			}
+		}
+	}
+	result := Preview{WorkspaceID: w, JobID: job, AttemptID: attempt, ObservedAt: s.clock.Now().UTC(), Eligible: plan.Eligible, Reason: plan.Reason, Resources: make([]ResourcePreview, 0, len(plan.Resources))}
 	for _, resource := range plan.Resources {
 		view := previewResource(ctx, plan, resource, adapter, verified)
+		if absent && resource.Request.Purpose == "staging" && resource.Reason == "creation_unresolved" {
+			view.Observation, view.Reason = "absent", "absence_observed"
+			result.Reason = "absence_observed"
+		}
 		result.Resources = append(result.Resources, view)
 		if !view.Eligible {
 			if result.Eligible {

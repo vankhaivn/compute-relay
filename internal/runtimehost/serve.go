@@ -18,6 +18,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
+	"github.com/vankhaivn/compute-relay/internal/localstorage"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -127,6 +128,11 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	sweeper, err := h.retentionSweeper()
 	if err != nil {
 		return err
+	}
+	cfg.LocalStorage = localstorage.New(h.root.Path)
+	cfg.InputReleases, err = retention.NewInputReleaser(h.access, h.store, sweeper)
+	if err != nil {
+		return ErrState
 	}
 	cfg.ResultReleases, err = retention.NewReleaser(h.access, h.store, sweeper)
 	if err != nil {

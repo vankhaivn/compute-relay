@@ -290,6 +290,10 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		if old.Phase == Rejected || old.Phase == Failed || old.Phase == Collectible || old.Phase == Attention || old.Phase == Prevented {
 			return Journal{}, state, "", ErrConflict
 		}
+		if unconfirmedPreparation(old) && j.PreparationObservationStarted == nil {
+			started := now.UTC()
+			j.PreparationObservationStarted = &started
+		}
 		j.Failures++
 		if j.Failures > MaxFailures {
 			j.Failures = MaxFailures
@@ -332,7 +336,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			// A known remote run needs only read-only observation after a transient outage.
 			observeAgain := old.Phase == Submitted && old.Remote != nil && state.Cancellation == domain.CancellationNotRequested &&
 				(a.Code == domain.CodeProviderUnreachable || a.Code == domain.CodeProviderStateUnknown)
-			if permanent || j.Failures == MaxFailures && !observeAgain {
+			if permanent || j.Failures == MaxFailures && !observeAgain && !unconfirmedPreparation(old) {
 				j.Phase = Attention
 				next.Orchestration = domain.OrchestrationNeedsAttention
 				if cancellationPending(state) {

@@ -75,7 +75,7 @@ func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation doma
 	}
 	seen, reason, err := s.check(ctx, "create", plan, operation)
 	if errors.Is(err, errStagingVisibilityPending) {
-		// Creation was acknowledged but the exact dataset is briefly unreadable.
+		// Creation may have succeeded even when its acknowledgement was lost.
 		// Poll reads only; never repeat upload tickets or CreateDataset.
 		seen, err = s.awaitCreatedVisibility(ctx, plan, operation)
 		reason = "staging_not_visible"
@@ -100,21 +100,25 @@ func stagingFailure(reason string) error {
 
 func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	var none provider.PreparationObservation
-	deadline := time.NewTimer(stagingVisibilityGrace)
-	defer deadline.Stop()
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, stagingVisibilityGrace)
+	defer cancel()
 	for {
 		seen, _, err := s.check(ctx, "observe", plan, operation)
-		if err != nil || seen.Status != provider.ReconciliationNotFound {
+		if errors.Is(err, ErrStagingIdentity) || errors.Is(err, ErrProtocol) || provider.IsLocalStateError(err) || err == nil && seen.Status == provider.ReconciliationFound {
 			return seen, err
+		}
+		if ctx.Err() != nil && parent.Err() == nil {
+			return provider.PreparationObservation{Status: provider.ReconciliationUnknown}, nil
 		}
 		wait := time.NewTimer(stagingVisibilityPoll)
 		select {
 		case <-ctx.Done():
 			wait.Stop()
-			return none, ctx.Err()
-		case <-deadline.C:
-			wait.Stop()
-			return seen, nil
+			if parent.Err() == nil {
+				return provider.PreparationObservation{Status: provider.ReconciliationUnknown}, nil
+			}
+			return none, parent.Err()
 		case <-wait.C:
 		}
 	}
