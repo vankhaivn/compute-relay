@@ -161,16 +161,17 @@ func (systemClock) Now() time.Time { return time.Now().UTC() }
 type Kind string
 
 const (
-	BeginPreparation      Kind = "begin_preparation"
-	PreparationSeen       Kind = "preparation_seen"
-	BeginSubmission       Kind = "begin_submission"
-	SubmissionSeen        Kind = "submission_seen"
-	ObservationSeen       Kind = "observation_seen"
-	Fault                 Kind = "fault"
-	PreventDispatch       Kind = "prevent_dispatch"
-	ExpireDispatch        Kind = "expire_dispatch"
-	RefuseNewWork         Kind = "refuse_new_work"
-	RequestReconciliation Kind = "request_reconciliation"
+	BeginPreparation          Kind = "begin_preparation"
+	PreparationSeen           Kind = "preparation_seen"
+	EndUnconfirmedPreparation Kind = "end_unconfirmed_preparation"
+	BeginSubmission           Kind = "begin_submission"
+	SubmissionSeen            Kind = "submission_seen"
+	ObservationSeen           Kind = "observation_seen"
+	Fault                     Kind = "fault"
+	PreventDispatch           Kind = "prevent_dispatch"
+	ExpireDispatch            Kind = "expire_dispatch"
+	RefuseNewWork             Kind = "refuse_new_work"
+	RequestReconciliation     Kind = "request_reconciliation"
 )
 
 type Action struct {

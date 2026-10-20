@@ -542,7 +542,7 @@ func systemCleanupPrepared(t *testing.T, f *managedTestFixture, id scheduler.Ide
 }
 
 func TestSystemStagingObservationAndSubmissionKeepPreparationBudgetAndParentDeadline(t *testing.T) {
-	for _, parentBudget := range []time.Duration{10 * time.Minute, 2 * time.Minute} {
+	for _, parentBudget := range []time.Duration{10 * time.Minute, 10 * time.Second} {
 		t.Run(parentBudget.String(), func(t *testing.T) {
 			f, e, trace := newSystemDispatch(t, fake.DefaultScenario())
 			id := f.dispatchJob(t, "app", 1)
@@ -573,14 +573,18 @@ func TestSystemStagingObservationAndSubmissionKeepPreparationBudgetAndParentDead
 					deadline = e.deadlines.start
 				}
 				expected := min(config.PreparationTimeout, parentBudget)
+				if phase == dispatch.Staging {
+					expected = min(expected, config.ControlTimeout)
+				}
 				remaining := deadline.Sub(start)
 				if remaining < expected-5*time.Second || remaining > expected+5*time.Second || deadline.After(parentDeadline) {
 					t.Fatal("incorrect bounded callback deadline", phase, remaining, expected)
 				}
-				if parentBudget < config.PreparationTimeout && !deadline.Equal(parentDeadline) {
+				if parentBudget <= expected && !deadline.Equal(parentDeadline) {
 					t.Fatal("shorter parent deadline lost", phase)
 				}
-				if b := e.deadlines.binding.Sub(start); b < config.ControlTimeout-5*time.Second || b > config.ControlTimeout+5*time.Second {
+				bindingBudget := min(config.ControlTimeout, parentBudget)
+				if b := e.deadlines.binding.Sub(start); b < bindingBudget-5*time.Second || b > bindingBudget+5*time.Second {
 					t.Fatal("binding verification lost control budget", b)
 				}
 			}

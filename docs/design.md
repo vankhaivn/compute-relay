@@ -21,7 +21,9 @@ These rules hold for every change. Breaking one needs an explicit design decisio
 5. **Workers are fenced.** Every claim has a renewable lease with a fence; stale owners cannot write
    progress. An expired lease does not prove a remote call stopped.
 6. **Capacity is reserved conservatively.** Prepared and uncertain attempts hold shared
-   account/machine capacity until inactivity is confirmed.
+   account/machine capacity until inactivity is confirmed or a durable terminal transition
+   prevents submission before it starts. Unknown staging existence and cleanup eligibility
+   remain separate; releasing compute capacity never proves a staging resource absent.
 7. **Unknown stays unknown.** Execution, cancellation, result availability, cleanup and hardware
    release are separate facts. A 202 is only a local receipt.
 8. **Results are all-or-nothing.** Publish a complete, bounded, hash-verified artifact set

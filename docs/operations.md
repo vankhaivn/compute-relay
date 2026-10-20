@@ -128,7 +128,7 @@ flowchart LR
 | Lost response to a request | Resend the identical request with the **same** key; then read state. |
 | Error before Relay recorded intent | Nothing external happened; check state, then retry the local step. |
 | Remote call uncertain after intent was recorded | Relay observes the original resource only. Wait; do not resubmit. |
-| Staging stalled before submission | `POST /jobs/{id}/reconcile` resumes observing the original staging. |
+| Staging stalled before submission | `POST /jobs/{id}/reconcile` observes the original staging. Without a previously confirmed resource, one bounded unsuccessful pass ends the attempt with `staging_unconfirmed`; a new attempt requires explicit intent. Confirmed pending staging stays distinct. |
 | Submission rejected before reaching the provider | Read `problem.details.reason`, fix the cause, retry explicitly. |
 | Temporary observation outage after confirmed submission | Relay keeps observing the same run with backoff, including after restart. No resubmission. |
 | Remote state active or unknown | Capacity stays reserved. Do not delete; reconcile if the attempt requires attention. |

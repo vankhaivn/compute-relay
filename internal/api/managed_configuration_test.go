@@ -1,6 +1,8 @@
 package api_test
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -49,7 +51,7 @@ func TestManagedHTTPLiveConfigurationPreservesOldAdmissionReplay(t *testing.T) {
 	if replay.JobID != original.JobID || !replay.Replay {
 		t.Fatal("old admitted job no longer replays")
 	}
-	f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "stale-selection-job", oldJobBody, 409)
+	f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "compatible-selection-job", oldJobBody, 202)
 	newJobBody := strings.Replace(oldJobBody, connection.Selection.Profile, current.Selection.Profile, 1)
 	newJobBody = strings.Replace(newJobBody, `"remote_wall_seconds":120`, `"remote_wall_seconds":3600`, 1)
 	f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "after-configuration-job", newJobBody, 202)
@@ -91,4 +93,27 @@ func TestManagedHTTPConfigurationRejectsInvalidShapeWithoutMutation(t *testing.T
 	if string(before) != string(after) || f.adapter.verifies.Load() != 1 {
 		t.Fatal("invalid configuration partially changed the connection")
 	}
+}
+
+func TestManagedHTTPPendingCheckRetriesExactAdmission(t *testing.T) {
+	f := setupManagedHTTP(t, true)
+	connection := verifiedManagedConnection(t, f)
+	body := strings.Replace(jobBody, "default-gpu", connection.Selection.Profile, 1)
+	action := fmt.Sprintf(`{"action":"check","expected_revision":%d}`, connection.Revision)
+	f.call(t, "POST", "/v1/workspaces/a/connections/"+connection.ID+"/actions", "manage", "pending-check", action, 202)
+	headers, raw := f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "pending-job", body, 429)
+	var response struct {
+		Error struct {
+			Code              string            `json:"code"`
+			RecommendedAction string            `json:"recommended_action"`
+			Details           map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &response) != nil || response.Error.Code != "REQUEST_LIMIT_EXCEEDED" || response.Error.RecommendedAction != "wait" || response.Error.Details["reason"] != "connection_update_pending" || headers.Get("Retry-After") != "1" {
+		t.Fatal("pending update did not expose retry metadata", string(raw))
+	}
+	if worked, err := f.service.RunOnce(context.Background()); err != nil || !worked {
+		t.Fatal("check failed", err)
+	}
+	f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "pending-job", body, 202)
 }

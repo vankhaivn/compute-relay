@@ -27,7 +27,8 @@ func replayAdmission(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, keyH
 }
 
 type HostHealthAdmission struct {
-	Replay  *admission.Receipt
+	Replay *admission.Receipt
+	// Profile is the current compatible policy used only for admission health evidence.
 	Profile admission.Profile
 	Target  *hosthealth.Target
 }
@@ -48,7 +49,7 @@ func (s *Store) PreviewHostHealthAdmission(ctx context.Context, w domain.Workspa
 		if err != nil || result.Replay != nil {
 			return err
 		}
-		result.Profile, _, err = resolveJob(ctx, tx, w, req)
+		_, result.Profile, _, err = resolveJob(ctx, tx, w, req)
 		if err != nil {
 			return err
 		}
@@ -74,4 +75,21 @@ func (s *Store) ReplayHostHealthAdmission(ctx context.Context, w domain.Workspac
 		return err
 	})
 	return receipt, err
+}
+
+// A check may complete while the demand sampler is outside SQL. Reuse its
+// evidence only after the same transactional compatibility check proves the
+// sampled connection still resolves to the current admission policy.
+func checkAdmissionHealth(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, policy admission.Profile, spec admission.Spec, now time.Time) error {
+	if proof, ok := ctx.Value(hostEvidenceKey{}).(hostEvidence); ok && proof.profile != policy {
+		current, err := admissionSelection(ctx, tx, w, proof.profile, true, spec)
+		if err != nil {
+			return err
+		}
+		if current != policy {
+			return admission.ErrHostUnhealthy
+		}
+		ctx = WithHostHealthEvidence(ctx, policy, proof.evidence)
+	}
+	return checkHostNewWork(ctx, tx, admission.Record{Job: domain.Job{WorkspaceID: w}, Profile: policy}, now)
 }

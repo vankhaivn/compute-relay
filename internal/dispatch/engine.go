@@ -171,13 +171,24 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	if work.Gate != nil {
 		preparationLimit = min(preparationLimit, time.Duration(work.Gate.Request.MaxPreparationSeconds)*time.Second)
 	}
+	if unconfirmedPreparation(work.Journal) {
+		var stop context.CancelFunc
+		ctx, stop = context.WithTimeout(ctx, min(preparationLimit, e.config.ControlTimeout))
+		defer stop()
+	}
 	binding := provider.BindingSnapshot{Binding: work.Job.Profile.Binding, AccountScope: work.Job.Profile.AccountScope, CredentialRef: work.Job.Profile.CredentialRef}
 	p, err := e.providers.Resolve(binding)
 	if err != nil {
+		if unconfirmedPreparation(work.Journal) {
+			return s.endUnconfirmedPreparation(err)
+		}
 		return s.providerFailure(err, domain.CodeConfigurationInvalid)
 	}
 	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, p.Verify(c, binding) })
 	if err != nil {
+		if unconfirmedPreparation(work.Journal) {
+			return s.endUnconfirmedPreparation(err)
+		}
 		code := errorCode(err, domain.CodeProviderAuthFailed)
 		if errors.Is(err, context.DeadlineExceeded) {
 			code = domain.CodeProviderUnreachable
@@ -185,6 +196,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.providerFailure(err, code)
 	}
 	if p.Describe().InstanceID != binding.Binding.ProviderInstanceID {
+		if unconfirmedPreparation(work.Journal) {
+			return s.endUnconfirmedPreparation(nil)
+		}
 		return s.fail(domain.CodeRemoteIdentityMismatch)
 	}
 	// Explicit durable job cancellation is separate from Run's shutdown context.
@@ -251,10 +265,17 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.prepared(prepared)
 	case Staging:
 		journal := work.Journal
-		seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
+		limit := preparationLimit
+		if unconfirmedPreparation(journal) {
+			limit = min(limit, e.config.ControlTimeout)
+		}
+		seen, err := control(ctx, limit, func(c context.Context) (provider.PreparationObservation, error) {
 			return p.ReconcilePrepare(c, journal.Plan.Clone(), journal.PreparationID)
 		})
 		if err != nil {
+			if unconfirmedPreparation(journal) {
+				return s.endUnconfirmedPreparation(err)
+			}
 			if provider.IsLocalStateError(err) {
 				return err
 			}
@@ -264,9 +285,15 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return s.fail(domain.CodeStagingFailed)
 		}
 		if seen.Validate(*journal.Plan, journal.PreparationID) != nil {
+			if unconfirmedPreparation(journal) {
+				return s.endUnconfirmedPreparation(nil)
+			}
 			return s.fail(domain.CodeRemoteIdentityMismatch)
 		}
 		if seen.Status != provider.ReconciliationFound {
+			if unconfirmedPreparation(journal) {
+				return s.endUnconfirmedPreparation(nil)
+			}
 			if expired && work.Gate != nil {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
@@ -537,4 +564,21 @@ func (s *session) progress(completed, total int64) {
 	if worker.Classify(err) == worker.Stop {
 		s.progressErr = errors.Join(s.progressErr, err)
 	}
+}
+
+func unconfirmedPreparation(j Journal) bool {
+	return j.Phase == Staging && j.Plan != nil && j.Prepared == nil && !j.SubmitStarted
+}
+
+func (s *session) endUnconfirmedPreparation(cause error) error {
+	if provider.IsLocalStateError(cause) {
+		return cause
+	}
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.commit(Action{Kind: EndUnconfirmedPreparation}); err != nil {
+		return err
+	}
+	return s.work().Journal.Problem
 }

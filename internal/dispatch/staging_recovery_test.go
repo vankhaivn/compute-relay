@@ -104,3 +104,31 @@ func TestStagingFailureReasonSurvivesDeferredReconciliations(t *testing.T) {
 		t.Fatal("an open reason was recorded", err)
 	}
 }
+
+func TestEndUnconfirmedPreparationRejectsKnownOrPossibleExecution(t *testing.T) {
+	w, plan, prep := fixtureWork(t)
+	base, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prep})
+	for _, name := range []string{"local", "prepared", "submitted", "cancelled", "possible_activity", "terminal"} {
+		t.Run(name, func(t *testing.T) {
+			j, s := base, state
+			switch name {
+			case "local":
+				j, s = w.Journal, w.Job.Attempt.State
+			case "prepared":
+				j, s = readyFixture(t)
+			case "submitted":
+				j, s = readyFixture(t)
+				j, s = apply(t, j, s, Action{Kind: BeginSubmission})
+			case "cancelled":
+				s.Cancellation = domain.CancellationRequested
+			case "possible_activity":
+				s.RemoteActivity = domain.RemoteActivityPossible
+			case "terminal":
+				j, s = apply(t, j, s, Action{Kind: EndUnconfirmedPreparation})
+			}
+			if _, _, _, err := Apply(j, s, Action{Kind: EndUnconfirmedPreparation}, time.Now()); err == nil {
+				t.Fatal("unsafe preparation terminated")
+			}
+		})
+	}
+}

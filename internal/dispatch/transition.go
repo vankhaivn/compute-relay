@@ -142,6 +142,22 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			next.Orchestration = domain.OrchestrationNeedsAttention
 			event = domain.EventPreparationObserved
 		}
+	case EndUnconfirmedPreparation:
+		if old.Phase != Staging || old.Plan == nil || old.Prepared != nil || old.SubmitStarted ||
+			state.Orchestration.Terminal() || state.Execution != domain.ExecutionNotSubmitted ||
+			state.RemoteActivity != domain.RemoteActivityNotStarted || state.Cancellation != domain.CancellationNotRequested {
+			return Journal{}, state, "", ErrConflict
+		}
+		// Only compute eligibility ends. An unconfirmed staging resource stays
+		// unknown in the ledger; this neither proves absence nor permits deletion.
+		j.Phase = Prevented
+		p := provider.Problem(domain.CodeStagingNotReady, domain.FailureStageProviderPreparation,
+			"Private staging could not be confirmed within the observation budget; no execution was submitted.").
+			WithDetail(domain.ReasonDetail, "staging_unconfirmed").WithRecommendedAction(domain.RecommendedActionFixRequest)
+		j.Problem = &p
+		next.Orchestration = domain.OrchestrationFailed
+		next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+		event = domain.EventReconciliationDeferred
 	case BeginSubmission:
 		if old.Phase != Ready || old.SubmitStarted || old.Prepared == nil || !old.Prepared.Ready || !old.Prepared.Private || !scheduler.LocalOnly(state) || state.Cancellation != domain.CancellationNotRequested {
 			return Journal{}, state, "", ErrConflict
