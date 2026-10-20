@@ -69,8 +69,17 @@ asynchronously.
 
 Omitted optional fields keep their saved values. Track the outcome with
 `GET /connection-operations/{id}`. Existing jobs and grants always keep the selection they were
-admitted with; if admission later conflicts because a selection changed, run `check` and use the
-new profile.
+admitted with. A pending request may retain an older selection after a check or compatible
+configuration change: admission atomically verifies the same connection, workspace, account,
+credential generation, resource class and pinned runtime identity, plus current limits for the
+requested wall time, internet and inputs. SSH health/storage policy updates do not change host
+identity; current health and storage gates still apply. Admitted work retains its original limits.
+
+An enabled connection update in progress returns HTTP 429 with `Retry-After: 1`,
+`recommended_action: wait` and `details.reason: connection_update_pending`; retry the exact request
+and idempotency key. Once the update settles, incompatible or disabled selections return the
+existing stale-selection conflict. A new selection needs a new request identity. Exact admitted
+request replay always returns its original receipt, even after later connection changes.
 
 ## Concurrency
 

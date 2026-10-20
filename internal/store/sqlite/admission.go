@@ -73,37 +73,34 @@ func actorInTx(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, tokenID st
 	return workspace.AllowedProfiles, nil
 }
 
-func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, req admission.Request) (admission.Profile, []admission.FrozenObject, error) {
+func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, req admission.Request) (admission.Profile, admission.Profile, []admission.FrozenObject, error) {
 	var profile admission.Profile
 	spec := req.Spec()
 	var raw string
 	var enabled bool
 	err := tx.QueryRowContext(ctx, `SELECT r.snapshot,p.enabled FROM profiles p JOIN profile_revisions r ON p.profile=r.profile AND p.revision=r.revision WHERE p.profile=?`, spec.Profile).Scan(&raw, &enabled)
 	if errors.Is(err, sql.ErrNoRows) {
-		return profile, nil, auth.ErrForbidden
+		return profile, admission.Profile{}, nil, auth.ErrForbidden
 	}
 	if err != nil {
-		return profile, nil, dbError(err)
+		return profile, admission.Profile{}, nil, dbError(err)
 	}
 	if len(raw) > 8192 || json.Unmarshal([]byte(raw), &profile) != nil || profile.Validate() != nil || profile.Binding.Profile != spec.Profile {
-		return profile, nil, ErrCorrupt
+		return profile, admission.Profile{}, nil, ErrCorrupt
 	}
 	if err = managedProfileOwned(ctx, tx, w, profile); err != nil {
-		return profile, nil, err
+		return profile, admission.Profile{}, nil, err
 	}
-	var selected bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM managed_connections WHERE workspace_id=? AND current_profile=? AND new_work='enabled' AND pending_operation='')`, w, spec.Profile).Scan(&selected); err != nil {
-		return profile, nil, dbError(err)
-	}
-	if !selected || !enabled {
-		return profile, nil, admission.ErrSelection
+	current, err := admissionSelection(ctx, tx, w, profile, enabled, spec)
+	if err != nil {
+		return profile, admission.Profile{}, nil, err
 	}
 	if err = profile.Check(spec); err != nil {
-		return profile, nil, err
+		return profile, admission.Profile{}, nil, err
 	}
 	refs := []admission.FrozenObject{}
 	var total int64
-	load := func(role string, id domain.ObjectID, max int64, expectedSHA domain.SHA256Digest, expectedBytes *int64) error {
+	load := func(role string, id domain.ObjectID, max, currentMax int64, expectedSHA domain.SHA256Digest, expectedBytes *int64) error {
 		var m domain.ObjectMetadata
 		err := tx.QueryRowContext(ctx, retainedInputQuery, string(w), string(id)).Scan(&m.WorkspaceID, &m.ID, &m.Bytes, &m.SHA256)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -121,36 +118,42 @@ func resolveJob(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, req admis
 		if m.Bytes > max {
 			return admission.ErrRequirements
 		}
+		if m.Bytes > currentMax {
+			return admission.ErrSelection
+		}
 		if role != "bundle" && role != "application_image" {
 			if m.Bytes > profile.MaxInputBytes-total {
 				return admission.ErrRequirements
+			}
+			if m.Bytes > current.MaxInputBytes-total {
+				return admission.ErrSelection
 			}
 			total += m.Bytes
 		}
 		refs = append(refs, admission.FrozenObject{Role: role, Object: m})
 		return nil
 	}
-	if err = load("bundle", spec.Bundle.ObjectID, profile.MaxBundleBytes, spec.Bundle.SHA256, spec.Bundle.Bytes); err != nil {
-		return profile, nil, err
+	if err = load("bundle", spec.Bundle.ObjectID, profile.MaxBundleBytes, current.MaxBundleBytes, spec.Bundle.SHA256, spec.Bundle.Bytes); err != nil {
+		return profile, admission.Profile{}, nil, err
 	}
 	for i, in := range spec.Inputs {
-		if err = load("input:"+strconv.Itoa(i), in.Source.ObjectID, 2<<30, in.Source.SHA256, in.Source.Bytes); err != nil {
-			return profile, nil, err
+		if err = load("input:"+strconv.Itoa(i), in.Source.ObjectID, 2<<30, 2<<30, in.Source.SHA256, in.Source.Bytes); err != nil {
+			return profile, admission.Profile{}, nil, err
 		}
 	}
 	if image := spec.ApplicationImage; image != nil {
 		target, err := cacheTargetInTx(ctx, tx, w, profile)
 		if err != nil {
-			return profile, nil, err
+			return profile, admission.Profile{}, nil, err
 		}
 		if target == nil {
-			return profile, nil, admission.ErrRequirements
+			return profile, admission.Profile{}, nil, admission.ErrRequirements
 		}
-		if err := load("application_image", image.ObjectID, 2<<30, image.SHA256, &image.Bytes); err != nil {
-			return profile, nil, err
+		if err := load("application_image", image.ObjectID, 2<<30, 2<<30, image.SHA256, &image.Bytes); err != nil {
+			return profile, admission.Profile{}, nil, err
 		}
 	}
-	return profile, refs, nil
+	return profile, current, refs, nil
 }
 
 func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID string, req admission.Request) (admission.Validation, error) {
@@ -163,7 +166,7 @@ func (s *Store) ValidateJob(ctx context.Context, w domain.WorkspaceID, tokenID s
 		if err != nil {
 			return err
 		}
-		_, _, err = resolveJob(ctx, tx, w, req)
+		_, _, _, err = resolveJob(ctx, tx, w, req)
 		if err != nil {
 			return err
 		}
@@ -200,14 +203,14 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 			receipt = *prior
 			return nil
 		}
-		profile, refs, err := resolveJob(ctx, tx, w, req)
+		profile, policy, refs, err := resolveJob(ctx, tx, w, req)
 		if err != nil {
 			return err
 		}
 		if req.Spec().Expired(now) {
 			return admission.ErrExpired
 		}
-		if err = checkHostNewWork(ctx, tx, admission.Record{Job: domain.Job{WorkspaceID: w}, Profile: profile}, now); err != nil {
+		if err = checkAdmissionHealth(ctx, tx, w, policy, req.Spec(), now); err != nil {
 			return err
 		}
 		var total, workspace int
@@ -263,7 +266,7 @@ func (s *Store) AdmitJob(ctx context.Context, w domain.WorkspaceID, tokenID, key
 		if err = pinHostApplicationImageAdmission(ctx, tx, w, domain.JobID(job), domain.AttemptID(attempt), profile, refs, now); err != nil {
 			return err
 		}
-		if err = storageAdmissionInTx(ctx, tx, w, domain.JobID(job), domain.AttemptID(attempt), profile, refs, now); err != nil {
+		if err = storageAdmissionInTx(ctx, tx, w, domain.JobID(job), domain.AttemptID(attempt), policy, refs, now); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO events(workspace_id,job_id,event_id,sequence,attempt_id,type,occurred_at) VALUES(?,?,?,?,?,?,?)`, string(w), job, event, 1, attempt, string(domain.EventJobAccepted), created)

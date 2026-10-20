@@ -660,3 +660,48 @@ func TestHostHealthWorkerTransientFailurePreservesIndependentStopAndRun(t *testi
 }
 
 var _ dispatch.NewWorkGuard = (*managedHostHealthGuard)(nil)
+
+func TestHostHealthPendingAdmissionUsesCurrentPolicyAndKeepsFrozenBinding(t *testing.T) {
+	g := newHostGuardFixture(t, "warning")
+	original := g.spec(t)
+	// The new policy is compatible, and remains authoritative for new admission.
+	body := systemJSON(t, map[string]any{"action": "configure", "expected_revision": g.connection.Revision,
+		"configuration": map[string]any{"max_remote_wall_seconds": 600, "host_health": map[string]any{"warning_thermal_level": 2, "critical_thermal_level": 3}}})
+	_, err := g.f.services.connections.Submit(t.Context(), g.f.actor, "app", g.connection.ID, "guard-compatible-policy", body)
+	requireNoError(t, err)
+	job := g.admit(t, "guard-old-selection", original)
+	if record := g.read(t, job); record.Profile.Binding.Profile != original.Profile {
+		t.Fatal("new admission replaced frozen binding")
+	}
+	g.sampler.set("critical")
+	g.f.advance(t, hosthealth.DemandCache)
+	_, err = g.jobs.Submit(t.Context(), g.f.actor, "app", "guard-current-policy-refusal", systemJSON(t, original))
+	if !errors.Is(err, admission.ErrHostUnhealthy) {
+		t.Fatal("new admission ignored current health policy", err)
+	}
+}
+
+func TestHostHealthAdmissionCheckRaceKeepsSampleAndFrozenRequest(t *testing.T) {
+	g := newHostGuardFixture(t, "ok")
+	spec := g.spec(t)
+	req, err := admission.Parse(systemJSON(t, spec))
+	requireNoError(t, err)
+	key, err := admission.KeyDigest("guard-check-race")
+	requireNoError(t, err)
+	ctx, replay, err := g.guard.PreflightAdmission(t.Context(), "app", g.f.actor.TokenID(), key, req)
+	if err != nil || replay != nil {
+		t.Fatal("health preview failed", err)
+	}
+	body := systemJSON(t, map[string]any{"action": "check", "expected_revision": g.connection.Revision})
+	_, err = g.f.services.connections.Submit(t.Context(), g.f.actor, "app", g.connection.ID, "guard-race-check", body)
+	requireNoError(t, err)
+	worked, err := g.f.services.connections.RunOnce(t.Context())
+	if err != nil || !worked {
+		t.Fatal("check failed", err)
+	}
+	receipt, err := g.f.host.store.AdmitJob(ctx, "app", g.f.actor.TokenID(), key, req, admission.DefaultLimits())
+	requireNoError(t, err)
+	if record := g.read(t, receipt); record.Profile.Binding.Profile != spec.Profile {
+		t.Fatal("check race changed frozen request")
+	}
+}

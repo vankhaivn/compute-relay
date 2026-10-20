@@ -261,3 +261,6 @@ func (s *Service) authorize(ctx context.Context, p auth.Principal, w domain.Work
 	}
 	return fresh, nil
 }
+
+// ErrSelectionPending permits retrying the same request after a connection update finishes.
+var ErrSelectionPending = errors.New("selected connection update is pending")
