@@ -81,6 +81,12 @@ and idempotency key. Once the update settles, incompatible or disabled selection
 existing stale-selection conflict. A new selection needs a new request identity. Exact admitted
 request replay always returns its original receipt, even after later connection changes.
 
+A check keeps the last verified selection while it is pending. A temporary provider or transport
+failure preserves that selection and does not turn it into a stale revision or rejected credential.
+A genuine credential rejection still disables it. An unavailable connection without a usable
+verified selection returns HTTP 503 with `PROVIDER_UNREACHABLE`,
+`details.reason: connection_unavailable`, safe operation retry and `Retry-After: 5`.
+
 ## Concurrency
 
 The provider descriptor's `capabilities.concurrency` gives `support`, `scope` (`account` for Kaggle,

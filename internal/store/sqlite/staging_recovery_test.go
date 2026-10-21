@@ -270,7 +270,7 @@ func TestUnconfirmedStagingGraceSurvivesRestartWithoutRepeatingPreparation(t *te
 					return probe.probeProvider.ReconcilePrepare(ctx, plan, op)
 				}
 			}
-			f.clock.advance(30 * time.Second)
+			f.clock.advance(dispatch.PreparationObservationGrace - 100*time.Second + time.Second)
 			_, _ = f.engine.RunOnce(t.Context(), "restarted")
 			j := f.journal(t, id)
 			if appears {

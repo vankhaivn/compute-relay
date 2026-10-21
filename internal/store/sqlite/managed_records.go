@@ -92,7 +92,7 @@ func managedProfileOwned(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, 
 }
 func projectManaged(ctx context.Context, tx *sql.Tx, r managedRecord, snapshot *managedScheduling, now time.Time) (connections.Connection, error) {
 	v := r.view
-	if r.profile != "" && v.NewWork == "enabled" && v.Authentication == "verified" && r.pending == "" {
+	if r.profile != "" && v.NewWork == "enabled" && v.Authentication == "verified" {
 		var raw string
 		var enabled bool
 		if err := tx.QueryRowContext(ctx, `SELECT r.snapshot,p.enabled FROM profiles p JOIN profile_revisions r ON r.profile=p.profile AND r.revision=p.revision WHERE p.profile=?`, r.profile).Scan(&raw, &enabled); err != nil {

@@ -20,10 +20,10 @@ changing the flag, run a connection `check` to get a selection for it.
 | Wall time | At most 86400 s (Kaggle's session limit). |
 | Inputs | Up to 256 inputs, staged in one private attempt dataset with a marker file (≤2 MiB). Inputs of 256 MiB or more go to [shared datasets](#shared-input-datasets). |
 | Staging checks | Uploads are SHA-checked against the frozen digest; readiness and recovery compare metadata only, and the runner rehashes every input before use. |
-| Staging visibility | After an acknowledged or uncertain create, Relay polls the exact owner/slug, version 1 and marker for up to 2 minutes. Dispatch retains a separate durable two-minute observation grace from its first preparation fault. |
+| Staging visibility | After an acknowledged or uncertain create, Relay polls the exact owner/slug, version 1 and marker for up to 2 minutes. Dispatch retains a separate durable ten-minute observation grace from its first preparation fault. |
 | Create acknowledgement | CreateDataset has one send and up to 2 minutes to answer; ordinary metadata requests retain a 15-second deadline. Caller budgets can shorten both. |
 | Request pacing | API requests are admitted at least 500 ms apart per configured account, plus 0–100 ms jitter, and at least 100 ms apart across the provider. Concurrent callers share admission through response headers. |
-| Rate limits | Metadata, logs and download tickets honor HTTP 429 `Retry-After` (seconds or HTTP date), with up to three sends per read. Missing or invalid delays use 30 s then 60 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. |
+| Read retries | Metadata, logs and download tickets retry HTTP 429, temporary 5xx and transport failures, with up to three sends per read. HTTP 429 honors `Retry-After` (seconds or HTTP date); missing or invalid delays use 30 s then 60 s. Other temporary read faults wait 1 s then 2 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. Mutations remain one-shot. |
 | GPU quota | A GPU authorization needs fresh, sufficient known quota. Connections to one account share it. No reset time is reported. |
 | Internet | Disabled unless the policy allows it **and** the job requests it. |
 | GPU proof | Success requires the runner's hardware evidence, not just a requested GPU or a quota deduction. |
@@ -36,7 +36,7 @@ changing the flag, run a connection `check` to get a selection for it.
 A lost staging or submission response leaves the original intent for observation; a "not found"
 read never triggers another create or submit. When staging has never acquired a confirmed dataset
 identity, reconciliation reads use the control-call budget (one minute by default) within a
-durable two-minute grace starting at the first preparation fault, after upload. A restart does
+durable ten-minute grace starting at the first preparation fault, after upload. A restart does
 not reset that grace or permit uploading again. If observation still cannot confirm the resource,
 the unsubmitted attempt ends as `failed` with reason
 `staging_unconfirmed`, releasing its account slot. A 403, 429 or timeout still means unknown,
@@ -51,7 +51,8 @@ identity for ordinary cleanup without reopening the failed attempt. An exact HTT
 unknown. Until identity is confirmed, the ledger stays `creation_unresolved` and local input pins
 remain. Confirmed partial resources use exact-attempt cleanup; shared inputs remain untouched.
 Mutations never retry because of HTTP 429. A file upload that failed before its dataset was created
-can be sent once more with a new ticket.
+can use a fresh upload ticket up to five times, waiting 15, 30, 60 and 120 seconds within the
+original preparation budget. This never repeats `CreateDataset` or a kernel submission.
 
 Rate-limit cooldowns apply across all API endpoints and clients for the same account, including
 credential replacement. A limit before account discovery applies provider-wide. Mutations share

@@ -48,7 +48,7 @@ func TestErrorTaxonomyCategories(t *testing.T) {
 		},
 		ErrorCategoryLocalRuntime: {
 			CodeStateStoreUnavailable, CodeDiskLimitExceeded, CodeStateDirectoryLocked,
-			CodeConfigurationInvalid, CodeRequestLimitExceeded,
+			CodeConfigurationInvalid, CodeRequestLimitExceeded, CodeRequestTimeout, CodeRuntimeUnavailable,
 		},
 	}
 

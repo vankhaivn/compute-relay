@@ -151,7 +151,9 @@ flowchart LR
 | Lost response to a request | Resend the identical request with the **same** key; then read state. |
 | Error before Relay recorded intent | Nothing external happened; check state, then retry the local step. |
 | Remote call uncertain after intent was recorded | Relay observes the original resource only. Wait; do not resubmit. |
-| Staging stalled before submission | `POST /jobs/{id}/reconcile` observes the original staging. Without a confirmed resource, Relay observes for a durable two-minute grace from the first preparation fault, then ends with `staging_unconfirmed` if still unresolved. Restart resumes reads; a new attempt requires explicit intent. Confirmed pending staging stays distinct. |
+| Temporary fault before staging intent | Relay defers the original queued attempt for up to ten minutes, starting at a 15-second backoff floor. Permanent input or identity faults still stop it. |
+| Host health warning or unknown | New preparation and execution wait for safe observations; the original queued attempt is retained. Running work follows the separate critical-health guard. |
+| Staging stalled before submission | `POST /jobs/{id}/reconcile` observes the original staging. Without a confirmed resource, Relay observes for a durable ten-minute grace from the first preparation fault, then ends with `staging_unconfirmed` if still unresolved. Crash recovery resumes reads; a new attempt requires explicit intent. Confirmed pending staging stays distinct. |
 | Submission rejected before reaching the provider | Read `problem.details.reason`, fix the cause, retry explicitly. |
 | Temporary observation outage after confirmed submission | Relay keeps observing the same run with backoff, including after restart. No resubmission. |
 | Remote state active or unknown | Capacity stays reserved. Do not delete; reconcile if the attempt requires attention. |
@@ -163,6 +165,26 @@ flowchart LR
 | Download failed after writing a local file | Inspect that file and the request; never overwrite it automatically. |
 | Results expired | History stays. Do not rerun compute to get them back. |
 | Identity, version or root mismatch | Stop and keep evidence; do not adopt a replacement or edit markers. |
+
+An orderly stop drains a preparation whose intent was already committed, including its lease
+heartbeat, within that preparation's existing finite timeout, followed by at most five seconds
+of best-effort SSH staging cleanup when needed. It does not proceed to Start.
+A hard process kill cannot drain; recovery observes the recorded resource without recreating it.
+Provider transfer retries may refill the same verified staging target, but never repeat resource
+creation or compute submission. An identity mismatch is not proof that old compute stopped, so
+its capacity remains reserved while remote activity is unknown.
+
+An exact container-not-found observation on the same verified SSH host and Docker engine is
+different: Relay records the frozen remote reference and observation time, leaves the final
+execution outcome unknown, and marks remote activity inactive. The attempt needs attention but
+no longer holds compute capacity. An engine change, unreachable host or Kaggle permission error
+does not establish this absence.
+
+HTTP 429 responses advertise safe operation retry and a cooldown. HTTP 503 responses include
+`Retry-After: 5`; the error's retry hint still determines whether a mutation can be retried.
+A route deadline reports `REQUEST_TIMEOUT`, not an input-download failure. Preserve the original
+request key and inspect state after a timeout; the deadline alone cannot prove a mutation failed.
+An unexpected handler panic reports `RUNTIME_UNAVAILABLE` without exposing private error text.
 
 For a bug, keep raw state and logs private. Report the binary revision, exact command, actual
 result, possible remote effects and a minimal sanitized reproduction.

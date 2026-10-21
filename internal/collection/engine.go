@@ -50,7 +50,8 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	if !w.Valid() {
 		return true, ErrInvalid
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.config.Timeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, e.collectionTimeout(*w))
 	defer cancel()
 	renewWork := *w
 	call, stop := worker.Heartbeat(ctx, w.Lease.Until, e.clock.Now, func(c context.Context) (time.Time, error) {
@@ -61,7 +62,7 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 	}()
 	recordFailure := func(err error) error {
 		var progressErr progressWriteError
-		if provider.IsLocalStateError(err) || errors.As(err, &progressErr) {
+		if provider.IsLocalStateError(err) || errors.As(err, &progressErr) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return err
 		}
 		if renewalErr := stop(); renewalErr != nil {
@@ -71,7 +72,15 @@ func (e *Engine) RunOnce(ctx context.Context) (worked bool, resultErr error) {
 			// Provider failures normally become collection evidence, not fatal store errors.
 			return worker.HeartbeatError(collectionFailure(err), renewalErr)
 		}
-		return e.recordFailure(ctx, *w, err)
+		if parent.Err() != nil {
+			return parent.Err()
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_call_timeout"}
+		}
+		record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return e.recordFailure(record, *w, err)
 	}
 	src, err := e.resolve(call, *w)
 	if err != nil {
@@ -152,7 +161,12 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, er
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, failure(domain.CodeRemoteIdentityMismatch, true)
+		var value domain.Problem
+		var pointer *domain.Problem
+		if errors.As(err, &value) && value.Code == domain.CodeRemoteIdentityMismatch || errors.As(err, &pointer) && pointer != nil && pointer.Code == domain.CodeRemoteIdentityMismatch {
+			return nil, failure(domain.CodeRemoteIdentityMismatch, true)
+		}
+		return nil, Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_account_read_failed"}
 	}
 	return src, nil
 }
@@ -452,4 +466,17 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 		return worker.Classify(err)
 	})
+}
+
+// Allow at least one MiB/s plus the control/verification budget. Before discovery,
+// use the admitted byte ceiling; pinned retries use the exact known byte count.
+func (e *Engine) collectionTimeout(w Work) time.Duration {
+	bytes := e.config.MaxBytes
+	if w.Snapshot != nil {
+		bytes = 0
+		for _, file := range w.Snapshot.Files {
+			bytes += file.Object.Bytes
+		}
+	}
+	return min(2*time.Hour, e.config.Timeout+time.Duration((bytes+(1<<20)-1)/(1<<20))*time.Second)
 }

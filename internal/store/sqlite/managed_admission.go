@@ -135,15 +135,19 @@ func (s *Store) AcceptConnection(ctx context.Context, in connections.Accept) (co
 			if in.Action == "disable" || in.Action == "remove" {
 				newWork = "disabled"
 			}
-			if in.Action == "check" || in.Action == "replace_credential" {
+			if in.Action == "replace_credential" {
 				authentication = "pending"
 			}
-			if prior.profile != "" {
+			profile := ""
+			if in.Action == "check" {
+				profile = prior.profile
+			}
+			if prior.profile != "" && in.Action != "check" {
 				if _, err = tx.ExecContext(ctx, `UPDATE profiles SET enabled=0 WHERE profile=?`, prior.profile); err != nil {
 					return dbError(err)
 				}
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE managed_connections SET revision=?,authentication=?,new_work=?,current_profile='',pending_operation=?,updated_at=? WHERE connection_id=?`, revision, authentication, newWork, operationID, stamp, id)
+			_, err = tx.ExecContext(ctx, `UPDATE managed_connections SET revision=?,authentication=?,new_work=?,current_profile=?,pending_operation=?,updated_at=? WHERE connection_id=?`, revision, authentication, newWork, profile, operationID, stamp, id)
 		}
 		if err != nil {
 			return dbError(err)

@@ -185,7 +185,7 @@ func TestApplicationImageStaleStorageScanHoldsAuthorizationUntilRefresh(t *testi
 	if journal := f.journal(t, id); journal.Phase != dispatch.Local || journal.Plan != nil {
 		t.Fatalf("stale scan moved attempt beyond local queue: %+v", journal)
 	}
-	if state := f.state(t, id); state.Orchestration != domain.OrchestrationPreparing || state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted {
+	if state := f.state(t, id); state.Orchestration != domain.OrchestrationQueued || state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted {
 		t.Fatalf("stale scan changed claimed, unsubmitted execution: %+v", state)
 	}
 	var consumed int

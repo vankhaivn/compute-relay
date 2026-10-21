@@ -163,3 +163,10 @@ func waitRead(ctx context.Context, delay time.Duration) error {
 		return nil
 	}
 }
+
+func (p *RequestPacer) wait(ctx context.Context, delay time.Duration) error {
+	if p.sleep != nil {
+		return p.sleep(ctx, delay)
+	}
+	return waitRead(ctx, delay)
+}

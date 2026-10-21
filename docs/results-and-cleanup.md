@@ -24,6 +24,14 @@ A failed collection records a provider-neutral `details.reason` naming the faile
 operation; provider error text is never stored. Retrying means a new collect request for the same
 attempt, never a compute rerun.
 
+A temporary provider verification fault is a retryable collection failure; only a confirmed
+identity mismatch invalidates the identity. Collection receives its configured base timeout
+(ten minutes by default) plus one second per MiB of all selected files, including manifests and
+logs, rounded up, capped at two
+hours. Before output discovery, the admitted output bound supplies the size. An exhausted
+collection budget records a retryable failure instead of silently restarting from zero when its
+lease expires. Runtime shutdown leaves the accepted ticket for recovery.
+
 ## Download
 
 | Request | Returns |

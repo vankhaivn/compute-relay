@@ -254,6 +254,8 @@
         "CONFIGURATION_INVALID",
         "INVALID_REQUEST",
         "REQUEST_LIMIT_EXCEEDED",
+        "REQUEST_TIMEOUT",
+        "RUNTIME_UNAVAILABLE",
         "LOG_CURSOR_RESET"
       ]
     },

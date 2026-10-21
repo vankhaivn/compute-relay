@@ -40,7 +40,7 @@ var orchestrationTransitions = map[OrchestrationState]map[OrchestrationState]str
 		OrchestrationFailed, OrchestrationTimedOut,
 	),
 	OrchestrationPreparing: setOf(
-		OrchestrationDispatching, OrchestrationBlocked, OrchestrationReconciling,
+		OrchestrationQueued, OrchestrationDispatching, OrchestrationBlocked, OrchestrationReconciling,
 		OrchestrationCancelling, OrchestrationNeedsAttention, OrchestrationFailed,
 		OrchestrationCancelled, OrchestrationTimedOut,
 	),
@@ -65,7 +65,7 @@ var orchestrationTransitions = map[OrchestrationState]map[OrchestrationState]str
 		OrchestrationNeedsAttention,
 	),
 	OrchestrationBlocked: setOf(
-		OrchestrationPreparing, OrchestrationDispatching, OrchestrationReconciling,
+		OrchestrationQueued, OrchestrationPreparing, OrchestrationDispatching, OrchestrationReconciling,
 		OrchestrationCancelling, OrchestrationNeedsAttention, OrchestrationFailed,
 		OrchestrationCancelled, OrchestrationTimedOut,
 	),

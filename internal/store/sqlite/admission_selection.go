@@ -34,6 +34,9 @@ func admissionSelection(ctx context.Context, tx *sql.Tx, w domain.WorkspaceID, f
 	if newWork == "enabled" && pending != "" {
 		return frozen, admission.ErrSelectionPending
 	}
+	if newWork == "enabled" && authentication == "unavailable" {
+		return frozen, admission.ErrSelectionUnavailable
+	}
 	if pending != "" || newWork != "enabled" || authentication != "verified" || currentName == "" {
 		return frozen, admission.ErrSelection
 	}

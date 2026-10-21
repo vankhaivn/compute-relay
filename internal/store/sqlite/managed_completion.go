@@ -103,6 +103,10 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 		if result.Problem == "credential_rejected" {
 			authState = "rejected"
 		}
+		if op.Action == "check" && target.profile != "" && (result.Problem == "provider_unavailable" || result.Problem == "credential_store_unavailable") {
+			authState = "verified"
+			profile = target.profile
+		}
 		if (op.Action == "replace_credential" || op.Action == "install_image") && credential != "" && account != "" {
 			authState = "verified"
 		}
@@ -175,6 +179,11 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 				if err != nil || len(encoded) > 8192 {
 					return ErrInvalid
 				}
+				if target.profile != "" {
+					if _, err = tx.ExecContext(ctx, `UPDATE profiles SET enabled=0 WHERE profile=?`, target.profile); err != nil {
+						return dbError(err)
+					}
+				}
 				profile = result.Profile.Binding.Profile
 				if _, err = tx.ExecContext(ctx, `INSERT INTO profile_revisions VALUES(?,?,?)`, profile, result.Profile.Binding.ConfigurationRevision, string(encoded)); err != nil {
 					return dbError(err)
@@ -219,6 +228,11 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 				}
 			}
 			// Another credential for the same account may have newer evidence. Keep it.
+		}
+	}
+	if result.Problem != "" && target.profile != "" && profile == "" {
+		if _, err = tx.ExecContext(ctx, `UPDATE profiles SET enabled=0 WHERE profile=?`, target.profile); err != nil {
+			return dbError(err)
 		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE managed_connections SET authentication=?,new_work=?,canonical_account=?,account_scope=?,active_credential_key=?,current_profile=?,pending_operation='',updated_at=? WHERE connection_id=?`, authState, newWork, account, scope, credential, profile, stamp, op.ConnectionID)

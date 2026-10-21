@@ -321,7 +321,7 @@ func TestPassDelayPacesSubmittedAttempts(t *testing.T) {
 		before += nextPassDelay(time.Second, Journal{Failures: failures})
 		after += nextPassDelay(time.Second, Journal{SubmitStarted: true, Remote: remote, Failures: failures})
 	}
-	if before != 30*time.Second || after != 7*time.Minute {
+	if before != 330*time.Second || after != 7*time.Minute {
 		t.Fatal("unexpected spread before attention", before, after)
 	}
 	if nextPassDelay(time.Minute, Journal{SubmitStarted: true, Failures: MaxFailures}) != 2*time.Minute {

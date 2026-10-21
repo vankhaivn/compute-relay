@@ -249,14 +249,15 @@ func TestRequestAndParentDeadlines(t *testing.T) {
 	})})
 	requireOK(t, err)
 	defer c.Close()
+	c.state.pacing, _ = fakeCooldowns()
 	_, err = c.IntrospectToken(context.Background())
-	if !errors.Is(err, context.DeadlineExceeded) || calls != 1 {
+	if !errors.Is(err, context.DeadlineExceeded) || calls != readTries {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = c.IntrospectToken(ctx)
-	if !errors.Is(err, context.Canceled) || calls != 1 {
+	if !errors.Is(err, context.Canceled) || calls != readTries {
 		t.Fatal("cancelled request reached transport")
 	}
 	var failure *Error
@@ -357,10 +358,15 @@ func TestGPUSaveRequiresImmediateFreeOnlyQuota(t *testing.T) {
 				}
 				return response(200, "application/json", `{"ref":"fixture_user/fixture-run","versionNumber":1,"kernelId":42}`), nil
 			}, nil)
+			c.state.pacing, _ = fakeCooldowns()
 			_, err := c.SaveKernel(context.Background(), SaveKernelRequest{Resource: fixtureKernel, Datasets: []Resource{fixtureDataset},
 				Source: "print('fixture')\n", GPU: true, MachineShape: "NvidiaTeslaT4", WallSeconds: 60})
 			allowed := mode == "omitted-flag" || mode == "false" || mode == "lost-save"
-			if quotaReads != 1 || saves != map[bool]int{true: 1, false: 0}[allowed] {
+			wantReads := 1
+			if mode == "http" {
+				wantReads = readTries
+			}
+			if quotaReads != wantReads || saves != map[bool]int{true: 1, false: 0}[allowed] {
 				t.Fatalf("wrong bounded calls: quota=%d save=%d", quotaReads, saves)
 			}
 			if !allowed {

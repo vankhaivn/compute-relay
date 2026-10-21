@@ -37,11 +37,14 @@ func respondError(w http.ResponseWriter, r *http.Request, status int, code domai
 	} else if status >= 500 {
 		action = domain.RecommendedActionContactOperator
 	}
+	if status == 503 && w.Header().Get("Retry-After") == "" {
+		w.Header().Set("Retry-After", "5")
+	}
 	if status == 401 {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="compute-relay"`)
 	}
 	respond(w, status, ErrorEnvelope{Error: ErrorBody{Code: code, Message: message, Stage: stage,
-		RequestID: RequestID(r.Context()), RecommendedAction: action}})
+		RequestID: RequestID(r.Context()), SafeOperationRetry: status == 429, RecommendedAction: action}})
 }
 
 func mapError(w http.ResponseWriter, r *http.Request, err error) {
@@ -61,7 +64,7 @@ func mapError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, objects.ErrInvalid), errors.Is(err, blobfs.ErrInvalid), errors.Is(err, blobfs.ErrLengthMismatch):
 		respondError(w, r, 400, domain.CodeInvalidRequest, domain.FailureStageValidation, "invalid object declaration")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.As(err, &network) && network.Timeout():
-		respondError(w, r, 408, domain.CodeInputFetchFailed, domain.FailureStageInputPreparation, "request transfer did not complete")
+		respondError(w, r, 408, domain.CodeRequestTimeout, domain.FailureStageLocalRuntime, "request deadline expired; read the recorded operation before retrying a mutation")
 	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.ErrNoProgress):
 		respondError(w, r, 400, domain.CodeInputFetchFailed, domain.FailureStageInputPreparation, "request body is incomplete")
 	case errors.Is(err, blobfs.ErrStorageFull):

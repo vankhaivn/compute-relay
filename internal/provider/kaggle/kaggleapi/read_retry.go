@@ -2,6 +2,7 @@ package kaggleapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -68,23 +69,43 @@ func (c *Client) requestResponse(parent context.Context, op string, tries int, s
 		response, err := send(ctx)
 		if err != nil {
 			release()
-			cancel()
-			return nil, err
+			if tries == 1 || (!errors.Is(err, ErrTransport) && !errors.Is(err, context.DeadlineExceeded)) || attempt+1 == tries || ctx.Err() != nil {
+				cancel()
+				return nil, err
+			}
+			if err := c.state.pacing.wait(ctx, time.Second<<attempt); err != nil {
+				cancel()
+				return nil, err
+			}
+			continue
 		}
-		if response.response.StatusCode != http.StatusTooManyRequests {
+		status := response.response.StatusCode
+		retry := status == http.StatusTooManyRequests || tries > 1 && status >= 500 && status <= 599
+		if !retry || status != http.StatusTooManyRequests && attempt+1 == tries {
 			release()
 			requestCancel := response.cancel
 			response.cancel = func() { requestCancel(); cancel() }
 			return response, nil
 		}
 		delay := retryDelay(response.response.Header.Get("Retry-After"), c.state.pacing.clock(), attempt)
-		err = c.state.pacing.remember(scope, delay)
+		if status != http.StatusTooManyRequests && response.response.Header.Get("Retry-After") == "" {
+			delay = time.Second << attempt
+		}
 		_ = response.response.Body.Close()
 		response.cancel()
+		if status == http.StatusTooManyRequests {
+			err = c.state.pacing.remember(scope, delay)
+		}
 		release()
 		if err != nil {
 			cancel()
 			return nil, failure(op, ErrPacingState, 0, true)
+		}
+		if status != http.StatusTooManyRequests {
+			if err := c.state.pacing.wait(ctx, delay); err != nil {
+				cancel()
+				return nil, err
+			}
 		}
 	}
 	cancel()

@@ -110,14 +110,15 @@ type session interface {
 // Adapter runs one attempt per container on an operator-owned Docker host. Every call
 // dials with the vault credential and the pinned host key; no connection is cached.
 type Adapter struct {
-	config  Config
-	binding provider.BindingSnapshot
-	creds   ports.CredentialResolver
-	blobs   StagingBlobs
-	clock   ports.Clock
-	cache   hostcache.Repository
-	images  hostimages.Repository
-	dial    func(context.Context, Target, Credential) (session, error)
+	config         Config
+	binding        provider.BindingSnapshot
+	creds          ports.CredentialResolver
+	blobs          StagingBlobs
+	clock          ports.Clock
+	cache          hostcache.Repository
+	images         hostimages.Repository
+	dial           func(context.Context, Target, Credential) (session, error)
+	copyRetryDelay time.Duration
 }
 
 // WithHostCache enables immutable host-volume staging for attempts that have
@@ -479,24 +480,31 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		if application {
 			proof.ApplicationImage = image.ID
 		}
-		if err = a.stage(ctx, d, id, plan, modules, manifestJSON, cached); err == nil && (spec.SeparateStart() || cached || application) {
-			var info containerInfo
-			var exists bool
-			info, exists, err = d.inspect(ctx, name)
-			if err == nil && (!exists || info.ID != id || info.Started() || info.Image != image.ID || application && !validApplicationContainer(info, image.ID)) {
-				err = ErrIdentity
+		err = a.stageWithRetry(ctx, d, id, engine, plan, operation, func(d docker) error {
+			if err := a.stage(ctx, d, id, plan, modules, manifestJSON, cached); err != nil {
+				return err
 			}
-			if err == nil {
+			if spec.SeparateStart() || cached || application {
+				info, exists, err := d.inspect(ctx, name)
+				if err != nil {
+					return err
+				}
+				if !exists || info.ID != id || info.Started() || info.Image != image.ID || application && !validApplicationContainer(info, image.ID) {
+					return ErrIdentity
+				}
 				proof.Verification, err = a.verifyPreparedBytes(ctx, d, info, plan, modules, manifestJSON, bindings, "")
+				if err != nil {
+					return err
+				}
 				proof.Manifest = provider.Digest(manifestJSON)
 			}
-		}
-		if err == nil {
 			staged, _ := json.Marshal(proof)
-			err = d.copyIn(ctx, id, singleFile(strings.TrimPrefix(stagedMarker, "/"), staged))
-		}
+			return d.copyIn(ctx, id, singleFile(strings.TrimPrefix(stagedMarker, "/"), staged))
+		})
 		if err != nil {
-			_, _ = d.simple(context.WithoutCancel(ctx), "container", "rm", id)
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_, _ = d.simple(cleanup, "container", "rm", id)
+			stop()
 			return err
 		}
 		prepared = provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(),
@@ -507,6 +515,55 @@ func (a *Adapter) Prepare(ctx context.Context, plan provider.Plan, operation dom
 		return provider.Prepared{}, err
 	}
 	return prepared, nil
+}
+
+// Only the creating invocation can repeat a copy into its exact stopped container.
+// It never repeats container creation or start, and recovery remains read-only.
+const preparationCopyRetryDelay = 15 * time.Second
+
+func (a *Adapter) stageWithRetry(ctx context.Context, initial docker, id, engine string, plan provider.Plan, operation domain.OperationID, stage func(docker) error) error {
+	var last error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt == 0 {
+			last = stage(initial)
+		} else {
+			delay := a.copyRetryDelay
+			if delay == 0 {
+				delay = preparationCopyRetryDelay
+			}
+			timer := time.NewTimer(delay << (attempt - 1))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+			// A transfer may have broken its SSH connection. Reconnect to the same
+			// frozen host and prove the existing target before writing any bytes.
+			last = a.withDocker(ctx, func(d docker, _ Endpoint) error {
+				if err := d.verifyEngine(ctx, engine); err != nil {
+					return err
+				}
+				info, found, err := d.inspect(ctx, id)
+				if err != nil {
+					return err
+				}
+				if !found || info.ID != id || info.Started() || !owned(info, plan.Job.Identity) ||
+					info.Config.Labels[labelPrefix+"preparation"] != string(operation) ||
+					info.Config.Labels[labelPrefix+"plan"] != string(plan.Digest()) ||
+					info.Config.Labels[labelPrefix+"engine"] != engine {
+					return ErrIdentity
+				}
+				return stage(d)
+			})
+		}
+		if last == nil || ctx.Err() != nil || errors.Is(last, ErrArtifact) || errors.Is(last, ErrIdentity) ||
+			errors.Is(last, ErrBinding) || errors.Is(last, ErrHostKeyMismatch) || errors.Is(last, ErrCredentialReject) ||
+			errors.Is(last, errResourceChanged) || provider.IsLocalStateError(last) {
+			return last
+		}
+	}
+	return last
 }
 
 // stage streams one tar archive into the stopped container. Both the remote copy and
@@ -912,7 +969,21 @@ func inspectRemote(ctx context.Context, d docker, remote provider.RemoteReferenc
 	if err != nil {
 		return containerInfo{}, err
 	}
-	if !found || info.ID != ref.ID || !owned(info, remote.Identity) {
+	if !found && ref.EngineID != "" {
+		// A renamed container may still run. Absence is proved by the full ID on
+		// the already verified engine, never by its name alone.
+		_, present, lookupErr := d.inspect(ctx, ref.ID)
+		if lookupErr != nil {
+			return containerInfo{}, lookupErr
+		}
+		if !present {
+			return containerInfo{}, errors.Join(provider.RemoteAbsence{Remote: remote, ObservedAt: time.Now().UTC()}, ErrIdentity)
+		}
+	}
+	if !found {
+		return containerInfo{}, ErrIdentity
+	}
+	if info.ID != ref.ID || !owned(info, remote.Identity) {
 		return containerInfo{}, ErrIdentity
 	}
 	return info, nil
@@ -957,7 +1028,20 @@ func (a *Adapter) Observe(ctx context.Context, remote provider.RemoteReference) 
 		return observation.Validate(remote)
 	})
 	if err != nil {
-		return provider.Observation{}, err
+		var absence provider.RemoteAbsence
+		if errors.As(err, &absence) {
+			absence.ObservedAt = a.clock.Now().UTC()
+			return provider.Observation{}, errors.Join(absence, ErrIdentity)
+		}
+		var known domain.Problem
+		if errors.As(err, &known) {
+			return provider.Observation{}, err
+		}
+		if errors.Is(err, ErrIdentity) {
+			return provider.Observation{}, provider.Problem(domain.CodeRemoteIdentityMismatch,
+				domain.FailureStageObservation, "The recorded container identity could not be confirmed").WithCause(err)
+		}
+		return provider.Observation{}, verificationError(err)
 	}
 	return observation, nil
 }

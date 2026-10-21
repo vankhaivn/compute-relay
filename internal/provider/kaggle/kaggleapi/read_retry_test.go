@@ -117,7 +117,7 @@ func TestMutationsAndOtherFailuresNeverRetry(t *testing.T) {
 			}
 		})
 	}
-	for _, status := range []int{401, 403, 404, 500, 503} {
+	for _, status := range []int{401, 403, 404} {
 		calls := 0
 		c := newFixtureClient(t, func(*http.Request) (*http.Response, error) {
 			calls++

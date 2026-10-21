@@ -112,8 +112,14 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Retry-After", "1")
 		respond(w, 429, ErrorEnvelope{Error: ErrorBody{Code: domain.CodeRequestLimitExceeded,
 			Message: "selected connection is being updated; retry the same request", Stage: domain.FailureStageValidation,
-			RequestID: RequestID(r.Context()), RecommendedAction: domain.RecommendedActionWait,
+			RequestID: RequestID(r.Context()), SafeOperationRetry: true, RecommendedAction: domain.RecommendedActionWait,
 			Details: map[string]string{domain.ReasonDetail: "connection_update_pending"}}})
+	case errors.Is(err, admission.ErrSelectionUnavailable):
+		w.Header().Set("Retry-After", "5")
+		respond(w, 503, ErrorEnvelope{Error: ErrorBody{Code: domain.CodeProviderUnreachable,
+			Message: "selected connection is temporarily unavailable; retry the same request", Stage: domain.FailureStageObservation,
+			RequestID: RequestID(r.Context()), SafeOperationRetry: true, RecommendedAction: domain.RecommendedActionWait,
+			Details: map[string]string{domain.ReasonDetail: "connection_unavailable"}}})
 	case errors.Is(err, admission.ErrSelection):
 		respondError(w, r, 409, domain.CodeIllegalStateTransition, domain.FailureStageValidation, "selected profile revision is stale; choose the current connection revision explicitly")
 	case errors.Is(err, admission.ErrConflict):

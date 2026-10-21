@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -166,6 +167,9 @@ func TestNativeSharedInputLostCreateIsObservedNotRepeated(t *testing.T) {
 }
 
 func TestNativeStagingUploadIsSentAgainOnceAndReportsItsStep(t *testing.T) {
+	oldDelay := stagingUploadRetryDelay
+	stagingUploadRetryDelay = time.Millisecond
+	t.Cleanup(func() { stagingUploadRetryDelay = oldDelay })
 	p, plan, _, _, f := sharedRuntime(t)
 	f.putFailures = 1
 	if prepared, err := p.Prepare(context.Background(), plan, "prep"); err != nil || !prepared.Ready ||
@@ -173,11 +177,11 @@ func TestNativeStagingUploadIsSentAgainOnceAndReportsItsStep(t *testing.T) {
 		t.Fatal("a failed upload was not sent again with a new ticket", err)
 	}
 	q, plan2, _, _, g := sharedRuntime(t)
-	g.putFailures = 2
+	g.putFailures = stagingUploadTries
 	_, err := q.Prepare(context.Background(), plan2, "prep")
 	var problem domain.Problem
 	if !errors.As(err, &problem) || !errors.Is(err, ErrStaging) || problem.Code != domain.CodeStagingFailed ||
-		problem.PublicDetails()[domain.ReasonDetail] != "shared_upload_failed_http_500" || g.count("StartBlobUpload") != 2 || g.count("CreateDataset") != 0 {
+		problem.PublicDetails()[domain.ReasonDetail] != "shared_upload_failed_http_500" || g.count("StartBlobUpload") != stagingUploadTries || g.count("CreateDataset") != 0 {
 		t.Fatal("upload failure was repeated beyond its bound or lost its step", err)
 	}
 }

@@ -156,7 +156,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				panic(http.ErrAbortHandler) // Preserve a failed binary stream's missing acknowledgement.
 			}
 			// No panic value, token, request dump, or private host path is returned/logged.
-			respondError(w, r, http.StatusServiceUnavailable, domain.CodeStateStoreUnavailable, domain.FailureStageLocalRuntime, "runtime request failed")
+			respondError(w, r, http.StatusServiceUnavailable, domain.CodeRuntimeUnavailable, domain.FailureStageLocalRuntime, "runtime request failed")
 		}
 	}()
 	if !h.safeAuthority(r) {

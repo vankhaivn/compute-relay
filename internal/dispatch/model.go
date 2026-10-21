@@ -60,6 +60,16 @@ func (j Journal) Recoverable() bool {
 	return j.Phase == Staging || j.Phase == Ready || j.Phase == Submitting || j.Phase == Submitted
 }
 func (j Journal) Valid() bool {
+	if raw := journalDetail(j, localFailureDetail); raw != "" {
+		if _, ok := journalTime(raw); !ok {
+			return false
+		}
+	}
+	if raw := journalDetail(j, remoteAbsenceDetail); raw != "" {
+		if j.RemoteAbsence() == nil {
+			return false
+		}
+	}
 	if j.PreparationObservationStarted != nil && (!scheduler.ValidTime(*j.PreparationObservationStarted) || j.Plan == nil) {
 		return false
 	}
@@ -122,6 +132,35 @@ func (j Journal) Valid() bool {
 	return j.Problem == nil || j.Problem.Validate() == nil
 }
 
+const localFailureDetail = "local_failure_started"
+const remoteAbsenceDetail = "remote_absence_observed_at"
+
+// Internal timestamps use the existing private problem metadata; public projection
+// exposes only the closed reason and older journal decoders retain their shape.
+func journalDetail(j Journal, key string) string {
+	if j.Problem == nil {
+		return ""
+	}
+	return j.Problem.Details[key]
+}
+func journalTime(raw string) (time.Time, bool) {
+	at, err := time.Parse(time.RFC3339Nano, raw)
+	return at, err == nil && scheduler.ValidTime(at)
+}
+
+// RemoteAbsence binds its timestamp to the journal's immutable accepted reference.
+func (j Journal) RemoteAbsence() *provider.RemoteAbsence {
+	if j.Phase != Attention || j.Remote == nil || j.Problem == nil || j.Problem.Code != domain.CodeRemoteExecutionUnresolved ||
+		j.Problem.PublicDetails()[domain.ReasonDetail] != "remote_not_found" {
+		return nil
+	}
+	at, ok := journalTime(journalDetail(j, remoteAbsenceDetail))
+	if !ok {
+		return nil
+	}
+	return &provider.RemoteAbsence{Remote: *j.Remote, ObservedAt: at}
+}
+
 type Handle struct {
 	Claim   scheduler.Claim
 	Version int64
@@ -171,6 +210,7 @@ const (
 	BeginSubmission           Kind = "begin_submission"
 	SubmissionSeen            Kind = "submission_seen"
 	ObservationSeen           Kind = "observation_seen"
+	RemoteAbsenceSeen         Kind = "remote_absence_seen"
 	Fault                     Kind = "fault"
 	PreventDispatch           Kind = "prevent_dispatch"
 	ExpireDispatch            Kind = "expire_dispatch"
@@ -186,6 +226,7 @@ type Action struct {
 	PreparationID      domain.OperationID
 	Prepared           *provider.Prepared
 	Submission         *provider.SubmissionOutcome
+	Absence            *provider.RemoteAbsence
 	Observation        *provider.Observation
 	Code               domain.ErrorCode
 	Reason             string // closed adapter reason for a Fault, when known

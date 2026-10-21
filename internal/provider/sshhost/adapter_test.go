@@ -104,6 +104,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.adapter.copyRetryDelay = time.Millisecond
 	h.adapter.dial = func(_ context.Context, got Target, credential Credential) (session, error) {
 		h.dials++
 		if got != target || string(credential.Password) != "secret" {

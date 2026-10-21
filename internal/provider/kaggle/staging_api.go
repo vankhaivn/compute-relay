@@ -127,7 +127,9 @@ type uploadProgress struct {
 
 // stagingUploadTries bounds sends of one file. A failed upload creates no dataset and
 // its blob is never referenced, so the file is sent again with a new ticket.
-const stagingUploadTries = 2
+const stagingUploadTries = 5
+
+var stagingUploadRetryDelay = 15 * time.Second
 
 // uploadStaging uploads a marker and its objects (same order as Files[1:]). It returns
 // a non-empty status and closed reason when an upload did not complete.
@@ -153,10 +155,22 @@ func uploadStaging(ctx context.Context, client *kaggleapi.Client, kind string, r
 		var uploaded *kaggleapi.UploadedBlob
 		reason := ""
 		for try := 0; try < stagingUploadTries && uploaded == nil && ctx.Err() == nil; try++ {
+			if try > 0 {
+				timer := time.NewTimer(stagingUploadRetryDelay << (try - 1))
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return nil, "unknown", kind + "_upload_failed" + failureSuffix(ctx.Err())
+				case <-timer.C:
+				}
+			}
 			progress.sent = sent
 			ticket, err := client.StartBlobUpload(ctx, file.Name, file.Bytes)
 			if err != nil {
 				reason = kind + "_upload_start_failed" + failureSuffix(err)
+				if !retryableStagingUpload(err) {
+					break
+				}
 				continue
 			}
 			source, err := open()
@@ -167,6 +181,9 @@ func uploadStaging(ctx context.Context, client *kaggleapi.Client, kind string, r
 			// and successful source Close. No create can follow an uncertain local source.
 			if uploaded, err = client.UploadBlob(ctx, ticket, source, [sha256.Size]byte(digest)); err != nil {
 				reason = kind + "_upload_failed" + failureSuffix(err)
+				if !retryableStagingUpload(err) {
+					break
+				}
 			}
 		}
 		if uploaded == nil {
@@ -388,4 +405,10 @@ func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingP
 	}
 	result.Status, result.VerifiedFiles, result.VerifiedBytes = "ready", len(r.Files), total
 	return result
+}
+
+func retryableStagingUpload(err error) bool {
+	var apiErr *kaggleapi.Error
+	return errors.Is(err, kaggleapi.ErrTransport) || errors.Is(err, kaggleapi.ErrReceipt) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.As(err, &apiErr) && (apiErr.StatusCode == 429 || apiErr.StatusCode >= 500 && apiErr.StatusCode <= 599)
 }

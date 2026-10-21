@@ -186,12 +186,17 @@ func (e *Executor) Observe(ctx context.Context, expected provider.RemoteReferenc
 	if r.Status == "invalid" {
 		return none, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "kernel identity or source was replaced; retain the original reference")
 	}
+	if r.Status == "not_found" {
+		return none, provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation,
+			"The recorded kernel is not visible; execution and hardware release remain unconfirmed").WithDetail(domain.ReasonDetail, "remote_not_found")
+	}
 	if r.Status != "found" {
 		return none, ErrUnavailable
 	}
 	actual, err := e.remote(r)
 	if err != nil || actual != expected {
-		return none, ErrExecutionIdentity
+		return none, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation,
+			"Kernel identity does not match the recorded attempt").WithCause(ErrExecutionIdentity)
 	}
 	execution, activity := executionState(r.RawState)
 	result := provider.Observation{Remote: expected, Execution: execution, RawState: r.RawState, RemoteActivity: activity, ReleaseEvidence: domain.ReleaseEvidenceNotObservable, ObservedAt: e.now().UTC()}

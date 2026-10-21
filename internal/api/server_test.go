@@ -126,7 +126,7 @@ func assertStatus(t *testing.T, r *http.Response, body []byte, want int) {
 			t.Fatal("invalid error taxonomy", err)
 		}
 		_ = p
-		if e.Error.RequestID != r.Header.Get("X-Request-ID") || e.Error.ComputeMayHaveStarted || e.Error.SafeOperationRetry {
+		if e.Error.RequestID != r.Header.Get("X-Request-ID") || e.Error.ComputeMayHaveStarted || e.Error.SafeOperationRetry != (want == 429) {
 			t.Fatal("invalid error envelope")
 		}
 	}

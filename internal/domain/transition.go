@@ -14,7 +14,13 @@ func ValidateAttemptStateTransition(current, next AttemptState) error {
 		return err
 	}
 	if err := validateTransition("execution", current.Execution, next.Execution, executionTransitions); err != nil {
-		return err
+		// Exact resource absence ends activity without inventing an exit outcome.
+		absent := (current.Execution == ExecutionQueued || current.Execution == ExecutionStarting || current.Execution == ExecutionRunning) &&
+			next.Execution == ExecutionUnknown && next.Orchestration == OrchestrationNeedsAttention &&
+			next.RemoteActivity == RemoteActivityInactive && next.ReleaseEvidence == ReleaseEvidenceProviderReported
+		if !absent {
+			return err
+		}
 	}
 	if err := validateTransition("result", current.Result, next.Result, resultTransitions); err != nil {
 		return err

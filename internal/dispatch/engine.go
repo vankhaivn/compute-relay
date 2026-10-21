@@ -101,7 +101,10 @@ func (e *Engine) Run(ctx context.Context) error {
 
 // PreparationObservationGrace bounds recovery after the first failed preparation.
 // It starts after uploads and survives restarts through the journal.
-const PreparationObservationGrace = 2 * time.Minute
+const PreparationObservationGrace = 10 * time.Minute
+
+// Local failures have no provider mutation to reconcile and may safely wait.
+const LocalFailureBudget = 10 * time.Minute
 
 // A submitted remote run is observed at most every 15 seconds; control requests still wake it
 // at once. Unresolved outcomes after submission start from 30 seconds. Known remote runs
@@ -114,6 +117,9 @@ const (
 // nextPassDelay doubles the poll delay per unresolved outcome up to two minutes.
 func nextPassDelay(poll time.Duration, j Journal) time.Duration {
 	delay := poll
+	if j.Plan == nil && j.Failures > 0 {
+		delay = max(delay, 15*time.Second)
+	}
 	if j.Remote != nil {
 		delay = max(delay, submittedPollFloor)
 	}
@@ -131,8 +137,22 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(parent, e.config.PreparationTimeout)
-	s := &session{e: e, current: work}
+	deadline := time.Now().Add(e.config.PreparationTimeout)
+	if parentDeadline, ok := parent.Deadline(); ok && parentDeadline.Before(deadline) {
+		deadline = parentDeadline
+	}
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(parent), deadline)
+	s := &session{e: e, current: work, parent: parent}
+	// Serialize shutdown with the intent commit. A committed Prepare owns its
+	// bounded call and heartbeat until completion; shutdown cannot interrupt it.
+	stopShutdown := context.AfterFunc(parent, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if !s.drainingPreparation {
+			cancel()
+		}
+	})
+	defer stopShutdown()
 	ctx, stop := worker.Heartbeat(ctx, work.Handle.Claim.ExpiresAt, e.clock.Now, func(c context.Context) (time.Time, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -388,7 +408,11 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		remote := *work.Journal.Remote
 		obs, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Observation, error) { return p.Observe(c, remote) })
 		if err != nil {
-			return s.providerFailure(err, domain.CodeProviderUnreachable)
+			var absence provider.RemoteAbsence
+			if errors.As(err, &absence) {
+				return s.commit(Action{Kind: RemoteAbsenceSeen, Absence: &absence})
+			}
+			return s.providerFailure(err, errorCode(err, domain.CodeProviderUnreachable))
 		}
 		if obs.Validate(remote) != nil {
 			return s.fail(domain.CodeRemoteIdentityMismatch)
@@ -489,12 +513,14 @@ func errorCode(err error, fallback domain.ErrorCode) domain.ErrorCode {
 }
 
 type session struct {
-	mu          sync.Mutex
-	e           *Engine
-	current     Work
-	ctx         context.Context
-	sampled     time.Time
-	progressErr error
+	mu                  sync.Mutex
+	e                   *Engine
+	current             Work
+	ctx                 context.Context
+	sampled             time.Time
+	progressErr         error
+	parent              context.Context
+	drainingPreparation bool
 }
 
 func (s *session) work() Work { s.mu.Lock(); defer s.mu.Unlock(); return s.current }
@@ -503,6 +529,9 @@ func (s *session) commit(action Action) error {
 	defer s.mu.Unlock()
 	base := context.Background()
 	if action.Kind == BeginPreparation || action.Kind == BeginSubmission {
+		if s.parent != nil && s.parent.Err() != nil {
+			return s.parent.Err()
+		}
 		base = s.ctx /* Cancellation can save an outcome, but can never authorize new work. */
 	} else if action.Kind == RefuseNewWork {
 		base = context.WithoutCancel(s.ctx)
@@ -512,12 +541,18 @@ func (s *session) commit(action Action) error {
 	work, err := s.e.repo.CommitDispatch(ctx, s.current.Handle, action)
 	if err == nil {
 		s.current = work
+		if action.Kind == BeginPreparation {
+			s.drainingPreparation = true
+		}
 	}
 	return err
 }
 func (s *session) consumeAuthorization() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.parent != nil && s.parent.Err() != nil {
+		return s.parent.Err()
+	}
 	work, err := s.e.repo.ConsumeAuthorization(s.ctx, s.current.Handle)
 	if err == nil {
 		s.current = work
@@ -547,7 +582,7 @@ func (s *session) providerFailure(err error, code domain.ErrorCode) error {
 	if provider.IsLocalStateError(err) {
 		return err
 	}
-	return s.fail(code)
+	return s.failWith(errorCode(err, code), problemReason(err))
 }
 
 // progress records at most one staging sample per second plus the final one. Transient

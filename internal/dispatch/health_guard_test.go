@@ -11,7 +11,7 @@ import (
 func TestHealthRefusalDoesNotCreateOrDiscardRemoteAuthority(t *testing.T) {
 	w, _, _ := fixtureWork(t)
 	j, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: RefuseNewWork})
-	if j.Phase != Failed || state.Execution != domain.ExecutionNotSubmitted || state.Orchestration != domain.OrchestrationFailed || scheduler.HoldsAccount(state, false) || j.Problem == nil || j.Problem.Details[domain.ReasonDetail] != "host_unhealthy" || j.Problem.ComputeMayHaveStarted || j.Problem.SafeOperationRetry {
+	if j.Phase != Local || state.Execution != domain.ExecutionNotSubmitted || state.Orchestration != domain.OrchestrationQueued || j.Problem == nil || j.Problem.Details[domain.ReasonDetail] != "host_unhealthy" || j.Problem.ComputeMayHaveStarted || j.Problem.SafeOperationRetry {
 		t.Fatal("local refusal fabricated or retained compute authority")
 	}
 	j, state = readyFixture(t)

@@ -295,8 +295,14 @@ func TestHostHealthRefusesPreparationAndPreservesPreparedStartAuthority(t *testi
 				t.Fatal("refusal lost stable pre-submit evidence", r.Attempt.State, r.Problem)
 			}
 			if stage == "preparation" {
-				if g.f.backend.Stats().PrepareCalls != 0 || r.Attempt.State.Orchestration != domain.OrchestrationFailed {
+				if g.f.backend.Stats().PrepareCalls != 0 || r.Attempt.State.Orchestration != domain.OrchestrationQueued {
 					t.Fatal("preparation refusal staged or retained automatic work")
+				}
+				g.sampler.set("ok")
+				g.f.advance(t, 40*time.Second)
+				requireNoError(t, g.step(t))
+				if g.f.backend.Stats().PrepareCalls != 1 || g.read(t, job).Attempt.ID != job.AttemptID {
+					t.Fatal("healthy preparation did not resume the same attempt")
 				}
 				return
 			}

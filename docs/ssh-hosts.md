@@ -78,6 +78,12 @@ parallelism does not guarantee more throughput. Jobs run as an unprivileged user
 unless allowed, with only the Python standard library preinstalled. Logs stream stdout; stderr
 arrives with the results.
 
+If staging transfer fails after container creation, Relay may retry copying into that same stopped
+container up to five times, with 15, 30, 60 and 120 second waits inside the original preparation
+budget. Each retry opens a fresh connection and checks the exact container, Docker engine and
+ownership labels. It never creates a replacement container or starts execution as part of
+transfer recovery.
+
 ## Long attempts
 
 An SSH connection can allow `max_remote_wall_seconds` up to 604800 (7 days); the `serve` default

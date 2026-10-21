@@ -20,6 +20,9 @@ import (
 
 func nativeRuntime(t *testing.T, gpu bool) (*RuntimeAdapter, provider.Plan, *provider.Prepared, *stagingTestBlobs, *nativeFixture) {
 	t.Helper()
+	oldRetry := stagingUploadRetryDelay
+	stagingUploadRetryDelay = time.Millisecond
+	t.Cleanup(func() { stagingUploadRetryDelay = oldRetry })
 	c, plan, prepared := executionFixture(t)
 	policy := DefaultExecutionPolicy()
 	if gpu {

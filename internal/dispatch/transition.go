@@ -44,10 +44,8 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		}
 		p := provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, message).WithDetail(domain.ReasonDetail, reason).WithRecommendedAction(domain.RecommendedActionWait)
 		j.Problem = &p
-		if old.Plan == nil && reason == "host_unhealthy" {
-			j.Phase = Failed
-			next.Orchestration = domain.OrchestrationFailed
-			next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+		if old.Plan == nil {
+			next.Orchestration = domain.OrchestrationQueued
 		}
 		// A prepared hold remains owned and stopped; its unused start grant is not
 		// consumed and the machine reservation is retained while health refuses it.
@@ -76,7 +74,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			event = domain.EventReconciliationDeferred
 		}
 	case RequestReconciliation:
-		if state.Execution.Terminal() || state.Orchestration.Terminal() || old.Problem != nil && (old.Problem.Code == domain.CodeRemoteIdentityMismatch || old.Problem.Code == domain.CodePrivateStagingUnavailable) {
+		if old.RemoteAbsence() != nil || state.Execution.Terminal() || state.Orchestration.Terminal() || old.Problem != nil && (old.Problem.Code == domain.CodeRemoteIdentityMismatch || old.Problem.Code == domain.CodePrivateStagingUnavailable) {
 			return Journal{}, state, "", ErrConflict
 		}
 		if !old.SubmitStarted {
@@ -224,6 +222,27 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			next.Orchestration = domain.OrchestrationReconciling
 			event = domain.EventSubmissionUnknown
 		}
+	case RemoteAbsenceSeen:
+		if old.Phase != Submitted || old.Remote == nil || a.Absence == nil || a.Absence.Remote != *old.Remote ||
+			!scheduler.ValidTime(a.Absence.ObservedAt) || a.Absence.ObservedAt.After(now) ||
+			old.Observation != nil && !a.Absence.ObservedAt.After(old.Observation.ObservedAt) {
+			return Journal{}, state, "", ErrConflict
+		}
+		j.Phase = Attention
+		p := provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation,
+			"The exact remote resource is absent; final execution outcome and results remain unknown").
+			WithDetail(domain.ReasonDetail, "remote_not_found").
+			WithDetail(remoteAbsenceDetail, a.Absence.ObservedAt.UTC().Format(time.RFC3339Nano)).WithRetrySemantics(false, true).
+			WithRecommendedAction(domain.RecommendedActionInspectProvider)
+		j.Problem = &p
+		next.Orchestration = domain.OrchestrationNeedsAttention
+		next.Execution = domain.ExecutionUnknown
+		next.RemoteActivity = domain.RemoteActivityInactive
+		next.ReleaseEvidence = domain.ReleaseEvidenceProviderReported
+		if cancellationPending(state) {
+			next.Cancellation = domain.CancellationManual
+		}
+		event = domain.EventReconciliationDeferred
 	case ObservationSeen:
 		if old.Phase != Submitted || old.Remote == nil || a.Observation == nil || a.Observation.Validate(*old.Remote) != nil {
 			return Journal{}, state, "", ErrConflict
@@ -317,15 +336,28 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		}
 		permanent := a.Code == domain.CodeRemoteIdentityMismatch || a.Code == domain.CodePrivateStagingUnavailable
 		if old.Plan == nil {
-			next.Orchestration = domain.OrchestrationBlocked
+			started, ok := journalTime(journalDetail(old, localFailureDetail))
+			if !ok {
+				started = now.UTC()
+			}
+			p := j.Problem.WithDetail(localFailureDetail, started.Format(time.RFC3339Nano))
+			j.Problem = &p
+			next.Orchestration = domain.OrchestrationQueued
 			switch a.Code {
 			case domain.CodeInputNotFound, domain.CodeInputDigestMismatch, domain.CodeInputTooLarge, domain.CodeInvalidInputPath, domain.CodeUnsupportedCapability, domain.CodeResourceRequirementUnsatisfied:
 				permanent = true
 			}
-			if permanent || j.Failures == MaxFailures {
+			if permanent || !now.Before(started.Add(LocalFailureBudget)) {
 				j.Phase = Failed
 				next.Orchestration = domain.OrchestrationFailed
 				next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
+				if j.Problem.RecommendedAction == domain.RecommendedActionReconcile {
+					p := j.Problem.WithRecommendedAction(domain.RecommendedActionFixRequest)
+					j.Problem = &p
+				}
+			} else {
+				p := j.Problem.WithRecommendedAction(domain.RecommendedActionWait).WithRetrySemantics(true, false)
+				j.Problem = &p
 			}
 		} else {
 			if may {
@@ -390,6 +422,8 @@ func problem(code domain.ErrorCode, may bool) *domain.Problem {
 	case domain.CodeProviderSubmissionUnknown:
 		stage = domain.FailureStageSubmission
 		message = "Submission may have been accepted; reconcile the recorded identity without resubmitting."
+	case domain.CodeRemoteExecutionUnresolved:
+		stage = domain.FailureStageOperation
 	case domain.CodeProviderStateUnknown, domain.CodeProviderUnreachable, domain.CodeRemoteIdentityMismatch:
 	default:
 		return nil
