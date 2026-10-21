@@ -107,6 +107,10 @@ const PreparationObservationGrace = 10 * time.Minute
 // Local failures have no provider mutation to reconcile and may safely wait.
 const LocalFailureBudget = 10 * time.Minute
 
+// Two complete inventories separated by this grace resolve a lost submission
+// reply without racing ordinary provider indexing. Exact-name misses never do.
+const SubmissionAbsenceGrace = 2 * time.Minute
+
 // A submitted remote run is observed at most every 15 seconds; control requests still wake it
 // at once. Unresolved outcomes after submission start from 30 seconds. Known remote runs
 // remain observable through transient outages with bounded calls and backoff.
@@ -400,6 +404,12 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if seen.Validate(identity) != nil {
 			return s.fail(domain.CodeRemoteIdentityMismatch)
 		}
+		if seen.Status == provider.ReconciliationAbsent {
+			if work.Journal.OwnerSubmissionPresent {
+				return s.failWith(domain.CodeProviderSubmissionUnknown, "owner_present_lookup_unavailable")
+			}
+			return s.commit(Action{Kind: SubmissionAbsenceSeen, ResourceName: seen.ResourceName})
+		}
 		if seen.Status != provider.ReconciliationFound {
 			return s.fail(domain.CodeProviderSubmissionUnknown)
 		}
@@ -583,7 +593,18 @@ func (s *session) providerFailure(err error, code domain.ErrorCode) error {
 	if provider.IsLocalStateError(err) {
 		return err
 	}
-	return s.failWith(errorCode(err, code), problemReason(err))
+	var details map[string]string
+	var value domain.Problem
+	var pointer *domain.Problem
+	if errors.As(err, &value) {
+		details = value.PublicDetails()
+	} else if errors.As(err, &pointer) {
+		details = pointer.PublicDetails()
+	}
+	if commitErr := s.commit(Action{Kind: Fault, Code: errorCode(err, code), Reason: problemReason(err), Details: details}); commitErr != nil {
+		return commitErr
+	}
+	return s.work().Journal.Problem
 }
 
 // progress records at most one staging sample per second plus the final one. Transient

@@ -75,6 +75,23 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 	kernel, err := client.GetKernel(ctx, resource)
 	id := request.KernelID
 	if err != nil {
+		if mode == "reconcile" {
+			present, listErr := client.OwnedKernelPresent(ctx, resource)
+			if listErr != nil {
+				return reject(executionReadReason(listErr, "kernel_read_failed", mode))
+			}
+			if !present {
+				return empty("absent")
+			}
+			// The inventory found the exact name. A private-name lookup can lag;
+			// keep observing it, never turn a failed identity read into absence.
+			kernel, err = client.GetKernel(ctx, resource)
+			if err != nil {
+				return reject(executionReadReason(err, "kernel_read_failed", mode))
+			}
+		}
+	}
+	if err != nil {
 		if !kaggleapi.NameAbsent(err) {
 			return reject(executionReadReason(err, "kernel_read_failed", mode))
 		}
@@ -100,14 +117,14 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 				}
 				return reject("helper_failed")
 			}
-			return empty("unknown")
+			return submissionFailure(err)
 		}
 		id = string(receipt.ID)
 		// Submission needs new identity proof; an existing resource already has
 		// the pre-status proof from the first GetKernel above.
 		kernel, err = client.GetKernel(ctx, resource)
 		if err != nil {
-			return empty("unknown")
+			return submissionFailure(err)
 		}
 	}
 	if !matchingKernel(kernel, request, id) {
@@ -121,7 +138,7 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 	kernel, err = client.GetKernel(ctx, resource)
 	if err != nil {
 		if mode == "submit" {
-			return empty("unknown")
+			return submissionFailure(err)
 		}
 		return reject(executionReadReason(err, "kernel_read_failed", mode))
 	}
@@ -164,4 +181,43 @@ func executionReadReason(err error, fallback, mode string) string {
 		return "lookup_response_invalid"
 	}
 	return fallback
+}
+
+func submissionFailure(err error) executionResponse {
+	r := executionResponse{Protocol: 1, Status: "unknown", ErrorType: "unavailable", FailureOperation: "unknown"}
+	var apiErr *kaggleapi.Error
+	if errors.As(err, &apiErr) {
+		r.HTTPStatus = apiErr.StatusCode
+		switch apiErr.Operation {
+		case "kernels.KernelsApiService/SaveKernel":
+			r.FailureOperation = "save_kernel"
+		case "kernels.KernelsApiService/GetKernel":
+			r.FailureOperation = "verify_kernel"
+		}
+		if validSubmissionErrorType(apiErr.ProviderType) {
+			r.ErrorType = apiErr.ProviderType
+		} else if errors.Is(err, kaggleapi.ErrHTTP) {
+			r.ErrorType = "http_error"
+		}
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		r.ErrorType = "timeout"
+	case errors.Is(err, context.Canceled):
+		r.ErrorType = "interrupted"
+	case errors.Is(err, kaggleapi.ErrTransport):
+		r.ErrorType = "transport"
+	case errors.Is(err, kaggleapi.ErrResponse), errors.Is(err, kaggleapi.ErrReceipt), errors.Is(err, kaggleapi.ErrLimit):
+		r.ErrorType = "invalid_response"
+	}
+	return r
+}
+
+func validSubmissionErrorType(value string) bool {
+	switch value {
+	case "unavailable", "http_error", "timeout", "interrupted", "transport", "invalid_response",
+		"PERMISSION_DENIED", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED", "INVALID_ARGUMENT", "INTERNAL", "NOT_FOUND", "ALREADY_EXISTS":
+		return true
+	}
+	return false
 }

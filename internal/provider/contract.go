@@ -127,6 +127,7 @@ const (
 	ReconciliationFound    ReconciliationStatus = "found"
 	ReconciliationNotFound ReconciliationStatus = "not_found"
 	ReconciliationUnknown  ReconciliationStatus = "unknown"
+	ReconciliationAbsent   ReconciliationStatus = "absent"
 )
 
 // NotFound is an observation, NOT proof that a previous submission was rejected. Neither
@@ -134,6 +135,9 @@ const (
 type Reconciliation struct {
 	Status ReconciliationStatus
 	Remote *RemoteReference
+	// Absent is an authenticated complete inventory observation, distinct from
+	// an exact-name miss. Dispatch requires a second separated observation.
+	ResourceName string
 }
 
 type PageRequest struct {

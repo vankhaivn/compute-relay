@@ -253,7 +253,7 @@ func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now 
 func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action dispatch.Action) (dispatch.Work, error) {
 	// HTTP controls use their authenticated operation transaction; an ordinary worker
 	// cannot bypass its operation identity/event journal through the dispatch port.
-	if action.Kind == dispatch.PreventDispatch || action.Kind == dispatch.RequestReconciliation {
+	if action.Kind == dispatch.PreventDispatch || action.Kind == dispatch.RequestReconciliation || action.Kind == dispatch.OwnerSubmissionAbsent {
 		return dispatch.Work{}, dispatch.ErrInvalid
 	}
 	var result dispatch.Work

@@ -28,6 +28,8 @@ These rules hold for every change. Breaking one needs an explicit design decisio
 7. **Unknown stays unknown.** Execution, cancellation, result availability, cleanup and hardware
    release are separate facts. A 202 is only a local receipt. Unclassified provider verification
    failures remain state-unknown; adapters must establish specific authentication or identity failures.
+   Complete owned-inventory evidence or an explicit owner attestation may resolve a missing submission
+   as rejected, with distinct provenance. This never rearms the original submission intent.
 8. **Results are all-or-nothing.** Publish a complete, bounded, hash-verified artifact set
    atomically; complete temporary bytes are not results.
 9. **Credentials stay in the vault.** Never in jobs, logs, fixtures, SQLite or Git. Access failure

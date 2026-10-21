@@ -63,6 +63,7 @@
         "cancellation_confirmed",
         "too_late",
         "observation_refreshed",
+        "submission_resolved_absent",
         "collection_requested",
         "results_available",
         "new_attempt_created",
@@ -190,7 +191,7 @@
           "const": "succeeded"
         },
         "effect": {
-          "const": "observation_refreshed"
+          "enum": ["observation_refreshed", "submission_resolved_absent"]
         }
       }
     },

@@ -272,22 +272,61 @@ func (problem Problem) WithDetail(key, value string) Problem {
 	return problem
 }
 
-// ReasonDetail is the only detail that crosses a public boundary: a closed adapter reason
-// such as "staging_not_confirmed", never provider, URL or OS text.
+// ReasonDetail is a closed adapter reason, never provider, URL or OS text.
 const ReasonDetail = "reason"
 
-// PublicDetails returns the problem's closed reason, or nil when it has none.
+// PublicDetails projects only bounded reasons, explicit resource identity and
+// closed submission diagnostics. Raw provider messages are never public.
 func (problem Problem) PublicDetails() map[string]string {
+	result := make(map[string]string)
 	reason := problem.Details[ReasonDetail]
-	if reason == "" || len(reason) > 64 || reason[0] < 'a' || reason[0] > 'z' {
+	if closedReason(reason) {
+		result[ReasonDetail] = reason
+	}
+	if name := problem.Details["resource_name"]; ValidResourceName(name) {
+		result["resource_name"] = name
+	}
+	if status := problem.Details["submission_http_status"]; len(status) == 3 && status[0] >= '1' && status[0] <= '5' && status[1] >= '0' && status[1] <= '9' && status[2] >= '0' && status[2] <= '9' {
+		result["submission_http_status"] = status
+	}
+	switch value := problem.Details["submission_error_type"]; value {
+	case "unavailable", "http_error", "timeout", "interrupted", "transport", "invalid_response",
+		"PERMISSION_DENIED", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED", "INVALID_ARGUMENT", "INTERNAL", "NOT_FOUND", "ALREADY_EXISTS":
+		result["submission_error_type"] = value
+	}
+	switch value := problem.Details["submission_operation"]; value {
+	case "save_kernel", "verify_kernel", "unknown":
+		result["submission_operation"] = value
+	}
+	if len(result) == 0 {
 		return nil
+	}
+	return result
+}
+
+func closedReason(reason string) bool {
+	if reason == "" || len(reason) > 64 || reason[0] < 'a' || reason[0] > 'z' {
+		return false
 	}
 	for _, c := range []byte(reason) {
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
-			return nil
+			return false
 		}
 	}
-	return map[string]string{ReasonDetail: reason}
+	return true
+}
+
+// ValidResourceName accepts a provider-owned name, never a URL or free text.
+func ValidResourceName(name string) bool {
+	if name == "" || len(name) > 256 {
+		return false
+	}
+	for _, c := range []byte(name) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' && c != '.' && c != '/' {
+			return false
+		}
+	}
+	return true
 }
 
 // WithCause returns a copy that unwraps to cause without exposing it as public details.

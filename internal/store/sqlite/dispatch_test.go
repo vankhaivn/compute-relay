@@ -414,13 +414,17 @@ func TestSubmittedObservationRecoversAfterDisconnectAndRestart(t *testing.T) {
 		t.Fatal("not submitted", original.Phase)
 	}
 	f.adapter.verifyError = provider.Problem(domain.CodeProviderUnreachable, domain.FailureStageObservation, "fixture unavailable")
-	for n := 0; n < dispatch.MaxFailures+3; n++ {
+	for n := 0; n < dispatch.MaxFailures; n++ {
 		var problem *domain.Problem
 		if err := f.step(t); !errors.As(err, &problem) || problem.Code != domain.CodeProviderUnreachable {
 			t.Fatal("failure classification lost", err)
 		}
 		j := f.journal(t, id)
-		if !j.Recoverable() || *j.Remote != *original.Remote || f.state(t, id).Orchestration != domain.OrchestrationReconciling {
+		expected := domain.OrchestrationReconciling
+		if n == dispatch.MaxFailures-1 {
+			expected = domain.OrchestrationNeedsAttention
+		}
+		if *j.Remote != *original.Remote || f.state(t, id).Orchestration != expected {
 			t.Fatal("observation parked or identity changed", j.Phase)
 		}
 	}
@@ -428,6 +432,9 @@ func TestSubmittedObservationRecoversAfterDisconnectAndRestart(t *testing.T) {
 	requireNoError(t, f.adapter.Advance(*original.Remote))
 	requireNoError(t, f.adapter.Advance(*original.Remote))
 	f.restart(t)
+	service, actor, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+	_, err := service.Submit(t.Context(), actor, "a", id.JobID, domain.OperationReconcile, "recover-after-disconnect", controlRequest(id.AttemptID))
+	requireNoError(t, err)
 	requireNoError(t, f.step(t))
 	j, state := f.journal(t, id), f.state(t, id)
 	if j.Phase != dispatch.Collectible || j.Failures != 0 || j.Problem != nil || state.Execution != domain.ExecutionSucceeded || state.Result != domain.ResultNotAvailable {

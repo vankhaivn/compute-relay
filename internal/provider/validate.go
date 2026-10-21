@@ -253,6 +253,11 @@ func (result Reconciliation) Validate(expected Identity) error {
 		return err
 	}
 	switch result.Status {
+	case ReconciliationAbsent:
+		if result.Remote != nil || !domain.ValidResourceName(result.ResourceName) {
+			return errors.New("absence requires an exact owned resource name")
+		}
+		return nil
 	case ReconciliationFound:
 		if result.Remote == nil || result.Remote.Identity != expected {
 			return errors.New("reconciliation identity mismatch")

@@ -46,14 +46,20 @@ observation after an explicit reconciliation request.
 
 Submission reconciliation derives the kernel name from the frozen attempt identity and validates
 version 1, source digest, owner, privacy and mounted inputs before normal observation can resume.
-Unresolved lookups retain a closed reason: `kernel_not_visible` for an exact 404,
-`lookup_access_denied` for a 403 (including Kaggle's missing-name permission response),
-`lookup_authentication_failed`, `lookup_rate_limited`, `lookup_timeout`,
-`lookup_interrupted`, or `lookup_response_invalid`. Authentication/kernel read failures
-and credential availability remain distinct. These reasons survive dispatch attention and
-are public diagnostics, never provider response bodies. A missing kernel today does not prove
-it never ran or that an in-flight save was rejected. Neither elapsed time nor repeated misses
-release an uncertain submission for replacement; explicit non-acceptance remains required.
+If an exact lookup fails, it scans every page of the authenticated owner's unfiltered kernel
+inventory. Finding the name resumes identity verification. Only complete inventories can establish
+absence; two complete absent observations at least two minutes apart settle the original attempt
+as rejected with `submission_absent_owned_list`. Partial, malformed, rate-limited or unavailable
+inventories retain uncertainty and never permit another submission of the original attempt.
+The consumer may then admit a new attempt under its replacement policy.
+
+Unresolved lookups retain closed access, authentication, rate-limit, timeout, interruption or
+invalid-response reasons. Five failed observations reach attention. At attention, an explicit
+owner resolution can attest the exact notebook absent or present through the normal reconciliation
+operation. Absence settles with `submission_absent_owner_confirmed`; presence follows the original
+identity and prevents later inventory misses from overruling that attestation. Original submission
+HTTP status, allowlisted provider error type and operation survive later observations. Raw provider
+messages and bodies are never public diagnostics. A 403 or 404 lookup alone is not absence proof.
 
 Terminalization preserves the original intent and unknown resource evidence. Cleanup preview can
 observe this settled attempt using its frozen staging plan. Exact discovery records the numeric

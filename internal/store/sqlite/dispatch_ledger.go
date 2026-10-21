@@ -49,7 +49,7 @@ func writeDispatchLedger(ctx context.Context, tx *sql.Tx, work dispatch.Work, j 
 		prepared, _ := json.Marshal(j.Prepared)
 		_, err := tx.ExecContext(ctx, `INSERT INTO submission_intents(intent_id,queue_seq,identity,prepared,status,created_at) VALUES(?,?,?,?,'started',?)`, string(j.Plan.Job.Identity.IntentID), work.Handle.Claim.Sequence, string(identity), string(prepared), now.UTC().Format(time.RFC3339Nano))
 		return dbError(err)
-	case dispatch.SubmissionSeen:
+	case dispatch.SubmissionSeen, dispatch.SubmissionAbsenceSeen, dispatch.OwnerSubmissionAbsent:
 		status := "unknown"
 		remote := ""
 		if j.Phase == dispatch.Rejected {

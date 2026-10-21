@@ -213,8 +213,12 @@ func finishObservedOperations(ctx context.Context, tx *sql.Tx, work *dispatch.Wo
 			p = controlProblem(domain.CodeRemoteExecutionUnresolved, true)
 		} else if !(kind == dispatch.PreparationSeen && !work.Journal.SubmitStarted && work.Journal.Prepared != nil) &&
 			!(kind == dispatch.SubmissionSeen && work.Journal.Remote != nil) &&
+			!(kind == dispatch.SubmissionAbsenceSeen && work.Journal.Phase == dispatch.Rejected) &&
 			!(kind == dispatch.ObservationSeen && work.Journal.Observation != nil && work.Journal.Observation.Execution != domain.ExecutionUnknown) {
 			continue
+		}
+		if kind == dispatch.SubmissionAbsenceSeen && work.Journal.Phase == dispatch.Rejected {
+			effect = operations.SubmissionResolvedAbsent
 		}
 		if _, err = finishControl(ctx, tx, r, status, effect, p, now); err != nil {
 			return err

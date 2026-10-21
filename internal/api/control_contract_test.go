@@ -47,7 +47,7 @@ func TestControlWireSchemaMatchesRecordSemantics(t *testing.T) {
 	kinds := []domain.OperationKind{domain.OperationCancel, domain.OperationRetryCompute, domain.OperationReconcile, domain.OperationCollect}
 	statuses := []domain.OperationStatus{domain.OperationAccepted, domain.OperationRunning, domain.OperationSucceeded, domain.OperationFailed, domain.OperationManualRequired}
 	effects := []operations.Effect{operations.Pending, operations.DispatchPrevented, operations.CancellationRequested,
-		operations.CancellationConfirmed, operations.TooLate, operations.ObservationRefreshed, operations.CollectionRequested,
+		operations.CancellationConfirmed, operations.TooLate, operations.ObservationRefreshed, operations.SubmissionResolvedAbsent, operations.CollectionRequested,
 		operations.ResultsAvailable, operations.NewAttemptCreated, operations.ManualRequired, operations.Failed}
 	for _, kind := range kinds {
 		for _, status := range statuses {
@@ -99,12 +99,19 @@ func TestControlRequestSchemasMatchStrictParser(t *testing.T) {
 		name := "control-request.v1alpha1.schema.json"
 		if kind == domain.OperationRetryCompute {
 			name += "#/$defs/retry"
+		} else if kind == domain.OperationReconcile {
+			name += "#/$defs/reconcile"
 		}
 		schema := controlSchema(t, name)
 		for _, raw := range []string{`{"attempt_id":"source"}`, `{"attempt_id":"source","reason":"explicit retry"}`,
 			`{}`, `null`, `{"attempt_id":null}`, `{"attempt_id":"source","reason":null}`,
 			`{"attempt_id":"source","reason":" "}`, `{"attempt_id":"source","reason":"\u00a0"}`,
 			`{"attempt_id":"source","reason":"\n"}`, `{"attempt_id":"source","reason":"\u0085"}`,
+			`{"attempt_id":"source","submission_resolution":"absent","resource_name":"owner/cre-original"}`,
+			`{"attempt_id":"source","submission_resolution":"present","resource_name":"owner/cre-original"}`,
+			`{"attempt_id":"source","submission_resolution":"absent"}`,
+			`{"attempt_id":"source","resource_name":"owner/cre-original"}`,
+			`{"attempt_id":"source","submission_resolution":"other","resource_name":"owner/cre-original"}`,
 			`{"attempt_id":"source","force":true}`, `{"attempt_id":"../source"}`,
 			`{"attempt_id":"source","reason":"` + strings.Repeat("x", 512) + `"}`,
 			`{"attempt_id":"source","reason":"` + strings.Repeat("x", 513) + `"}`} {

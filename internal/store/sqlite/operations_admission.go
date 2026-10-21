@@ -181,6 +181,9 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		}
 		err = tx.QueryRowContext(ctx, query, string(c.WorkspaceID), string(c.JobID), string(c.Request.AttemptID), string(c.Kind)).Scan(&existing)
 		if err == nil {
+			if c.Request.SubmissionResolution != "" {
+				return operations.ErrBusy
+			}
 			r, err := loadOperation(ctx, tx, c.WorkspaceID, domain.OperationID(existing))
 			if err != nil {
 				return err
@@ -255,7 +258,7 @@ func (s *Store) AdmitOperation(ctx context.Context, c operations.Command) (opera
 		case domain.OperationRetryCompute:
 			r, err = createRetry(ctx, tx, target, r, now)
 		case domain.OperationReconcile:
-			r, err = admitReconciliation(ctx, tx, target, r, now)
+			r, err = admitReconciliation(ctx, tx, target, r, c.Request, now)
 		case domain.OperationCollect:
 			r, err = admitCollection(ctx, tx, target, r, now)
 		}

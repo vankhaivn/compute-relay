@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -39,14 +40,17 @@ var lookupReasons = map[string]bool{
 }
 
 type executionResponse struct {
-	Protocol     int                 `json:"protocol"`
-	Status       string              `json:"status"`
-	Reason       string              `json:"reason"`
-	KernelID     string              `json:"kernel_id"`
-	Reference    string              `json:"reference"`
-	Version      int                 `json:"version"`
-	SourceSHA256 domain.SHA256Digest `json:"source_sha256"`
-	RawState     string              `json:"raw_state"`
+	Protocol         int                 `json:"protocol"`
+	Status           string              `json:"status"`
+	Reason           string              `json:"reason"`
+	KernelID         string              `json:"kernel_id"`
+	Reference        string              `json:"reference"`
+	Version          int                 `json:"version"`
+	SourceSHA256     domain.SHA256Digest `json:"source_sha256"`
+	RawState         string              `json:"raw_state"`
+	HTTPStatus       int                 `json:"http_status,omitempty"`
+	ErrorType        string              `json:"error_type,omitempty"`
+	FailureOperation string              `json:"failure_operation,omitempty"`
 }
 
 type kernelReference struct {
@@ -109,6 +113,10 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 		if recover() != nil {
 			out = unknownExecution()
 		}
+		if e != nil && out.Problem != nil {
+			p := out.Problem.WithDetail("resource_name", e.request.Owner+"/"+e.request.Slug)
+			out.Problem = &p
+		}
 	}()
 	if e == nil || !e.allowSubmit {
 		return rejectedExecution(reasonSubmissionDisabled)
@@ -138,13 +146,13 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 		return rejectedExecution(stopped)
 	}
 	if err != nil {
-		return unknownExecution()
+		return unknownExecutionFailure(submissionFailure(err))
 	}
 	if r.Status == "rejected" {
 		return rejectedExecution(r.Reason)
 	}
 	if r.Status != "found" {
-		return unknownExecution()
+		return unknownExecutionFailure(r)
 	}
 	remote, err := e.remote(r)
 	if err != nil {
@@ -170,9 +178,13 @@ func (e *Executor) Reconcile(ctx context.Context, identity provider.Identity) (p
 			}
 		}
 		p := *unknownExecution().Problem
-		return provider.Reconciliation{}, p.WithDetail(domain.ReasonDetail, reason)
+		return provider.Reconciliation{}, p.WithDetail(domain.ReasonDetail, reason).
+			WithDetail("resource_name", e.request.Owner+"/"+e.request.Slug)
 	}
 	switch r.Status {
+	case "absent":
+		return provider.Reconciliation{Status: provider.ReconciliationAbsent,
+			ResourceName: e.request.Owner + "/" + e.request.Slug}, nil
 	case "not_found":
 		return provider.Reconciliation{Status: provider.ReconciliationNotFound}, nil
 	case "unknown":
@@ -257,13 +269,20 @@ func (r executionResponse) valid() bool {
 	if r.Protocol != 1 {
 		return false
 	}
+	if r.HTTPStatus != 0 || r.ErrorType != "" || r.FailureOperation != "" {
+		if r.Status != "unknown" || r.HTTPStatus != 0 && (r.HTTPStatus < 100 || r.HTTPStatus > 599) ||
+			!validSubmissionErrorType(r.ErrorType) || r.FailureOperation != "save_kernel" && r.FailureOperation != "verify_kernel" && r.FailureOperation != "unknown" {
+			return false
+		}
+		r.HTTPStatus, r.ErrorType, r.FailureOperation = 0, "", ""
+	}
 	switch r.Status {
 	case "rejected":
 		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && submissionRefusals[r.Reason]
 	case "unknown", "not_found":
 		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) &&
 			(r.Reason == "" || lookupReasons[r.Reason] || submissionRefusals[r.Reason])
-	case "invalid":
+	case "invalid", "absent":
 		return r == (executionResponse{Protocol: 1, Status: r.Status})
 	case "found":
 		if r.Reason != "" || !positiveDecimal(r.KernelID) || r.Version != 1 || !r.SourceSHA256.Valid() {
@@ -275,6 +294,20 @@ func (r executionResponse) valid() bool {
 		}
 	}
 	return false
+}
+
+func unknownExecutionFailure(r executionResponse) provider.SubmissionOutcome {
+	out := unknownExecution()
+	if r.HTTPStatus != 0 {
+		p := out.Problem.WithDetail("submission_http_status", strconv.Itoa(r.HTTPStatus))
+		out.Problem = &p
+	}
+	if r.ErrorType != "" {
+		p := out.Problem.WithDetail("submission_error_type", r.ErrorType).
+			WithDetail("submission_operation", r.FailureOperation)
+		out.Problem = &p
+	}
+	return out
 }
 
 // call returns a closed stop reason when the native client was never invoked; after

@@ -41,9 +41,11 @@ var (
 // Request always names the intended attempt. A delayed request must not silently
 // target an attempt created by a concurrent retry. Reason is non-secret metadata.
 type Request struct {
-	AttemptID          domain.AttemptID `json:"attempt_id"`
-	Reason             string           `json:"reason,omitempty"`
-	DiscardUncollected bool             `json:"discard_uncollected,omitempty"`
+	AttemptID            domain.AttemptID `json:"attempt_id"`
+	Reason               string           `json:"reason,omitempty"`
+	DiscardUncollected   bool             `json:"discard_uncollected,omitempty"`
+	SubmissionResolution string           `json:"submission_resolution,omitempty"`
+	ResourceName         string           `json:"resource_name,omitempty"`
 }
 
 func Supported(kind domain.OperationKind) bool {
@@ -52,6 +54,11 @@ func Supported(kind domain.OperationKind) bool {
 }
 
 func (r Request) Validate(kind domain.OperationKind) error {
+	if r.SubmissionResolution != "" || r.ResourceName != "" {
+		if kind != domain.OperationReconcile || (r.SubmissionResolution != "absent" && r.SubmissionResolution != "present") || !domain.ValidResourceName(r.ResourceName) {
+			return ErrRequest
+		}
+	}
 	if !Supported(kind) || !r.AttemptID.Valid() || !utf8.ValidString(r.Reason) || len(r.Reason) > 512 {
 		return ErrRequest
 	}
@@ -75,6 +82,9 @@ func Parse(kind domain.OperationKind, raw []byte) (Request, error) {
 	var r Request
 	fields, err := jsonwire.Object(raw, MaxRequestBytes)
 	optional := []string{"reason"}
+	if kind == domain.OperationReconcile {
+		optional = append(optional, "submission_resolution", "resource_name")
+	}
 	if kind == domain.OperationCleanup {
 		optional = append(optional, "discard_uncollected")
 	}
@@ -125,25 +135,26 @@ func (r Request) CanonicalJSON(kind domain.OperationKind) ([]byte, error) {
 type Effect string
 
 const (
-	Pending               Effect = "pending"
-	RemoteDeleted         Effect = "remote_deleted"
-	AlreadyAbsent         Effect = "already_absent"
-	DispatchPrevented     Effect = "dispatch_prevented"
-	CancellationRequested Effect = "cancellation_requested"
-	CancellationConfirmed Effect = "cancellation_confirmed"
-	TooLate               Effect = "too_late"
-	ObservationRefreshed  Effect = "observation_refreshed"
-	CollectionRequested   Effect = "collection_requested"
-	ResultsAvailable      Effect = "results_available"
-	NewAttemptCreated     Effect = "new_attempt_created"
-	ManualRequired        Effect = "manual_required"
-	Failed                Effect = "failed"
+	Pending                  Effect = "pending"
+	RemoteDeleted            Effect = "remote_deleted"
+	AlreadyAbsent            Effect = "already_absent"
+	DispatchPrevented        Effect = "dispatch_prevented"
+	CancellationRequested    Effect = "cancellation_requested"
+	CancellationConfirmed    Effect = "cancellation_confirmed"
+	TooLate                  Effect = "too_late"
+	ObservationRefreshed     Effect = "observation_refreshed"
+	SubmissionResolvedAbsent Effect = "submission_resolved_absent"
+	CollectionRequested      Effect = "collection_requested"
+	ResultsAvailable         Effect = "results_available"
+	NewAttemptCreated        Effect = "new_attempt_created"
+	ManualRequired           Effect = "manual_required"
+	Failed                   Effect = "failed"
 )
 
 func (e Effect) Valid() bool {
 	switch e {
 	case RemoteDeleted, AlreadyAbsent, Pending, DispatchPrevented, CancellationRequested, CancellationConfirmed, TooLate,
-		ObservationRefreshed, CollectionRequested, ResultsAvailable, NewAttemptCreated, ManualRequired, Failed:
+		ObservationRefreshed, SubmissionResolvedAbsent, CollectionRequested, ResultsAvailable, NewAttemptCreated, ManualRequired, Failed:
 		return true
 	default:
 		return false
@@ -210,7 +221,7 @@ func (r Record) Validate() error {
 				return ErrRequest
 			}
 		case domain.OperationReconcile:
-			if r.Effect != ObservationRefreshed {
+			if r.Effect != ObservationRefreshed && r.Effect != SubmissionResolvedAbsent {
 				return ErrRequest
 			}
 		case domain.OperationCollect:

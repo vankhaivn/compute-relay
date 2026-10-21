@@ -59,6 +59,63 @@ func (c *Client) GetKernel(ctx context.Context, resource Resource) (Kernel, erro
 	return result, nil
 }
 
+// OwnedKernelPresent scans the authenticated owner's unfiltered private/public
+// inventory. Only exhausting every page establishes absence; a partial listing,
+// malformed identity or repeated cursor is an error, never an empty inventory.
+func (c *Client) OwnedKernelPresent(ctx context.Context, resource Resource) (bool, error) {
+	op := kernelService + "ListKernels"
+	if !resource.valid() {
+		return false, failure(op, ErrConfig, 0, false)
+	}
+	seen := make(map[string]bool)
+	cursors := make(map[string]bool)
+	cursor := ""
+	for page := 0; page < 100; page++ {
+		query := struct {
+			Group      string `json:"group"`
+			User       string `json:"user"`
+			Language   string `json:"language"`
+			KernelType string `json:"kernelType"`
+			OutputType string `json:"outputType"`
+			SortBy     string `json:"sortBy"`
+			PageSize   int    `json:"pageSize"`
+			PageToken  string `json:"pageToken,omitempty"`
+		}{"PROFILE", resource.Owner, "all", "all", "all", "DATE_CREATED", 100, cursor}
+		object, err := c.rpc(ctx, op, query, maxMetadataBytes)
+		if err != nil {
+			return false, err
+		}
+		var result struct {
+			Kernels []struct {
+				Reference string `json:"ref"`
+			} `json:"kernels"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if decodeObject(object, &result) != nil || len(result.Kernels) > 100 || len(result.NextPageToken) > 4096 {
+			return false, failure(op, ErrResponse, 0, true)
+		}
+		for _, kernel := range result.Kernels {
+			owner, slug, ok := strings.Cut(kernel.Reference, "/")
+			if !ok || owner != resource.Owner || !(Resource{Owner: owner, Slug: slug}).valid() || seen[kernel.Reference] {
+				return false, failure(op, ErrResponse, 0, true)
+			}
+			if kernel.Reference == resource.reference() {
+				return true, nil
+			}
+			seen[kernel.Reference] = true
+		}
+		if result.NextPageToken == "" {
+			return false, nil
+		}
+		if cursors[result.NextPageToken] || len(result.Kernels) == 0 {
+			return false, failure(op, ErrResponse, 0, true)
+		}
+		cursors[result.NextPageToken] = true
+		cursor = result.NextPageToken
+	}
+	return false, failure(op, ErrLimit, 0, true)
+}
+
 type SaveKernelRequest struct {
 	Resource     Resource
 	Source       string

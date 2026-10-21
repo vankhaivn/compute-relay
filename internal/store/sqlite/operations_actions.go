@@ -180,7 +180,7 @@ func admitCancellation(ctx context.Context, tx *sql.Tx, target admission.Record,
 	return r, dbError(err)
 }
 
-func admitReconciliation(ctx context.Context, tx *sql.Tx, target admission.Record, r operationRow, now time.Time) (operationRow, error) {
+func admitReconciliation(ctx context.Context, tx *sql.Tx, target admission.Record, r operationRow, request operations.Request, now time.Time) (operationRow, error) {
 	if target.Attempt.State.Orchestration.Terminal() || target.Attempt.State.Execution.Terminal() {
 		return finishControl(ctx, tx, r, domain.OperationSucceeded, operations.ObservationRefreshed, nil, now)
 	}
@@ -191,15 +191,35 @@ func admitReconciliation(ctx context.Context, tx *sql.Tx, target admission.Recor
 	if err != nil {
 		return r, err
 	}
-	next, state, _, err := dispatch.Apply(work.Journal, target.Attempt.State, dispatch.Action{Kind: dispatch.RequestReconciliation}, now)
+	action := dispatch.Action{Kind: dispatch.RequestReconciliation}
+	if request.SubmissionResolution != "" {
+		if work.Journal.Phase != dispatch.Attention || !work.Journal.SubmitStarted || work.Journal.Remote != nil ||
+			target.Attempt.State.Execution != domain.ExecutionUnknown || request.ResourceName != work.Journal.SubmissionResourceName {
+			return r, operations.ErrState
+		}
+		action.ResourceName = request.ResourceName
+		action.OwnerPresent = request.SubmissionResolution == "present"
+		if request.SubmissionResolution == "absent" {
+			action.Kind = dispatch.OwnerSubmissionAbsent
+		}
+	}
+	next, state, _, err := dispatch.Apply(work.Journal, target.Attempt.State, action, now)
 	if err != nil {
 		return r, operations.ErrState
+	}
+	if action.Kind == dispatch.OwnerSubmissionAbsent {
+		if err = writeDispatchLedger(ctx, tx, work, next, action.Kind, now); err != nil {
+			return r, err
+		}
 	}
 	if err = controlJournal(ctx, tx, work, next); err != nil {
 		return r, err
 	}
 	if _, err = controlState(ctx, tx, r, target.Attempt, state, domain.EventReconciliationRequested, now); err != nil {
 		return r, err
+	}
+	if action.Kind == dispatch.OwnerSubmissionAbsent {
+		return finishControl(ctx, tx, r, domain.OperationSucceeded, operations.SubmissionResolvedAbsent, nil, now)
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE scheduler_queue SET not_before_ms=0 WHERE queue_seq=?", work.Handle.Claim.Sequence)
 	return r, dbError(err)

@@ -48,6 +48,7 @@ type Error struct {
 	StatusCode     int
 	Sent           bool
 	MissingName403 bool
+	ProviderType   string // closed status enum only; never provider text
 	kind           error
 }
 
@@ -336,9 +337,9 @@ func httpFailure(ctx context.Context, op string, response *http.Response) error 
 	} else if op == kernelService+"GetKernel" {
 		permission = "kernels.get"
 	}
-	// Other error bodies and redirect bodies are never consumed. Even this narrow
-	// absence classifier retains only a boolean, never the body or its text.
-	if permission != "" && response.StatusCode == 403 && contentType(response, "application/json") {
+	// Only exact-name reads and submission errors need body classification.
+	// Retain a closed provider enum and an absence boolean, never body text.
+	if (permission != "" && response.StatusCode == 403 || op == kernelService+"SaveKernel") && contentType(response, "application/json") {
 		data, readErr := readBounded(ctx, response, maxErrorBytes)
 		if readErr == nil {
 			object, parseErr := strictObject(data)
@@ -348,9 +349,12 @@ func httpFailure(ctx context.Context, op string, response *http.Response) error 
 				Message string `json:"message"`
 			}
 			errorObject, errorParseErr := strictObject(object["error"])
-			if parseErr == nil && errorParseErr == nil && decodeObject(errorObject, &envelope) == nil && envelope.Code == 403 &&
-				envelope.Status == "PERMISSION_DENIED" && envelope.Message == "Permission '"+permission+"' was denied" {
-				err.MissingName403 = true
+			if parseErr == nil && errorParseErr == nil && decodeObject(errorObject, &envelope) == nil {
+				switch envelope.Status {
+				case "PERMISSION_DENIED", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED", "INVALID_ARGUMENT", "INTERNAL", "NOT_FOUND", "ALREADY_EXISTS":
+					err.ProviderType = envelope.Status
+				}
+				err.MissingName403 = permission != "" && envelope.Code == 403 && envelope.Status == "PERMISSION_DENIED" && envelope.Message == "Permission '"+permission+"' was denied"
 			}
 		}
 	}

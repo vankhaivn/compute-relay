@@ -126,33 +126,96 @@ func TestControlsCancellationFencesWorkerWithoutReleasingItsLease(t *testing.T) 
 	}
 }
 func TestControlsRetryPreservesHistoricalRowsAndOneReceipt(t *testing.T) {
-	f := newDispatchFixture(t, fake.DefaultScenario())
-	id := f.seed(t, "a", 1, false)
-	service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
-	cancelControl(t, f, service, p, id)
-	probe := &retentionReadProbe{inner: f.blobs}
-	access, err := auth.New(f.s, f.s)
-	requireNoError(t, err)
-	service, err = operations.New(access, f.s, probe, admission.DefaultLimits())
-	requireNoError(t, err)
-	old, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
-	requireNoError(t, err)
-	first, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID))
-	if err != nil || first.Replay || probe.reads != 2 {
-		t.Fatal("first retry did not read both frozen objects", err, probe.reads)
-	}
-	replay, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID))
-	if err != nil || !replay.Replay || replay.Operation.ID != first.Operation.ID || probe.reads != 2 {
-		t.Fatal("retry replay reread inputs or changed receipt", err, probe.reads)
-	}
-	historical, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
-	if err != nil || historical != old {
-		t.Fatal("retry rewrote historical attempt", err)
-	}
-	if controlCount(t, f.s, "SELECT count(*) FROM attempts") != 2 || controlCount(t, f.s, "SELECT count(*) FROM scheduler_queue") != 2 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='retry_compute'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation' AND scope='retry_compute'") != 1 {
-		t.Fatal("retry duplicated durable rows")
+	for _, mode := range []string{"cancelled", "owner_absent", "inventory_absent"} {
+		t.Run(mode, func(t *testing.T) {
+			scenario := fake.DefaultScenario()
+			if mode != "cancelled" {
+				scenario.Mode = fake.Unresolved
+			}
+			f := newDispatchFixture(t, scenario)
+			id := f.seed(t, "a", 1, false)
+			service, p, _ := controlService(t, f, "a", auth.Read, auth.Operate)
+			if mode == "cancelled" {
+				cancelControl(t, f, service, p, id)
+			} else {
+				requireNoError(t, f.step(t))
+				requireNoError(t, f.step(t))
+				for n := 0; n < dispatch.MaxFailures; n++ {
+					f.clock.advance(3 * time.Minute)
+					claim, err := f.s.ClaimRecovery(t.Context(), "absence-fixture")
+					requireNoError(t, err)
+					work, err := f.s.LoadDispatch(t.Context(), *claim)
+					requireNoError(t, err)
+					work, err = f.s.CommitDispatch(t.Context(), work.Handle, dispatch.Action{Kind: dispatch.Fault, Code: domain.CodeProviderSubmissionUnknown,
+						Reason: "lookup_access_denied", Details: map[string]string{"reason": "lookup_access_denied", "resource_name": "owner/original"}})
+					requireNoError(t, err)
+					requireNoError(t, f.s.YieldDispatch(t.Context(), work.Handle, 0))
+				}
+				resolution, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, SubmissionResolution: "absent", ResourceName: "owner/original"})
+				if mode == "owner_absent" {
+					rejected, _ := json.Marshal(operations.Request{AttemptID: id.AttemptID, SubmissionResolution: "absent", ResourceName: "owner/wrong"})
+					if _, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationReconcile, "wrong-name", rejected); !errors.Is(err, operations.ErrState) {
+						t.Fatal("owner attestation changed identity", err)
+					}
+					receipt, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationReconcile, "owner-absence", resolution)
+					requireNoError(t, err)
+					replay, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationReconcile, "owner-absence", resolution)
+					if err != nil || !replay.Replay || replay.Operation.ID != receipt.Operation.ID || receipt.Effect != operations.SubmissionResolvedAbsent {
+						t.Fatal("attestation replay changed effect", err)
+					}
+				} else {
+					_, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationReconcile, "inventory-absence", controlRequest(id.AttemptID))
+					requireNoError(t, err)
+					for n := 0; n < 2; n++ {
+						f.clock.advance(dispatch.SubmissionAbsenceGrace)
+						claim, err := f.s.ClaimRecovery(t.Context(), "inventory-fixture")
+						requireNoError(t, err)
+						work, err := f.s.LoadDispatch(t.Context(), *claim)
+						requireNoError(t, err)
+						work, err = f.s.CommitDispatch(t.Context(), work.Handle, dispatch.Action{Kind: dispatch.SubmissionAbsenceSeen, ResourceName: "owner/original"})
+						requireNoError(t, err)
+						requireNoError(t, f.s.YieldDispatch(t.Context(), work.Handle, 0))
+					}
+				}
+				// Independent journal/intent checks and the maintained cleanup plan must
+				// agree that only the old staging resource remains.
+				target, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
+				requireNoError(t, err)
+				if target.State.Execution != domain.ExecutionNotSubmitted || f.journal(t, id).Phase != dispatch.Rejected {
+					t.Fatal("absence did not settle")
+				}
+				plan, err := f.s.PlanCleanup(t.Context(), "a", p.TokenID(), id.JobID, id.AttemptID, true)
+				requireNoError(t, err)
+				if len(plan.Resources) != 1 {
+					t.Fatal("obsolete execution intent blocked staging cleanup", len(plan.Resources))
+				}
+			}
+			probe := &retentionReadProbe{inner: f.blobs}
+			access, err := auth.New(f.s, f.s)
+			requireNoError(t, err)
+			service, err = operations.New(access, f.s, probe, admission.DefaultLimits())
+			requireNoError(t, err)
+			old, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
+			requireNoError(t, err)
+			first, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID))
+			if err != nil || first.Replay || probe.reads != 2 {
+				t.Fatal("first retry did not read both frozen objects", err, probe.reads)
+			}
+			replay, err := service.Submit(t.Context(), p, "a", id.JobID, domain.OperationRetryCompute, "retry-storage", controlRequest(id.AttemptID))
+			if err != nil || !replay.Replay || replay.Operation.ID != first.Operation.ID || probe.reads != 2 {
+				t.Fatal("retry replay reread inputs or changed receipt", err, probe.reads)
+			}
+			historical, _, err := loadAttempt(t.Context(), f.s.db, "a", id.JobID, id.AttemptID)
+			if err != nil || historical != old {
+				t.Fatal("retry rewrote historical attempt", err)
+			}
+			if controlCount(t, f.s, "SELECT count(*) FROM attempts") != 2 || controlCount(t, f.s, "SELECT count(*) FROM scheduler_queue") != 2 || controlCount(t, f.s, "SELECT count(*) FROM operations WHERE kind='retry_compute'") != 1 || controlCount(t, f.s, "SELECT count(*) FROM receipts WHERE namespace='operation' AND scope='retry_compute'") != 1 {
+				t.Fatal("retry duplicated durable rows")
+			}
+		})
 	}
 }
+
 func TestControlsRetryEventFailureRollsBackAndLeavesKeyReusable(t *testing.T) {
 	f := newDispatchFixture(t, fake.DefaultScenario())
 	id := f.seed(t, "a", 1, false)

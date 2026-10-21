@@ -130,6 +130,9 @@ func TestRejectionKeepsOnlyTheAdapterClosedReason(t *testing.T) {
 func TestAmbiguityStopsWithoutInventingNonAcceptance(t *testing.T) {
 	j, s := readyFixture(t)
 	j, s = apply(t, j, s, Action{Kind: BeginSubmission})
+	problem := *problem(domain.CodeProviderSubmissionUnknown, true)
+	problem = problem.WithDetail("resource_name", "owner/original").WithDetail("submission_http_status", "429").WithDetail("submission_error_type", "RESOURCE_EXHAUSTED")
+	j, s = apply(t, j, s, Action{Kind: SubmissionSeen, Submission: &provider.SubmissionOutcome{Status: provider.SubmissionUnknown, Problem: &problem}})
 	for n := 0; n < MaxFailures; n++ {
 		j, s = apply(t, j, s, Action{Kind: Fault, Code: domain.CodeProviderSubmissionUnknown, Reason: "kernel_not_visible"})
 	}
@@ -142,7 +145,47 @@ func TestAmbiguityStopsWithoutInventingNonAcceptance(t *testing.T) {
 	if j.Recoverable() {
 		t.Fatal("exhausted automatic recovery did not stop")
 	}
+	if j.Problem.PublicDetails()["submission_http_status"] != "429" || j.SubmissionProblem == nil {
+		t.Fatal("original failure was overwritten")
+	}
+	for _, mode := range []string{"inventory", "owner_absent", "owner_present"} {
+		t.Run(mode, func(t *testing.T) {
+			current, state := j, s
+			if mode == "owner_absent" {
+				current, state = apply(t, current, state, Action{Kind: OwnerSubmissionAbsent, ResourceName: "owner/original"})
+			} else {
+				current, state = apply(t, current, state, Action{Kind: RequestReconciliation, OwnerPresent: mode == "owner_present", ResourceName: "owner/original"})
+				action := Action{Kind: SubmissionAbsenceSeen, ResourceName: "owner/original"}
+				if mode == "owner_present" {
+					if _, _, _, err := Apply(current, state, action, time.Now()); err == nil {
+						t.Fatal("inventory overrode owner presence")
+					}
+					return
+				}
+				current, state = apply(t, current, state, action)
+				current, state = apply(t, current, state, action)
+				if current.Phase != Submitting || !scheduler.HoldsAccount(state, true) {
+					t.Fatal("one immediate inventory released compute")
+				}
+				var err error
+				current, state, _, err = Apply(current, state, action, current.SubmissionAbsenceObservedAt.Add(SubmissionAbsenceGrace))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if current.Phase != Rejected || state.Execution != domain.ExecutionNotSubmitted || scheduler.HoldsAccount(state, true) || current.Problem.ComputeMayHaveStarted {
+				t.Fatal("absence did not settle the original attempt")
+			}
+			if current.SubmissionProblem.PublicDetails()["submission_http_status"] != "429" {
+				t.Fatal("original failure lost on resolution")
+			}
+			if _, _, _, err := Apply(current, state, Action{Kind: BeginSubmission}, time.Now()); err == nil {
+				t.Fatal("resolved attempt submitted twice")
+			}
+		})
+	}
 }
+
 func TestPrivateReadinessAndIdentityAreRequired(t *testing.T) {
 	w, p, op := fixtureWork(t)
 	j, s := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: BeginPreparation, Plan: &p, PreparationID: op})
@@ -332,21 +375,32 @@ func TestPassDelayPacesSubmittedAttempts(t *testing.T) {
 	}
 }
 
-func TestSubmittedUnknownObservationsRemainRecoverable(t *testing.T) {
+func TestSubmittedUnknownObservationsReachBoundedAttention(t *testing.T) {
 	j, s := readyFixture(t)
 	j, s = apply(t, j, s, Action{Kind: BeginSubmission})
 	remote := provider.RemoteReference{Identity: j.Plan.Job.Identity, Resource: "exec", Version: "v1"}
 	j, s = apply(t, j, s, Action{Kind: SubmissionSeen, Submission: &provider.SubmissionOutcome{Status: provider.SubmissionAccepted, Remote: &remote}})
 	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
-	for n := 0; n < MaxFailures+3; n++ {
+	for n := 0; n < MaxFailures; n++ {
 		obs := provider.Observation{Remote: remote, Execution: domain.ExecutionUnknown, RemoteActivity: domain.RemoteActivityUnknown, ReleaseEvidence: domain.ReleaseEvidenceNotObservable, RawState: "unknown", ObservedAt: at.Add(time.Duration(n) * time.Second)}
 		j, s = apply(t, j, s, Action{Kind: ObservationSeen, Observation: &obs})
-		if !j.Recoverable() || s.Orchestration != domain.OrchestrationReconciling || !scheduler.HoldsAccount(s, true) {
+		expected := domain.OrchestrationReconciling
+		if n == MaxFailures-1 {
+			expected = domain.OrchestrationNeedsAttention
+		}
+		if s.Orchestration != expected || !scheduler.HoldsAccount(s, true) {
 			t.Fatal("unknown observation stopped recovery")
 		}
 	}
+	if j.Phase != Attention {
+		t.Fatal("unknown observation stayed queued")
+	}
 	if j.Failures != MaxFailures {
 		t.Fatal("failure count is not bounded", j.Failures)
+	}
+	j, s = apply(t, j, s, Action{Kind: RequestReconciliation})
+	if !j.Recoverable() || j.Remote == nil || *j.Remote != remote || !j.SubmitStarted {
+		t.Fatal("recovery lost the original identity")
 	}
 }
 

@@ -151,7 +151,9 @@ func TestNativeSubmissionLostAcknowledgementReconcilesWithoutSave(t *testing.T) 
 	for _, tc := range []struct{ fault, reason string }{
 		{"found", ""}, {"kernel-hidden", "kernel_not_visible"},
 		{"kernel-denied", "lookup_access_denied"}, {"kernel-throttled", "lookup_rate_limited"},
-		{"kernel-invalid", "lookup_response_invalid"},
+		{"kernel-invalid", "lookup_response_invalid"}, {"absent", ""}, {"save-throttled", ""},
+		{"list-pagination", ""}, {"list-unavailable", "lookup_rate_limited"},
+		{"list-incomplete", "lookup_access_denied"}, {"list-loop", "lookup_response_invalid"}, {"list-wrong-owner", "lookup_response_invalid"},
 	} {
 		t.Run(tc.fault, func(t *testing.T) {
 			p, plan, saved, _, f := nativeRuntime(t, false)
@@ -160,19 +162,36 @@ func TestNativeSubmissionLostAcknowledgementReconcilesWithoutSave(t *testing.T) 
 				t.Fatal(err)
 			}
 			*saved, f.fault = prepared, "lost-save-ack"
-			if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || !out.Problem.ComputeMayHaveStarted || out.Problem.SafeOperationRetry {
+			if tc.fault == "save-throttled" {
+				f.fault = tc.fault
+			}
+			out := p.Start(context.Background(), prepared, nil, nil)
+			if out.Status != provider.SubmissionUnknown || !out.Problem.ComputeMayHaveStarted || out.Problem.SafeOperationRetry {
 				t.Fatal("lost save acknowledgement became rejection or retry permission", out)
+			}
+			details := out.Problem.PublicDetails()
+			if details["resource_name"] == "" || details["submission_operation"] != "save_kernel" ||
+				tc.fault == "save-throttled" && (details["submission_http_status"] != "429" || details["submission_error_type"] != "RESOURCE_EXHAUSTED") ||
+				strings.Contains(out.Problem.Error(), "SYNTHETIC_TOKEN") {
+				t.Fatal("submission diagnostics missing or unsafe", details)
 			}
 			if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
 				t.Fatal("ambiguous save was repeated")
 			}
 			f.fault = tc.fault
+			if tc.fault == "absent" {
+				f.kernel = nil
+			}
 			seen, err := p.Reconcile(context.Background(), plan.Job.Identity)
 			if tc.reason != "" {
 				var problem domain.Problem
 				if !errors.As(err, &problem) || problem.Code != domain.CodeProviderSubmissionUnknown ||
 					problem.PublicDetails()[domain.ReasonDetail] != tc.reason || !problem.ComputeMayHaveStarted || problem.SafeOperationRetry {
 					t.Fatalf("unresolved lookup lost its reason or allowed replacement: %+v, %v", seen, err)
+				}
+			} else if tc.fault == "absent" || tc.fault == "save-throttled" {
+				if err != nil || seen.Status != provider.ReconciliationAbsent || seen.ResourceName != details["resource_name"] {
+					t.Fatal("complete inventory did not resolve exact absence", seen, err)
 				}
 			} else if err != nil || seen.Status != provider.ReconciliationFound {
 				t.Fatal("original save could not be recovered by reads", seen, err)

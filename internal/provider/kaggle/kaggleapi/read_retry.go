@@ -33,7 +33,7 @@ func retryableRead(op string) bool {
 	switch op {
 	case authRPC, quotaRPC,
 		datasetService + "GetDataset", datasetService + "GetDatasetStatus", datasetService + "ListDatasetFiles",
-		kernelService + "GetKernel", kernelService + "GetKernelSessionStatus":
+		kernelService + "GetKernel", kernelService + "GetKernelSessionStatus", kernelService + "ListKernels":
 		return true
 	}
 	return false
@@ -60,6 +60,7 @@ func (c *Client) rpcResponse(parent context.Context, op string, payload any) (*r
 func (c *Client) requestResponse(parent context.Context, op string, tries int, send func(context.Context) (*rpcResponse, error)) (*rpcResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, time.Hour)
 	scope := c.requestScope()
+	var lastError error
 	for attempt := 0; attempt < tries; attempt++ {
 		release, err := c.state.pacing.acquire(ctx, scope, op)
 		if err != nil {
@@ -88,6 +89,9 @@ func (c *Client) requestResponse(parent context.Context, op string, tries int, s
 			return response, nil
 		}
 		delay := retryDelay(response.response.Header.Get("Retry-After"), c.state.pacing.clock(), attempt)
+		if status == http.StatusTooManyRequests && attempt+1 == tries {
+			lastError = httpFailure(response.ctx, op, response.response)
+		}
 		if status != http.StatusTooManyRequests && response.response.Header.Get("Retry-After") == "" {
 			delay = time.Second << attempt
 		}
@@ -109,5 +113,8 @@ func (c *Client) requestResponse(parent context.Context, op string, tries int, s
 		}
 	}
 	cancel()
+	if lastError != nil {
+		return nil, lastError
+	}
 	return nil, failure(op, ErrHTTP, http.StatusTooManyRequests, true)
 }

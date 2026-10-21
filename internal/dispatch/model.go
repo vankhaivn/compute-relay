@@ -49,6 +49,10 @@ type Journal struct {
 	PreparationObservationStarted *time.Time                   `json:"preparation_observation_started,omitempty"`
 	Prepared                      *provider.Prepared           `json:"prepared,omitempty"`
 	SubmitStarted                 bool                         `json:"submit_started"`
+	SubmissionProblem             *domain.Problem              `json:"submission_problem,omitempty"`
+	SubmissionAbsenceObservedAt   *time.Time                   `json:"submission_absence_observed_at,omitempty"`
+	SubmissionResourceName        string                       `json:"submission_resource_name,omitempty"`
+	OwnerSubmissionPresent        bool                         `json:"owner_submission_present,omitempty"`
 	StartAuthorization            *provider.StartAuthorization `json:"start_authorization,omitempty"`
 	Remote                        *provider.RemoteReference    `json:"remote,omitempty"`
 	Observation                   *provider.Observation        `json:"observation,omitempty"`
@@ -60,6 +64,15 @@ func (j Journal) Recoverable() bool {
 	return j.Phase == Staging || j.Phase == Ready || j.Phase == Submitting || j.Phase == Submitted
 }
 func (j Journal) Valid() bool {
+	if j.SubmissionProblem != nil && (!j.SubmitStarted || j.SubmissionProblem.Validate() != nil) {
+		return false
+	}
+	if j.SubmissionResourceName != "" && (!j.SubmitStarted || !domain.ValidResourceName(j.SubmissionResourceName)) {
+		return false
+	}
+	if j.SubmissionAbsenceObservedAt != nil && (!j.SubmitStarted || !scheduler.ValidTime(*j.SubmissionAbsenceObservedAt) || j.SubmissionResourceName == "") {
+		return false
+	}
 	if raw := journalDetail(j, localFailureDetail); raw != "" {
 		if _, ok := journalTime(raw); !ok {
 			return false
@@ -216,6 +229,8 @@ const (
 	ExpireDispatch            Kind = "expire_dispatch"
 	RefuseNewWork             Kind = "refuse_new_work"
 	RequestReconciliation     Kind = "request_reconciliation"
+	SubmissionAbsenceSeen     Kind = "submission_absence_seen"
+	OwnerSubmissionAbsent     Kind = "owner_submission_absent"
 )
 
 type Action struct {
@@ -230,6 +245,9 @@ type Action struct {
 	Observation        *provider.Observation
 	Code               domain.ErrorCode
 	Reason             string // closed adapter reason for a Fault, when known
+	Details            map[string]string
+	ResourceName       string
+	OwnerPresent       bool
 	StartAuthorization *provider.StartAuthorization
 	PreparationExpired bool
 }

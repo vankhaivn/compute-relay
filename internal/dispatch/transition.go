@@ -74,6 +74,14 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			event = domain.EventReconciliationDeferred
 		}
 	case RequestReconciliation:
+		if a.OwnerPresent {
+			if old.Phase != Attention || !old.SubmitStarted || old.Remote != nil || state.Execution != domain.ExecutionUnknown ||
+				a.ResourceName == "" || a.ResourceName != old.SubmissionResourceName {
+				return Journal{}, state, "", ErrConflict
+			}
+			j.OwnerSubmissionPresent = true
+			j.SubmissionAbsenceObservedAt = nil
+		}
 		if old.RemoteAbsence() != nil || state.Execution.Terminal() || state.Orchestration.Terminal() || old.Problem != nil && (old.Problem.Code == domain.CodeRemoteIdentityMismatch || old.Problem.Code == domain.CodePrivateStagingUnavailable) {
 			return Journal{}, state, "", ErrConflict
 		}
@@ -172,8 +180,36 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		next.Execution = domain.ExecutionUnknown
 		next.RemoteActivity = domain.RemoteActivityPossible
 		event = domain.EventSubmissionIntentRecorded
-	case SubmissionSeen:
-		if old.Phase != Submitting || !old.SubmitStarted || old.Remote != nil || a.Submission == nil || a.Submission.Validate(old.Plan.Job.Identity) != nil {
+	case SubmissionSeen, SubmissionAbsenceSeen, OwnerSubmissionAbsent:
+		if a.Kind != SubmissionSeen {
+			if (old.Phase != Submitting && old.Phase != Attention) || !old.SubmitStarted || old.Remote != nil ||
+				(a.Kind == SubmissionAbsenceSeen && old.OwnerSubmissionPresent) || state.Execution != domain.ExecutionUnknown || state.Orchestration.Terminal() || !domain.ValidResourceName(a.ResourceName) ||
+				old.SubmissionResourceName != "" && old.SubmissionResourceName != a.ResourceName {
+				return Journal{}, state, "", ErrConflict
+			}
+			j.SubmissionResourceName = a.ResourceName
+			reason := "submission_absent_owned_list"
+			if a.Kind == OwnerSubmissionAbsent {
+				reason = "submission_absent_owner_confirmed"
+			} else if old.SubmissionAbsenceObservedAt == nil || now.Before(old.SubmissionAbsenceObservedAt.Add(SubmissionAbsenceGrace)) {
+				if old.SubmissionAbsenceObservedAt == nil {
+					at := now.UTC()
+					j.SubmissionAbsenceObservedAt = &at
+				}
+				j.Phase = Submitting
+				j.Failures = max(1, j.Failures)
+				p := *problem(domain.CodeProviderSubmissionUnknown, true)
+				p = p.WithDetail(domain.ReasonDetail, "submission_absence_confirming").WithDetail("resource_name", a.ResourceName)
+				j.Problem = &p
+				next.Orchestration = domain.OrchestrationReconciling
+				event = domain.EventReconciliationDeferred
+				break
+			}
+			p := provider.Problem(domain.CodeProviderRejected, domain.FailureStageSubmission, "Submission resolved absent; a replacement requires a new attempt").
+				WithDetail(domain.ReasonDetail, reason).WithDetail("resource_name", a.ResourceName)
+			a.Submission = &provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &p}
+		}
+		if (old.Phase != Submitting && a.Kind != OwnerSubmissionAbsent) || !old.SubmitStarted || old.Remote != nil || a.Submission == nil || a.Submission.Validate(old.Plan.Job.Identity) != nil {
 			return Journal{}, state, "", ErrConflict
 		}
 		switch a.Submission.Status {
@@ -219,6 +255,14 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			event = domain.EventSubmissionRejected
 		case provider.SubmissionUnknown:
 			j.Problem = problem(domain.CodeProviderSubmissionUnknown, true)
+			if a.Submission.Problem != nil {
+				j.Problem.Details = a.Submission.Problem.PublicDetails()
+				if j.SubmissionProblem == nil {
+					p := *j.Problem
+					j.SubmissionProblem = &p
+				}
+				j.SubmissionResourceName = j.Problem.Details["resource_name"]
+			}
 			next.Orchestration = domain.OrchestrationReconciling
 			event = domain.EventSubmissionUnknown
 		}
@@ -296,7 +340,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		if obs.Execution == domain.ExecutionUnknown {
 			j.Failures = min(old.Failures+1, MaxFailures)
 			j.Problem = problem(domain.CodeProviderStateUnknown, true)
-			if j.Failures == MaxFailures && state.Cancellation != domain.CancellationNotRequested {
+			if j.Failures == MaxFailures {
 				j.Phase = Attention
 				next.Orchestration = domain.OrchestrationNeedsAttention
 				if cancellationPending(state) {
@@ -319,6 +363,14 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		}
 		may := old.SubmitStarted && old.Phase != Rejected
 		j.Problem = problem(a.Code, may)
+		if j.Problem != nil && a.Details != nil {
+			p := j.Problem.WithDetail(domain.ReasonDetail, a.Reason)
+			p.Details = a.Details
+			j.Problem.Details = p.PublicDetails()
+			if old.SubmitStarted && old.Remote == nil && j.Problem.Details["resource_name"] != "" {
+				j.SubmissionResourceName = j.Problem.Details["resource_name"]
+			}
+		}
 		if j.Problem == nil {
 			return Journal{}, state, "", ErrInvalid
 		}
@@ -329,7 +381,7 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		}
 		if reason != "" {
 			p := j.Problem.WithDetail(domain.ReasonDetail, reason)
-			if p.PublicDetails() == nil {
+			if p.PublicDetails()[domain.ReasonDetail] != reason {
 				return Journal{}, state, "", ErrInvalid
 			}
 			j.Problem = &p
@@ -365,10 +417,9 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			} else {
 				next.Orchestration = domain.OrchestrationPreparing
 			}
-			// A known remote run needs only read-only observation after a transient outage.
-			observeAgain := old.Phase == Submitted && old.Remote != nil && state.Cancellation == domain.CancellationNotRequested &&
-				(a.Code == domain.CodeProviderUnreachable || a.Code == domain.CodeProviderStateUnknown)
-			if permanent || j.Failures == MaxFailures && !observeAgain && !unconfirmedPreparation(old) {
+			// Prolonged unknown/read failures become visible attention even for
+			// known remote identities. Explicit recovery still observes only.
+			if permanent || j.Failures == MaxFailures && !unconfirmedPreparation(old) {
 				j.Phase = Attention
 				next.Orchestration = domain.OrchestrationNeedsAttention
 				if cancellationPending(state) {
@@ -379,6 +430,18 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		event = domain.EventReconciliationDeferred
 	default:
 		return Journal{}, state, "", ErrInvalid
+	}
+	if j.Problem != nil && j.SubmissionProblem != nil {
+		for key, value := range j.SubmissionProblem.PublicDetails() {
+			if key != domain.ReasonDetail && j.Problem.Details[key] == "" {
+				p := j.Problem.WithDetail(key, value)
+				j.Problem = &p
+			}
+		}
+	}
+	if j.Problem != nil && j.SubmissionResourceName != "" {
+		p := j.Problem.WithDetail("resource_name", j.SubmissionResourceName)
+		j.Problem = &p
 	}
 	j.Version++
 	if !j.Valid() || domain.ValidateAttemptStateTransition(state, next) != nil {

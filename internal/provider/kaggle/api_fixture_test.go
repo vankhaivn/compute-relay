@@ -186,7 +186,7 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 	case "GetKernel":
 		f.getKernel++
 		switch f.fault {
-		case "kernel-hidden":
+		case "kernel-hidden", "list-unavailable", "list-incomplete", "list-loop", "list-wrong-owner":
 			return jsonResponse(404, `{}`), nil
 		case "kernel-denied":
 			return jsonResponse(403, `{"error":{"code":403,"status":"PERMISSION_DENIED","message":"Permission 'kernels.get' was denied"}}`), nil
@@ -196,6 +196,9 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 			return response, nil
 		case "kernel-invalid":
 			return jsonResponse(200, `{}`), nil
+		}
+		if f.fault == "list-pagination" && f.count("ListKernels") == 0 {
+			return jsonResponse(404, `{}`), nil
 		}
 		if f.kernel == nil {
 			return jsonResponse(404, `{}`), nil
@@ -209,9 +212,39 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 			"currentVersionNumber": 1, "language": "python", "kernelType": "script", "isPrivate": f.fault != "public-kernel",
 			"enableGpu": r.GPU, "enableTpu": false, "enableInternet": r.Internet, "machineShape": r.MachineShape,
 			"datasetDataSources": r.Datasets}, "blob": map[string]any{"source": r.Source}}), nil
+	case "ListKernels":
+		if get("group") != "PROFILE" || get("user") != f.owner || get("language") != "all" || get("kernelType") != "all" || get("outputType") != "all" || get("search") != "" {
+			f.t.Fatal("inventory filtered or not owner-scoped")
+		}
+		switch f.fault {
+		case "list-unavailable":
+			response := jsonResponse(429, `{}`)
+			response.Header.Set("Retry-After", "0")
+			return response, nil
+		case "list-incomplete":
+			if get("pageToken") != "" {
+				return jsonResponse(403, `{}`), nil
+			}
+			return f.json(map[string]any{"kernels": []any{map[string]any{"ref": f.owner + "/other"}}, "nextPageToken": "page2"}), nil
+		case "list-loop":
+			return f.json(map[string]any{"kernels": []any{map[string]any{"ref": f.owner + "/other"}}, "nextPageToken": "page2"}), nil
+		case "list-wrong-owner":
+			return f.json(map[string]any{"kernels": []any{map[string]any{"ref": "someone_else/other"}}}), nil
+		case "list-pagination":
+			if get("pageToken") == "" {
+				return f.json(map[string]any{"kernels": []any{map[string]any{"ref": f.owner + "/other"}}, "nextPageToken": "page2"}), nil
+			}
+		}
+		if f.kernel == nil {
+			return f.json(map[string]any{"kernels": []any{}}), nil
+		}
+		return f.json(map[string]any{"kernels": []any{map[string]any{"ref": f.owner + "/" + f.kernel.Slug}}}), nil
 	case "SaveKernel":
 		if f.kernel != nil || string(payload["isPrivate"]) != "true" || string(payload["enableTpu"]) != "false" {
 			f.t.Fatal("duplicate or unsafe kernel save")
+		}
+		if f.fault == "save-throttled" {
+			return jsonResponse(429, `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"SYNTHETIC_TOKEN private provider message"}}`), nil
 		}
 		var gpu, internet bool
 		_ = json.Unmarshal(payload["enableGpu"], &gpu)
