@@ -23,6 +23,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/operations"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/retention"
+	"github.com/vankhaivn/compute-relay/internal/scheduler"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
@@ -207,6 +208,9 @@ func stopClass(err error) string {
 		{sqlite.ErrClosed, "state_closed"}, {sqlite.ErrUnavailable, "state_unavailable"}, {sqlite.ErrBusy, "state_busy"},
 		{sqlite.ErrInvalid, "state_rejected"}, {sqlite.ErrConflict, "state_rejected"},
 		{dispatch.ErrInvalid, "transition_rejected"}, {dispatch.ErrConflict, "transition_rejected"},
+		{scheduler.ErrInvalid, "scheduler_rejected"}, {scheduler.ErrPhaseGate, "scheduler_phase_gate"},
+		{scheduler.ErrScanLimit, "scheduler_scan_limit"}, {scheduler.ErrLeaseLost, "scheduler_lease_lost"},
+		{context.Canceled, "operation_cancelled"},
 		{ErrState, "runtime_state"},
 	} {
 		if errors.Is(err, known.err) {
@@ -217,7 +221,8 @@ func stopClass(err error) string {
 		return "local_state"
 	}
 	var problem *domain.Problem
-	if errors.As(err, &problem) {
+	var value domain.Problem
+	if errors.As(err, &problem) || errors.As(err, &value) {
 		return "provider_problem"
 	}
 	return "unclassified"

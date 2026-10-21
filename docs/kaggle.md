@@ -73,6 +73,14 @@ API reads; a verified log page uses six. Both retain separate account verificati
 resolution and kernel identity checks before and after status/log reads; no identity results are
 cached across calls.
 
+Log reads have a 45-second authenticated route budget (40 seconds inside the account monitor).
+The native stream has up to 15 seconds for connection setup and replay to the verified cursor;
+only then does its two-second live-tail window begin. Complete lines preserve cursor continuity,
+while an unreadable stream with no verified new lines returns unavailable rather than claiming
+an idle log. Kernel identity is still checked before and after releasing a page. A delayed log
+read says nothing about whether the kernel is progressing; inspect its observed execution state
+and the timestamps of real workload progress separately.
+
 Temporary verification outages are `PROVIDER_UNREACHABLE`; malformed responses are
 `PROVIDER_STATE_UNKNOWN`. After confirmed submission, both keep read-only observation active
 with bounded calls and backoff, even after repeated failures or a Relay restart. Rejected credentials,

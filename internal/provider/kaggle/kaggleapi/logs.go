@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -76,7 +77,19 @@ func (c *Client) ReadLogs(parent context.Context, resource Resource, state Kerne
 	}
 	reader := newLogDecoder(page, string(token))
 	if contentType(response, "text/event-stream") {
-		err = reader.sse(ctx, response.Body)
+		// Catch up to the verified cursor before starting the short live-tail
+		// window. Network setup and prefix replay have their own bounded budget.
+		var tail *time.Timer
+		defer func() {
+			if tail != nil {
+				tail.Stop()
+			}
+		}()
+		err = reader.sse(ctx, response.Body, func() {
+			if reader.matched && tail == nil {
+				tail = time.AfterFunc(2*time.Second, result.cancel)
+			}
+		})
 	} else if contentType(response, "application/json") {
 		var raw []byte
 		raw, err = readBounded(ctx, response, maxLogInput)
@@ -96,7 +109,11 @@ func (c *Client) ReadLogs(parent context.Context, resource Resource, state Kerne
 		if reader.ended {
 			return LogReplay{}, failure(logOperation, ErrLogChanged, response.StatusCode, true)
 		}
-		return LogReplay{}, failure(logOperation, ErrTransport, response.StatusCode, true)
+		cause := error(ErrTransport)
+		if ctx.Err() != nil {
+			cause = ctx.Err()
+		}
+		return LogReplay{}, failure(logOperation, cause, response.StatusCode, true)
 	}
 	availability := "live"
 	if state == KernelComplete || state == KernelError {
@@ -275,10 +292,11 @@ func (d *logDecoder) completed(raw []byte) error {
 	return d.finish()
 }
 
-func (d *logDecoder) sse(ctx context.Context, body io.Reader) error {
+func (d *logDecoder) sse(ctx context.Context, body io.Reader, beforeRead func()) error {
 	limited := &io.LimitedReader{R: body, N: maxLogInput}
 	reader := bufio.NewReaderSize(limited, maxLogEvent+1)
 	for {
+		beforeRead()
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -293,6 +311,9 @@ func (d *logDecoder) sse(ctx context.Context, body io.Reader) error {
 			}
 			if readErr == io.EOF && ctx.Err() == nil {
 				return d.finish()
+			}
+			if ctx.Err() == nil && len(d.output) == 0 {
+				return ErrTransport
 			}
 			// An idle/interrupted live stream can yield its already verified complete
 			// lines, but cannot manufacture an EOF or flush an unfinished line.

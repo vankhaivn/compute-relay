@@ -251,6 +251,8 @@ func (h *handler) timeout(policy routePolicy) time.Duration {
 		return h.config.UploadTimeout
 	case policy.remote:
 		return max(h.config.RequestTimeout, cleanup.PreviewTimeout)
+	case policy.logs:
+		return max(h.config.RequestTimeout, joblogs.ReadTimeout)
 	}
 	return h.config.RequestTimeout
 }

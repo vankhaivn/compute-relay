@@ -104,6 +104,9 @@ func TestHTTPKeepsServingWhileWorkersRetryStoreFailures(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			fault := &resilienceFault{failures: []error{sqlite.ErrBusy, context.DeadlineExceeded}, retried: make(chan struct{}), resumed: make(chan struct{})}
+			if kind == "dispatch" {
+				fault.failures = append(fault.failures, provider.Problem(domain.CodeProviderSubmissionUnknown, domain.FailureStageSubmission, "submission unknown"))
+			}
 			run := resilienceEngine(t, kind, fault)
 			ready, done := make(chan struct{}), make(chan error, 1)
 			go func() {

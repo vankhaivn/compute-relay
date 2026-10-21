@@ -3,9 +3,12 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
@@ -33,16 +36,31 @@ func (workerBusy) Error() string   { return "busy" }
 func (workerBusy) Temporary() bool { return true }
 
 func TestWorkerResumesAfterTransientStoreErrors(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	repo := &workerFaultRepo{faults: []error{workerBusy{}, context.DeadlineExceeded}, cancel: cancel}
-	cfg := DefaultConfig()
-	cfg.Workers = 1
-	cfg.PollDelay = time.Millisecond
-	e := &Engine{repo: repo, clock: systemClock{}, config: cfg, slots: make(chan struct{}, 1)}
-	started := time.Now()
-	if err := e.Run(ctx); !errors.Is(err, context.Canceled) || repo.calls != 3 || time.Since(started) < 15*time.Millisecond {
-		t.Fatal("transient failure stopped worker or skipped backoff", repo.calls, err)
+	problem := provider.Problem(domain.CodeProviderSubmissionUnknown, domain.FailureStageSubmission, "submission outcome unknown")
+	for name, faults := range map[string][]error{
+		"store":             {workerBusy{}, context.DeadlineExceeded},
+		"provider-value":    {problem},
+		"provider-pointer":  {&problem},
+		"wrapped-provider":  {fmt.Errorf("job: %w", problem)},
+		"provider-and-busy": {errors.Join(problem, workerBusy{})},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			wantCalls := len(faults) + 1
+			repo := &workerFaultRepo{faults: faults, cancel: cancel}
+			cfg := DefaultConfig()
+			cfg.Workers = 1
+			cfg.PollDelay = time.Millisecond
+			e := &Engine{repo: repo, clock: systemClock{}, config: cfg, slots: make(chan struct{}, 1)}
+			started := time.Now()
+			if err := e.Run(ctx); !errors.Is(err, context.Canceled) || repo.calls != wantCalls {
+				t.Fatal("job failure stopped worker", repo.calls, err)
+			}
+			if name == "store" && time.Since(started) < 15*time.Millisecond {
+				t.Fatal("store backoff skipped")
+			}
+		})
 	}
 }
 

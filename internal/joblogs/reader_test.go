@@ -103,7 +103,7 @@ func logSetup(t *testing.T) (*Reader, *auth.Service, auth.Principal, *logRepo, *
 func TestReadRevalidatesAuthorityBeforeAndAfterProviderBytes(t *testing.T) {
 	r, access, p, repo, resolver := logSetup(t)
 	adapter := &logProvider{read: func(ctx context.Context) (provider.LogPage, error) {
-		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 10*time.Second {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 45*time.Second {
 			t.Error("provider read lacked deadline")
 		}
 		if err := access.Revoke(ctx, p.TokenID()); err != nil {

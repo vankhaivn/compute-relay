@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func logClient(t *testing.T, contentType, body string) *Client {
@@ -83,6 +85,17 @@ func TestLogReplayResetAndBoundaryChanges(t *testing.T) {
 	if !errors.Is(err, ErrLogChanged) {
 		t.Fatal("partial-line cursor accepted")
 	}
+	// A later page must have time to replay the verified prefix before tailing.
+	slow := newFixtureClient(t, func(request *http.Request) (*http.Response, error) {
+		r := response(200, "text/event-stream", good)
+		r.Body = &delayedLogBody{ctx: request.Context(), body: r.Body, delay: 2100 * time.Millisecond}
+		return r, nil
+	}, nil)
+	next, err := slow.ReadLogs(context.Background(), fixtureKernel, KernelRunning, LogRequest{Offset: first.Offset, Prefix: first.Prefix})
+	requireOK(t, err)
+	if string(next.Text) != "two\n" || !next.Ended {
+		t.Fatal("slow prefix replay lost the next line", next)
+	}
 }
 
 func TestLogPageByteCapDoesNotSkipNextLine(t *testing.T) {
@@ -102,6 +115,27 @@ func TestLogPageByteCapDoesNotSkipNextLine(t *testing.T) {
 	}
 }
 
+type delayedLogBody struct {
+	ctx   context.Context
+	body  io.ReadCloser
+	delay time.Duration
+}
+
+func (b *delayedLogBody) Read(p []byte) (int, error) {
+	if b.delay > 0 {
+		timer := time.NewTimer(b.delay)
+		defer timer.Stop()
+		b.delay = 0
+		select {
+		case <-timer.C:
+		case <-b.ctx.Done():
+			return 0, b.ctx.Err()
+		}
+	}
+	return b.body.Read(p)
+}
+func (b *delayedLogBody) Close() error { return b.body.Close() }
+
 type logReadError struct{ err error }
 
 func (b logReadError) Read([]byte) (int, error) { return 0, b.err }
@@ -115,13 +149,22 @@ func TestIdleInterruptedLogsNeverClaimExhaustion(t *testing.T) {
 			return r, nil
 		}, nil)
 		result, err := c.ReadLogs(context.Background(), fixtureKernel, state, LogRequest{})
+		if !errors.Is(err, ErrTransport) || result.Ended || len(result.Text) != 0 {
+			t.Fatal("unreadable stream was reported as quiet", result, err)
+		}
+		quiet := newFixtureClient(t, func(request *http.Request) (*http.Response, error) {
+			r := response(200, "text/event-stream", "")
+			r.Body = &delayedLogBody{ctx: request.Context(), body: r.Body, delay: 3 * time.Second}
+			return r, nil
+		}, nil)
+		result, err = quiet.ReadLogs(context.Background(), fixtureKernel, state, LogRequest{})
 		requireOK(t, err)
 		want := "live"
 		if state == KernelComplete {
 			want = "delayed"
 		}
 		if result.Availability != want || result.Ended || len(result.Text) != 0 {
-			t.Fatal(result)
+			t.Fatal("idle tail invented exhaustion", result)
 		}
 	}
 	c := logClient(t, "text/event-stream", "data: END_OF_LOG\n\n")

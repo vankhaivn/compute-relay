@@ -17,6 +17,9 @@ var (
 	ErrUnavailable = errors.New("logs unavailable")
 )
 
+// ReadTimeout includes binding checks, provider replay and final identity checks.
+const ReadTimeout = 45 * time.Second
+
 // Attempt contains only the immutable provider binding and committed remote identity.
 // A nil remote means submission has not yielded an accepted reference.
 type Attempt struct {
@@ -44,7 +47,7 @@ func NewReader(access *auth.Service, repo Repository, resolver Resolver) (*Reade
 
 // Read is observational: no scheduling, authorization, reconciliation or collection writes.
 func (r *Reader) Read(ctx context.Context, p auth.Principal, w domain.WorkspaceID, job domain.JobID, attempt domain.AttemptID, request provider.PageRequest) (provider.LogPage, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, ReadTimeout)
 	defer cancel()
 	fresh, err := r.access.Revalidate(ctx, p)
 	if err != nil {

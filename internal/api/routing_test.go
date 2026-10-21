@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/cleanup"
+	"github.com/vankhaivn/compute-relay/internal/joblogs"
 	"github.com/vankhaivn/compute-relay/internal/operations"
 )
 
@@ -67,10 +68,13 @@ func TestMuxNeverRedirectsOrAcceptsPathAndQueryAliases(t *testing.T) {
 	}
 }
 
-// Kaggle preview reads exceed the short control deadline; only the GET preview gets more.
-func TestCleanupPreviewRouteGetsPreviewDeadline(t *testing.T) {
+// Verified provider reads have longer bounded deadlines; mutations keep control deadlines.
+func TestObservationalRoutesGetTheirBoundedReadDeadline(t *testing.T) {
 	h := &handler{config: Config{RequestTimeout: 10 * time.Second, UploadTimeout: 2 * time.Minute, Operations: new(operations.Service), Cleanup: new(cleanup.Service)}}
 	h.routes()
+	if got := h.timeout(h.policies["GET /v1/workspaces/{workspace}/jobs/{job}/logs"]); got != joblogs.ReadTimeout {
+		t.Fatal("log replay deadline", got)
+	}
 	const path = "/v1/workspaces/{workspace}/jobs/{job}/cleanup"
 	if got := h.timeout(h.policies["GET "+path]); got != cleanup.PreviewTimeout {
 		t.Fatal("cleanup preview deadline", got)

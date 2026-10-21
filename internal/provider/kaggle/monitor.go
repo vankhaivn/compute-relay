@@ -132,7 +132,7 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 	}
 	budget := time.Minute
 	if mode == "logs" {
-		budget = 10 * time.Second
+		budget = 40 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(parent, budget)
 	defer cancel()

@@ -92,7 +92,8 @@ func (e *Engine) Run(ctx context.Context) error {
 			return worker.Classify(err)
 		}
 		var p *domain.Problem
-		if errors.As(err, &p) || newWorkRefusalReason(err) != "" || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
+		var value domain.Problem
+		if errors.As(err, &p) || errors.As(err, &value) || newWorkRefusalReason(err) != "" || errors.Is(err, ErrPolicy) || errors.Is(err, scheduler.ErrLeaseLost) || controlContention(err) {
 			return worker.Continue
 		}
 		return worker.Classify(err)

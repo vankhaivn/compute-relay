@@ -122,7 +122,7 @@ func New(token []byte, options Options) (*Client, error) {
 	if !ok {
 		return nil, ErrConfig
 	}
-	logs, ok := timeout(options.LogTimeout, 2*time.Second, 2*time.Second)
+	logs, ok := timeout(options.LogTimeout, 15*time.Second, 15*time.Second)
 	if !ok {
 		return nil, ErrConfig
 	}

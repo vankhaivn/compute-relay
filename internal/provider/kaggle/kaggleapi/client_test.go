@@ -287,7 +287,7 @@ func TestDefaultsHaveNoProxyCompressionOrConnectionRetry(t *testing.T) {
 	if api.ResponseHeaderTimeout < c.state.createRequest || storage.ResponseHeaderTimeout != 10*time.Second || c.state.request != 15*time.Second {
 		t.Fatal("create acknowledgement or ordinary request header budgets regressed")
 	}
-	for _, options := range []Options{{RequestTimeout: time.Minute}, {TransferTimeout: time.Hour}, {LogTimeout: 3 * time.Second}, {RequestTimeout: -1}} {
+	for _, options := range []Options{{RequestTimeout: time.Minute}, {TransferTimeout: time.Hour}, {LogTimeout: 16 * time.Second}, {RequestTimeout: -1}} {
 		if _, err := New([]byte(fixtureToken), options); !errors.Is(err, ErrConfig) {
 			t.Fatal("unbounded timeout accepted")
 		}
