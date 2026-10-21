@@ -32,21 +32,8 @@ func TestRealDockerOverSSH(t *testing.T) {
 	if platform := os.Getenv("COMPUTE_RELAY_SSH_DOCKER_PLATFORM"); platform != "" {
 		environment = append(environment, "DOCKER_DEFAULT_PLATFORM="+platform)
 	}
-	server := newTestServer(t)
-	server.Password = "e2e-password"
-	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
-		cmd := exec.Command("/bin/sh", "-c", command)
-		cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = environment, stdin, stdout, stderr
-		err := cmd.Run()
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			return exit.ExitCode()
-		}
-		if err != nil {
-			return 255
-		}
-		return 0
-	}
+	server := localDockerSSHServer(t, environment)
+
 	target := server.target()
 	account, err := Account(target)
 	if err != nil {
@@ -204,4 +191,24 @@ func waitTerminal(ctx context.Context, t *testing.T, adapter *Adapter, remote pr
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func localDockerSSHServer(t *testing.T, environment []string) *testServer {
+	t.Helper()
+	server := newTestServer(t)
+	server.Password = "e2e-password"
+	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
+		cmd := exec.Command("/bin/sh", "-c", command)
+		cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = environment, stdin, stdout, stderr
+		err := cmd.Run()
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
+		}
+		if err != nil {
+			return 255
+		}
+		return 0
+	}
+	return server
 }

@@ -221,12 +221,34 @@ func scanDockerStorage(ctx context.Context, d docker, scope hoststorage.Scope) (
 	if err != nil {
 		return hoststorage.Scan{}, err
 	}
+	containers, err := storageContainers(ctx, d, budget, scope, nativeEngine)
+	if err != nil {
+		return hoststorage.Scan{}, err
+	}
+	allContainers, err := storageIDs(ctx, d, budget, "container", storageLabel)
+	if err != nil {
+		return hoststorage.Scan{}, err
+	}
+	allContainers = uniqueStorageIDs(allContainers)
+	if len(allContainers) < len(containers) {
+		return hoststorage.Scan{}, ErrRemoteDocker
+	}
+	listed := make(map[string]bool, len(allContainers))
+	for _, id := range allContainers {
+		listed[id] = true
+	}
+	for _, object := range containers {
+		if !listed[object.ID] {
+			return hoststorage.Scan{}, ErrRemoteDocker
+		}
+	}
+	result.Objects = append(result.Objects, containers...)
+	result.Foreign.Containers = int64(len(allContainers) - len(containers))
 	for _, class := range []struct {
 		docker  string
 		kind    hoststorage.Kind
 		foreign *int64
 	}{
-		{"container", hoststorage.Container, &result.Foreign.Containers},
 		{"volume", hoststorage.Volume, &result.Foreign.Volumes},
 		{"image", hoststorage.Image, &result.Foreign.Images},
 	} {

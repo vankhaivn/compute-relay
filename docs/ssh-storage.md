@@ -79,7 +79,7 @@ Size the budget to Docker's own capacity (the Docker VM on macOS), not host `df`
 `GET /v1/workspaces/{w}/connections/{id}/storage` (read token) shows totals per class, workspace
 references, cache pins, pending retention, orphan summaries, budget state (`below_soft`,
 `above_soft`, `hard_refusal`, `unknown`) and scan completeness. It never exposes Docker IDs, paths
-or other workspaces' jobs. An incomplete scan proves nothing absent.
+or other workspaces' jobs. An incomplete scan proves nothing absent. Container usage is read from Docker's filtered summary, which remains available while a stopped container streams a result archive. Missing size information still makes storage unknown; a download never bypasses the storage budget. Exact cleanup separately re-inspects its target before deletion.
 
 An *orphan* is a labelled object with no matching Relay record. Objects of other installations are
 only counted, never touched; unlabelled objects are ignored. To remove an orphan (manage token,

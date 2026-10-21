@@ -1,10 +1,12 @@
 package sshhost
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -20,11 +22,23 @@ type storageExecutor struct {
 	listCalls    []string
 	truncate     bool
 	labels       map[string]string
+	archiveOpen  bool
+	summaryReply string
+	summaryWait  bool
+	summaryExit  int
 }
 
-func (e *storageExecutor) Run(_ context.Context, _ map[string]string, argv []string, _ io.Reader, stdout io.Writer) (Result, error) {
+func (e *storageExecutor) Run(ctx context.Context, _ map[string]string, argv []string, stdin io.Reader, stdout io.Writer) (Result, error) {
 	command := strings.Join(argv[1:], " ")
 	var response string
+	labels := e.labels
+	if labels == nil {
+		labels = map[string]string{storageLabel: "installation_1", labelPrefix + "engine": "NATIVEENGINE1234567890", labelPrefix + "attempt": "attempt_1", labelPrefix + "workspace": "workspace_1"}
+	}
+	encoded, err := json.Marshal(labels)
+	if err != nil {
+		return Result{}, err
+	}
 	switch {
 	case strings.HasPrefix(command, "info --format"):
 		response = "NATIVEENGINE1234567890\n"
@@ -41,24 +55,120 @@ func (e *storageExecutor) Run(_ context.Context, _ map[string]string, argv []str
 			response = strings.Repeat("x", hoststorage.ScanMaxBytes+1)
 		}
 	case strings.HasPrefix(command, "container inspect --size"):
+		if e.archiveOpen {
+			<-ctx.Done()
+			return Result{}, ctx.Err()
+		}
 		e.inspectCalls = append(e.inspectCalls, command)
 		if strings.Contains(command, e.foreignID) {
 			return Result{ExitCode: 1}, nil
 		}
-		labels := e.labels
-		if labels == nil {
-			labels = map[string]string{storageLabel: "installation_1", labelPrefix + "engine": "NATIVEENGINE1234567890", labelPrefix + "attempt": "attempt_1", labelPrefix + "workspace": "workspace_1"}
+		response = fmt.Sprintf(`[{"Id":"%s","SizeRw":128,"State":{"Running":false},"Config":{"Labels":%s},"Mounts":[]}]`, strings.Repeat("a", 64), encoded)
+	case command == "system dial-stdio":
+		if e.summaryWait {
+			<-ctx.Done()
+			return Result{}, ctx.Err()
 		}
-		encoded, err := json.Marshal(labels)
+		request, err := http.ReadRequest(bufio.NewReader(stdin))
 		if err != nil {
 			return Result{}, err
 		}
-		response = fmt.Sprintf(`[{"Id":"%s","SizeRw":128,"State":{"Running":false},"Config":{"Labels":%s},"Mounts":[]}]`, strings.Repeat("a", 64), encoded)
+		query := request.URL.Query()
+		if request.Method != http.MethodGet || request.URL.Path != "/containers/json" || !request.Close || query.Get("all") != "1" || query.Get("size") != "1" || query.Get("filters") != `{"label":["io.compute-relay.installation=installation_1"]}` {
+			return Result{ExitCode: 1}, nil
+		}
+		response = e.summaryReply
+		if response == "" {
+			body := fmt.Sprintf(`[{"Id":"%s","SizeRw":128,"State":"exited","Labels":%s,"Mounts":[]}]`, strings.Repeat("a", 64), encoded)
+			response = storageHTTPReply(body)
+		}
 	default:
 		return Result{ExitCode: 1}, nil
 	}
-	_, err := io.WriteString(stdout, response)
+	_, err = io.WriteString(stdout, response)
+	if command == "system dial-stdio" {
+		return Result{ExitCode: e.summaryExit}, err
+	}
 	return Result{}, err
+}
+
+func storageHTTPReply(body string) string {
+	return fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+}
+
+func TestStorageScanDoesNotWaitForContainerArchive(t *testing.T) {
+	scope := hoststorage.Scope{InstallationID: "installation_1", MachineID: domain.SHA256Digest(strings.Repeat("b", 64)), EngineID: domain.SHA256Digest(strings.Repeat("c", 64))}
+	exec := &storageExecutor{foreignID: strings.Repeat("f", 64), archiveOpen: true}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	scan, err := scanDockerStorage(ctx, docker{exec: exec, binary: "/usr/bin/docker"}, scope)
+	if err != nil || len(scan.Objects) != 1 || !scan.Objects[0].SizeKnown || scan.Objects[0].SizeBytes != 128 {
+		t.Fatalf("archive transfer blocked storage observation: %+v, %v", scan, err)
+	}
+}
+
+func TestStorageContainerSummaryRejectsIncompleteEvidence(t *testing.T) {
+	scope := hoststorage.Scope{InstallationID: "installation_1", MachineID: domain.SHA256Digest(strings.Repeat("b", 64)), EngineID: domain.SHA256Digest(strings.Repeat("c", 64))}
+	object := fmt.Sprintf(`{"Id":"%s","SizeRw":128,"State":"exited","Labels":{"io.compute-relay.installation":"installation_1","io.compute-relay.engine":"NATIVEENGINE1234567890"},"Mounts":[]}`, strings.Repeat("a", 64))
+	body := "[" + object + "]"
+	valid := storageHTTPReply(body)
+	for _, test := range []struct {
+		name  string
+		reply string
+		exit  int
+	}{
+		{"not an HTTP response", body, 0},
+		{"failed request", strings.Replace(valid, "200 OK", "500 Internal Server Error", 1), 0},
+		{"wrong content type", strings.Replace(valid, "application/json", "text/html", 1), 0},
+		{"encoded body", strings.Replace(valid, "Content-Type:", "Content-Encoding: gzip\r\nContent-Type:", 1), 0},
+		{"truncated body", valid[:len(valid)-1], 0},
+		{"extra response", valid + valid, 0},
+		{"failed command", valid, 1},
+		{"unknown membership", storageHTTPReply("null"), 0},
+		{"duplicate container", storageHTTPReply("[" + object + "," + object + "]"), 0},
+		{"unlisted container", storageHTTPReply(strings.Replace(body, strings.Repeat("a", 64), strings.Repeat("b", 64), 1)), 0},
+		{"foreign installation", storageHTTPReply(strings.Replace(body, "installation_1", "installation_2", 1)), 0},
+		{"unknown state", storageHTTPReply(strings.Replace(body, `"exited"`, `"future-state"`, 1)), 0},
+		{"too many containers", storageHTTPReply("[" + strings.Repeat(object+",", hoststorage.ScanMaxObjects) + object + "]"), 0},
+		{"oversized response", storageHTTPReply(strings.Repeat(" ", hoststorage.ScanMaxBytes) + body), 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			exec := &storageExecutor{foreignID: strings.Repeat("f", 64), summaryReply: test.reply, summaryExit: test.exit}
+			if scan, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope); err == nil || scan.Valid() {
+				t.Fatalf("incomplete evidence established a complete scan: %+v, %v", scan, err)
+			}
+		})
+	}
+	for _, test := range []struct{ name, body string }{
+		{"missing size", strings.Replace(body, `"SizeRw":128,`, "", 1)},
+		{"failed size calculation", strings.Replace(body, `"SizeRw":128`, `"SizeRw":-1`, 1)},
+		{"wrong engine", strings.Replace(body, "NATIVEENGINE1234567890", "OTHERENGINE1234567890", 1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			exec := &storageExecutor{foreignID: strings.Repeat("f", 64), summaryReply: storageHTTPReply(test.body)}
+			scan, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope)
+			if err != nil || len(scan.Objects) != 1 || scan.Objects[0].SizeKnown {
+				t.Fatalf("unknown size became usable accounting: %+v, %v", scan, err)
+			}
+		})
+	}
+
+	t.Run("chunked response", func(t *testing.T) {
+		reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n%x\r\n%s\r\n0\r\n\r\n", len(body), body)
+		exec := &storageExecutor{foreignID: strings.Repeat("f", 64), summaryReply: reply}
+		scan, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope)
+		if err != nil || len(scan.Objects) != 1 || !scan.Objects[0].SizeKnown || scan.Objects[0].SizeBytes != 128 {
+			t.Fatalf("complete chunked summary rejected: %+v, %v", scan, err)
+		}
+	})
+	t.Run("cancelled observation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		exec := &storageExecutor{foreignID: strings.Repeat("f", 64), summaryWait: true}
+		if scan, err := scanDockerStorage(ctx, docker{exec: exec, binary: "/usr/bin/docker"}, scope); err == nil || scan.Valid() {
+			t.Fatalf("cancelled observation established a complete scan: %+v, %v", scan, err)
+		}
+	})
 }
 
 func TestStorageScanRecognizesCurrentCacheVerifierLabels(t *testing.T) {
@@ -98,7 +208,7 @@ func TestStorageScanFiltersForeignObjectsAndBoundsOutput(t *testing.T) {
 	scope := hoststorage.Scope{InstallationID: "installation_1", MachineID: domain.SHA256Digest(strings.Repeat("b", 64)), EngineID: domain.SHA256Digest(strings.Repeat("c", 64))}
 	exec := &storageExecutor{foreignID: strings.Repeat("d", 64)}
 	scan, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope)
-	if err != nil || !scan.Valid() || len(scan.Objects) != 1 || scan.Objects[0].ID != strings.Repeat("a", 64) || scan.Foreign.Containers != 1 || len(exec.inspectCalls) != 1 {
+	if err != nil || !scan.Valid() || len(scan.Objects) != 1 || scan.Objects[0].ID != strings.Repeat("a", 64) || scan.Foreign.Containers != 1 || len(exec.inspectCalls) != 0 {
 		t.Fatalf("bounded own-only scan failed: %+v, %v, inspections=%v", scan, err, exec.inspectCalls)
 	}
 	for _, command := range exec.listCalls {
