@@ -31,6 +31,13 @@ var submissionRefusals = map[string]bool{
 	"auth_read_failed": true, "kernel_read_failed": true, "quota_read_failed": true, "helper_failed": true,
 }
 
+// Closed lookup outcomes describe why the original attempt cannot yet be resolved.
+var lookupReasons = map[string]bool{
+	"lookup_authentication_failed": true, "lookup_access_denied": true,
+	"kernel_not_visible": true, "lookup_rate_limited": true, "lookup_timeout": true,
+	"lookup_interrupted": true, "lookup_response_invalid": true,
+}
+
 type executionResponse struct {
 	Protocol     int                 `json:"protocol"`
 	Status       string              `json:"status"`
@@ -150,9 +157,20 @@ func (e *Executor) Reconcile(ctx context.Context, identity provider.Identity) (p
 	if e == nil || identity != e.plan.Job.Identity {
 		return provider.Reconciliation{}, ErrExecutionIdentity
 	}
-	r, _, err := e.call(ctx, "reconcile", "")
-	if err != nil {
+	r, stopped, err := e.call(ctx, "reconcile", "")
+	if provider.IsLocalStateError(err) {
 		return provider.Reconciliation{}, err
+	}
+	if err != nil || r.Reason != "" {
+		reason := r.Reason
+		if err != nil {
+			reason = stopped
+			if reason == "" {
+				reason = executionReadReason(err, "lookup_unavailable", "reconcile")
+			}
+		}
+		p := *unknownExecution().Problem
+		return provider.Reconciliation{}, p.WithDetail(domain.ReasonDetail, reason)
 	}
 	switch r.Status {
 	case "not_found":
@@ -242,7 +260,10 @@ func (r executionResponse) valid() bool {
 	switch r.Status {
 	case "rejected":
 		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && submissionRefusals[r.Reason]
-	case "unknown", "not_found", "invalid":
+	case "unknown", "not_found":
+		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) &&
+			(r.Reason == "" || lookupReasons[r.Reason] || submissionRefusals[r.Reason])
+	case "invalid":
 		return r == (executionResponse{Protocol: 1, Status: r.Status})
 	case "found":
 		if r.Reason != "" || !positiveDecimal(r.KernelID) || r.Version != 1 || !r.SourceSHA256.Valid() {

@@ -131,10 +131,13 @@ func TestAmbiguityStopsWithoutInventingNonAcceptance(t *testing.T) {
 	j, s := readyFixture(t)
 	j, s = apply(t, j, s, Action{Kind: BeginSubmission})
 	for n := 0; n < MaxFailures; n++ {
-		j, s = apply(t, j, s, Action{Kind: Fault, Code: domain.CodeProviderSubmissionUnknown})
+		j, s = apply(t, j, s, Action{Kind: Fault, Code: domain.CodeProviderSubmissionUnknown, Reason: "kernel_not_visible"})
 	}
 	if j.Phase != Attention || s.Orchestration != domain.OrchestrationNeedsAttention || !scheduler.HoldsAccount(s, true) || !j.Problem.ComputeMayHaveStarted || j.Problem.SafeOperationRetry {
 		t.Fatal("uncertainty was cleared")
+	}
+	if j.Problem.PublicDetails()[domain.ReasonDetail] != "kernel_not_visible" {
+		t.Fatal("attention lost the lookup outcome")
 	}
 	if j.Recoverable() {
 		t.Fatal("exhausted automatic recovery did not stop")

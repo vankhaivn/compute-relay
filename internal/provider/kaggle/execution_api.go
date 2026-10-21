@@ -54,7 +54,7 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 	empty := func(status string) executionResponse { return executionResponse{Protocol: 1, Status: status} }
 	reject := func(reason string) executionResponse {
 		if mode != "submit" {
-			return empty("unknown")
+			return executionResponse{Protocol: 1, Status: "unknown", Reason: reason}
 		}
 		return executionResponse{Protocol: 1, Status: "rejected", Reason: reason}
 	}
@@ -63,7 +63,7 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 	}
 	account, err := client.IntrospectToken(ctx)
 	if err != nil {
-		return reject("auth_read_failed")
+		return reject(executionReadReason(err, "auth_read_failed", mode))
 	}
 	if !account.Active {
 		return reject("token_inactive")
@@ -76,10 +76,10 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 	id := request.KernelID
 	if err != nil {
 		if !kaggleapi.NameAbsent(err) {
-			return reject("kernel_read_failed")
+			return reject(executionReadReason(err, "kernel_read_failed", mode))
 		}
 		if mode != "submit" {
-			return empty("not_found")
+			return executionResponse{Protocol: 1, Status: "not_found", Reason: executionReadReason(err, "kernel_read_failed", mode)}
 		}
 		datasets := make([]kaggleapi.Resource, 0, len(request.Datasets))
 		for _, dataset := range request.Datasets {
@@ -120,11 +120,48 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 	}
 	kernel, err = client.GetKernel(ctx, resource)
 	if err != nil {
-		return empty("unknown")
+		if mode == "submit" {
+			return empty("unknown")
+		}
+		return reject(executionReadReason(err, "kernel_read_failed", mode))
 	}
 	if !matchingKernel(kernel, request, id) {
 		return empty("invalid")
 	}
 	return executionResponse{Protocol: 1, Status: "found", KernelID: id, Reference: resource.Owner + "/" + resource.Slug,
 		Version: 1, SourceSHA256: request.SourceSHA256, RawState: string(state)}
+}
+
+// A name miss is not a historical non-acceptance receipt. In particular Kaggle
+// uses a permission-denied response for some missing/private names. Keep that
+// distinction visible without exposing provider response bodies.
+func executionReadReason(err error, fallback, mode string) string {
+	if mode == "submit" {
+		return fallback
+	}
+	var apiErr *kaggleapi.Error
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 401:
+			return "lookup_authentication_failed"
+		case 403:
+			return "lookup_access_denied"
+		case 404:
+			if fallback == "kernel_read_failed" {
+				return "kernel_not_visible"
+			}
+		case 429:
+			return "lookup_rate_limited"
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "lookup_timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "lookup_interrupted"
+	}
+	if errors.Is(err, kaggleapi.ErrResponse) || errors.Is(err, kaggleapi.ErrLimit) {
+		return "lookup_response_invalid"
+	}
+	return fallback
 }

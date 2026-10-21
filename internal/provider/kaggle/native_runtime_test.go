@@ -148,21 +148,39 @@ func TestNativeRuntimePrivateBatchRestartLogsArtifactsAndCleanup(t *testing.T) {
 }
 
 func TestNativeSubmissionLostAcknowledgementReconcilesWithoutSave(t *testing.T) {
-	p, plan, saved, _, f := nativeRuntime(t, false)
-	prepared, err := p.Prepare(context.Background(), plan, "prep")
-	if err != nil {
-		t.Fatal(err)
-	}
-	*saved, f.fault = prepared, "lost-save-ack"
-	if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || !out.Problem.ComputeMayHaveStarted || out.Problem.SafeOperationRetry {
-		t.Fatal("lost save acknowledgement became rejection or retry permission", out)
-	}
-	if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
-		t.Fatal("ambiguous save was repeated")
-	}
-	seen, err := p.Reconcile(context.Background(), plan.Job.Identity)
-	if err != nil || seen.Status != provider.ReconciliationFound || f.count("SaveKernel") != 1 {
-		t.Fatal("original save could not be recovered by reads", seen, err)
+	for _, tc := range []struct{ fault, reason string }{
+		{"found", ""}, {"kernel-hidden", "kernel_not_visible"},
+		{"kernel-denied", "lookup_access_denied"}, {"kernel-throttled", "lookup_rate_limited"},
+		{"kernel-invalid", "lookup_response_invalid"},
+	} {
+		t.Run(tc.fault, func(t *testing.T) {
+			p, plan, saved, _, f := nativeRuntime(t, false)
+			prepared, err := p.Prepare(context.Background(), plan, "prep")
+			if err != nil {
+				t.Fatal(err)
+			}
+			*saved, f.fault = prepared, "lost-save-ack"
+			if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || !out.Problem.ComputeMayHaveStarted || out.Problem.SafeOperationRetry {
+				t.Fatal("lost save acknowledgement became rejection or retry permission", out)
+			}
+			if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
+				t.Fatal("ambiguous save was repeated")
+			}
+			f.fault = tc.fault
+			seen, err := p.Reconcile(context.Background(), plan.Job.Identity)
+			if tc.reason != "" {
+				var problem domain.Problem
+				if !errors.As(err, &problem) || problem.Code != domain.CodeProviderSubmissionUnknown ||
+					problem.PublicDetails()[domain.ReasonDetail] != tc.reason || !problem.ComputeMayHaveStarted || problem.SafeOperationRetry {
+					t.Fatalf("unresolved lookup lost its reason or allowed replacement: %+v, %v", seen, err)
+				}
+			} else if err != nil || seen.Status != provider.ReconciliationFound {
+				t.Fatal("original save could not be recovered by reads", seen, err)
+			}
+			if f.count("SaveKernel") != 1 {
+				t.Fatal("lookup repeated the save")
+			}
+		})
 	}
 }
 

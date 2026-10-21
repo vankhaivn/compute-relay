@@ -185,6 +185,18 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		return f.redirect("staging/" + name), nil
 	case "GetKernel":
 		f.getKernel++
+		switch f.fault {
+		case "kernel-hidden":
+			return jsonResponse(404, `{}`), nil
+		case "kernel-denied":
+			return jsonResponse(403, `{"error":{"code":403,"status":"PERMISSION_DENIED","message":"Permission 'kernels.get' was denied"}}`), nil
+		case "kernel-throttled":
+			response := jsonResponse(429, `{}`)
+			response.Header.Set("Retry-After", "0")
+			return response, nil
+		case "kernel-invalid":
+			return jsonResponse(200, `{}`), nil
+		}
 		if f.kernel == nil {
 			return jsonResponse(404, `{}`), nil
 		}

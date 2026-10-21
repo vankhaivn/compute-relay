@@ -44,6 +44,17 @@ not absent. A recorded private dataset that is still processing remains a separa
 Historical attention attempts without a saved grace start it on their first unsuccessful
 observation after an explicit reconciliation request.
 
+Submission reconciliation derives the kernel name from the frozen attempt identity and validates
+version 1, source digest, owner, privacy and mounted inputs before normal observation can resume.
+Unresolved lookups retain a closed reason: `kernel_not_visible` for an exact 404,
+`lookup_access_denied` for a 403 (including Kaggle's missing-name permission response),
+`lookup_authentication_failed`, `lookup_rate_limited`, `lookup_timeout`,
+`lookup_interrupted`, or `lookup_response_invalid`. Authentication/kernel read failures
+and credential availability remain distinct. These reasons survive dispatch attention and
+are public diagnostics, never provider response bodies. A missing kernel today does not prove
+it never ran or that an in-flight save was rejected. Neither elapsed time nor repeated misses
+release an uncertain submission for replacement; explicit non-acceptance remains required.
+
 Terminalization preserves the original intent and unknown resource evidence. Cleanup preview can
 observe this settled attempt using its frozen staging plan. Exact discovery records the numeric
 identity for ordinary cleanup without reopening the failed attempt. An exact HTTP 404 displays

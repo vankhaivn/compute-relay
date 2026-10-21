@@ -221,8 +221,8 @@ func TestExecutorCarriesOnlyClosedHelperRefusals(t *testing.T) {
 	e := newExecutionFixture(t)
 	found := executionFound(e.request, "QUEUED")
 	found.Reason = "kernel_read_failed"
-	if found.valid() || (executionResponse{Protocol: 1, Status: "unknown", Reason: "kernel_read_failed"}).valid() {
-		t.Fatal("a reason accompanied a status other than rejected")
+	if found.valid() || (executionResponse{Protocol: 1, Status: "unknown", Reason: "403 Forbidden"}).valid() {
+		t.Fatal("a reason accompanied a found status or raw provider text escaped")
 	}
 }
 
