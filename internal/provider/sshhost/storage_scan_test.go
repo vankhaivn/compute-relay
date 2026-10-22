@@ -26,6 +26,9 @@ type storageExecutor struct {
 	summaryReply string
 	summaryWait  bool
 	summaryExit  int
+	volumes      []string // cache volumes of this installation
+	dropVolume   string   // a volume inspect leaves unanswered
+	volumeCalls  int
 }
 
 func (e *storageExecutor) Run(ctx context.Context, _ map[string]string, argv []string, stdin io.Reader, stdout io.Writer) (Result, error) {
@@ -53,7 +56,20 @@ func (e *storageExecutor) Run(ctx context.Context, _ map[string]string, argv []s
 	case strings.HasPrefix(command, "volume ls"), strings.HasPrefix(command, "image ls"):
 		if e.truncate {
 			response = strings.Repeat("x", hoststorage.ScanMaxBytes+1)
+		} else if strings.HasPrefix(command, "volume ls") {
+			response = strings.Join(e.volumes, "\n")
 		}
+	case strings.HasPrefix(command, "volume inspect "):
+		e.volumeCalls++
+		entries := []string{}
+		for _, name := range argv[3:] {
+			if name == e.dropVolume {
+				continue
+			}
+			entries = append(entries, fmt.Sprintf(`{"Name":"%s","Labels":{"%s":"installation_1","%skind":"cache","%sbytes":"10","%smachine":"%s","%sengine":"%s"}}`,
+				name, storageLabel, labelPrefix, labelPrefix, labelPrefix, strings.Repeat("b", 64), labelPrefix, strings.Repeat("c", 64)))
+		}
+		response = "[" + strings.Join(entries, ",") + "]"
 	case strings.HasPrefix(command, "container inspect --size"):
 		if e.archiveOpen {
 			<-ctx.Done()
@@ -219,5 +235,43 @@ func TestStorageScanFiltersForeignObjectsAndBoundsOutput(t *testing.T) {
 	exec.truncate = true
 	if _, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope); err == nil {
 		t.Fatal("truncated listing was accepted as a complete scan")
+	}
+}
+
+func TestStorageScanInspectsManyVolumesInFewCommands(t *testing.T) {
+	scope := hoststorage.Scope{InstallationID: "installation_1", MachineID: domain.SHA256Digest(strings.Repeat("b", 64)), EngineID: domain.SHA256Digest(strings.Repeat("c", 64))}
+	exec := &storageExecutor{foreignID: strings.Repeat("d", 64)}
+	for i := range 300 {
+		exec.volumes = append(exec.volumes, fmt.Sprintf("relay-cache-%032x", i))
+	}
+	scan, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope)
+	if err != nil || !scan.Valid() || len(scan.Objects) != 301 || exec.volumeCalls != 5 {
+		t.Fatalf("volume inspection did not batch: objects=%d calls=%d err=%v", len(scan.Objects), exec.volumeCalls, err)
+	}
+	for _, o := range scan.Objects[1:] {
+		if o.Kind != hoststorage.Volume || !o.SizeKnown || o.SizeBytes != 10 {
+			t.Fatalf("batched volume lost its accounting: %+v", o)
+		}
+	}
+	exec.dropVolume, exec.volumeCalls = exec.volumes[100], 0
+	if _, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope); err == nil {
+		t.Fatal("a volume missing from a batched answer was accepted")
+	}
+}
+
+func TestStorageScanReasonNamesTheFailedStep(t *testing.T) {
+	scope := hoststorage.Scope{InstallationID: "installation_1", MachineID: domain.SHA256Digest(strings.Repeat("b", 64)), EngineID: domain.SHA256Digest(strings.Repeat("c", 64))}
+	exec := &storageExecutor{foreignID: strings.Repeat("d", 64), summaryWait: true}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err := scanDockerStorage(ctx, docker{exec: exec, binary: "/usr/bin/docker"}, scope)
+	if got := StorageScanReason(err); got != "remote_scan_timeout" {
+		t.Fatalf("a scan over its deadline was reported as %q (%v)", got, err)
+	}
+	for err, want := range map[error]string{ErrRemoteDocker: "remote_docker_failed", errResponseLimit: "remote_response_limit",
+		fmt.Errorf("dial: %w", ErrUnavailable): "host_unavailable", io.EOF: "remote_observation_failed"} {
+		if got := StorageScanReason(err); got != want {
+			t.Fatalf("%v reported as %q", err, got)
+		}
 	}
 }

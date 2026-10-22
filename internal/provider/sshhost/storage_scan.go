@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -25,10 +26,34 @@ func (b *storageScanBudget) command(ctx context.Context, d docker, args ...strin
 	writer := &limitedWriter{w: &out, limit: b.remaining}
 	result, err := d.run(ctx, nil, writer, args...)
 	b.remaining -= writer.n
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil || result.ExitCode != 0 {
 		return nil, ErrRemoteDocker
 	}
 	return out.Bytes(), nil
+}
+
+// StorageScanReason names, as a closed reason, the step a storage scan failed at.
+func StorageScanReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "remote_scan_timeout"
+	case errors.Is(err, errResponseLimit):
+		return "remote_response_limit"
+	case errors.Is(err, ErrRemoteDocker):
+		return "remote_docker_failed"
+	case errors.Is(err, ErrHostKeyMismatch):
+		return "host_key_mismatch"
+	case errors.Is(err, ErrCredentialReject):
+		return "credential_rejected"
+	case errors.Is(err, ErrUnavailable):
+		return "host_unavailable"
+	case errors.Is(err, hoststorage.ErrUnverified):
+		return "storage_identity_unverified"
+	}
+	return "remote_observation_failed"
 }
 
 func storageLines(raw []byte, max int) ([]string, error) {
@@ -142,71 +167,123 @@ type storageImageInspect struct {
 	Digests []string `json:"RepoDigests"`
 }
 
+// storageInspectBatch bounds one inspect command's arguments. A scan's remote round
+// trips grow with batches, not objects, so hundreds of cache volumes fit its timeout.
+const storageInspectBatch = 64
+
 func storageInspectObject(ctx context.Context, d docker, budget *storageScanBudget, scope hoststorage.Scope, nativeEngine string, kind hoststorage.Kind, id string) (hoststorage.Object, error) {
-	o := hoststorage.Object{Kind: kind, ID: id}
-	if !o.Valid() {
-		return o, hoststorage.ErrUnverified
+	objects, err := storageInspectObjects(ctx, d, budget, scope, nativeEngine, kind, []string{id})
+	if err != nil {
+		return hoststorage.Object{Kind: kind, ID: id}, err
 	}
+	return objects[0], nil
+}
+
+// storageInspectObjects inspects distinct objects of one kind, one Docker command per batch.
+func storageInspectObjects(ctx context.Context, d docker, budget *storageScanBudget, scope hoststorage.Scope, nativeEngine string, kind hoststorage.Kind, ids []string) ([]hoststorage.Object, error) {
+	var command []string
 	switch kind {
 	case hoststorage.Container:
-		raw, err := budget.command(ctx, d, "container", "inspect", "--size", id)
-		if err != nil {
-			return o, err
-		}
-		var inspected []storageContainerInspect
-		if json.Unmarshal(raw, &inspected) != nil || len(inspected) != 1 || inspected[0].ID != id {
-			return o, ErrRemoteDocker
-		}
-		o.Labels = inspected[0].Config.Labels
-		o.Running = inspected[0].State.Running
-		if inspected[0].SizeRw != nil && *inspected[0].SizeRw >= 0 {
-			o.SizeKnown, o.SizeBytes = true, *inspected[0].SizeRw
-		}
-		o.References = int64(len(inspected[0].Mounts))
+		command = []string{"container", "inspect", "--size"}
 	case hoststorage.Volume:
-		raw, err := budget.command(ctx, d, "volume", "inspect", id)
-		if err != nil {
-			return o, err
-		}
-		var inspected []volumeInfo
-		if json.Unmarshal(raw, &inspected) != nil || len(inspected) != 1 || inspected[0].Name != id {
-			return o, ErrRemoteDocker
-		}
-		o.Labels = inspected[0].Labels
-		// Only the immutable declared cache reservation is available from a
-		// fixed label. Docker volume inspect does not report disk usage.
-		if inspected[0].Labels[labelPrefix+"kind"] == "cache" {
-			size, err := strconv.ParseInt(inspected[0].Labels[labelPrefix+"bytes"], 10, 64)
-			if err == nil && size >= 0 {
-				o.SizeKnown, o.SizeBytes = true, size
+		command = []string{"volume", "inspect"}
+	case hoststorage.Image:
+		command = []string{"image", "inspect"}
+	default:
+		return nil, hoststorage.ErrInvalid
+	}
+	objects := make([]hoststorage.Object, 0, len(ids))
+	for start := 0; start < len(ids); start += storageInspectBatch {
+		batch := ids[start:min(start+storageInspectBatch, len(ids))]
+		for _, id := range batch {
+			if !(hoststorage.Object{Kind: kind, ID: id}).Valid() {
+				return nil, hoststorage.ErrUnverified
 			}
 		}
-	case hoststorage.Image:
-		raw, err := budget.command(ctx, d, "image", "inspect", id)
+		raw, err := budget.command(ctx, d, append(append([]string(nil), command...), batch...)...)
 		if err != nil {
-			return o, err
+			return nil, err
 		}
+		inspected, err := decodeStorageObjects(kind, raw)
+		if err != nil {
+			return nil, err
+		}
+		// Every requested object must be answered exactly once.
+		byID := make(map[string]hoststorage.Object, len(inspected))
+		for _, o := range inspected {
+			if _, dup := byID[o.ID]; dup {
+				return nil, ErrRemoteDocker
+			}
+			byID[o.ID] = o
+		}
+		if len(byID) != len(batch) {
+			return nil, ErrRemoteDocker
+		}
+		for _, id := range batch {
+			o, ok := byID[id]
+			if !ok {
+				return nil, ErrRemoteDocker
+			}
+			if o.Labels[storageLabel] != string(scope.InstallationID) || !o.Valid() {
+				return nil, hoststorage.ErrUnverified
+			}
+			// A machine/engine mismatch stays visible to accounting but is never a
+			// deletion authority. Its size uncertainty closes the write gate.
+			if !validStorageLabels(kind, o.Labels, scope, nativeEngine) {
+				o.SizeKnown = false
+			}
+			objects = append(objects, o)
+		}
+	}
+	return objects, nil
+}
+
+func decodeStorageObjects(kind hoststorage.Kind, raw []byte) ([]hoststorage.Object, error) {
+	var objects []hoststorage.Object
+	switch kind {
+	case hoststorage.Container:
+		var inspected []storageContainerInspect
+		if json.Unmarshal(raw, &inspected) != nil {
+			return nil, ErrRemoteDocker
+		}
+		for _, c := range inspected {
+			o := hoststorage.Object{Kind: kind, ID: c.ID, Labels: c.Config.Labels, Running: c.State.Running, References: int64(len(c.Mounts))}
+			if c.SizeRw != nil && *c.SizeRw >= 0 {
+				o.SizeKnown, o.SizeBytes = true, *c.SizeRw
+			}
+			objects = append(objects, o)
+		}
+	case hoststorage.Volume:
+		var inspected []volumeInfo
+		if json.Unmarshal(raw, &inspected) != nil {
+			return nil, ErrRemoteDocker
+		}
+		for _, v := range inspected {
+			o := hoststorage.Object{Kind: kind, ID: v.Name, Labels: v.Labels}
+			// Only the immutable declared cache reservation is available from a
+			// fixed label. Docker volume inspect does not report disk usage.
+			if v.Labels[labelPrefix+"kind"] == "cache" {
+				size, err := strconv.ParseInt(v.Labels[labelPrefix+"bytes"], 10, 64)
+				if err == nil && size >= 0 {
+					o.SizeKnown, o.SizeBytes = true, size
+				}
+			}
+			objects = append(objects, o)
+		}
+	case hoststorage.Image:
 		var inspected []storageImageInspect
-		if json.Unmarshal(raw, &inspected) != nil || len(inspected) != 1 || inspected[0].ID != id {
-			return o, ErrRemoteDocker
+		if json.Unmarshal(raw, &inspected) != nil {
+			return nil, ErrRemoteDocker
 		}
-		o.Labels = inspected[0].Config.Labels
-		if inspected[0].Size != nil && *inspected[0].Size >= 0 {
-			o.SizeKnown, o.SizeBytes = true, *inspected[0].Size
+		for _, i := range inspected {
+			o := hoststorage.Object{Kind: kind, ID: i.ID, Labels: i.Config.Labels, References: int64(len(i.Tags) + len(i.Digests))}
+			if i.Size != nil && *i.Size >= 0 {
+				o.SizeKnown, o.SizeBytes = true, *i.Size
+			}
+			objects = append(objects, o)
 		}
-		o.References = int64(len(inspected[0].Tags) + len(inspected[0].Digests))
-	default:
-		return o, hoststorage.ErrInvalid
 	}
-	if o.Labels[storageLabel] != string(scope.InstallationID) || !o.Valid() {
-		return o, hoststorage.ErrUnverified
-	}
-	// A machine/engine mismatch stays visible to accounting but is never a
-	// deletion authority. Its size uncertainty closes the write gate.
-	if !validStorageLabels(kind, o.Labels, scope, nativeEngine) {
-		o.SizeKnown = false
-	}
-	return o, nil
+	return objects, nil
 }
 
 func scanDockerStorage(ctx context.Context, d docker, scope hoststorage.Scope) (hoststorage.Scan, error) {
@@ -268,13 +345,11 @@ func scanDockerStorage(ctx context.Context, d docker, scope hoststorage.Scope) (
 			return hoststorage.Scan{}, ErrRemoteDocker
 		}
 		*class.foreign = int64(len(all) - len(own))
-		for _, id := range own {
-			object, err := storageInspectObject(ctx, d, budget, scope, nativeEngine, class.kind, id)
-			if err != nil {
-				return hoststorage.Scan{}, err
-			}
-			result.Objects = append(result.Objects, object)
+		objects, err := storageInspectObjects(ctx, d, budget, scope, nativeEngine, class.kind, own)
+		if err != nil {
+			return hoststorage.Scan{}, err
 		}
+		result.Objects = append(result.Objects, objects...)
 	}
 	result.ObservedAt = time.Now().UTC()
 	if !result.Valid() {

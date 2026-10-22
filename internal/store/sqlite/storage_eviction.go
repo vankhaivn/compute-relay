@@ -29,6 +29,10 @@ type evictionCandidate struct {
 // QueueStorageEvictions creates durable exact-target work only after a fresh,
 // complete scan observes a machine above its shared soft threshold. Candidates
 // are chosen by oldest use across cache volumes and application images.
+// cacheVolumeLimit is the number of cache volumes a machine keeps before the oldest
+// unpinned ones are evicted, independent of the byte budget.
+var cacheVolumeLimit = 64
+
 func (s *Store) QueueStorageEvictions(ctx context.Context, scope hoststorage.Scope, w domain.WorkspaceID, profile admission.Profile) error {
 	if !scope.Valid() || !w.Valid() || profile.Validate() != nil {
 		return ErrInvalid
@@ -74,7 +78,16 @@ func (s *Store) QueueStorageEvictions(ctx context.Context, scope hoststorage.Sco
 		if err != nil {
 			return err
 		}
-		if charge.view.Machine.ChargedBytes <= effective.SoftBytes {
+		// Idle cache volumes are also bounded by count: small volumes never reach the
+		// byte limit, yet each one adds work to every storage scan.
+		volumes := 0
+		for _, object := range observation.objects {
+			if object.Kind == hoststorage.Volume && object.Labels[storageLabelPrefix+"kind"] == "cache" {
+				volumes++
+			}
+		}
+		excess := volumes - cacheVolumeLimit
+		if charge.view.Machine.ChargedBytes <= effective.SoftBytes && excess <= 0 {
 			return nil
 		}
 		const eligible = `SELECT 'volume',g.volume_name,g.bytes,g.last_used_at,g.generation_id,g.operation_id,g.sha256
@@ -122,8 +135,15 @@ func (s *Store) QueueStorageEvictions(ctx context.Context, scope hoststorage.Sco
 		}
 		remaining := charge.view.Machine.ChargedBytes - effective.SoftBytes
 		for _, item := range candidates {
-			if remaining <= 0 {
+			if remaining <= 0 && excess <= 0 {
 				break
+			}
+			reason := "soft_limit_lru"
+			if remaining <= 0 {
+				if item.class != hoststorage.Volume {
+					continue
+				}
+				reason = "count_limit_lru"
 			}
 			object, present := objects[storageObjectKey(item.class, item.id)]
 			if !present || !object.SizeKnown || object.References != 0 || item.bytes < 0 {
@@ -175,14 +195,17 @@ func (s *Store) QueueStorageEvictions(ctx context.Context, scope hoststorage.Sco
 			_, err = tx.ExecContext(ctx, `INSERT INTO host_storage_cleanup_operations
 			 (operation_id,workspace_id,connection_id,preview_id,installation_id,machine_id,engine_id,action,class,object_id,
 			 labels_json,binding_json,fingerprint,key_sha256,actor_token_id,status,result,reason,created_at,updated_at)
-			 VALUES(?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,'system','accepted','pending','soft_limit_lru',?,?)`,
+			 VALUES(?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,'system','accepted','pending',?,?,?)`,
 				id, w, connection, scope.InstallationID, scope.MachineID, scope.EngineID, action, item.class, item.id,
-				string(labelsJSON), string(bindingJSON), hash, hash, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+				string(labelsJSON), string(bindingJSON), hash, hash, reason, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 			if err != nil {
 				return dbError(err)
 			}
 			freed := charge.objects[storageObjectKey(item.class, item.id)]
 			remaining -= freed
+			if item.class == hoststorage.Volume {
+				excess--
+			}
 		}
 		return nil
 	})

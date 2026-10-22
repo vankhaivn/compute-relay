@@ -21,7 +21,7 @@ flowchart LR
 
 | Object | Lifetime | Removed by |
 |---|---|---|
-| Cache volume | Shared across jobs and workspaces | Soft-limit eviction when unreferenced |
+| Cache volume | Shared across jobs and workspaces | Soft-limit or count-limit eviction when unreferenced |
 | Application image | Reused across jobs | Soft-limit eviction when unreferenced |
 | Attempt container | One attempt | [Cleanup or retention](results-and-cleanup.md#cleanup) |
 
@@ -70,6 +70,7 @@ is a conservative upper bound.
 |---|---|
 | Below soft | Nothing. |
 | Above soft | Evict unreferenced cache entries and images, least recently used first. |
+| Over 64 cache volumes | Evict unreferenced cache volumes, least recently used first, whatever their size (`count_limit_lru`). |
 | At or near hard, or unknown | New admission and preparation get HTTP 422 `RESOURCE_REQUIREMENT_UNSATISFIED` with `details.reason` `host_storage_limit` or `host_storage_unknown`; queued work retries every 30 s. Running work is never stopped. |
 
 Size the budget to Docker's own capacity (the Docker VM on macOS), not host `df`.
@@ -79,7 +80,7 @@ Size the budget to Docker's own capacity (the Docker VM on macOS), not host `df`
 `GET /v1/workspaces/{w}/connections/{id}/storage` (read token) shows totals per class, workspace
 references, cache pins, pending retention, orphan summaries, budget state (`below_soft`,
 `above_soft`, `hard_refusal`, `unknown`) and scan completeness. It never exposes Docker IDs, paths
-or other workspaces' jobs. An incomplete scan proves nothing absent. Container usage is read from Docker's filtered summary, which remains available while a stopped container streams a result archive. Missing size information still makes storage unknown; a download never bypasses the storage budget. Exact cleanup separately re-inspects its target before deletion.
+or other workspaces' jobs. An incomplete scan proves nothing absent. Container usage is read from Docker's filtered summary, which remains available while a stopped container streams a result archive; volumes and images are inspected in batches of 64 per command, so a scan stays within its 30 s bound as objects accumulate. An incomplete scan records the failed step: `remote_scan_timeout`, `remote_docker_failed`, `remote_response_limit`, `host_unavailable`, `host_key_mismatch`, `credential_rejected`, `storage_identity_unverified`, `remote_scan_invalid` or `remote_observation_failed`. Missing size information still makes storage unknown; a download never bypasses the storage budget. Exact cleanup separately re-inspects its target before deletion.
 
 An *orphan* is a labelled object with no matching Relay record. Objects of other installations are
 only counted, never touched; unlabelled objects are ignored. To remove an orphan (manage token,

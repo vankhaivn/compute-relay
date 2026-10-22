@@ -49,7 +49,11 @@ func (g *managedStorageGuard) scanProfile(ctx context.Context, workspace domain.
 		return scanErr
 	})
 	if err != nil || !scan.Valid() || scan.Scope != scope {
-		if recordErr := g.store.RecordIncompleteStorageScan(ctx, scope, "remote_observation_failed"); recordErr != nil {
+		reason := "remote_scan_invalid"
+		if err != nil {
+			reason = sshhost.StorageScanReason(err)
+		}
+		if recordErr := g.store.RecordIncompleteStorageScan(ctx, scope, reason); recordErr != nil {
 			return recordErr
 		}
 		return hoststorage.ErrUnknown

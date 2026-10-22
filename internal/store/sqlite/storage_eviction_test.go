@@ -113,6 +113,47 @@ func TestStorageEvictionReceiptDischargesChargeAndNewScanRequeues(t *testing.T) 
 	}
 }
 
+func TestStorageEvictionBoundsCacheVolumeCountBelowByteLimit(t *testing.T) {
+	old := cacheVolumeLimit
+	cacheVolumeLimit = 0
+	t.Cleanup(func() { cacheVolumeLimit = old })
+	f := cacheAdmissionFixture(t)
+	ctx := context.Background()
+	receipt, err := f.service.Submit(ctx, f.p, "a", "storage-count-eviction", cacheJob("cache-host-a", "", ""))
+	requireNoError(t, err)
+	owner := cacheOwner("a", receipt)
+	pins, err := f.s.Pins(ctx, owner)
+	requireNoError(t, err)
+	generation, _, err := f.s.Claim(ctx, owner, pins[0])
+	requireNoError(t, err)
+	requireNoError(t, f.s.BeginWrite(ctx, owner, generation.ID))
+	requireNoError(t, f.s.Verify(ctx, completeCacheObservation(generation)))
+	requireNoError(t, f.s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		if err := releaseHostCachePinsWithoutPreparation(ctx, tx, owner.WorkspaceID, owner.JobID, owner.AttemptID, now); err != nil {
+			return err
+		}
+		return releaseAttemptStorageResourcesInTx(ctx, tx, owner.WorkspaceID, owner.JobID, owner.AttemptID, now)
+	}))
+	profile := f.profile
+	profile.Binding.Profile = "cache-host-a"
+	profile.Binding.ConfigurationRevision = "rev_cache_a"
+	profile.CredentialRef = "vault:con_admission_a"
+	profile.ResourceScope = "resource_" + cacheMachine
+	profile.CostClass = admission.CostOperatorManaged
+	info, err := f.s.Info(ctx)
+	requireNoError(t, err)
+	scope := hoststorage.Scope{InstallationID: domain.RuntimeInstallationID(info.InstallationID), MachineID: cacheMachine, EngineID: cacheEngine}
+	observed := hoststorage.Object{Kind: hoststorage.Volume, ID: generation.VolumeName, SizeBytes: 7, SizeKnown: true, Labels: generation.Labels()}
+	requireNoError(t, f.s.RecordStorageScan(ctx, hoststorage.Scan{Scope: scope, ObservedAt: time.Now().UTC(), Objects: []hoststorage.Object{observed}}))
+	requireNoError(t, f.s.QueueStorageEvictions(ctx, scope, "a", profile))
+	var count int
+	var reason string
+	requireNoError(t, f.s.db.QueryRowContext(ctx, `SELECT count(*),COALESCE(max(reason),'') FROM host_storage_cleanup_operations`).Scan(&count, &reason))
+	if count != 1 || reason != "count_limit_lru" {
+		t.Fatalf("idle cache volume over the count limit was not evicted: %d %q", count, reason)
+	}
+}
+
 func TestStorageHardLimitSharesBudgetAcrossConnectionAliases(t *testing.T) {
 	f := cacheAdmissionFixture(t)
 	ctx := context.Background()
