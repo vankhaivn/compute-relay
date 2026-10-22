@@ -57,7 +57,7 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 		return failed("unknown", "account_check_failed"+failureSuffix(err)), nil
 	}
 	if !matched {
-		return empty("invalid"), nil
+		return failed("invalid", "staging_account_mismatch"), nil
 	}
 	meta, err := client.GetDataset(ctx, resource)
 	if err != nil && !kaggleapi.NameAbsent(err) {
@@ -80,12 +80,12 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 	// input it names was created. A missing one is created once under this preparation.
 	var missing []sharedInput
 	for _, entry := range plan.shared {
-		switch state := observeShared(ctx, client, entry); state {
+		switch state, reason := observeShared(ctx, client, entry); state {
 		case "not_found":
 			missing = append(missing, entry)
 		case "ready", "pending":
 		default:
-			return failed(state, "shared_"+state), nil
+			return failed(state, reason), nil
 		}
 	}
 	progress := &uploadProgress{}
@@ -209,7 +209,7 @@ func createDataset(ctx context.Context, client *kaggleapi.Client, r stagingReque
 func sharedCreated(ctx context.Context, client *kaggleapi.Client, entry sharedInput) bool {
 	deadline := time.Now().Add(stagingVisibilityGrace)
 	for {
-		switch observeShared(ctx, client, entry) {
+		switch state, _ := observeShared(ctx, client, entry); state {
 		case "ready", "pending":
 			return true
 		case "invalid":
@@ -240,34 +240,37 @@ func failureSuffix(err error) string {
 }
 
 // observeShared checks one shared dataset's identity, privacy, readiness and exact
-// file list without downloading it.
-func observeShared(ctx context.Context, client *kaggleapi.Client, entry sharedInput) string {
+// file list without downloading it. The reason names the step that did not match.
+func observeShared(ctx context.Context, client *kaggleapi.Client, entry sharedInput) (string, string) {
 	r := entry.request
 	resource := kaggleapi.Resource{Owner: r.Owner, Slug: r.Slug}
 	meta, err := client.GetDataset(ctx, resource)
 	if err != nil {
 		if kaggleapi.NameAbsent(err) {
-			return "not_found"
+			return "not_found", "shared_absent" + failureSuffix(err)
 		}
-		return "unknown"
+		return "unknown", "shared_lookup_failed" + failureSuffix(err)
 	}
-	if !matchingStaging(meta, r) || meta.Private == nil || !*meta.Private {
-		return "invalid"
+	if !matchingStaging(meta, r) {
+		return "invalid", "shared_metadata_mismatch"
+	}
+	if meta.Private == nil || !*meta.Private {
+		return "invalid", "shared_not_private"
 	}
 	switch state, err := client.DatasetStatus(ctx, resource); {
 	case err != nil:
-		return "unknown"
+		return "unknown", "shared_status_failed" + failureSuffix(err)
 	case pendingDataset(state):
-		return "pending"
+		return "pending", ""
 	case state != kaggleapi.DatasetReady:
-		return "unknown"
+		return "unknown", "shared_state_unknown"
 	}
 	if listed, err := listedExactly(ctx, client, resource, r.Files); err != nil {
-		return "unknown"
+		return "unknown", "shared_list_failed" + failureSuffix(err)
 	} else if !listed {
-		return "invalid"
+		return "invalid", "shared_files_mismatch"
 	}
-	return "ready"
+	return "ready", ""
 }
 
 func pendingDataset(state kaggleapi.DatasetState) bool {
@@ -333,19 +336,27 @@ func matchingStaging(meta kaggleapi.Dataset, r stagingRequest) bool {
 // observeStaging names the step that left a result unknown, so a failed create read-back
 // reports it.
 func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingPlan, meta kaggleapi.Dataset, confirmStable, cleanupOnly bool) stagingResponse {
-	empty := func(status string) stagingResponse { return stagingResponse{Protocol: 1, Status: status} }
+	invalid := func(reason string) stagingResponse {
+		return stagingResponse{Protocol: 1, Status: "invalid", Reason: reason}
+	}
 	unknown := func(reason string) stagingResponse {
 		return stagingResponse{Protocol: 1, Status: "unknown", Reason: reason}
 	}
 	r := plan.request
 	resource := kaggleapi.Resource{Owner: r.Owner, Slug: r.Slug}
 	if !matchingStaging(meta, r) {
-		return empty("invalid")
+		return invalid("staging_metadata_mismatch")
 	}
 	result := stagingResponse{Protocol: 1, Status: "pending", DatasetID: string(meta.ID), Owner: r.Owner,
 		Slug: r.Slug, Version: 1, MarkerSHA256: r.MarkerSHA256, Private: meta.Private != nil && *meta.Private}
 	if !result.Private {
-		return result
+		// A non-private report stops the attempt for attention, so one read that
+		// omits or misreports privacy is confirmed by reading again first.
+		reread, private := privateOnReread(ctx, client, resource, r, meta)
+		if !private {
+			return result
+		}
+		meta, result.Private = reread, true
 	}
 	if cleanupOnly {
 		// Cleanup needs ownership, not executable readiness. Shared datasets may
@@ -355,19 +366,20 @@ func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingP
 			return unknown("staging_readback_failed" + failureSuffix(err))
 		}
 		if !matchingStaging(final, r) || final.ID != meta.ID || final.Private == nil || !*final.Private || final.LastUpdated != meta.LastUpdated {
-			return empty("invalid")
+			return invalid("staging_changed_during_read")
 		}
 		return result
 	}
 	for _, entry := range plan.shared {
-		switch state := observeShared(ctx, client, entry); state {
+		switch state, reason := observeShared(ctx, client, entry); state {
 		case "ready":
 		case "pending":
 			return result
 		case "not_found":
-			return empty("invalid")
+			// A shared input the attempt already names cannot be absent; this is invalid.
+			return invalid(reason)
 		default:
-			return stagingResponse{Protocol: 1, Status: state, Reason: "shared_" + state}
+			return stagingResponse{Protocol: 1, Status: state, Reason: reason}
 		}
 	}
 	state, err := client.DatasetStatus(ctx, resource)
@@ -383,7 +395,7 @@ func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingP
 	if listed, err := listedExactly(ctx, client, resource, r.Files); err != nil {
 		return unknown("staging_list_failed" + failureSuffix(err))
 	} else if !listed {
-		return empty("invalid")
+		return invalid("staging_files_mismatch")
 	}
 	var total int64
 	for _, file := range r.Files {
@@ -400,11 +412,30 @@ func observeStaging(ctx context.Context, client *kaggleapi.Client, plan stagingP
 		}
 		if finalState != kaggleapi.DatasetReady || !matchingStaging(final, r) || final.ID != meta.ID ||
 			final.Private == nil || !*final.Private || final.LastUpdated != meta.LastUpdated {
-			return empty("invalid")
+			return invalid("staging_changed_during_read")
 		}
 	}
 	result.Status, result.VerifiedFiles, result.VerifiedBytes = "ready", len(r.Files), total
 	return result
+}
+
+// privateOnReread reads a dataset reported as non-private again, a few seconds apart,
+// and returns the first read that confirms the same private dataset.
+func privateOnReread(ctx context.Context, client *kaggleapi.Client, resource kaggleapi.Resource, r stagingRequest, meta kaggleapi.Dataset) (kaggleapi.Dataset, bool) {
+	for range stagingPrivacyRereads {
+		wait := time.NewTimer(stagingPrivacyPoll)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return meta, false
+		case <-wait.C:
+		}
+		again, err := client.GetDataset(ctx, resource)
+		if err == nil && matchingStaging(again, r) && again.ID == meta.ID && again.Private != nil && *again.Private {
+			return again, true
+		}
+	}
+	return meta, false
 }
 
 func retryableStagingUpload(err error) bool {

@@ -152,8 +152,22 @@ func TestNativeSharedInputChangedAfterReadinessStopsBeforeSave(t *testing.T) {
 	for _, entry := range f.shared {
 		entry.staged[sharedBlobFile] = []byte("abcd")
 	}
-	if out := p.Start(context.Background(), prepared, nil, nil); out.Status == provider.SubmissionAccepted || f.count("SaveKernel") != 0 {
-		t.Fatal("changed shared dataset reached submission", out)
+	out := p.Start(context.Background(), prepared, nil, nil)
+	if out.Status == provider.SubmissionAccepted || f.count("SaveKernel") != 0 || out.Problem.PublicDetails()[domain.CauseDetail] != "shared_list_failed" {
+		t.Fatal("changed shared dataset reached submission or lost its cause", out)
+	}
+}
+
+func TestNativeSharedInputDeniedOnceAtRecheckIsReadAgain(t *testing.T) {
+	p, plan, saved, _, f := sharedRuntime(t)
+	prepared, err := p.Prepare(context.Background(), plan, "prep")
+	if err != nil || !prepared.Ready {
+		t.Fatal(err)
+	}
+	*saved = prepared
+	f.sharedDenials = 1
+	if out := p.Start(context.Background(), prepared, nil, nil); out.Status != provider.SubmissionAccepted || f.count("SaveKernel") != 1 {
+		t.Fatal("a transient shared read denial ended the attempt or repeated SaveKernel", out)
 	}
 }
 

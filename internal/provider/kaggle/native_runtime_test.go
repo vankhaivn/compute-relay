@@ -318,6 +318,17 @@ func TestNativeStagingReadyByMetadataWithoutReadBack(t *testing.T) {
 	}
 }
 
+func TestNativeStagingConfirmsPrivacyByReadingAgain(t *testing.T) {
+	for reads, private := range map[int]bool{2: true, 10: false} {
+		p, plan, _, _, f := nativeRuntime(t, false)
+		f.publicReads = reads
+		prepared, err := p.Prepare(context.Background(), plan, "prep")
+		if err != nil || prepared.Private != private || f.count("CreateDataset") != 1 {
+			t.Fatal("privacy was reported from a single read", reads, prepared, err)
+		}
+	}
+}
+
 func TestNativeStagingRejectsChangedCompleteCatalogAndIdentity(t *testing.T) {
 	for _, fault := range []string{"extra-staging-file", "resized-staging-file", "changed-marker", "dataset-replaced", "public-dataset", "pending-dataset"} {
 		t.Run(fault, func(t *testing.T) {

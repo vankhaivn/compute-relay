@@ -92,6 +92,16 @@ func (s InputSnapshot) InputDigest() domain.SHA256Digest {
 	return Digest(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
 }
 
+// ReadError carries the closed reason an adapter read failed an identity or protocol
+// check. It only names the step; classification still follows the wrapped error.
+type ReadError struct {
+	Reason string
+	Err    error
+}
+
+func (e ReadError) Error() string { return e.Err.Error() }
+func (e ReadError) Unwrap() error { return e.Err }
+
 // PreparationObservation is one read of staging. Unknown means the provider did not
 // answer; NotFound is its answer that the resource is absent. Cause optionally names,
 // as a closed reason, why an unresolved read did not find the resource.

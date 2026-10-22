@@ -212,18 +212,24 @@ func TestExecutorRechecksUnresolvedStagingBeforeOneSubmission(t *testing.T) {
 		r.Reason = "staging_lookup_failed_http_429"
 		return r
 	}
+	// Every read that does not confirm the prepared staging is read again until the window
+	// ends; persistent replies end it with their cause.
 	for name, tc := range map[string]struct {
 		replies    []string
 		want       provider.SubmissionStatus
 		reads      int
 		reason     string
 		cause      string
-		unanswered bool
+		persistent bool
 	}{
 		"rate-limited-then-ready": {replies: []string{"limited", "not_found", "ready"}, want: provider.SubmissionAccepted, reads: 3},
-		"stays-unanswered":        {replies: []string{"limited"}, want: provider.SubmissionRejected, reason: reasonStagingUnconfirmed, cause: "staging_lookup_failed_http_429", unanswered: true},
-		"identity-changed":        {replies: []string{"replaced"}, want: provider.SubmissionRejected, reads: 1, reason: reasonStagingUnconfirmed},
-		"invalid-identity":        {replies: []string{"invalid"}, want: provider.SubmissionRejected, reads: 1, reason: reasonStagingRecheck},
+		"mismatch-then-ready":     {replies: []string{"mismatch", "ready"}, want: provider.SubmissionAccepted, reads: 2},
+		"unready-then-ready":      {replies: []string{"pending", "public", "ready"}, want: provider.SubmissionAccepted, reads: 3},
+		"stays-unanswered":        {replies: []string{"limited"}, want: provider.SubmissionRejected, reason: reasonStagingUnconfirmed, cause: "staging_lookup_failed_http_429", persistent: true},
+		"identity-changed":        {replies: []string{"replaced"}, want: provider.SubmissionRejected, reason: reasonStagingUnconfirmed, cause: "staging_identity_changed", persistent: true},
+		"stays-public":            {replies: []string{"public"}, want: provider.SubmissionRejected, reason: reasonStagingUnconfirmed, cause: "staging_not_private", persistent: true},
+		"stays-mismatched":        {replies: []string{"mismatch"}, want: provider.SubmissionRejected, reason: reasonStagingRecheck, cause: "shared_files_mismatch", persistent: true},
+		"invalid-without-reason":  {replies: []string{"invalid"}, want: provider.SubmissionRejected, reason: reasonStagingRecheck, cause: "staging_read_failed", persistent: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newExecutionFixture(t)
@@ -241,6 +247,14 @@ func TestExecutorRechecksUnresolvedStagingBeforeOneSubmission(t *testing.T) {
 					r := stageResponse(p, "ready")
 					r.DatasetID = "999"
 					return r, nil
+				case "mismatch":
+					r := stageResponse(p, "invalid")
+					r.Reason = "shared_files_mismatch"
+					return r, nil
+				case "public":
+					r := stageResponse(p, "pending")
+					r.Private = false
+					return r, nil
 				}
 				return stageResponse(p, reply), nil
 			}
@@ -256,7 +270,7 @@ func TestExecutorRechecksUnresolvedStagingBeforeOneSubmission(t *testing.T) {
 			if out.Validate(e.plan.Job.Identity) != nil || out.Status != tc.want {
 				t.Fatal("unexpected recheck outcome", out.Status, out.Problem)
 			}
-			if tc.unanswered && reads < 2 || !tc.unanswered && reads != tc.reads {
+			if tc.persistent && reads < 2 || !tc.persistent && reads != tc.reads {
 				t.Fatal("recheck read count", reads)
 			}
 			if tc.want == provider.SubmissionAccepted {
@@ -270,6 +284,52 @@ func TestExecutorRechecksUnresolvedStagingBeforeOneSubmission(t *testing.T) {
 				t.Fatal("unsubmitted request lost its reason or cause", submits, details)
 			}
 		})
+	}
+}
+
+func TestExecutorReadsAgainAfterPreSaveReadRefusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		replies []executionResponse
+		want    provider.SubmissionStatus
+		calls   int
+		reason  string
+		cause   string
+	}{
+		"auth-then-found":   {replies: []executionResponse{{Status: "rejected", Reason: "auth_read_failed", Cause: "lookup_rate_limited"}, {Status: "found"}}, want: provider.SubmissionAccepted, calls: 2},
+		"quota-then-kernel": {replies: []executionResponse{{Status: "rejected", Reason: "quota_read_failed"}, {Status: "rejected", Reason: "kernel_read_failed", Cause: "lookup_access_denied"}, {Status: "found"}}, want: provider.SubmissionAccepted, calls: 3},
+		"stays-refused":     {replies: []executionResponse{{Status: "rejected", Reason: "auth_read_failed", Cause: "lookup_rate_limited"}}, want: provider.SubmissionRejected, reason: "auth_read_failed", cause: "lookup_rate_limited"},
+		"token-inactive":    {replies: []executionResponse{{Status: "rejected", Reason: "token_inactive"}, {Status: "found"}}, want: provider.SubmissionRejected, calls: 1, reason: "token_inactive"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newExecutionFixture(t)
+			calls := 0
+			e.run = func(_ context.Context, _ Config, mode string, _ []byte, r executionRequest) (executionResponse, error) {
+				if mode != "submit" {
+					t.Fatal("unexpected execution mode", mode)
+				}
+				reply := tc.replies[min(calls, len(tc.replies)-1)]
+				calls++
+				if reply.Status == "found" {
+					return executionFound(r, "QUEUED"), nil
+				}
+				reply.Protocol = 1
+				return reply, nil
+			}
+			out := e.Start(context.Background(), e.prepared, nil, nil)
+			if out.Validate(e.plan.Job.Identity) != nil || out.Status != tc.want || tc.calls > 0 && calls != tc.calls || tc.calls == 0 && calls < 2 {
+				t.Fatal("pre-save read refusal was not read again within the window", out.Status, calls)
+			}
+			if tc.want == provider.SubmissionRejected {
+				details := out.Problem.PublicDetails()
+				if out.Problem.ComputeMayHaveStarted || details[domain.ReasonDetail] != tc.reason || details[domain.CauseDetail] != tc.cause {
+					t.Fatal("refusal lost its reason or cause", details)
+				}
+			}
+		})
+	}
+	invalid := executionResponse{Protocol: 1, Status: "rejected", Reason: "auth_read_failed", Cause: "403 Forbidden"}
+	if invalid.valid() {
+		t.Fatal("raw provider text escaped as a refusal cause")
 	}
 }
 

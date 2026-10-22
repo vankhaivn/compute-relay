@@ -35,28 +35,30 @@ const missingName403 = `{"error":{"code":403,"status":"PERMISSION_DENIED","messa
 // This fixture speaks only the actual native HTTP protocol. It never bypasses
 // request encoding, signed-transfer handling, response validation or hashing.
 type nativeFixture struct {
-	t           *testing.T
-	owner       string
-	calls       []string
-	dataset     bool
-	datasetID   string
-	stage       stagingRequest
-	staged      map[string][]byte
-	uploads     map[string]string
-	uploaded    map[string][]byte
-	kernel      *executionRequest
-	kernelID    string
-	state       string
-	outputs     map[string][]byte
-	logs        string
-	fault       string
-	quota       string
-	getDataset  int
-	getKernel   int
-	transferred int
-	putFailures int
-	hiddenReads int // GetDataset answers of a created attempt dataset that deny its name.
-	shared      map[string]*fixtureDataset
+	t             *testing.T
+	owner         string
+	calls         []string
+	dataset       bool
+	datasetID     string
+	stage         stagingRequest
+	staged        map[string][]byte
+	uploads       map[string]string
+	uploaded      map[string][]byte
+	kernel        *executionRequest
+	kernelID      string
+	state         string
+	outputs       map[string][]byte
+	logs          string
+	fault         string
+	quota         string
+	getDataset    int
+	getKernel     int
+	transferred   int
+	putFailures   int
+	hiddenReads   int // GetDataset answers of a created attempt dataset that deny its name.
+	publicReads   int // GetDataset answers of a created attempt dataset that report it public.
+	sharedDenials int // GetDataset answers of an existing shared dataset that are denied.
+	shared        map[string]*fixtureDataset
 }
 
 // fixtureDataset is one shared input dataset; the attempt dataset keeps the fields above.
@@ -136,7 +138,11 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 		if f.fault == "changed-marker" {
 			marker = provider.Digest([]byte("another marker"))
 		}
-		return f.json(map[string]any{"id": id, "ref": f.owner + "/" + f.stage.Slug, "currentVersionNumber": 1, "isPrivate": f.fault != "public-dataset",
+		public := f.fault == "public-dataset" || f.publicReads > 0
+		if f.publicReads > 0 {
+			f.publicReads--
+		}
+		return f.json(map[string]any{"id": id, "ref": f.owner + "/" + f.stage.Slug, "currentVersionNumber": 1, "isPrivate": !public,
 			"description": stagingDescription(marker), "licenseName": stagingLicense(f.stage.License), "lastUpdated": "fixture"}), nil
 	case "GetDatasetStatus":
 		if f.fault == "status-failed" {
@@ -310,6 +316,10 @@ func (f *nativeFixture) sharedAPI(op string, payload map[string]json.RawMessage,
 	case "GetDataset":
 		if entry == nil {
 			return jsonResponse(404, `{}`), nil
+		}
+		if f.sharedDenials > 0 {
+			f.sharedDenials--
+			return jsonResponse(403, `{"code":403,"status":"PERMISSION_DENIED","message":"denied"}`), nil
 		}
 		return f.json(map[string]any{"id": entry.id, "ref": f.owner + "/" + slug, "currentVersionNumber": 1, "isPrivate": true,
 			"description": stagingDescription(entry.stage.MarkerSHA256), "licenseName": stagingLicense(entry.stage.License), "lastUpdated": "fixture"}), nil

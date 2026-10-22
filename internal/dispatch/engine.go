@@ -505,6 +505,10 @@ func control[T any](ctx context.Context, limit time.Duration, fn func(context.Co
 
 // problemReason returns the closed public reason an adapter problem carries, if any.
 func problemReason(err error) string {
+	var read provider.ReadError
+	if errors.As(err, &read) {
+		return read.Reason
+	}
 	var value domain.Problem
 	if errors.As(err, &value) {
 		return value.PublicDetails()[domain.ReasonDetail]

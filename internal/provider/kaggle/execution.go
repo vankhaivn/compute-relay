@@ -51,6 +51,8 @@ type executionResponse struct {
 	HTTPStatus       int                 `json:"http_status,omitempty"`
 	ErrorType        string              `json:"error_type,omitempty"`
 	FailureOperation string              `json:"failure_operation,omitempty"`
+	// Cause names, as a closed lookup reason, why a read refusal before SaveKernel failed.
+	Cause string `json:"cause,omitempty"`
 }
 
 type kernelReference struct {
@@ -107,8 +109,9 @@ func rejectedStaging(reason, cause string) provider.SubmissionOutcome {
 }
 
 // Kaggle can leave a ready dataset unanswered for minutes (rate limits, outages) or
-// briefly answer a missing name. The pre-submit recheck reads again with backoff;
-// tests shorten the window.
+// briefly answer a missing name, a partial file list or other metadata. Just before
+// submission every read that does not confirm the prepared staging, and every read
+// refusal before SaveKernel, is read again with backoff; tests shorten the window.
 var (
 	stagingRecheckGrace = 10 * time.Minute
 	stagingRecheckPoll  = 15 * time.Second
@@ -116,40 +119,75 @@ var (
 
 const stagingRecheckMaxPoll = 2 * time.Minute
 
-// recheck repeats only the metadata read while staging stays unresolved, until the
-// window or the caller's budget ends. Identity, protocol and local faults are final.
-func (e *Executor) recheck(ctx context.Context) (provider.PreparationObservation, error) {
-	deadline := e.now().Add(stagingRecheckGrace)
-	delay := stagingRecheckPoll
+// readRefusals are submit refusals from failed Kaggle reads before SaveKernel was sent.
+var readRefusals = map[string]bool{"auth_read_failed": true, "kernel_read_failed": true, "quota_read_failed": true}
+
+// recheckWindow paces reads until a deadline shared by the staging recheck and the
+// pre-save read refusals of one Start.
+type recheckWindow struct {
+	e        *Executor
+	deadline time.Time
+	delay    time.Duration
+}
+
+// wait reports whether another read fits in the window, after waiting for it.
+func (w *recheckWindow) wait(ctx context.Context) bool {
+	if ctx.Err() != nil || !w.e.now().Add(w.delay).Before(w.deadline) {
+		return false
+	}
+	timer := time.NewTimer(w.delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+	}
+	w.delay = min(2*w.delay, stagingRecheckMaxPoll)
+	return true
+}
+
+// recheck repeats only the metadata read until it confirms the prepared staging or the
+// window ends. Local state and configuration faults are final.
+func (e *Executor) recheck(ctx context.Context, w *recheckWindow) (provider.PreparationObservation, error) {
 	for {
 		stage, err := e.stager.RecheckPrepare(ctx, e.plan, e.prepared.PreparationID)
-		if !unresolvedRecheck(stage, err) || ctx.Err() != nil || !e.now().Add(delay).Before(deadline) {
+		if err == nil && e.confirmed(stage) || provider.IsLocalStateError(err) || errors.Is(err, ErrConfig) || !w.wait(ctx) {
 			return stage, err
 		}
-		wait := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			wait.Stop()
-			return stage, err
-		case <-wait.C:
-		}
-		delay = min(2*delay, stagingRecheckMaxPoll)
 	}
 }
 
-func unresolvedRecheck(stage provider.PreparationObservation, err error) bool {
-	if err != nil {
-		return !provider.IsLocalStateError(err) && (errors.Is(err, ErrStaging) || errors.Is(err, context.DeadlineExceeded))
+func (e *Executor) confirmed(stage provider.PreparationObservation) bool {
+	return stage.Status == provider.ReconciliationFound && stage.Prepared != nil && *stage.Prepared == e.prepared
+}
+
+// stagingCause names why a final recheck did not confirm the prepared staging.
+func (e *Executor) stagingCause(stage provider.PreparationObservation) string {
+	if stage.Status != provider.ReconciliationFound || stage.Prepared == nil {
+		return stage.Cause
 	}
-	return stage.Status == provider.ReconciliationUnknown || stage.Status == provider.ReconciliationNotFound
+	switch {
+	case stage.Prepared.Resource != e.prepared.Resource:
+		return "staging_identity_changed"
+	case !stage.Prepared.Private:
+		return "staging_not_private"
+	case !stage.Prepared.Ready:
+		return "staging_not_ready"
+	}
+	return "staging_identity_changed"
 }
 
 func stagingErrorCause(err error) string {
-	if errors.Is(err, context.DeadlineExceeded) {
+	var read provider.ReadError
+	switch {
+	case errors.As(err, &read):
+		return read.Reason
+	case errors.Is(err, context.DeadlineExceeded):
 		return "staging_read_timeout"
 	}
-	return ""
+	return "staging_read_failed"
 }
+
 func unknownExecution() provider.SubmissionOutcome {
 	p := provider.Problem(domain.CodeProviderSubmissionUnknown, domain.FailureStageSubmission, "kernel acceptance unresolved; reconcile the original identity without resubmitting")
 	p.ComputeMayHaveStarted = true
@@ -185,17 +223,22 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 	// rehashes every input before use. Recheck it here by metadata only, under
 	// the preparation budget: equality includes the first-pinned numeric dataset ID,
 	// version, marker, privacy, readiness and the exact file list.
-	stage, err := e.recheck(parent)
+	window := &recheckWindow{e: e, deadline: e.now().Add(stagingRecheckGrace), delay: stagingRecheckPoll}
+	stage, err := e.recheck(parent, window)
 	if err != nil {
 		if provider.IsLocalStateError(err) {
 			return unknownExecution()
 		}
 		return rejectedStaging(reasonStagingRecheck, stagingErrorCause(err))
 	}
-	if stage.Status != provider.ReconciliationFound || stage.Prepared == nil || *stage.Prepared != e.prepared {
-		return rejectedStaging(reasonStagingUnconfirmed, stage.Cause)
+	if !e.confirmed(stage) {
+		return rejectedStaging(reasonStagingUnconfirmed, e.stagingCause(stage))
 	}
 	r, stopped, err := e.call(parent, "submit", "")
+	// A read refusal before SaveKernel sent nothing, so reading again is not a resubmission.
+	for stopped == "" && err == nil && r.Status == "rejected" && readRefusals[r.Reason] && window.wait(parent) {
+		r, stopped, err = e.call(parent, "submit", "")
+	}
 	if stopped != "" {
 		return rejectedExecution(stopped)
 	}
@@ -203,7 +246,7 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 		return unknownExecutionFailure(submissionFailure(err))
 	}
 	if r.Status == "rejected" {
-		return rejectedExecution(r.Reason)
+		return rejectedStaging(r.Reason, r.Cause)
 	}
 	if r.Status != "found" {
 		return unknownExecutionFailure(r)
@@ -332,7 +375,8 @@ func (r executionResponse) valid() bool {
 	}
 	switch r.Status {
 	case "rejected":
-		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) && submissionRefusals[r.Reason]
+		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason, Cause: r.Cause}) && submissionRefusals[r.Reason] &&
+			(r.Cause == "" || lookupReasons[r.Cause])
 	case "unknown", "not_found":
 		return r == (executionResponse{Protocol: 1, Status: r.Status, Reason: r.Reason}) &&
 			(r.Reason == "" || lookupReasons[r.Reason] || submissionRefusals[r.Reason])

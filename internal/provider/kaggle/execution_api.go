@@ -58,12 +58,20 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 		}
 		return executionResponse{Protocol: 1, Status: "rejected", Reason: reason}
 	}
+	// rejectRead refuses after a failed read; before SaveKernel it also keeps the read's cause.
+	rejectRead := func(err error, fallback string) executionResponse {
+		r := reject(executionReadReason(err, fallback, mode))
+		if mode == "submit" {
+			r.Cause = executionReadReason(err, "", "observe")
+		}
+		return r
+	}
 	if mode != "submit" && mode != "observe" && mode != "reconcile" {
 		return empty("unknown")
 	}
 	account, err := client.IntrospectToken(ctx)
 	if err != nil {
-		return reject(executionReadReason(err, "auth_read_failed", mode))
+		return rejectRead(err, "auth_read_failed")
 	}
 	if !account.Active {
 		return reject("token_inactive")
@@ -78,7 +86,7 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 		if mode == "reconcile" {
 			present, listErr := client.OwnedKernelPresent(ctx, resource)
 			if listErr != nil {
-				return reject(executionReadReason(listErr, "kernel_read_failed", mode))
+				return rejectRead(listErr, "kernel_read_failed")
 			}
 			if !present {
 				return empty("absent")
@@ -87,13 +95,13 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 			// keep observing it, never turn a failed identity read into absence.
 			kernel, err = client.GetKernel(ctx, resource)
 			if err != nil {
-				return reject(executionReadReason(err, "kernel_read_failed", mode))
+				return rejectRead(err, "kernel_read_failed")
 			}
 		}
 	}
 	if err != nil {
 		if !kaggleapi.NameAbsent(err) {
-			return reject(executionReadReason(err, "kernel_read_failed", mode))
+			return rejectRead(err, "kernel_read_failed")
 		}
 		if mode != "submit" {
 			return executionResponse{Protocol: 1, Status: "not_found", Reason: executionReadReason(err, "kernel_read_failed", mode)}
@@ -140,7 +148,7 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 		if mode == "submit" {
 			return submissionFailure(err)
 		}
-		return reject(executionReadReason(err, "kernel_read_failed", mode))
+		return rejectRead(err, "kernel_read_failed")
 	}
 	if !matchingKernel(kernel, request, id) {
 		return empty("invalid")

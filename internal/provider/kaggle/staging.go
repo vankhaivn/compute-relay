@@ -21,6 +21,9 @@ import (
 var (
 	stagingVisibilityGrace = 2 * time.Minute
 	stagingVisibilityPoll  = 3 * time.Second
+	// A dataset read as non-private is read again this many times before it is reported.
+	stagingPrivacyRereads = 3
+	stagingPrivacyPoll    = 5 * time.Second
 )
 
 var errStagingVisibilityPending = errors.New("created staging dataset is not yet query-visible")
@@ -225,6 +228,9 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	seen, err := result.observation(p, frozen, operation)
 	if err == nil && seen.Status != provider.ReconciliationFound {
 		seen.Cause = result.Reason
+	}
+	if err != nil && result.Reason != "" {
+		err = provider.ReadError{Reason: result.Reason, Err: err}
 	}
 	return seen, result.Reason, err
 }

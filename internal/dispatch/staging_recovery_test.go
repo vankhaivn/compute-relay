@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -153,5 +154,12 @@ func TestUnconfirmedPreparationKeepsFirstAndLatestCause(t *testing.T) {
 	ended, _ = apply(t, j, state, Action{Kind: EndUnconfirmedPreparation, Cause: "staging_absent_http_403"})
 	if d := ended.Problem.PublicDetails(); d[domain.ReasonDetail] != "staging_unconfirmed" || d[domain.CauseDetail] != "staging_absent_http_403" {
 		t.Fatal("terminal staging ignored the latest read cause", d)
+	}
+}
+
+func TestProblemReasonNamesTheFailedAdapterRead(t *testing.T) {
+	err := fmt.Errorf("prepare: %w", provider.ReadError{Reason: "shared_files_mismatch", Err: errors.New("identity mismatch")})
+	if problemReason(err) != "shared_files_mismatch" || problemReason(errors.New("plain")) != "" {
+		t.Fatal("adapter read reason was not carried", problemReason(err))
 	}
 }
