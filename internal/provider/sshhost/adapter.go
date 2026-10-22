@@ -1290,26 +1290,32 @@ func (a *Adapter) Fetch(ctx context.Context, remote provider.RemoteReference, ar
 		if !exited(info) {
 			return failure(ErrNotDone, "fetch_container_not_finished")
 		}
-		files := 0
-		found, err := readTar(ctx, d, info.ID, workRoot+"/"+artifact.Path, artifact.Bytes, func(name string, r io.Reader) error {
-			if files++; files > 1 || name != path.Base(artifact.Path) {
-				return failure(ErrArtifact, "fetch_artifact_invalid")
-			}
-			digest := sha256.New()
-			n, err := io.Copy(io.MultiWriter(w, digest), r)
-			result = provider.TransferResult{Bytes: n, SHA256: domain.SHA256Digest(hex.EncodeToString(digest.Sum(nil)))}
-			return err
-		})
-		if err != nil {
-			return err
-		}
-		if !found || files != 1 || result.Bytes != artifact.Bytes || result.SHA256 != artifact.SHA256 {
-			return failure(ErrArtifact, "fetch_artifact_invalid")
-		}
-		return nil
+		result, err = fetchArtifact(ctx, d, info.ID, artifact, w)
+		return err
 	})
 	if err != nil {
 		return provider.TransferResult{}, err
+	}
+	return result, nil
+}
+
+func fetchArtifact(ctx context.Context, d docker, container string, artifact provider.Artifact, w io.Writer) (provider.TransferResult, error) {
+	var result provider.TransferResult
+	files := 0
+	found, err := readTar(ctx, d, container, workRoot+"/"+artifact.Path, artifact.Bytes, func(name string, r io.Reader) error {
+		if files++; files > 1 || name != path.Base(artifact.Path) {
+			return failure(ErrArtifact, "fetch_artifact_invalid")
+		}
+		digest := sha256.New()
+		n, err := io.Copy(io.MultiWriter(w, digest), r)
+		result = provider.TransferResult{Bytes: n, SHA256: domain.SHA256Digest(hex.EncodeToString(digest.Sum(nil)))}
+		return err
+	})
+	if err != nil {
+		return provider.TransferResult{}, err
+	}
+	if !found || files != 1 || result.Bytes != artifact.Bytes || result.SHA256 != artifact.SHA256 {
+		return provider.TransferResult{}, failure(ErrArtifact, "fetch_artifact_invalid")
 	}
 	return result, nil
 }

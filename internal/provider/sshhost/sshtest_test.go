@@ -23,11 +23,20 @@ func fakeHostOverSSH(t *testing.T, host *fakeHost, password string, key ssh.Publ
 	server := newTestServer(t)
 	server.Password, server.ClientKey = password, key
 	server.Handle = func(command string, stdin io.Reader, stdout, stderr io.Writer) int {
+		args := commandArgs(t, command)
+		if len(args) >= 2 && args[len(args)-2] == "system" && args[len(args)-1] == "dial-stdio" {
+			result, err := host.Run(context.Background(), nil, args, stdin, stdout)
+			if err != nil {
+				return 255
+			}
+			_, _ = stderr.Write(result.Stderr)
+			return result.ExitCode
+		}
 		input, _ := io.ReadAll(stdin)
 		if record != nil {
 			record(command, input)
 		}
-		result, err := host.Run(context.Background(), nil, commandArgs(t, command), bytes.NewReader(input), stdout)
+		result, err := host.Run(context.Background(), nil, args, bytes.NewReader(input), stdout)
 		if err != nil {
 			return 255
 		}

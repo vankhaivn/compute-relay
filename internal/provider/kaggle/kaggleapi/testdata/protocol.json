@@ -23,12 +23,12 @@
     },
     {
       "operation": "datasets.DatasetApiService/ListDatasetFiles",
-      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage", "datasetVersionNumber": 1, "pageSize": 20},
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage", "datasetVersionNumber": 1, "pageSize": 200},
       "response": {"datasetFiles": [{"name": "relay-stage.bin", "totalBytes": 3}], "nextPageToken": "fixture-page-two"}
     },
     {
       "operation": "datasets.DatasetApiService/ListDatasetFiles",
-      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage", "datasetVersionNumber": 1, "pageSize": 20, "pageToken": "fixture-page-two"},
+      "request": {"ownerSlug": "fixture_user", "datasetSlug": "fixture-stage", "datasetVersionNumber": 1, "pageSize": 200, "pageToken": "fixture-page-two"},
       "response": {"datasetFiles": [{"name": "code.bin"}]}
     },
     {

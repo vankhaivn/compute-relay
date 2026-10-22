@@ -308,6 +308,9 @@ func TestManagedResolverPreservesAccountsAliasesRotationAndFrozenMachine(t *test
 		if !ok || wrapped.outer != expected || wrapped.inner.AccountScope == expected.AccountScope {
 			t.Fatal("canonical account confused with public opaque scope")
 		}
+		if _, ok := p.(provider.ArtifactBatchFetcher); !ok {
+			t.Fatal("managed provider dropped bounded artifact collection")
+		}
 		shape := "NvidiaTeslaT4"
 		if expected == current {
 			shape = "NvidiaTeslaP100"

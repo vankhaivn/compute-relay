@@ -24,6 +24,8 @@
 // Artifact listing remains manifest based: download the version-1 runner result
 // manifest with DownloadKernelOutput, validate the frozen identity and declared
 // outputs, and fetch bounded control files. The SDK's unused output-list RPC
-// cannot replace the runner's digest/size catalog. Writer destinations must remain
+// cannot replace the runner's digest/size catalog. Batch collection reuses the
+// account, manifest and initial/final identity/terminal read envelope while
+// downloading only exact pinned files. Writer destinations must remain
 // unpublished until their receipts and the final identity/state reads verify.
 package kaggleapi

@@ -81,10 +81,10 @@ func TestCollectionTimeoutScalesWithPinnedBytes(t *testing.T) {
 	cfg := DefaultConfig()
 	e := &Engine{config: cfg}
 	w := Work{Snapshot: &Snapshot{Files: []File{{Object: domain.ObjectMetadata{Bytes: 2 << 30}}}}}
-	if got := e.collectionTimeout(w); got != cfg.Timeout+2048*time.Second {
+	if got := e.collectionTimeout(w); got != cfg.Timeout+2049*time.Second {
 		t.Fatal("size budget missing", got)
 	}
-	if got := e.collectionTimeout(Work{}); got != cfg.Timeout+4096*time.Second {
+	if got := e.collectionTimeout(Work{}); got != 2*time.Hour {
 		t.Fatal("discovery ceiling missing", got)
 	}
 }

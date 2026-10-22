@@ -9,6 +9,13 @@ After the attempt finishes, Relay lists the remote outputs, downloads the declar
 them against the runner's manifest (job, attempt, nonce, input digests, sizes, SHA-256) and
 publishes the whole set at once. Partial or unverified bytes are never visible.
 
+SSH and Kaggle can transfer the exact selected files within one shared verification
+envelope. Each file still receives its own size and hash check, followed by the
+adapter's final identity and terminal-state check before publication. Retained verified
+temporary bytes never replace that final check, including when no bytes need downloading.
+Adapters without batch transfer use the individual-file path; a failed batch never falls
+back to another transfer path automatically. Undeclared files are not downloaded.
+
 - `result_collection: "automatic"` (default) collects on its own.
 - `result_collection: "manual"` waits with `collection.state=awaiting_request` until you send
   `POST /collect` with `{"attempt_id": …}`, an operate token and an `Idempotency-Key`. This
@@ -26,9 +33,11 @@ attempt, never a compute rerun.
 
 A temporary provider verification fault is a retryable collection failure; only a confirmed
 identity mismatch invalidates the identity. Collection receives its configured base timeout
-(ten minutes by default) plus one second per MiB of all selected files, including manifests and
-logs, rounded up, capped at two
-hours. Before output discovery, the admitted output bound supplies the size. An exhausted
+(ten minutes by default) plus one second per selected file and one second per MiB of all
+selected files, including manifests and logs, rounded up, capped at two hours. Before
+output discovery, the admitted byte bound supplies the size. File declarations supply
+the count plus four control files; a declared directory uses the configured file ceiling
+because the job contract has no narrower directory file-count bound. An exhausted
 collection budget records a retryable failure instead of silently restarting from zero when its
 lease expires. Runtime shutdown leaves the accepted ticket for recovery.
 

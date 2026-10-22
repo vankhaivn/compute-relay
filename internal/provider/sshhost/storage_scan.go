@@ -116,6 +116,9 @@ func validStorageLabels(kind hoststorage.Kind, labels map[string]string, scope h
 	switch kind {
 	case hoststorage.Container:
 		if labels[labelPrefix+"kind"] == "verification" {
+			if labels[labelPrefix+"verification-schema"] == cacheBatchSchema {
+				return labels[labelPrefix+"machine"] == string(scope.MachineID) && labels[labelPrefix+"engine"] == string(scope.EngineID) && domain.AttemptID(labels[labelPrefix+"attempt"]).Valid() && domain.OperationID(labels[labelPrefix+"operation"]).Valid()
+			}
 			if labels[labelPrefix+"machine"] != "" || labels[labelPrefix+"engine"] != "" {
 				// Cache verifiers inherit their generation's hashed scope and
 				// immutable content labels rather than an attempt identity.

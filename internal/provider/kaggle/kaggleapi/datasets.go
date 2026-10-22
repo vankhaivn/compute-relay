@@ -12,6 +12,11 @@ import (
 const MaxStagingBytes int64 = (4 << 30) + (100 << 20) + (2 << 20)
 const MaxStagingFiles = 258
 
+const datasetFilePageSize = 200
+
+// Bound metadata work even when a provider returns undersized pages.
+const maxDatasetFilePages = 16
+
 // Resource names are not numeric identity. Get responses must still be compared
 // to the immutable ID/version/privacy evidence saved for the original attempt.
 type Resource struct {
@@ -111,14 +116,14 @@ func (c *Client) ListDatasetFiles(parent context.Context, resource Resource, max
 	seen, cursors := make(map[string]bool), make(map[string]bool)
 	cursor := ""
 	var total int64
-	for page := 0; page <= maxFiles; page++ {
+	for page := 0; page < maxDatasetFilePages; page++ {
 		query := struct {
 			Owner   string `json:"ownerSlug"`
 			Slug    string `json:"datasetSlug"`
 			Version int    `json:"datasetVersionNumber"`
 			Size    int    `json:"pageSize"`
 			Cursor  string `json:"pageToken,omitempty"`
-		}{resource.Owner, resource.Slug, 1, 20, cursor}
+		}{resource.Owner, resource.Slug, 1, datasetFilePageSize, cursor}
 		object, err := c.rpc(ctx, op, query, maxMetadataBytes)
 		if err != nil {
 			return nil, err
@@ -128,10 +133,10 @@ func (c *Client) ListDatasetFiles(parent context.Context, resource Resource, max
 			Error  json.RawMessage `json:"errorMessage"`
 			Cursor string          `json:"nextPageToken"`
 		}
-		if decodeObject(object, &response) != nil || len(response.Files) > 20 || !emptyError(response.Error) {
+		if decodeObject(object, &response) != nil || len(response.Files) > datasetFilePageSize || !emptyError(response.Error) {
 			return nil, failure(op, ErrResponse, 0, true)
 		}
-		if bytes.Equal(object["datasetFiles"], []byte("null")) {
+		if raw, exists := object["datasetFiles"]; !exists || bytes.Equal(raw, []byte("null")) {
 			return nil, failure(op, ErrResponse, 0, true)
 		}
 		for _, file := range response.Files {
@@ -144,7 +149,7 @@ func (c *Client) ListDatasetFiles(parent context.Context, resource Resource, max
 		if response.Cursor == "" {
 			return files, nil
 		}
-		if len(response.Cursor) > 2048 || cursors[response.Cursor] {
+		if len(response.Files) == 0 || len(files) >= maxFiles || len(response.Cursor) > 2048 || cursors[response.Cursor] {
 			return nil, failure(op, ErrResponse, 0, true)
 		}
 		cursors[response.Cursor], cursor = true, response.Cursor

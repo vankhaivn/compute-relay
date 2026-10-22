@@ -41,6 +41,13 @@ records. Give both fields or neither:
 A corrupt or missing entry is never used: Relay retires it and writes a new one. A cache entry used
 by a queued, running, uncertain or still-mounted attempt is never evicted.
 
+Warm cache checks read one filtered volume inventory for the frozen installation, machine and
+Docker engine, then verify up to 64 exact read-only volumes per helper. A pass over the maximum
+257 distinct contents (bundle plus 256 inputs) uses at most five helpers. Preparation keeps both
+its selection and post-mount readiness passes (at most ten helpers); reconciliation and start
+each use one pass. Every pass keeps the caller's original deadline. Incomplete metadata or
+helper replies remain unknown and never authorize replacing a generation.
+
 ## Application images
 
 A job can bring its own Docker or OCI image archive (uploaded as an object, ≤2 GiB):

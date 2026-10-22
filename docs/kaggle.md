@@ -19,7 +19,7 @@ changing the flag, run a connection `check` to get a selection for it.
 |---|---|
 | Wall time | At most 86400 s (Kaggle's session limit). |
 | Inputs | Up to 256 inputs, staged in one private attempt dataset with a marker file (≤2 MiB). Inputs of 256 MiB or more go to [shared datasets](#shared-input-datasets). |
-| Staging checks | Uploads are SHA-checked against the frozen digest; readiness and recovery compare metadata only, and the runner rehashes every input before use. |
+| Staging checks | Uploads are SHA-checked against the frozen digest; readiness and recovery compare metadata only, and the runner rehashes every input before use. File lists request 200 entries per page, with at most 16 pages; missing/null arrays, non-progressing pages and incomplete lists never confirm readiness. |
 | Staging visibility | After an acknowledged or uncertain create, Relay polls the exact owner/slug, version 1 and marker for up to 2 minutes. Dispatch retains a separate durable ten-minute observation grace from its first preparation fault. |
 | Pre-submit recheck | Just before the one submission, Relay rereads ready staging. Any read that does not confirm it (unanswered, missing name, changed or partial metadata, unready, non-private) is read again from 15 s backoff (doubling, at most 2 min) for up to 10 minutes. Auth, kernel and quota read refusals before `SaveKernel` share that window. It ends `staging_not_confirmed`, `staging_recheck_failed` or the refusal reason, with a `cause`, never submitting. |
 | Privacy | A dataset read as non-private is read again 3 times, 5 s apart, before it is reported for attention. |
@@ -30,7 +30,8 @@ changing the flag, run a connection `check` to get a selection for it.
 | Internet | Disabled unless the policy allows it **and** the job requests it. |
 | GPU proof | Success requires the runner's hardware evidence, not just a requested GPU or a quota deduction. |
 | Unsupported | `prepare_then_start`, absolute deadlines, workload secrets, `application_image`, SSH cache. |
-| Downloads | Only from `storage.googleapis.com` and `www.kaggleusercontent.com` over HTTPS. |
+| Downloads | Only from `storage.googleapis.com` and `www.kaggleusercontent.com` over HTTPS. Batch collection shares one account/manifest read and initial/final kernel identity and terminal checks across exact pinned file downloads. It transfers selected files only, including on recovery; an empty retry still verifies remote identity and terminal state. |
+| Collection budget | The batch has a shared finite budget: the configured control allowance plus one second per selected file and per MiB, capped at two hours and shortened by the caller. Each transfer retains its own timeout; complete temporary bytes are published only after the batch returns verified success. |
 | Cancellation | May stay manual-required when Kaggle gives no usable session target. |
 | Failure reasons | A stopped preparation or collection carries a closed `reason`, e.g. `shared_create_failed_http_500` or `artifact_manifest_download_failed`. Unresolved staging reads and pre-submit stops add `cause`, e.g. `staging_lookup_failed_http_429`, `shared_lookup_failed_http_403`, `staging_files_mismatch` or `lookup_rate_limited`; a terminal `staging_unconfirmed` also keeps the first failed step as `first_cause`. |
 | Cleanup | Explicit; never touches shared datasets. Deletion is by owner/name, so a resource replaced between check and delete could be deleted instead. A 403 alone (for example after a lost acknowledgement) stays `unknown`. |
@@ -53,7 +54,9 @@ If an exact lookup fails, it scans every page of the authenticated owner's unfil
 inventory. Finding the name resumes identity verification. Only complete inventories can establish
 absence; two complete absent observations at least two minutes apart settle the original attempt
 as rejected with `submission_absent_owned_list`. Partial, malformed, rate-limited or unavailable
-inventories retain uncertainty and never permit another submission of the original attempt.
+inventories retain uncertainty and never permit another submission of the original attempt. Missing
+or null kernel arrays are malformed, not empty inventories; only an explicit complete list can
+establish absence.
 The consumer may then admit a new attempt under its replacement policy.
 
 Unresolved lookups retain closed access, authentication, rate-limit, timeout, interruption or

@@ -162,10 +162,35 @@ def volume_scan(root_path, expected_size):
         raise InvalidArchive("invalid volume") from exc
 
 
+def volume_batch(root_path, sizes):
+    if (
+        not isinstance(sizes, list)
+        or not 1 <= len(sizes) <= 64
+        or any(type(size) is not int or not 0 <= size <= MAX_WIRE_BYTES for size in sizes)
+        or sum(sizes) > MAX_WIRE_BYTES
+    ):
+        raise InvalidArchive("invalid volume batch")
+    files = []
+    for index, size in enumerate(sizes):
+        try:
+            digest = volume_scan(os.path.join(root_path, str(index)), size)["files"][0]
+            files.append({"index": index, "status": "complete", **digest})
+        except InvalidArchive as exc:
+            if exc.__cause__ is not None:
+                raise
+            files.append({"index": index, "status": "corrupt", "bytes": 0, "sha256": ""})
+    return {"files": files}
+
+
 def main():
     signal.alarm(3600)
     try:
-        result = volume_scan("/cache", int(sys.argv[3])) if len(sys.argv) == 4 and sys.argv[2] == "volume" else scan()
+        if len(sys.argv) == 4 and sys.argv[2] == "volumes":
+            result = volume_batch("/cache", json.loads(base64.b64decode(sys.argv[3], validate=True)))
+        elif len(sys.argv) == 4 and sys.argv[2] == "volume":
+            result = volume_scan("/cache", int(sys.argv[3]))
+        else:
+            result = scan()
     except Exception:
         print("verification failed", file=sys.stderr)
         return 2

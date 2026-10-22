@@ -15,7 +15,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
-	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/runnerplan"
@@ -100,6 +99,7 @@ type ArtifactReader struct {
 	request  artifactRequest
 	slot     chan struct{}
 	run      artifactInvocation
+	runBatch artifactBatchInvocation
 }
 
 func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, error) {
@@ -127,7 +127,7 @@ func NewArtifactReader(e *Executor, policy ArtifactPolicy) (*ArtifactReader, err
 		}
 		r.Outputs = append(r.Outputs, artifactDeclaration{o.Path, kind, o.Required, o.MaxBytes})
 	}
-	return &ArtifactReader{executor: e, policy: policy, request: r, slot: make(chan struct{}, 1), run: runArtifacts}, nil
+	return &ArtifactReader{executor: e, policy: policy, request: r, slot: make(chan struct{}, 1), run: runArtifacts, runBatch: runArtifactBatch}, nil
 }
 func artifactSafePath(path string) bool {
 	if !provider.SafeArtifactPath(path) || len(path) > 512 || strings.ContainsAny(path, `%<>"|?*`) {
@@ -182,7 +182,13 @@ func (a *ArtifactReader) enter(parent context.Context) (context.Context, context
 	if a == nil {
 		return nil, nil, ErrConfig
 	}
-	ctx, cancel := context.WithTimeout(parent, a.policy.Timeout)
+	return a.enterFor(parent, a.policy.Timeout)
+}
+func (a *ArtifactReader) enterFor(parent context.Context, budget time.Duration) (context.Context, context.CancelFunc, error) {
+	if a == nil {
+		return nil, nil, ErrConfig
+	}
+	ctx, cancel := context.WithTimeout(parent, budget)
 	select {
 	case a.slot <- struct{}{}:
 		return ctx, func() { <-a.slot; cancel() }, nil
@@ -368,13 +374,8 @@ func (a *ArtifactReader) call(ctx context.Context, mode string, ref provider.Rem
 			return ErrProtocol
 		}
 		called = true
-		if len(token) == 0 || len(token) > credentials.MaxBytes {
+		if !validArtifactToken(token) {
 			return artifactFailure("artifact_credential_unavailable")
-		}
-		for _, b := range token {
-			if b < 33 || b > 126 {
-				return artifactFailure("artifact_credential_unavailable")
-			}
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()

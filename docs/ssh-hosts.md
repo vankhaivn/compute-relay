@@ -104,6 +104,12 @@ Containers with their staged inputs and outputs stay on the host until
 [cleanup](results-and-cleanup.md#cleanup) or a [retention rule](results-and-cleanup.md#automatic-remote-retention)
 removes them. Restarting Relay deletes nothing.
 
+Result collection shares one authenticated SSH connection and a fixed set of identity checks
+across the selected files. Docker still copies each exact file separately; Relay never copies
+the whole output directory, which may contain undeclared or excluded files. Every stream must
+pass its size and digest checks, followed by a fresh check of the original stopped container,
+before the batch succeeds. Even a retry with all bytes already retained rechecks that identity.
+
 ## Troubleshooting
 
 | Symptom | Check |

@@ -83,7 +83,7 @@ func dockerStep(args []string) string {
 	case "context":
 		return "docker_context_read_failed"
 	case "system":
-		return "storage_container_summary_failed"
+		return "" // The bounded API reader names its selected request.
 	}
 	if len(args) > 1 {
 		switch args[0] + "/" + args[1] {

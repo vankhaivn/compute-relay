@@ -154,6 +154,7 @@ func TestNativeSubmissionLostAcknowledgementReconcilesWithoutSave(t *testing.T) 
 		{"kernel-invalid", "lookup_response_invalid"}, {"absent", ""}, {"save-throttled", ""},
 		{"list-pagination", ""}, {"list-unavailable", "lookup_rate_limited"},
 		{"list-incomplete", "lookup_access_denied"}, {"list-loop", "lookup_response_invalid"}, {"list-wrong-owner", "lookup_response_invalid"},
+		{"list-missing-array", "lookup_response_invalid"}, {"list-null-array", "lookup_response_invalid"},
 	} {
 		t.Run(tc.fault, func(t *testing.T) {
 			p, plan, saved, _, f := nativeRuntime(t, false)

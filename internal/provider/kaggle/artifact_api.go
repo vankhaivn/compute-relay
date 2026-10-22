@@ -29,59 +29,14 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 	if mode != "catalog" && mode != "fetch" || mode == "catalog" && request.Target != nil || mode == "fetch" && (request.Target == nil || dst == nil) {
 		return nil, artifactFailure("artifact_request_invalid")
 	}
-	r := request.Execution
-	resource := kaggleapi.Resource{Owner: r.Owner, Slug: r.Slug}
-	account, err := client.IntrospectToken(ctx)
+	remote, err := openArtifactRemote(ctx, client, request)
 	if err != nil {
-		return nil, artifactFailure("artifact_account_read_failed")
+		return nil, err
 	}
-	if !account.Active {
-		return nil, artifactFailure("artifact_credential_unavailable")
-	}
-	if account.Username != r.Owner {
-		return nil, artifactFailure("artifact_account_mismatch")
-	}
-	check := func() error {
-		kernel, err := client.GetKernel(ctx, resource)
-		if err != nil {
-			return artifactFailure("artifact_remote_read_failed")
-		}
-		if !matchingKernel(kernel, r, r.KernelID) {
-			return artifactFailure("artifact_remote_identity_mismatch")
-		}
-		return nil
-	}
-	terminal := func() error {
-		state, err := client.KernelSessionStatus(ctx, resource)
-		if err != nil {
-			return artifactFailure("artifact_status_read_failed")
-		}
-		if state != kaggleapi.KernelComplete && state != kaggleapi.KernelError {
-			return artifactFailure("artifact_not_terminal")
-		}
-		return nil
-	}
+	selected := remote.selected
+	manifestFile, manifest := remote.manifestFile, remote.manifest
 	download := func(path string, limit int64, sink io.Writer) (artifactEntry, error) {
-		receipt, err := client.DownloadKernelOutput(ctx, resource, "relay-result/"+path, limit, sink)
-		if err != nil {
-			return artifactEntry{}, err
-		}
-		return artifactEntry{path, receipt.Bytes, domainDigest(receipt.SHA256[:])}, nil
-	}
-	if err := check(); err != nil {
-		return nil, err
-	}
-	if err := terminal(); err != nil {
-		return nil, err
-	}
-	var manifest bytes.Buffer
-	manifestFile, err := download(artifactManifest, runnerplan.MaxManifestBytes, &manifest)
-	if err != nil {
-		return nil, artifactDownloadFailure("artifact_manifest_download_failed", err)
-	}
-	selected, err := selectArtifacts(manifest.Bytes(), request)
-	if err != nil {
-		return nil, err
+		return remote.download(ctx, path, limit, sink)
 	}
 	if mode == "catalog" {
 		var total int64
@@ -115,7 +70,7 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 			if manifestFile != target {
 				return nil, artifactFailure("artifact_target_mismatch")
 			}
-			if n, err := dst.Write(manifest.Bytes()); err != nil || n != manifest.Len() {
+			if n, err := dst.Write(manifest); err != nil || n != len(manifest) {
 				return nil, artifactFailure("artifact_write_failed")
 			}
 		} else {
@@ -137,10 +92,7 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 		}
 	}
 	// Complete payload bytes do not bypass final terminal and identity checks.
-	if err := terminal(); err != nil {
-		return nil, err
-	}
-	if err := check(); err != nil {
+	if err := remote.finish(ctx); err != nil {
 		return nil, err
 	}
 	if mode == "fetch" {
@@ -151,6 +103,86 @@ func artifacts(ctx context.Context, client *kaggleapi.Client, mode string, reque
 		Protocol int             `json:"protocol"`
 		Files    []artifactEntry `json:"files"`
 	}{1, selected})
+}
+
+// artifactRemote holds one authenticated, identity-checked collection read.
+// Its selected catalog remains the runner manifest, never a provider output list.
+type artifactRemote struct {
+	client       *kaggleapi.Client
+	request      artifactRequest
+	resource     kaggleapi.Resource
+	manifest     []byte
+	manifestFile artifactEntry
+	selected     []artifactEntry
+}
+
+func openArtifactRemote(ctx context.Context, client *kaggleapi.Client, request artifactRequest) (*artifactRemote, error) {
+	r := request.Execution
+	account, err := client.IntrospectToken(ctx)
+	if err != nil {
+		return nil, artifactFailure("artifact_account_read_failed")
+	}
+	if !account.Active {
+		return nil, artifactFailure("artifact_credential_unavailable")
+	}
+	if account.Username != r.Owner {
+		return nil, artifactFailure("artifact_account_mismatch")
+	}
+	remote := &artifactRemote{client: client, request: request, resource: kaggleapi.Resource{Owner: r.Owner, Slug: r.Slug}}
+	if err := remote.check(ctx); err != nil {
+		return nil, err
+	}
+	if err := remote.terminal(ctx); err != nil {
+		return nil, err
+	}
+	var manifest bytes.Buffer
+	remote.manifestFile, err = remote.download(ctx, artifactManifest, runnerplan.MaxManifestBytes, &manifest)
+	if err != nil {
+		return nil, artifactDownloadFailure("artifact_manifest_download_failed", err)
+	}
+	remote.manifest = manifest.Bytes()
+	remote.selected, err = selectArtifacts(remote.manifest, request)
+	if err != nil {
+		return nil, err
+	}
+	return remote, nil
+}
+
+func (r *artifactRemote) check(ctx context.Context) error {
+	kernel, err := r.client.GetKernel(ctx, r.resource)
+	if err != nil {
+		return artifactFailure("artifact_remote_read_failed")
+	}
+	if !matchingKernel(kernel, r.request.Execution, r.request.Execution.KernelID) {
+		return artifactFailure("artifact_remote_identity_mismatch")
+	}
+	return nil
+}
+
+func (r *artifactRemote) terminal(ctx context.Context) error {
+	state, err := r.client.KernelSessionStatus(ctx, r.resource)
+	if err != nil {
+		return artifactFailure("artifact_status_read_failed")
+	}
+	if state != kaggleapi.KernelComplete && state != kaggleapi.KernelError {
+		return artifactFailure("artifact_not_terminal")
+	}
+	return nil
+}
+
+func (r *artifactRemote) download(ctx context.Context, path string, limit int64, sink io.Writer) (artifactEntry, error) {
+	receipt, err := r.client.DownloadKernelOutput(ctx, r.resource, "relay-result/"+path, limit, sink)
+	if err != nil {
+		return artifactEntry{}, err
+	}
+	return artifactEntry{path, receipt.Bytes, domainDigest(receipt.SHA256[:])}, nil
+}
+
+func (r *artifactRemote) finish(ctx context.Context) error {
+	if err := r.terminal(ctx); err != nil {
+		return err
+	}
+	return r.check(ctx)
 }
 
 func domainDigest(raw []byte) domain.SHA256Digest {

@@ -192,7 +192,7 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 	case "GetKernel":
 		f.getKernel++
 		switch f.fault {
-		case "kernel-hidden", "list-unavailable", "list-incomplete", "list-loop", "list-wrong-owner":
+		case "kernel-hidden", "list-unavailable", "list-incomplete", "list-loop", "list-wrong-owner", "list-missing-array", "list-null-array":
 			return jsonResponse(404, `{}`), nil
 		case "kernel-denied":
 			return jsonResponse(403, `{"error":{"code":403,"status":"PERMISSION_DENIED","message":"Permission 'kernels.get' was denied"}}`), nil
@@ -227,6 +227,10 @@ func (f *nativeFixture) api(r *http.Request) (*http.Response, error) {
 			response := jsonResponse(429, `{}`)
 			response.Header.Set("Retry-After", "0")
 			return response, nil
+		case "list-missing-array":
+			return jsonResponse(200, `{}`), nil
+		case "list-null-array":
+			return jsonResponse(200, `{"kernels":null}`), nil
 		case "list-incomplete":
 			if get("pageToken") != "" {
 				return jsonResponse(403, `{}`), nil
@@ -449,6 +453,14 @@ func (f *nativeFixture) bind(p *RuntimeAdapter) {
 			}
 			defer client.Close()
 			return artifacts(ctx, client, mode, r, dst)
+		}
+		a.runBatch = func(ctx context.Context, _ Config, token []byte, r artifactRequest, targets []artifactEntry, visit func(artifactEntry, io.Reader) error) error {
+			client, err := f.client(token)
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+			return artifactBatch(ctx, client, r, targets, visit)
 		}
 		return a, nil
 	}

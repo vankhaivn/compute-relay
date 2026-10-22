@@ -286,55 +286,62 @@ func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work)
 	if err := progress.checkpoint(ctx, "transferring", true); err != nil {
 		return proof, err
 	}
-	for _, file := range snapshot.Files {
-		if ctx.Err() != nil {
-			return proof, ctx.Err()
-		}
-		present, err := e.existing(ctx, file.Object)
-		if err != nil {
+	if batch, ok := src.(provider.ArtifactBatchFetcher); ok {
+		if err := e.verifyBatch(ctx, batch, w, snapshot, progress); err != nil {
 			return proof, err
 		}
-		if present {
+	} else {
+		for _, file := range snapshot.Files {
+			if ctx.Err() != nil {
+				return proof, ctx.Err()
+			}
+			present, err := e.existing(ctx, file.Object)
+			if err != nil {
+				return proof, err
+			}
+			if present {
+				if file.Role == "output" {
+					progress.completed += file.Object.Bytes
+				}
+				if err := progress.checkpoint(ctx, "transferring", false); err != nil {
+					return proof, err
+				}
+				continue
+			}
+			if file.Path == ManifestPath {
+				meta, err := e.blobs.Put(ctx, file.Object, bytes.NewBufferString(snapshot.Manifest))
+				if err != nil || meta != file.Object {
+					return proof, collectionFailureAt(ErrUnavailable, "artifact_blob_write_failed")
+				}
+			} else {
+				var callback func(int64) error
+				if file.Role == "output" {
+					callback = progress.stream(ctx, file.Object.Bytes)
+				}
+				if err = e.transfer(ctx, src, w.Observation.Remote, file, callback); err != nil {
+					return proof, err
+				}
+				if callback != nil && progress.current != file.Object.Bytes {
+					return proof, failure(domain.CodeArtifactCollectionFailed, true)
+				}
+			}
+			present, err = e.existing(ctx, file.Object)
+			if err != nil {
+				return proof, err
+			}
+			if !present {
+				return proof, collectionFailureAt(ErrUnavailable, "artifact_blob_write_failed")
+			}
 			if file.Role == "output" {
 				progress.completed += file.Object.Bytes
+				progress.current = 0
 			}
 			if err := progress.checkpoint(ctx, "transferring", false); err != nil {
 				return proof, err
 			}
-			continue
-		}
-		if file.Path == ManifestPath {
-			meta, err := e.blobs.Put(ctx, file.Object, bytes.NewBufferString(snapshot.Manifest))
-			if err != nil || meta != file.Object {
-				return proof, collectionFailureAt(ErrUnavailable, "artifact_blob_write_failed")
-			}
-		} else {
-			var callback func(int64) error
-			if file.Role == "output" {
-				callback = progress.stream(ctx, file.Object.Bytes)
-			}
-			if err = e.transfer(ctx, src, w.Observation.Remote, file, callback); err != nil {
-				return proof, err
-			}
-			if callback != nil && progress.current != file.Object.Bytes {
-				return proof, failure(domain.CodeArtifactCollectionFailed, true)
-			}
-		}
-		present, err = e.existing(ctx, file.Object)
-		if err != nil {
-			return proof, err
-		}
-		if !present {
-			return proof, collectionFailureAt(ErrUnavailable, "artifact_blob_write_failed")
-		}
-		if file.Role == "output" {
-			progress.completed += file.Object.Bytes
-			progress.current = 0
-		}
-		if err := progress.checkpoint(ctx, "transferring", false); err != nil {
-			return proof, err
 		}
 	}
+
 	if err := progress.checkpoint(ctx, "verifying", true); err != nil {
 		return proof, err
 	}
@@ -503,15 +510,17 @@ func (e *Engine) Run(ctx context.Context) error {
 	})
 }
 
-// Allow at least one MiB/s plus the control/verification budget. Before discovery,
-// use the admitted byte ceiling; pinned retries use the exact known byte count.
+// Allow one MiB/s and one second per file plus the control/verification budget.
+// Before discovery, use the admitted byte and file ceilings.
 func (e *Engine) collectionTimeout(w Work) time.Duration {
 	bytes := e.config.MaxBytes
+	files := e.discoveryFileLimit(w)
 	if w.Snapshot != nil {
 		bytes = 0
+		files = len(w.Snapshot.Files)
 		for _, file := range w.Snapshot.Files {
 			bytes += file.Object.Bytes
 		}
 	}
-	return min(2*time.Hour, e.config.Timeout+time.Duration((bytes+(1<<20)-1)/(1<<20))*time.Second)
+	return provider.ArtifactReadBudget(e.config.Timeout, bytes, files)
 }

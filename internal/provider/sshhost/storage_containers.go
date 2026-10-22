@@ -118,7 +118,11 @@ func (b *storageScanBudget) readDockerJSON(ctx context.Context, d docker, reques
 	runErr := <-done
 	b.remaining -= bounded.n
 	if err != nil || runErr != nil {
-		return nil, failure(errors.Join(ErrRemoteDocker, err, runErr), "storage_container_summary_failed")
+		reason := "storage_container_summary_failed"
+		if request.URL.Path == "/volumes" {
+			reason = "cache_inventory_read_failed"
+		}
+		return nil, failure(errors.Join(ErrRemoteDocker, err, runErr), reason)
 	}
 	return body, nil
 }

@@ -202,7 +202,7 @@ func TestStatusMissingOrUnknownNeverInheritsQueued(t *testing.T) {
 }
 
 func TestFullDatasetListingRejectsPartialOrInconsistentPages(t *testing.T) {
-	for _, mode := range []string{"duplicate", "cycle", "never-ending", "count", "page-size", "negative", "null-size", "bytes", "path", "provider-error"} {
+	for _, mode := range []string{"duplicate", "cycle", "never-ending", "count", "page-size", "negative", "null-size", "bytes", "path", "provider-error", "missing-array", "null-array"} {
 		t.Run(mode, func(t *testing.T) {
 			calls := 0
 			c := newFixtureClient(t, func(*http.Request) (*http.Response, error) {
@@ -218,7 +218,7 @@ func TestFullDatasetListingRejectsPartialOrInconsistentPages(t *testing.T) {
 				case "count":
 					body = `{"datasetFiles":[{"name":"a"},{"name":"b"},{"name":"c"}]}`
 				case "page-size":
-					body = `{"datasetFiles":[` + strings.TrimSuffix(strings.Repeat(`{"name":"a"},`, 21), ",") + `]}`
+					body = `{"datasetFiles":[` + strings.TrimSuffix(strings.Repeat(`{"name":"a"},`, 201), ",") + `]}`
 				case "negative":
 					body = `{"datasetFiles":[{"name":"code.bin","totalBytes":-1}]}`
 				case "null-size":
@@ -229,6 +229,10 @@ func TestFullDatasetListingRejectsPartialOrInconsistentPages(t *testing.T) {
 					body = `{"datasetFiles":[{"name":"../code.bin"}]}`
 				case "provider-error":
 					body = `{"errorMessage":"SYNTHETIC_TOKEN"}`
+				case "missing-array":
+					body = `{}`
+				case "null-array":
+					body = `{"datasetFiles":null}`
 				}
 				return response(200, "application/json", body), nil
 			}, nil)

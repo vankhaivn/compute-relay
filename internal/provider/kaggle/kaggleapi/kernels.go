@@ -1,6 +1,7 @@
 package kaggleapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -92,6 +93,9 @@ func (c *Client) OwnedKernelPresent(ctx context.Context, resource Resource) (boo
 			NextPageToken string `json:"nextPageToken"`
 		}
 		if decodeObject(object, &result) != nil || len(result.Kernels) > 100 || len(result.NextPageToken) > 4096 {
+			return false, failure(op, ErrResponse, 0, true)
+		}
+		if raw, exists := object["kernels"]; !exists || bytes.Equal(raw, []byte("null")) {
 			return false, failure(op, ErrResponse, 0, true)
 		}
 		for _, kernel := range result.Kernels {

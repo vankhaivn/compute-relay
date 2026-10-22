@@ -139,6 +139,7 @@ func (a *Adapter) prepareCache(ctx context.Context, d docker, plan provider.Plan
 	bindings := make([]cacheBinding, 0, len(keys))
 	var total, done int64
 	ready := map[hostcache.Key]hostcache.Generation{}
+	var generations []hostcache.Generation
 	for _, key := range keys {
 		generation, err := a.waitForPeerGeneration(ctx, key)
 		if err != nil {
@@ -151,10 +152,15 @@ func (a *Adapter) prepareCache(ctx context.Context, d docker, plan provider.Plan
 		if generation.State == hostcache.Claimed && generation.WriterPhase != hostcache.WriterFinished {
 			return nil, failure(hostcache.ErrUnknown, "prepare_cache_cache_state_unknown")
 		}
-		observation, err := a.observeVolume(ctx, d, *generation)
-		if err != nil {
-			return nil, err
-		}
+		generations = append(generations, *generation)
+	}
+	observations, err := a.observeVolumes(ctx, d, generations)
+	if err != nil {
+		return nil, err
+	}
+	for i, generation := range generations {
+		key := generation.Key
+		observation := observations[i]
 		if observation.Kind != hostcache.ObservedComplete {
 			if err := a.cache.Retire(ctx, observation); err != nil {
 				return nil, err
@@ -166,12 +172,13 @@ func (a *Adapter) prepareCache(ctx context.Context, d docker, plan provider.Plan
 			if err := a.cache.Verify(ctx, observation); err != nil {
 				return nil, err
 			}
-			generation, err = a.cache.Active(ctx, key)
-			if err != nil || generation == nil {
-				return nil, failure(errors.Join(ErrIdentity, err), "prepare_cache_identity_unverified")
+			active, readErr := a.cache.Active(ctx, key)
+			if readErr != nil || active == nil {
+				return nil, failure(errors.Join(ErrIdentity, readErr), "prepare_cache_identity_unverified")
 			}
+			generation = *active
 		}
-		ready[key] = *generation
+		ready[key] = generation
 	}
 	for _, key := range keys {
 		g, hit := ready[key]
@@ -533,10 +540,17 @@ func (a *Adapter) verifyCacheMounts(ctx context.Context, d docker, info containe
 				return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 			}
 		}
-		o, err := a.observeVolume(ctx, d, binding.Generation)
-		if err != nil {
-			return err
-		}
+	}
+	generations := make([]hostcache.Generation, len(bindings))
+	for i, binding := range bindings {
+		generations[i] = binding.Generation
+	}
+	observations, err := a.observeVolumes(ctx, d, generations)
+	if err != nil {
+		return err
+	}
+	for i, binding := range bindings {
+		o := observations[i]
 		if o.Kind != hostcache.ObservedComplete {
 			return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 		}

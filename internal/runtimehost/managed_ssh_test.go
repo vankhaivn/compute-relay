@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 )
 
@@ -93,6 +94,9 @@ func TestManagedSSHConnectionPublishesAnOperatorManagedCPUProvider(t *testing.T)
 	}
 	p, err := f.host.managedProvider(f.config, f.services.connections, saved)
 	requireNoError(t, err)
+	if _, ok := p.(provider.ArtifactBatchFetcher); !ok {
+		t.Fatal("managed SSH provider dropped bounded artifact collection")
+	}
 	if _, ok := p.(*sshhost.Adapter); !ok || p.Describe().Type != "ssh" || p.Describe().Support(domain.CapabilityGPU) != domain.CapabilitySupportUnsupported ||
 		p.Describe().Support(domain.CapabilityRemoteCancellation) != domain.CapabilitySupportSupported {
 		t.Fatalf("provider = %T %+v", p, p.Describe())

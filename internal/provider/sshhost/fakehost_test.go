@@ -2,6 +2,7 @@ package sshhost
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os/exec"
 	"path"
 	"slices"
@@ -63,43 +65,47 @@ type fakeApplicationImage struct {
 // fakeHost is an in-memory Docker host behind the executor seam. It understands only
 // the fixed argument arrays the adapter issues and records every command.
 type fakeHost struct {
-	t                      *testing.T
-	mu                     sync.Mutex
-	images                 map[string]imageInfo
-	applicationImages      map[string]fakeApplicationImage
-	applicationLoads       int
-	applicationLoadAckLost bool
-	applicationLoadMissing bool
-	containerdImages       bool
-	builds                 int
-	buildExit              int
-	buildInput             []byte
-	platform               string
-	engineTime             time.Time
-	image                  bool
-	registry               bool // pull succeeds
-	containers             map[string]*fakeContainer
-	volumes                map[string]*fakeVolume
-	writes                 int
-	volumeVerifications    int
-	calls                  [][]string
-	wireCalls              [][]string
-	machineID              string
-	engineID               string
-	dockerHost             string
-	starts                 int
-	created                int
-	secretPackets          [][]byte
-	secretAckLost          bool
-	verifierOutput         [][]byte
-	verifierTarFault       func([]byte) []byte
-	verifierMutate         func(*fakeContainer)
-	verifierProducerStatus int
-	verifierOmitStatus     bool
-	verifierExit           int
-	verifierExtraOutput    []byte
-	closed                 int
-	fail                   func(args []string) (Result, bool)
+	t                       *testing.T
+	mu                      sync.Mutex
+	images                  map[string]imageInfo
+	applicationImages       map[string]fakeApplicationImage
+	applicationLoads        int
+	applicationLoadAckLost  bool
+	applicationLoadMissing  bool
+	containerdImages        bool
+	builds                  int
+	buildExit               int
+	buildInput              []byte
+	platform                string
+	engineTime              time.Time
+	image                   bool
+	registry                bool // pull succeeds
+	containers              map[string]*fakeContainer
+	volumes                 map[string]*fakeVolume
+	writes                  int
+	volumeVerifications     int
+	cacheBatchVerifications int
+	cacheInventoryCalls     int
+	cacheBatchOutput        []byte
+	cacheInventoryReply     string
+	calls                   [][]string
+	wireCalls               [][]string
+	machineID               string
+	engineID                string
+	dockerHost              string
+	starts                  int
+	created                 int
+	secretPackets           [][]byte
+	secretAckLost           bool
+	verifierOutput          [][]byte
+	verifierTarFault        func([]byte) []byte
+	verifierMutate          func(*fakeContainer)
+	verifierProducerStatus  int
+	verifierOmitStatus      bool
+	verifierExit            int
+	verifierExtraOutput     []byte
+	closed                  int
+	fail                    func(args []string) (Result, bool)
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
@@ -272,7 +278,7 @@ func (h *fakeHost) Run(ctx context.Context, env map[string]string, argv []string
 	}
 	// Archives are read before locking so a streaming writer never blocks the host.
 	var archive []byte
-	if stdin != nil {
+	if stdin != nil && !(len(argv) >= 2 && slices.Equal(argv[len(argv)-2:], []string{"system", "dial-stdio"})) {
 		var err error
 		if archive, err = io.ReadAll(stdin); err != nil {
 			return Result{}, ErrUnavailable
@@ -315,6 +321,40 @@ func (h *fakeHost) Run(ctx context.Context, env map[string]string, argv []string
 		}
 	}
 	switch {
+	case slices.Equal(args, []string{"system", "dial-stdio"}):
+		request, err := http.ReadRequest(bufio.NewReader(stdin))
+		if err != nil {
+			return Result{}, err
+		}
+		if request.Method != http.MethodGet || request.URL.Path != "/volumes" || !request.Close {
+			h.t.Fatal("unexpected Docker API request", request.URL.Path)
+		}
+		var filters map[string][]string
+		if json.Unmarshal([]byte(request.URL.Query().Get("filters")), &filters) != nil || len(filters["label"]) != 4 {
+			h.t.Fatal("cache inventory lacks scope filters")
+		}
+		h.cacheInventoryCalls++
+		if h.cacheInventoryReply != "" {
+			_, err := io.WriteString(stdout, h.cacheInventoryReply)
+			return Result{}, err
+		}
+		volumes := []volumeInfo{}
+		for _, name := range slices.Sorted(maps.Keys(h.volumes)) {
+			v := h.volumes[name]
+			match := true
+			for _, filter := range filters["label"] {
+				key, want, _ := strings.Cut(filter, "=")
+				if v.labels[key] != want {
+					match = false
+				}
+			}
+			if match {
+				volumes = append(volumes, volumeInfo{Name: name, Driver: "local", Scope: "local", Labels: v.labels, Options: map[string]string{}})
+			}
+		}
+		raw, _ := json.Marshal(map[string]any{"Volumes": volumes, "Warnings": nil})
+		_, err = io.WriteString(stdout, storageHTTPReply(string(raw)))
+		return Result{}, err
 	case slices.Equal(args, []string{"context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"}):
 		_ = json.NewEncoder(stdout).Encode(h.dockerHost)
 		return Result{}, nil
@@ -705,6 +745,9 @@ func (h *fakeHost) volume(args []string, stdout io.Writer) Result {
 }
 
 func (h *fakeHost) runCacheHelper(args []string, input []byte, stdout io.Writer) Result {
+	if len(args) > 2 && args[len(args)-2] == "volumes" {
+		return h.runCacheBatchHelper(args, stdout)
+	}
 	mount := ""
 	readonly := false
 	kind := ""
@@ -816,5 +859,64 @@ func (h *fakeHost) copy(args []string, archive []byte, stdout io.Writer) Result 
 		return Result{ExitCode: 1, Stderr: []byte("Error response from daemon: Could not find the file " + source + " in container " + ref)}
 	}
 	_ = tw.Close()
+	return Result{}
+}
+
+func (h *fakeHost) runCacheBatchHelper(args []string, stdout io.Writer) Result {
+	h.cacheBatchVerifications++
+	if h.cacheBatchOutput != nil {
+		_, _ = stdout.Write(h.cacheBatchOutput)
+		return Result{}
+	}
+	encoded, err := base64.StdEncoding.DecodeString(args[len(args)-1])
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var sizes []int64
+	if json.Unmarshal(encoded, &sizes) != nil || len(sizes) == 0 || len(sizes) > cacheVerifyBatch {
+		h.t.Fatal("invalid verifier sizes")
+	}
+	mounts := []string{}
+	for i, arg := range args {
+		if arg != "--mount" {
+			continue
+		}
+		parts := strings.Split(args[i+1], ",")
+		var source, target string
+		ro := false
+		for _, part := range parts {
+			key, value, _ := strings.Cut(part, "=")
+			if key == "source" {
+				source = value
+			}
+			if key == "target" {
+				target = value
+			}
+			if key == "readonly" {
+				ro = true
+			}
+		}
+		if !ro || target != "/cache/"+strconv.Itoa(len(mounts)) {
+			h.t.Fatal("batch verifier mount is not fixed and read-only")
+		}
+		mounts = append(mounts, source)
+	}
+	if len(mounts) != len(sizes) {
+		h.t.Fatal("batch verifier mount count mismatch")
+	}
+	files := make([]cacheBatchFile, len(sizes))
+	for i, name := range mounts {
+		v := h.volumes[name]
+		if v == nil {
+			h.t.Fatal("batch verifier mounted absent volume")
+		}
+		h.volumeVerifications++
+		files[i] = cacheBatchFile{Index: i, Status: "corrupt"}
+		if v.complete && int64(len(v.blob)) == sizes[i] {
+			digest := sha256.Sum256(v.blob)
+			files[i] = cacheBatchFile{Index: i, Status: "complete", Bytes: int64(len(v.blob)), SHA256: hex.EncodeToString(digest[:])}
+		}
+	}
+	_ = json.NewEncoder(stdout).Encode(cacheBatchInventory{Files: files})
 	return Result{}
 }
