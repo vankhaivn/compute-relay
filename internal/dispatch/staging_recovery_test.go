@@ -132,3 +132,26 @@ func TestEndUnconfirmedPreparationRejectsKnownOrPossibleExecution(t *testing.T) 
 		})
 	}
 }
+
+func TestUnconfirmedPreparationKeepsFirstAndLatestCause(t *testing.T) {
+	w, plan, prep := fixtureWork(t)
+	j, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: BeginPreparation, Plan: &plan, PreparationID: prep})
+	j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingFailed, Reason: "staging_not_visible"})
+	j, state = apply(t, j, state, Action{Kind: Fault, Code: domain.CodeStagingNotReady, Cause: "staging_lookup_failed_http_429"})
+	if d := j.Problem.PublicDetails(); d[domain.ReasonDetail] != "staging_not_visible" || d[domain.CauseDetail] != "staging_lookup_failed_http_429" {
+		t.Fatal("observation lost its failed step or read cause", d)
+	}
+	for _, kind := range []Kind{Fault, EndUnconfirmedPreparation} {
+		if _, _, _, err := Apply(j, state, Action{Kind: kind, Code: domain.CodeStagingNotReady, Cause: "Not closed"}, time.Now()); !errors.Is(err, ErrInvalid) {
+			t.Fatal("an open cause was recorded", kind, err)
+		}
+	}
+	ended, _ := apply(t, j, state, Action{Kind: EndUnconfirmedPreparation})
+	if d := ended.Problem.PublicDetails(); d[domain.ReasonDetail] != "staging_unconfirmed" || d[domain.FirstCauseDetail] != "staging_not_visible" || d[domain.CauseDetail] != "staging_lookup_failed_http_429" {
+		t.Fatal("terminal staging lost its causes", d)
+	}
+	ended, _ = apply(t, j, state, Action{Kind: EndUnconfirmedPreparation, Cause: "staging_absent_http_403"})
+	if d := ended.Problem.PublicDetails(); d[domain.ReasonDetail] != "staging_unconfirmed" || d[domain.CauseDetail] != "staging_absent_http_403" {
+		t.Fatal("terminal staging ignored the latest read cause", d)
+	}
+}

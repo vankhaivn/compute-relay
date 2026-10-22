@@ -96,6 +96,60 @@ func rejectedExecution(reason string) provider.SubmissionOutcome {
 		WithDetail(domain.ReasonDetail, reason)
 	return provider.SubmissionOutcome{Status: provider.SubmissionRejected, Problem: &p}
 }
+
+func rejectedStaging(reason, cause string) provider.SubmissionOutcome {
+	out := rejectedExecution(reason)
+	if cause != "" {
+		p := out.Problem.WithDetail(domain.CauseDetail, cause)
+		out.Problem = &p
+	}
+	return out
+}
+
+// Kaggle can leave a ready dataset unanswered for minutes (rate limits, outages) or
+// briefly answer a missing name. The pre-submit recheck reads again with backoff;
+// tests shorten the window.
+var (
+	stagingRecheckGrace = 10 * time.Minute
+	stagingRecheckPoll  = 15 * time.Second
+)
+
+const stagingRecheckMaxPoll = 2 * time.Minute
+
+// recheck repeats only the metadata read while staging stays unresolved, until the
+// window or the caller's budget ends. Identity, protocol and local faults are final.
+func (e *Executor) recheck(ctx context.Context) (provider.PreparationObservation, error) {
+	deadline := e.now().Add(stagingRecheckGrace)
+	delay := stagingRecheckPoll
+	for {
+		stage, err := e.stager.RecheckPrepare(ctx, e.plan, e.prepared.PreparationID)
+		if !unresolvedRecheck(stage, err) || ctx.Err() != nil || !e.now().Add(delay).Before(deadline) {
+			return stage, err
+		}
+		wait := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return stage, err
+		case <-wait.C:
+		}
+		delay = min(2*delay, stagingRecheckMaxPoll)
+	}
+}
+
+func unresolvedRecheck(stage provider.PreparationObservation, err error) bool {
+	if err != nil {
+		return !provider.IsLocalStateError(err) && (errors.Is(err, ErrStaging) || errors.Is(err, context.DeadlineExceeded))
+	}
+	return stage.Status == provider.ReconciliationUnknown || stage.Status == provider.ReconciliationNotFound
+}
+
+func stagingErrorCause(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "staging_read_timeout"
+	}
+	return ""
+}
 func unknownExecution() provider.SubmissionOutcome {
 	p := provider.Problem(domain.CodeProviderSubmissionUnknown, domain.FailureStageSubmission, "kernel acceptance unresolved; reconcile the original identity without resubmitting")
 	p.ComputeMayHaveStarted = true
@@ -131,15 +185,15 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 	// rehashes every input before use. Recheck it here by metadata only, under
 	// the preparation budget: equality includes the first-pinned numeric dataset ID,
 	// version, marker, privacy, readiness and the exact file list.
-	stage, err := e.stager.RecheckPrepare(parent, e.plan, e.prepared.PreparationID)
+	stage, err := e.recheck(parent)
 	if err != nil {
 		if provider.IsLocalStateError(err) {
 			return unknownExecution()
 		}
-		return rejectedExecution(reasonStagingRecheck)
+		return rejectedStaging(reasonStagingRecheck, stagingErrorCause(err))
 	}
 	if stage.Status != provider.ReconciliationFound || stage.Prepared == nil || *stage.Prepared != e.prepared {
-		return rejectedExecution(reasonStagingUnconfirmed)
+		return rejectedStaging(reasonStagingUnconfirmed, stage.Cause)
 	}
 	r, stopped, err := e.call(parent, "submit", "")
 	if stopped != "" {

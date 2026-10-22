@@ -74,7 +74,7 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 				return empty("unknown"), nil
 			}
 		}
-		return empty("not_found"), nil
+		return failed("not_found", "staging_absent"+failureSuffix(err)), nil
 	}
 	// Shared datasets come first, so an attempt dataset exists only after every shared
 	// input it names was created. A missing one is created once under this preparation.

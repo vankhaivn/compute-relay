@@ -245,6 +245,7 @@ type Action struct {
 	Observation        *provider.Observation
 	Code               domain.ErrorCode
 	Reason             string // closed adapter reason for a Fault, when known
+	Cause              string // closed reason the latest staging read stayed unresolved
 	Details            map[string]string
 	ResourceName       string
 	OwnerPresent       bool

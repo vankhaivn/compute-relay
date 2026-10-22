@@ -160,6 +160,23 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		p := provider.Problem(domain.CodeStagingNotReady, domain.FailureStageProviderPreparation,
 			"Private staging could not be confirmed within the observation budget; no execution was submitted.").
 			WithDetail(domain.ReasonDetail, "staging_unconfirmed").WithRecommendedAction(domain.RecommendedActionFixRequest)
+		// Keep the step that failed first and why the latest read stayed unresolved.
+		cause := a.Cause
+		if old.Problem != nil {
+			details := old.Problem.PublicDetails()
+			if first := details[domain.ReasonDetail]; first != "" {
+				p = p.WithDetail(domain.FirstCauseDetail, first)
+			}
+			if cause == "" {
+				cause = details[domain.CauseDetail]
+			}
+		}
+		if cause != "" {
+			p = p.WithDetail(domain.CauseDetail, cause)
+			if p.PublicDetails()[domain.CauseDetail] != cause {
+				return Journal{}, state, "", ErrInvalid
+			}
+		}
 		j.Problem = &p
 		next.Orchestration = domain.OrchestrationFailed
 		next.ReleaseEvidence = domain.ReleaseEvidenceNotApplicable
@@ -382,6 +399,13 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		if reason != "" {
 			p := j.Problem.WithDetail(domain.ReasonDetail, reason)
 			if p.PublicDetails()[domain.ReasonDetail] != reason {
+				return Journal{}, state, "", ErrInvalid
+			}
+			j.Problem = &p
+		}
+		if a.Cause != "" {
+			p := j.Problem.WithDetail(domain.CauseDetail, a.Cause)
+			if p.PublicDetails()[domain.CauseDetail] != a.Cause {
 				return Journal{}, state, "", ErrInvalid
 			}
 			j.Problem = &p

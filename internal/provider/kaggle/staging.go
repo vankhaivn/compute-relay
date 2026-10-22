@@ -223,6 +223,9 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		return none, "", ErrStaging
 	} // Do not reflect secret-bearing callback or API errors.
 	seen, err := result.observation(p, frozen, operation)
+	if err == nil && seen.Status != provider.ReconciliationFound {
+		seen.Cause = result.Reason
+	}
 	return seen, result.Reason, err
 }
 

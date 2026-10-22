@@ -92,15 +92,19 @@ func (s InputSnapshot) InputDigest() domain.SHA256Digest {
 	return Digest(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
 }
 
+// PreparationObservation is one read of staging. Unknown means the provider did not
+// answer; NotFound is its answer that the resource is absent. Cause optionally names,
+// as a closed reason, why an unresolved read did not find the resource.
 type PreparationObservation struct {
 	Status   ReconciliationStatus
 	Prepared *Prepared
+	Cause    string
 }
 
 func (o PreparationObservation) Validate(plan Plan, id domain.OperationID) error {
 	switch o.Status {
 	case ReconciliationFound:
-		if o.Prepared == nil {
+		if o.Prepared == nil || o.Cause != "" {
 			return errors.New("missing preparation")
 		}
 		return o.Prepared.Validate(plan, id)

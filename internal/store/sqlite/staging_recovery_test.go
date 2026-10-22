@@ -22,6 +22,7 @@ type stagingRecoveryProbe struct {
 	*probeProvider
 	observeCalls  int
 	unavailable   bool
+	absent        bool // answers that staging is absent, which ends observation after the grace
 	observe       func(context.Context, provider.Plan, domain.OperationID) (provider.PreparationObservation, error)
 	planDigest    domain.SHA256Digest
 	preparationID domain.OperationID
@@ -37,6 +38,9 @@ func (p *stagingRecoveryProbe) ReconcilePrepare(ctx context.Context, plan provid
 	}
 	if p.unavailable {
 		return provider.PreparationObservation{}, errors.New("synthetic staging observation failure")
+	}
+	if p.absent {
+		return provider.PreparationObservation{Status: provider.ReconciliationNotFound}, nil
 	}
 	return p.probeProvider.ReconcilePrepare(ctx, plan, id)
 }
@@ -131,7 +135,7 @@ func TestUnconfirmedStagingEndsAfterObservationGrace(t *testing.T) {
 				case "not_found":
 					return provider.PreparationObservation{Status: provider.ReconciliationNotFound}, nil
 				default:
-					return provider.PreparationObservation{Status: provider.ReconciliationUnknown}, nil
+					return provider.PreparationObservation{Status: provider.ReconciliationUnknown, Cause: "staging_lookup_failed_http_429"}, nil
 				}
 			}
 			if mode == "historical_attention" {
@@ -165,8 +169,26 @@ func TestUnconfirmedStagingEndsAfterObservationGrace(t *testing.T) {
 			if mode == "timeout" && time.Since(started) > time.Second {
 				t.Fatal("observation ignored control budget")
 			}
+			// Reads the provider left unanswered keep observing past the grace, holding
+			// capacity, and end only at the preparation limit.
+			unanswered := mode == "unknown" || mode == "failure" || mode == "timeout" || mode == "historical_attention" || mode == "verify_failure"
+			if unanswered {
+				if state := f.state(t, id); state.Orchestration.Terminal() || !scheduler.HoldsAccount(state, true) || f.journal(t, id).Phase != dispatch.Staging {
+					t.Fatal("unanswered staging read ended observation at the grace", state)
+				}
+				var notBefore int64
+				requireNoError(t, f.s.db.QueryRow(`SELECT not_before_ms FROM scheduler_queue WHERE job_id=?`, string(id.JobID)).Scan(&notBefore))
+				if notBefore <= f.clock.Now().UnixMilli() {
+					t.Fatal("observation past the grace was requeued without delay")
+				}
+				f.clock.advance(cfg.PreparationTimeout)
+				_, _ = f.engine.RunOnce(ctx, "observer")
+			}
 			state, j := f.state(t, id), f.journal(t, id)
 			terminal := mode != "confirmed_pending" && mode != "local_state_error" && mode != "shutdown"
+			if mode == "unknown" && (j.Problem == nil || j.Problem.PublicDetails()[domain.CauseDetail] != "staging_lookup_failed_http_429") {
+				t.Fatal("terminal staging lost the unresolved read cause", j.Problem)
+			}
 			if terminal {
 				if state.Orchestration != domain.OrchestrationFailed || state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted || state.ReleaseEvidence != domain.ReleaseEvidenceNotApplicable || j.Problem == nil || j.Problem.PublicDetails()[domain.ReasonDetail] != "staging_unconfirmed" || j.Problem.ComputeMayHaveStarted || j.Problem.SafeOperationRetry || scheduler.HoldsAccount(state, true) {
 					t.Fatalf("unconfirmed staging did not safely terminate: %s %+v", j.Phase, state)
@@ -180,8 +202,12 @@ func TestUnconfirmedStagingEndsAfterObservationGrace(t *testing.T) {
 			if !reflect.DeepEqual(j.Plan, original.Plan) || j.PreparationID != original.PreparationID || j.SubmitStarted || f.backend.Stats().PrepareCalls != 1 || f.backend.Stats().SubmitCalls != 0 || f.backend.Stats().CleanupCalls != 0 {
 				t.Fatal("observation changed intent or repeated a mutation")
 			}
-			if mode != "verify_failure" && probe.observeCalls != 1 {
-				t.Fatal("observation was repeated", probe.observeCalls)
+			wantObserve := 1
+			if unanswered {
+				wantObserve = 2
+			}
+			if mode != "verify_failure" && probe.observeCalls != wantObserve {
+				t.Fatal("observation count", probe.observeCalls)
 			}
 			result, err := f.s.ClaimNext(t.Context(), "capacity-probe")
 			requireNoError(t, err)
@@ -316,7 +342,7 @@ func TestUnconfirmedStagingCleanupObservesWithoutReopeningCompute(t *testing.T) 
 				t.Fatal("lost acknowledgement hidden")
 			}
 			original := f.journal(t, id)
-			probe := &stagingRecoveryProbe{probeProvider: f.adapter, planDigest: original.Plan.Digest(), preparationID: original.PreparationID, unavailable: true}
+			probe := &stagingRecoveryProbe{probeProvider: f.adapter, planDigest: original.Plan.Digest(), preparationID: original.PreparationID, absent: true}
 			registry := provider.NewSnapshotRegistry()
 			requireNoError(t, registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, probe))
 			var err error

@@ -206,6 +206,73 @@ func TestExecutorUnreadyOrUnboundInputStopsBeforeKernelInvocation(t *testing.T) 
 	}
 }
 
+func TestExecutorRechecksUnresolvedStagingBeforeOneSubmission(t *testing.T) {
+	limited := func(p stagingPlan) stagingResponse {
+		r := stageResponse(p, "unknown")
+		r.Reason = "staging_lookup_failed_http_429"
+		return r
+	}
+	for name, tc := range map[string]struct {
+		replies    []string
+		want       provider.SubmissionStatus
+		reads      int
+		reason     string
+		cause      string
+		unanswered bool
+	}{
+		"rate-limited-then-ready": {replies: []string{"limited", "not_found", "ready"}, want: provider.SubmissionAccepted, reads: 3},
+		"stays-unanswered":        {replies: []string{"limited"}, want: provider.SubmissionRejected, reason: reasonStagingUnconfirmed, cause: "staging_lookup_failed_http_429", unanswered: true},
+		"identity-changed":        {replies: []string{"replaced"}, want: provider.SubmissionRejected, reads: 1, reason: reasonStagingUnconfirmed},
+		"invalid-identity":        {replies: []string{"invalid"}, want: provider.SubmissionRejected, reads: 1, reason: reasonStagingRecheck},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newExecutionFixture(t)
+			reads := 0
+			e.stager.run = func(_ context.Context, _ Config, mode string, _ []byte, p stagingPlan, _ StagingBlobs) (stagingResponse, error) {
+				if mode != "recheck" {
+					t.Fatal("recheck used a mutating mode", mode)
+				}
+				reply := tc.replies[min(reads, len(tc.replies)-1)]
+				reads++
+				switch reply {
+				case "limited":
+					return limited(p), nil
+				case "replaced":
+					r := stageResponse(p, "ready")
+					r.DatasetID = "999"
+					return r, nil
+				}
+				return stageResponse(p, reply), nil
+			}
+			submits := 0
+			e.run = func(_ context.Context, _ Config, mode string, _ []byte, r executionRequest) (executionResponse, error) {
+				if mode != "submit" {
+					t.Fatal("unexpected execution mode", mode)
+				}
+				submits++
+				return executionFound(r, "QUEUED"), nil
+			}
+			out := e.Start(context.Background(), e.prepared, nil, nil)
+			if out.Validate(e.plan.Job.Identity) != nil || out.Status != tc.want {
+				t.Fatal("unexpected recheck outcome", out.Status, out.Problem)
+			}
+			if tc.unanswered && reads < 2 || !tc.unanswered && reads != tc.reads {
+				t.Fatal("recheck read count", reads)
+			}
+			if tc.want == provider.SubmissionAccepted {
+				if submits != 1 {
+					t.Fatal("verified staging did not reach exactly one submission", submits)
+				}
+				return
+			}
+			details := out.Problem.PublicDetails()
+			if submits != 0 || out.Problem.ComputeMayHaveStarted || details[domain.ReasonDetail] != tc.reason || details[domain.CauseDetail] != tc.cause {
+				t.Fatal("unsubmitted request lost its reason or cause", submits, details)
+			}
+		})
+	}
+}
+
 func TestExecutorCarriesOnlyClosedHelperRefusals(t *testing.T) {
 	// After invocation, a refusal without a closed reason is a protocol fault and stays ambiguous.
 	for reason, want := range map[string]provider.SubmissionStatus{"kernel_read_failed": provider.SubmissionRejected, "": provider.SubmissionUnknown, "403 Forbidden": provider.SubmissionUnknown} {

@@ -101,7 +101,9 @@ func (e *Engine) Run(ctx context.Context) error {
 }
 
 // PreparationObservationGrace bounds recovery after the first failed preparation.
-// It starts after uploads and survives restarts through the journal.
+// It starts after uploads and survives restarts through the journal. After it, a
+// provider answer ends compute eligibility; reads the provider left unanswered keep
+// observing until the attempt's preparation limit.
 const PreparationObservationGrace = 10 * time.Minute
 
 // Local failures have no provider mutation to reconcile and may safely wait.
@@ -189,7 +191,9 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			delay += time.Duration(w.Handle.Claim.Fence[0]%4) * delay / 10
 		}
 		if unconfirmedPreparation(w.Journal) && w.Journal.PreparationObservationStarted != nil {
-			delay = min(delay, max(0, w.Journal.PreparationObservationStarted.Add(PreparationObservationGrace).Sub(e.clock.Now())))
+			if until := w.Journal.PreparationObservationStarted.Add(PreparationObservationGrace).Sub(e.clock.Now()); until > 0 {
+				delay = min(delay, until)
+			}
 		}
 		resultErr = errors.Join(resultErr, e.repo.YieldDispatch(cleanup, w.Handle, delay))
 	}()
@@ -203,6 +207,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	if work.Gate != nil {
 		preparationLimit = min(preparationLimit, time.Duration(work.Gate.Request.MaxPreparationSeconds)*time.Second)
 	}
+	s.observationLimit = max(PreparationObservationGrace, preparationLimit)
 	if unconfirmedPreparation(work.Journal) {
 		var stop context.CancelFunc
 		ctx, stop = context.WithTimeout(ctx, min(preparationLimit, e.config.ControlTimeout))
@@ -212,14 +217,14 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	p, err := e.providers.Resolve(binding)
 	if err != nil {
 		if unconfirmedPreparation(work.Journal) {
-			return s.endUnconfirmedPreparation(err)
+			return s.endUnconfirmedPreparation(err, false, "")
 		}
 		return s.providerFailure(err, domain.CodeConfigurationInvalid)
 	}
 	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, p.Verify(c, binding) })
 	if err != nil {
 		if unconfirmedPreparation(work.Journal) {
-			return s.endUnconfirmedPreparation(err)
+			return s.endUnconfirmedPreparation(err, unansweredRead(err), "")
 		}
 		// Adapters classify known causes. An untyped failure proves neither
 		// authentication refusal nor a changed frozen identity.
@@ -231,7 +236,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 	}
 	if p.Describe().InstanceID != binding.Binding.ProviderInstanceID {
 		if unconfirmedPreparation(work.Journal) {
-			return s.endUnconfirmedPreparation(nil)
+			return s.endUnconfirmedPreparation(nil, false, "")
 		}
 		return s.fail(domain.CodeRemoteIdentityMismatch)
 	}
@@ -308,7 +313,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		})
 		if err != nil {
 			if unconfirmedPreparation(journal) {
-				return s.endUnconfirmedPreparation(err)
+				return s.endUnconfirmedPreparation(err, unansweredRead(err), "")
 			}
 			if provider.IsLocalStateError(err) {
 				return err
@@ -320,13 +325,13 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		if seen.Validate(*journal.Plan, journal.PreparationID) != nil {
 			if unconfirmedPreparation(journal) {
-				return s.endUnconfirmedPreparation(nil)
+				return s.endUnconfirmedPreparation(nil, false, "")
 			}
 			return s.fail(domain.CodeRemoteIdentityMismatch)
 		}
 		if seen.Status != provider.ReconciliationFound {
 			if unconfirmedPreparation(journal) {
-				return s.endUnconfirmedPreparation(nil)
+				return s.endUnconfirmedPreparation(nil, seen.Status == provider.ReconciliationUnknown, seen.Cause)
 			}
 			if expired && work.Gate != nil {
 				return s.commit(Action{Kind: ExpireDispatch})
@@ -532,6 +537,7 @@ type session struct {
 	progressErr         error
 	parent              context.Context
 	drainingPreparation bool
+	observationLimit    time.Duration
 }
 
 func (s *session) work() Work { s.mu.Lock(); defer s.mu.Unlock(); return s.current }
@@ -636,18 +642,42 @@ func unconfirmedPreparation(j Journal) bool {
 	return j.Phase == Staging && j.Plan != nil && j.Prepared == nil && !j.SubmitStarted
 }
 
-func (s *session) endUnconfirmedPreparation(cause error) error {
-	if provider.IsLocalStateError(cause) {
-		return cause
+// unansweredRead reports a staging read the provider did not answer: an outage,
+// rate limit or timeout. Classified refusals and identity faults are answers.
+func unansweredRead(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	switch errorCode(err, domain.CodeProviderStateUnknown) {
+	case domain.CodeProviderStateUnknown, domain.CodeProviderUnreachable, domain.CodeProviderRateLimited:
+		return true
+	}
+	return false
+}
+
+// endUnconfirmedPreparation records one unresolved staging observation and its closed
+// cause. Within the grace, or while reads stay unanswered within the observation
+// limit, the attempt keeps observing; otherwise only compute eligibility ends.
+func (s *session) endUnconfirmedPreparation(err error, unanswered bool, cause string) error {
+	if provider.IsLocalStateError(err) {
+		return err
 	}
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
-	j := s.work().Journal
-	if j.PreparationObservationStarted == nil || s.e.clock.Now().Before(j.PreparationObservationStarted.Add(PreparationObservationGrace)) {
-		return s.fail(domain.CodeStagingNotReady)
+	if cause == "" {
+		cause = problemReason(err)
 	}
-	if err := s.commit(Action{Kind: EndUnconfirmedPreparation}); err != nil {
+	j := s.work().Journal
+	now := s.e.clock.Now()
+	if j.PreparationObservationStarted == nil || now.Before(j.PreparationObservationStarted.Add(PreparationObservationGrace)) ||
+		unanswered && now.Before(j.PreparationObservationStarted.Add(s.observationLimit)) {
+		if err := s.commit(Action{Kind: Fault, Code: domain.CodeStagingNotReady, Cause: cause}); err != nil {
+			return err
+		}
+		return s.work().Journal.Problem
+	}
+	if err := s.commit(Action{Kind: EndUnconfirmedPreparation, Cause: cause}); err != nil {
 		return err
 	}
 	return s.work().Journal.Problem

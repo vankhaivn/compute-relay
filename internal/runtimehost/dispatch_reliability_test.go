@@ -147,6 +147,13 @@ func TestSystemExhaustedPreparationEndsWithoutComputeAndUnblocksNextAttempt(t *t
 	}
 	f.advance(t, dispatch.PreparationObservationGrace+time.Second)
 	if f.dispatchStep(t) == nil {
+		t.Fatal("unanswered observation lost failure")
+	}
+	if trace.journal(t, id).Phase != dispatch.Staging || f.dispatchState(t, id).Orchestration.Terminal() {
+		t.Fatal("an outage ended observation at the grace")
+	}
+	f.advance(t, dispatch.DefaultConfig().PreparationTimeout)
+	if f.dispatchStep(t) == nil {
 		t.Fatal("exhausted observation lost failure")
 	}
 	state := f.dispatchState(t, id)

@@ -21,6 +21,7 @@ changing the flag, run a connection `check` to get a selection for it.
 | Inputs | Up to 256 inputs, staged in one private attempt dataset with a marker file (≤2 MiB). Inputs of 256 MiB or more go to [shared datasets](#shared-input-datasets). |
 | Staging checks | Uploads are SHA-checked against the frozen digest; readiness and recovery compare metadata only, and the runner rehashes every input before use. |
 | Staging visibility | After an acknowledged or uncertain create, Relay polls the exact owner/slug, version 1 and marker for up to 2 minutes. Dispatch retains a separate durable ten-minute observation grace from its first preparation fault. |
+| Pre-submit recheck | Just before the one submission, Relay rereads ready staging. An unanswered read or a missing name is read again from 15 s backoff (doubling, at most 2 min) for up to 10 minutes; a changed identity stops at once. It ends `staging_not_confirmed` only if still unresolved, never submitting. |
 | Create acknowledgement | CreateDataset has one send and up to 2 minutes to answer; ordinary metadata requests retain a 15-second deadline. Caller budgets can shorten both. |
 | Request pacing | API requests are admitted at least 500 ms apart per configured account, plus 0–100 ms jitter, and at least 100 ms apart across the provider. Concurrent callers share admission through response headers. |
 | Read retries | Metadata, logs and download tickets retry HTTP 429, temporary 5xx and transport failures, with up to three sends per read. HTTP 429 honors `Retry-After` (seconds or HTTP date); missing or invalid delays use 30 s then 60 s. Other temporary read faults wait 1 s then 2 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. Mutations remain one-shot. |
@@ -30,17 +31,18 @@ changing the flag, run a connection `check` to get a selection for it.
 | Unsupported | `prepare_then_start`, absolute deadlines, workload secrets, `application_image`, SSH cache. |
 | Downloads | Only from `storage.googleapis.com` and `www.kaggleusercontent.com` over HTTPS. |
 | Cancellation | May stay manual-required when Kaggle gives no usable session target. |
-| Failure reasons | A stopped preparation or collection carries a closed `reason`, e.g. `shared_create_failed_http_500` or `artifact_manifest_download_failed`. |
+| Failure reasons | A stopped preparation or collection carries a closed `reason`, e.g. `shared_create_failed_http_500` or `artifact_manifest_download_failed`. Unresolved staging reads add `cause`, e.g. `staging_lookup_failed_http_429` or `staging_absent_http_403`; a terminal `staging_unconfirmed` also keeps the first failed step as `first_cause`. |
 | Cleanup | Explicit; never touches shared datasets. Deletion is by owner/name, so a resource replaced between check and delete could be deleted instead. A 403 alone (for example after a lost acknowledgement) stays `unknown`. |
 
 A lost staging or submission response leaves the original intent for observation; a "not found"
 read never triggers another create or submit. When staging has never acquired a confirmed dataset
 identity, reconciliation reads use the control-call budget (one minute by default) within a
 durable ten-minute grace starting at the first preparation fault, after upload. A restart does
-not reset that grace or permit uploading again. If observation still cannot confirm the resource,
-the unsubmitted attempt ends as `failed` with reason
-`staging_unconfirmed`, releasing its account slot. A 403, 429 or timeout still means unknown,
-not absent. A recorded private dataset that is still processing remains a separate pending state.
+not reset that grace or permit uploading again. After the grace, an answered read that still
+cannot confirm the resource (a missing name or a different identity) ends the unsubmitted attempt
+as `failed` with reason `staging_unconfirmed`, releasing its account slot. Reads Kaggle leaves
+unanswered (429, outage, timeout) keep observing until the attempt's preparation limit (one hour
+by default), then end the same way. Either ending still means unknown, not absent. A recorded private dataset that is still processing remains a separate pending state.
 Historical attention attempts without a saved grace start it on their first unsuccessful
 observation after an explicit reconciliation request.
 

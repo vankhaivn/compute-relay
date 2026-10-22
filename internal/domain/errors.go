@@ -275,13 +275,22 @@ func (problem Problem) WithDetail(key, value string) Problem {
 // ReasonDetail is a closed adapter reason, never provider, URL or OS text.
 const ReasonDetail = "reason"
 
+// CauseDetail names, as a closed reason, why the latest provider read stayed
+// unresolved; FirstCauseDetail keeps the step that failed first. Neither changes
+// the problem's reason.
+const (
+	CauseDetail      = "cause"
+	FirstCauseDetail = "first_cause"
+)
+
 // PublicDetails projects only bounded reasons, explicit resource identity and
 // closed submission diagnostics. Raw provider messages are never public.
 func (problem Problem) PublicDetails() map[string]string {
 	result := make(map[string]string)
-	reason := problem.Details[ReasonDetail]
-	if closedReason(reason) {
-		result[ReasonDetail] = reason
+	for _, key := range []string{ReasonDetail, CauseDetail, FirstCauseDetail} {
+		if value := problem.Details[key]; closedReason(value) {
+			result[key] = value
+		}
 	}
 	if name := problem.Details["resource_name"]; ValidResourceName(name) {
 		result["resource_name"] = name

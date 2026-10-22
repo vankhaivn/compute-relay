@@ -253,7 +253,7 @@ func TestUnsubmittedStagingCleanupKeepsUnsafeInputReferences(t *testing.T) {
 				t.Fatal("lost preparation acknowledgement hidden")
 			}
 			original := f.journal(t, id)
-			probe := &stagingRecoveryProbe{probeProvider: f.adapter, planDigest: original.Plan.Digest(), preparationID: original.PreparationID, unavailable: true}
+			probe := &stagingRecoveryProbe{probeProvider: f.adapter, planDigest: original.Plan.Digest(), preparationID: original.PreparationID, absent: true}
 			registry := provider.NewSnapshotRegistry()
 			requireNoError(t, registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, probe))
 			var err error
