@@ -44,6 +44,8 @@ type systemCollectionSource struct {
 	advance func(time.Duration)
 }
 
+var systemPartialTransferFailure = errors.New("partial synthetic response")
+
 func (f *managedTestFixture) collectionSource(t *testing.T) *systemCollectionSource {
 	t.Helper()
 	s := &systemCollectionSource{now: f.fixtureClock().Now(), phase: "completed", fetches: map[string]int{}, files: map[string][]byte{
@@ -145,7 +147,7 @@ func (s *systemCollectionSource) Fetch(ctx context.Context, remote provider.Remo
 			panic("synthetic private provider detail")
 		case "partial":
 			_, _ = provider.WithTransferProgress(dst, progress).Write(data[:len(data)/2])
-			return provider.TransferResult{}, errors.New("partial synthetic response")
+			return provider.TransferResult{}, provider.WithReason(systemPartialTransferFailure, "artifact_read_failed")
 		case "corrupt":
 			data[0] ^= 1
 		case "long":
@@ -399,9 +401,38 @@ func TestFaultMatrixLargeTransferFailureRecoversWithoutCompute(t *testing.T) {
 	e := f.collectionEngine(t, nil)
 	worked, err := e.RunOnce(ctx)
 	var failure collection.Failure
-	if !worked || !errors.As(err, &failure) || source.fetches["outputs/result.json"] != 1 {
+	if !worked || !errors.As(err, &failure) || !errors.Is(err, systemPartialTransferFailure) ||
+		failure.Reason != "artifact_download_failed" || failure.Cause != "artifact_read_failed" || failure.Invalid ||
+		source.fetches["outputs/result.json"] != 1 {
 		t.Fatal("large partial transfer accepted", err)
 	}
+	failed := f.collectionStatus(t, job)
+	if failed.State != "failed" || failed.OperationID == nil {
+		t.Fatal("partial transfer lost original failed ticket", failed)
+	}
+	assertFailure := func() {
+		t.Helper()
+		record, err := f.host.store.ReadJob(ctx, "app", f.actor.TokenID(), job.JobID)
+		requireNoError(t, err)
+		op, err := f.controls(t).Get(ctx, f.actor, "app", *failed.OperationID)
+		requireNoError(t, err)
+		if op.Effect != operations.Failed || op.Operation.Status != domain.OperationFailed {
+			t.Fatal("partial transfer lost operation failure", op)
+		}
+		for _, problem := range []*domain.Problem{record.Problem, op.Operation.Failure} {
+			if problem == nil || problem.Code != domain.CodeArtifactCollectionFailed ||
+				problem.PublicDetails()[domain.ReasonDetail] != "artifact_download_failed" ||
+				problem.PublicDetails()[domain.CauseDetail] != "artifact_read_failed" ||
+				!problem.SafeOperationRetry || !problem.ComputeMayHaveStarted || problem.RecommendedAction != domain.RecommendedActionCollect {
+				t.Fatal("partial transfer lost safe recovery diagnostic", problem)
+			}
+			raw := systemJSON(t, problem)
+			if bytes.Contains(raw, []byte(systemPartialTransferFailure.Error())) {
+				t.Fatal("private transfer message reached public projection")
+			}
+		}
+	}
+	assertFailure()
 	if _, err = f.host.store.ReadCollection(ctx, "app", f.actor.TokenID(), job.JobID, job.AttemptID); !errors.Is(err, collection.ErrNotFound) {
 		t.Fatal("partial bytes published", err)
 	}
@@ -410,6 +441,7 @@ func TestFaultMatrixLargeTransferFailureRecoversWithoutCompute(t *testing.T) {
 	}
 	lists, _ := source.counts()
 	f.reopen(t)
+	assertFailure()
 	f.advance(t, time.Minute)
 	source.mode = ""
 	if _, err = f.controls(t).Submit(ctx, f.actor, "app", job.JobID, domain.OperationCollect, "large-explicit-recovery", systemControlBody(t, job.AttemptID)); err != nil {

@@ -131,6 +131,84 @@ func TestSystemDispatchStagingLossAndDelayedReadinessNeverRepeatPrepare(t *testi
 	}
 }
 
+func TestSystemIncidentStagingReadFailuresKeepOriginalPreparation(t *testing.T) {
+	for _, tc := range []struct{ name, cause string }{
+		{"http-429", "staging_lookup_failed_http_429"},
+		{"http-403", "staging_lookup_failed_http_403"},
+		{"partial-list", "shared_list_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, effects, trace := newSystemDispatch(t, fake.DefaultScenario())
+			id := f.dispatchJob(t, "app", 1)
+			effects.losePrepare = true
+			effects.prepareReceiptError = provider.WithReason(errors.New("private-response-canary"), "staging_create_failed")
+			if err := f.dispatchStep(t); err == nil {
+				t.Fatal("lost preparation receipt was hidden")
+			}
+			original := trace.journal(t, id)
+			first := original.Problem.PublicDetails()[domain.ReasonDetail]
+			if first != "staging_create_failed" {
+				t.Fatal("lost create receipt did not retain its first closed reason", original.Problem)
+			}
+			cause := tc.cause
+			effects.preparationObservation = func(_ context.Context, plan provider.Plan, op domain.OperationID) (provider.PreparationObservation, error) {
+				if !reflect.DeepEqual(&plan, original.Plan) || op != original.PreparationID {
+					t.Fatal("observation replaced original preparation")
+				}
+				return provider.PreparationObservation{Status: provider.ReconciliationUnknown, Cause: cause}, nil
+			}
+			observe := func() {
+				t.Helper()
+				f.advance(t, time.Second)
+				worked, err := f.services.dispatcher.RunOnce(t.Context(), "incident-observer")
+				var problem *domain.Problem
+				if !worked || !errors.As(err, &problem) || problem.Code != domain.CodeStagingNotReady {
+					t.Fatal("original preparation uncertainty was not reported", worked, err)
+				}
+				j := trace.journal(t, id)
+				state := f.dispatchState(t, id)
+				if j.Phase != dispatch.Staging || j.Problem == nil || j.Problem.PublicDetails()[domain.CauseDetail] != cause || j.Problem.PublicDetails()[domain.ReasonDetail] != first ||
+					state.Execution != domain.ExecutionNotSubmitted || !scheduler.HoldsAccount(state, true) || !reflect.DeepEqual(j.Plan, original.Plan) || j.PreparationID != original.PreparationID {
+					t.Fatalf("uncertainty lost cause, identity or capacity: %+v %+v", j, state)
+				}
+				if stats := f.backend.Stats(); stats.PrepareCalls != 1 || stats.SubmitCalls != 0 || stats.Executions != 0 || stats.CleanupCalls != 0 {
+					t.Fatal("uncertain observation mutated remote work", stats)
+				}
+				if record := f.dispatchRecord(t, id); record.Attempt.ID != id.AttemptID || record.Problem == nil || record.Problem.PublicDetails()[domain.CauseDetail] != cause {
+					t.Fatal("job projection lost original attempt or closed cause", record.Attempt)
+				}
+			}
+			observe()
+			f.reopen(t)
+			persisted := f.dispatchRecord(t, id)
+			if persisted.Attempt.ID != id.AttemptID || persisted.Problem == nil || persisted.Problem.PublicDetails()[domain.CauseDetail] != cause || persisted.Problem.PublicDetails()[domain.ReasonDetail] != first {
+				t.Fatal("reopen lost the original attempt or saved diagnostic", persisted.Problem)
+			}
+			observe()
+			if tc.name == "http-429" {
+				cause = "staging_lookup_failed_http_403"
+				observe() // The first failed step stays fixed while the latest read cause changes.
+			}
+			effects.preparationObservation = nil
+			f.advance(t, time.Second)
+			worked, err := f.services.dispatcher.RunOnce(t.Context(), "incident-ready")
+			requireNoError(t, err)
+			if !worked || trace.journal(t, id).Phase != dispatch.Ready {
+				t.Fatal("original staging did not recover")
+			}
+			job := admission.Receipt{JobID: id.JobID, AttemptID: id.AttemptID}
+			f.runToCollection(t, job)
+			f.collectOnce(t)
+			record := f.dispatchRecord(t, id)
+			j := trace.journal(t, id)
+			stats := f.backend.Stats()
+			if record.Attempt.ID != id.AttemptID || record.Attempt.State.Result != domain.ResultAvailable || j.PreparationID != original.PreparationID || !reflect.DeepEqual(j.Plan, original.Plan) || stats.PrepareCalls != 1 || stats.SubmitCalls != 1 || stats.Executions != 1 {
+				t.Fatalf("recovery did not collect exactly one original execution: %+v %+v", record.Attempt, stats)
+			}
+		})
+	}
+}
+
 func TestSystemDispatchUnknownNotFoundStopsAndKeepsAccountCapacity(t *testing.T) {
 	scenario := fake.DefaultScenario()
 	scenario.Mode = fake.Unresolved

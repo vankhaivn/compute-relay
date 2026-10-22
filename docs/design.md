@@ -96,9 +96,12 @@ each use one shared mechanism. Workers retry transient local errors; corruption 
 
 ## Fault catalog
 
-[`internal/devtool/fault-matrix.json`](../internal/devtool/fault-matrix.json) lists 28 failure
+[`internal/devtool/fault-matrix.json`](../internal/devtool/fault-matrix.json) lists 35 failure
 scenarios (lost responses, crashes around intents, stale polls, partial downloads, cancel races,
-disk full, credential rotation, eviction races, orphan cleanup…) and the tests that cover each.
+disk full, credential rotation, eviction races, orphan cleanup, Kaggle 429/403/partial inventories,
+absent staging, large SSH inventories, kill during result download and exhausted observation…) and the tests that cover each.
 `./scripts/check.sh` validates the references and runs the tests. These qualify offline behavior,
-not live providers or power loss. Never weaken a scenario to get a pass; moving a test means
+not live providers or power loss. Provider HTTP fixtures, durable runtime replays and the
+synchronized download SIGKILL test each prove their own boundary. Studio separately qualifies
+owner-visible messages/actions and continued safe checks after its ten-minute attention threshold. Never weaken a scenario to get a pass; moving a test means
 updating the catalog.

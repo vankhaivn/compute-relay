@@ -560,17 +560,21 @@ func TestNativeDiscoveryAndPreflightShareReadOnlyQuotaPath(t *testing.T) {
 }
 
 func TestNativeUnconfirmedStagingErrorsDoNotProveAbsenceOrRepeatCreation(t *testing.T) {
-	for _, fault := range []string{"lookup-denied", "lookup-throttled", "missing-name-403"} {
-		t.Run(fault, func(t *testing.T) {
+	for _, test := range []struct {
+		fault  string
+		status provider.ReconciliationStatus
+		cause  string
+	}{
+		{"lookup-denied", provider.ReconciliationUnknown, "staging_lookup_failed_http_403"},
+		{"lookup-throttled", provider.ReconciliationUnknown, "staging_lookup_failed_http_429"},
+		{"missing-name-403", provider.ReconciliationNotFound, "staging_absent_http_403"},
+	} {
+		t.Run(test.fault, func(t *testing.T) {
 			p, plan, _, blobs, f := nativeRuntime(t, false)
-			f.fault = fault
+			f.fault = test.fault
 			before := blobs.reads
 			seen, err := p.ReconcilePrepare(t.Context(), plan, "prep")
-			want := provider.ReconciliationUnknown
-			if fault == "missing-name-403" {
-				want = provider.ReconciliationNotFound
-			}
-			if err != nil || seen.Status != want || seen.Prepared != nil || blobs.reads != before || f.count("CreateDataset") != 0 || f.count("StartBlobUpload") != 0 || f.count("SaveKernel") != 0 || f.count("DeleteDataset") != 0 {
+			if err != nil || seen.Status != test.status || seen.Cause != test.cause || seen.Prepared != nil || blobs.reads != before || f.count("CreateDataset") != 0 || f.count("StartBlobUpload") != 0 || f.count("SaveKernel") != 0 || f.count("DeleteDataset") != 0 {
 				t.Fatal("uncertain metadata caused a mutation or invented confirmation", seen, err, f.calls)
 			}
 		})

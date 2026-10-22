@@ -342,6 +342,13 @@ func (f *nativeFixture) sharedAPI(op string, payload map[string]json.RawMessage,
 		}
 		return f.json(map[string]any{"ref": f.owner + "/" + slug}), nil
 	case "ListDatasetFiles":
+		if f.fault == "partial-shared-list" {
+			if get("pageToken") == "" {
+				return f.json(map[string]any{"datasetFiles": []map[string]any{{"name": sharedMarkerFile, "totalBytes": len(entry.staged[sharedMarkerFile])}}, "nextPageToken": "shared-page-2"}), nil
+			}
+			// A continuation without entries cannot certify a complete inventory.
+			return jsonResponse(200, `{"datasetFiles":[],"nextPageToken":"shared-page-3"}`), nil
+		}
 		files := []map[string]any{}
 		for name, data := range entry.staged {
 			files = append(files, map[string]any{"name": name, "totalBytes": len(data)})

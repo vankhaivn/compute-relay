@@ -254,8 +254,8 @@ func TestStorageScanInspectsManyVolumesInFewCommands(t *testing.T) {
 		}
 	}
 	exec.dropVolume, exec.volumeCalls = exec.volumes[100], 0
-	if _, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope); err == nil {
-		t.Fatal("a volume missing from a batched answer was accepted")
+	if _, err := scanDockerStorage(t.Context(), docker{exec: exec, binary: "/usr/bin/docker"}, scope); StorageScanReason(err) != "storage_inspect_incomplete" {
+		t.Fatalf("a missing batch member lost its closed cause: %v (%s)", err, StorageScanReason(err))
 	}
 }
 

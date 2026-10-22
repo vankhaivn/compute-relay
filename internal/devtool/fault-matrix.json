@@ -432,6 +432,136 @@
           "name": "TestStorageCleanupNeverInspectsOrDeletesExcludedObjects"
         }
       ]
+    },
+    {
+      "number": 29,
+      "scenario": "Kaggle metadata reads return HTTP 429 during unconfirmed staging; recovery preserves the original preparation and never repeats creation or compute.",
+      "tests": [
+        {
+          "file": "internal/provider/kaggle/native_runtime_test.go",
+          "name": "TestNativeUnconfirmedStagingErrorsDoNotProveAbsenceOrRepeatCreation"
+        },
+        {
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
+          "name": "TestSystemIncidentStagingReadFailuresKeepOriginalPreparation"
+        },
+        {
+          "file": "internal/provider/kaggle/kaggleapi/request_pacing_test.go",
+          "name": "TestReadCooldownPersistsAcrossRestartAndCredentialReplacement"
+        }
+      ]
+    },
+    {
+      "number": 30,
+      "scenario": "Kaggle permission-denied HTTP 403 remains unknown rather than absence; later valid evidence resumes the original preparation without duplicate compute.",
+      "tests": [
+        {
+          "file": "internal/provider/kaggle/native_runtime_test.go",
+          "name": "TestNativeUnconfirmedStagingErrorsDoNotProveAbsenceOrRepeatCreation"
+        },
+        {
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
+          "name": "TestSystemIncidentStagingReadFailuresKeepOriginalPreparation"
+        },
+        {
+          "file": "internal/provider/kaggle/staging_live_contract_test.go",
+          "name": "TestStagingCleanupObservationRequiresStrictAbsence"
+        }
+      ]
+    },
+    {
+      "number": 31,
+      "scenario": "Kaggle shared-input inventory is partial or inconsistent; submission remains closed until complete evidence confirms the original resources.",
+      "tests": [
+        {
+          "file": "internal/provider/kaggle/kaggleapi/protocol_test.go",
+          "name": "TestFullDatasetListingRejectsPartialOrInconsistentPages"
+        },
+        {
+          "file": "internal/provider/kaggle/shared_inputs_test.go",
+          "name": "TestNativeSharedInputPartialListingCannotReachSubmission"
+        },
+        {
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
+          "name": "TestSystemIncidentStagingReadFailuresKeepOriginalPreparation"
+        }
+      ]
+    },
+    {
+      "number": 32,
+      "scenario": "A Kaggle staging dataset stays absent after an unacknowledged create; bounded observation ends the original unsubmitted attempt without recreating it or guessing cleanup.",
+      "tests": [
+        {
+          "file": "internal/provider/kaggle/native_runtime_test.go",
+          "name": "TestNativeUnconfirmedStagingErrorsDoNotProveAbsenceOrRepeatCreation"
+        },
+        {
+          "file": "internal/provider/kaggle/native_runtime_test.go",
+          "name": "TestNativeStagingNeverVisibleStopsWithoutAnotherCreate"
+        },
+        {
+          "file": "internal/store/sqlite/staging_recovery_test.go",
+          "name": "TestUnconfirmedStagingGraceSurvivesRestartWithoutRepeatingPreparation"
+        }
+      ]
+    },
+    {
+      "number": 33,
+      "scenario": "SSH storage scanning batches more than 200 volumes; an incomplete batch retains its cause and safe refusal recovers after a fresh scan without duplicate compute.",
+      "tests": [
+        {
+          "file": "internal/provider/sshhost/storage_scan_test.go",
+          "name": "TestStorageScanInspectsManyVolumesInFewCommands"
+        },
+        {
+          "file": "internal/provider/sshhost/storage_scan_test.go",
+          "name": "TestStorageScanReasonNamesTheFailedStep"
+        },
+        {
+          "file": "internal/runtimehost/storage_incident_test.go",
+          "name": "TestSystemStorageScanFailureRetainsCauseAndResumesWithoutDuplicateCompute"
+        },
+        {
+          "file": "internal/store/sqlite/storage_inventory_test.go",
+          "name": "TestStorageScanCauseSurvivesRestartAndRejectsUnsafeText"
+        }
+      ]
+    },
+    {
+      "number": 34,
+      "scenario": "Relay is killed after result bytes start downloading; restart uses the frozen collection pin and ticket, publishes only verified complete bytes, and never repeats compute.",
+      "tests": [
+        {
+          "file": "internal/runtimehost/collection_download_crash_test.go",
+          "name": "TestCollectionProcessKillDuringResultDownload"
+        },
+        {
+          "file": "internal/runtimehost/system_collection_suite_test.go",
+          "name": "TestFaultMatrixLargeTransferFailureRecoversWithoutCompute"
+        },
+        {
+          "file": "internal/runtimehost/system_collection_suite_test.go",
+          "name": "TestCollectionRecoveryAcrossCommitBoundaries"
+        }
+      ]
+    },
+    {
+      "number": 35,
+      "scenario": "Recovery observation expires while staging or execution remains uncertain; the original identity and cause remain visible without reopening compute.",
+      "tests": [
+        {
+          "file": "internal/store/sqlite/staging_recovery_test.go",
+          "name": "TestUnconfirmedStagingEndsAfterObservationGrace"
+        },
+        {
+          "file": "internal/store/sqlite/staging_recovery_test.go",
+          "name": "TestUnconfirmedStagingGraceSurvivesRestartWithoutRepeatingPreparation"
+        },
+        {
+          "file": "internal/runtimehost/system_dispatch_recovery_suite_test.go",
+          "name": "TestSystemFaultMatrixLocalDeadlineKeepsUnknownExecution"
+        }
+      ]
     }
   ]
 }

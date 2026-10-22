@@ -28,6 +28,26 @@ type stagingRecoveryProbe struct {
 	preparationID domain.OperationID
 }
 
+type stagingReceiptLossProbe struct{ *probeProvider }
+
+func (p stagingReceiptLossProbe) Prepare(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.Prepared, error) {
+	prepared, err := p.probeProvider.Prepare(ctx, plan, op)
+	if err != nil {
+		return prepared, provider.WithReason(err, "staging_create_failed")
+	}
+	return prepared, nil
+}
+
+func loseStagingReceipt(t *testing.T, f *dispatchFixture) {
+	t.Helper()
+	f.adapter.losePrepare = true
+	registry := provider.NewSnapshotRegistry()
+	requireNoError(t, registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, stagingReceiptLossProbe{f.adapter}))
+	var err error
+	f.engine, err = dispatch.New(f.s, registry, f.blobs, f.clock, dispatch.DefaultConfig())
+	requireNoError(t, err)
+}
+
 func (p *stagingRecoveryProbe) ReconcilePrepare(ctx context.Context, plan provider.Plan, id domain.OperationID) (provider.PreparationObservation, error) {
 	p.observeCalls++
 	if plan.Digest() != p.planDigest || id != p.preparationID {
@@ -105,7 +125,7 @@ func TestUnconfirmedStagingEndsAfterObservationGrace(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := newDispatchFixture(t, fake.DefaultScenario())
 			id := f.seed(t, "a", 1, false)
-			f.adapter.losePrepare = true
+			loseStagingReceipt(t, f)
 			if err := f.step(t); err == nil {
 				t.Fatal("lost preparation acknowledgement hidden")
 			}
@@ -133,7 +153,7 @@ func TestUnconfirmedStagingEndsAfterObservationGrace(t *testing.T) {
 					}
 					return seen, err
 				case "not_found":
-					return provider.PreparationObservation{Status: provider.ReconciliationNotFound}, nil
+					return provider.PreparationObservation{Status: provider.ReconciliationNotFound, Cause: "staging_absent_http_404"}, nil
 				default:
 					return provider.PreparationObservation{Status: provider.ReconciliationUnknown, Cause: "staging_lookup_failed_http_429"}, nil
 				}
@@ -186,8 +206,14 @@ func TestUnconfirmedStagingEndsAfterObservationGrace(t *testing.T) {
 			}
 			state, j := f.state(t, id), f.journal(t, id)
 			terminal := mode != "confirmed_pending" && mode != "local_state_error" && mode != "shutdown"
-			if mode == "unknown" && (j.Problem == nil || j.Problem.PublicDetails()[domain.CauseDetail] != "staging_lookup_failed_http_429") {
-				t.Fatal("terminal staging lost the unresolved read cause", j.Problem)
+			if mode == "unknown" || mode == "not_found" {
+				cause := "staging_lookup_failed_http_429"
+				if mode == "not_found" {
+					cause = "staging_absent_http_404"
+				}
+				if original.Problem.PublicDetails()[domain.ReasonDetail] != "staging_create_failed" || j.Problem == nil || j.Problem.PublicDetails()[domain.CauseDetail] != cause || j.Problem.PublicDetails()[domain.FirstCauseDetail] != "staging_create_failed" {
+					t.Fatal("terminal staging lost latest or first cause", j.Problem)
+				}
 			}
 			if terminal {
 				if state.Orchestration != domain.OrchestrationFailed || state.Execution != domain.ExecutionNotSubmitted || state.RemoteActivity != domain.RemoteActivityNotStarted || state.ReleaseEvidence != domain.ReleaseEvidenceNotApplicable || j.Problem == nil || j.Problem.PublicDetails()[domain.ReasonDetail] != "staging_unconfirmed" || j.Problem.ComputeMayHaveStarted || j.Problem.SafeOperationRetry || scheduler.HoldsAccount(state, true) {
@@ -252,7 +278,7 @@ func TestUnconfirmedStagingGraceSurvivesRestartWithoutRepeatingPreparation(t *te
 		t.Run(fmt.Sprint(appears), func(t *testing.T) {
 			f := newDispatchFixture(t, fake.DefaultScenario())
 			id := f.seed(t, "a", 1, false)
-			f.adapter.losePrepare = true
+			loseStagingReceipt(t, f)
 			if err := f.step(t); err == nil {
 				t.Fatal("lost acknowledgement hidden")
 			}
@@ -263,7 +289,7 @@ func TestUnconfirmedStagingGraceSurvivesRestartWithoutRepeatingPreparation(t *te
 			attach := func() *stagingRecoveryProbe {
 				probe := &stagingRecoveryProbe{probeProvider: f.adapter, planDigest: original.Plan.Digest(), preparationID: original.PreparationID}
 				probe.observe = func(ctx context.Context, plan provider.Plan, op domain.OperationID) (provider.PreparationObservation, error) {
-					return provider.PreparationObservation{Status: provider.ReconciliationNotFound}, nil
+					return provider.PreparationObservation{Status: provider.ReconciliationNotFound, Cause: "staging_absent_http_403"}, nil
 				}
 				registry := provider.NewSnapshotRegistry()
 				requireNoError(t, registry.Register(provider.BindingSnapshot{Binding: f.profile.Binding, AccountScope: f.profile.AccountScope, CredentialRef: f.profile.CredentialRef}, probe))
@@ -305,6 +331,9 @@ func TestUnconfirmedStagingGraceSurvivesRestartWithoutRepeatingPreparation(t *te
 				}
 			} else if j.Phase != dispatch.Prevented || j.Problem == nil || j.Problem.Code != domain.CodeStagingNotReady {
 				t.Fatal("staging that never appeared did not end after grace", j.Phase)
+			}
+			if !appears && (original.Problem.PublicDetails()[domain.ReasonDetail] != "staging_create_failed" || j.Problem.PublicDetails()[domain.CauseDetail] != "staging_absent_http_403" || j.Problem.PublicDetails()[domain.FirstCauseDetail] != "staging_create_failed") {
+				t.Fatal("restart lost absent-read cause or first failed step", j.Problem)
 			}
 			if j.PreparationObservationStarted == nil || !j.PreparationObservationStarted.Equal(*original.PreparationObservationStarted) || !reflect.DeepEqual(j.Plan, original.Plan) || j.PreparationID != original.PreparationID || f.backend.Stats().PrepareCalls != 1 || f.backend.Stats().SubmitCalls != 0 {
 				t.Fatal("restart changed observation budget or repeated a mutation")

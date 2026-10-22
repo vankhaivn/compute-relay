@@ -233,6 +233,28 @@ func TestNativeSharedInputChangedAfterReadinessStopsBeforeSave(t *testing.T) {
 	}
 }
 
+func TestNativeSharedInputPartialListingCannotReachSubmission(t *testing.T) {
+	p, plan, saved, blobs, f := sharedRuntime(t)
+	prepared, err := p.Prepare(t.Context(), plan, "prep")
+	if err != nil || !prepared.Ready {
+		t.Fatal("fixture staging did not become ready", prepared, err)
+	}
+	*saved = prepared
+	uploads, creates, lists, reads := f.count("StartBlobUpload"), f.count("CreateDataset"), f.count("ListDatasetFiles"), blobs.reads
+	blobs.mode = "missing"
+	f.fault = "partial-shared-list"
+	seen, err := p.ReconcilePrepare(t.Context(), plan, "prep")
+	if err != nil || seen.Status != provider.ReconciliationUnknown || seen.Cause != "shared_list_failed" || seen.Prepared != nil || f.count("ListDatasetFiles") != lists+2 {
+		t.Fatal("incomplete shared pagination became readiness or lost its cause", seen, err, f.calls)
+	}
+	out := p.Start(t.Context(), prepared, nil, nil)
+	if out.Status != provider.SubmissionRejected || out.Problem == nil || out.Problem.PublicDetails()[domain.CauseDetail] != "shared_list_failed" ||
+		f.count("SaveKernel") != 0 || f.count("CreateDataset") != creates || f.count("StartBlobUpload") != uploads || f.count("DeleteDataset") != 0 ||
+		blobs.reads != reads || len(f.shared) != 1 || !f.dataset {
+		t.Fatal("partial shared listing reached submission, repeated mutations or lost its cause", out, f.calls)
+	}
+}
+
 func TestNativeSharedInputDeniedOnceAtRecheckIsReadAgain(t *testing.T) {
 	p, plan, saved, _, f := sharedRuntime(t)
 	prepared, err := p.Prepare(context.Background(), plan, "prep")

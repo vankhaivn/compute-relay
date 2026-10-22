@@ -88,10 +88,12 @@ func (r *systemDispatchProbe) CommitDispatch(ctx context.Context, h dispatch.Han
 
 type systemDispatchEffects struct {
 	losePrepare, panicSubmit, public, rejectQuota bool
+	prepareReceiptError                           error
 	prepareEntered, prepareRelease                chan struct{}
 	afterPreparationRead                          func()
 	prepare                                       func(context.Context, provider.Plan, domain.OperationID)
 	reconcilePrepare                              func(context.Context, provider.Plan, domain.OperationID) error
+	preparationObservation                        func(context.Context, provider.Plan, domain.OperationID) (provider.PreparationObservation, error)
 	verify                                        func(context.Context, provider.BindingSnapshot) error
 	observe                                       func(context.Context, provider.RemoteReference, provider.Observation) (provider.Observation, error)
 	reconcile                                     func(context.Context, provider.Identity) error
@@ -143,6 +145,9 @@ func (p *systemDispatchProvider) Prepare(ctx context.Context, plan provider.Plan
 		prepared.Private = false
 	}
 	if e.losePrepare {
+		if e.prepareReceiptError != nil {
+			return provider.Prepared{}, e.prepareReceiptError
+		}
 		return provider.Prepared{}, errors.New("private-response-canary")
 	}
 	return prepared, err
@@ -156,6 +161,9 @@ func (p *systemDispatchProvider) ReconcilePrepare(ctx context.Context, plan prov
 		if err := e.reconcilePrepare(ctx, plan, op); err != nil {
 			return provider.PreparationObservation{}, err
 		}
+	}
+	if e.preparationObservation != nil {
+		return e.preparationObservation(ctx, plan, op)
 	}
 	seen, err := p.Provider.ReconcilePrepare(ctx, plan, op)
 	if e.afterPreparationRead != nil {

@@ -13,7 +13,7 @@ import (
 
 func TestFaultCatalogReferencesExistingTests(t *testing.T) {
 	cases, err := loadFaultCases(filepath.Join("..", ".."))
-	if err != nil || len(cases) != 28 {
+	if err != nil || len(cases) != faultCaseCount {
 		t.Fatal("fault catalog drift", err)
 	}
 }
@@ -29,7 +29,7 @@ func TestFaultCatalogRejectsMissingOrUntraceableEvidence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(ref.File)), []byte("package fixture\nimport \"testing\"\nfunc TestProof(t *testing.T) {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cases := make([]faultCase, 28)
+	cases := make([]faultCase, faultCaseCount)
 	for i := range cases {
 		cases[i] = faultCase{Number: i + 1, Scenario: fmt.Sprintf("Case %d.", i+1), Tests: []faultTest{ref}}
 	}
@@ -53,7 +53,7 @@ func TestFaultCatalogRejectsMissingOrUntraceableEvidence(t *testing.T) {
 			c := copy.Cases
 			switch mode {
 			case "count":
-				c = c[:27]
+				c = c[:faultCaseCount-1]
 			case "number":
 				c[0].Number = 2
 			case "blank-scenario":

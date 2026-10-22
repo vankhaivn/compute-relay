@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -22,7 +21,8 @@ var faultCatalog []byte
 var faultTestName = regexp.MustCompile(`^Test[A-Z0-9][A-Za-z0-9_]*$`)
 
 const (
-	faultModule = "github.com/vankhaivn/compute-relay/"
+	faultCaseCount = 35
+	faultModule    = "github.com/vankhaivn/compute-relay/"
 )
 
 type faultTest struct {
@@ -51,8 +51,8 @@ func checkFaultCatalog(root string, raw []byte) ([]faultCase, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&catalog) != nil || d.Decode(new(any)) != io.EOF || catalog.Version != 1 || len(catalog.Cases) != 28 {
-		return nil, errors.New("fault matrix must contain exactly 28 version-1 cases")
+	if d.Decode(&catalog) != nil || d.Decode(new(any)) != io.EOF || catalog.Version != 1 || len(catalog.Cases) != faultCaseCount {
+		return nil, fmt.Errorf("fault matrix must contain exactly %d version-1 cases", faultCaseCount)
 	}
 	functions := map[string]map[string]bool{}
 	scenarios := map[string]bool{}
