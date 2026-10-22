@@ -3,6 +3,7 @@ package contracts
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -79,6 +80,18 @@ func TestHealthContractRejectsUnknownAndPrivateFields(t *testing.T) {
 				t.Fatal("invalid health response accepted")
 			}
 		})
+	}
+}
+
+func TestHealthContractAcceptsOnlyClosedCollectionCauses(t *testing.T) {
+	schema, value := healthContract(t)
+	for _, reason := range []string{"host_unavailable", "health_thermal_state_command_failed", "private/path", "private error", "", strings.Repeat("a", 65)} {
+		value["latest"].(map[string]any)["cause"] = reason
+		err := schema.Validate(value)
+		wantValid := reason == "host_unavailable" || reason == "health_thermal_state_command_failed"
+		if (err == nil) != wantValid {
+			t.Fatalf("cause %q validity=%v, want %v", reason, err == nil, wantValid)
+		}
 	}
 }
 func TestHealthSchemaGuardEnumsMatchEvaluator(t *testing.T) {

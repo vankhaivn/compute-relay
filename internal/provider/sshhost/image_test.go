@@ -98,6 +98,8 @@ func TestImageInstallationUnknownRecoversWithoutAnotherBuild(t *testing.T) {
 	op := domain.OperationID("op_lost_image_response")
 	if _, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, op, false); !errors.Is(err, ErrImageInstallationUnknown) {
 		t.Fatal("lost inspection became success", err)
+	} else {
+		assertFailureReason(t, err, "docker_image_inspect_failed")
 	}
 	fake.mu.Lock()
 	fake.fail = nil
@@ -185,6 +187,8 @@ func TestImageInstallationNonzeroExitUsesImageEvidence(t *testing.T) {
 	fake.mu.Unlock()
 	if _, err := InstallImage(ctx, raw, before.Account, before.MachineID, before.Architecture, "op_nonzero_absent", false); !errors.Is(err, ErrImageInstallationUnknown) {
 		t.Fatal("nonzero CLI proved an absent outcome", err)
+	} else {
+		assertFailureReason(t, err, "docker_image_build_failed")
 	}
 }
 

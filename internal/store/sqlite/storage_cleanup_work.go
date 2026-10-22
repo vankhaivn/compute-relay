@@ -178,8 +178,8 @@ func (s *Store) BeginStorageCleanup(ctx context.Context, work cleanup.StorageWor
 	})
 }
 
-func (s *Store) CompleteStorageCleanup(ctx context.Context, work cleanup.StorageWork, outcome hoststorage.DeleteOutcome) error {
-	if !work.Valid() || (outcome != hoststorage.DeleteConfirmed && outcome != hoststorage.AbsentConfirmed &&
+func (s *Store) CompleteStorageCleanup(ctx context.Context, work cleanup.StorageWork, outcome hoststorage.DeleteOutcome, reason string) error {
+	if !work.Valid() || !domain.ValidReason(reason) || (outcome != hoststorage.DeleteConfirmed && outcome != hoststorage.AbsentConfirmed &&
 		outcome != hoststorage.DeleteRetained && outcome != hoststorage.DeleteUnknown) {
 		return ErrInvalid
 	}
@@ -210,7 +210,7 @@ func (s *Store) CompleteStorageCleanup(ctx context.Context, work cleanup.Storage
 		result, err := tx.ExecContext(ctx, `UPDATE host_storage_cleanup_operations
 		 SET status=?,result=?,reason=?,updated_at=?,confirmed_scan_seq=?
 		 WHERE operation_id=? AND status='running' AND result IN (?, 'running')`, status, outcome,
-			string(outcome), now.Format(time.RFC3339Nano), confirmedScan, work.Lease.OperationID, prior)
+			reason, now.Format(time.RFC3339Nano), confirmedScan, work.Lease.OperationID, prior)
 		if err != nil {
 			return dbError(err)
 		}
@@ -277,4 +277,33 @@ func releaseDeletedStorageContentInTx(ctx context.Context, tx *sql.Tx, target ho
 	 AND mutation_operation_id=? AND state='committed'`, stamp, scope.InstallationID, scope.MachineID,
 		scope.EngineID, "cache", contentReservationKey(domain.SHA256Digest(sha), bytes), operation)
 	return dbError(err)
+}
+
+// RecordStorageCleanupReason keeps unresolved verification observable without
+// releasing its lease or authorizing another remote deletion.
+func (s *Store) RecordStorageCleanupReason(ctx context.Context, work cleanup.StorageWork, reason string) error {
+	if !work.Valid() || !domain.ValidReason(reason) {
+		return ErrInvalid
+	}
+	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		current, err := storageLeaseCurrent(ctx, tx, work, now)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return cleanup.ErrLeaseLost
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE host_storage_cleanup_operations SET reason=?,updated_at=? WHERE operation_id=? AND status='running'`, reason, now.Format(time.RFC3339Nano), work.Lease.OperationID)
+		if err != nil {
+			return dbError(err)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return dbError(err)
+		}
+		if count != 1 {
+			return cleanup.ErrLeaseLost
+		}
+		return nil
+	})
 }

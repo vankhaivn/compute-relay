@@ -212,7 +212,9 @@ func TestArtifactDestinationFailureCancelsWithoutPublishing(t *testing.T) {
 			}
 			return nil, nil
 		}
-		if result, err := a.Fetch(context.Background(), ref, file, brokenArtifactWriter{mode}, file.Bytes, nil); err == nil || result != (provider.TransferResult{}) {
+		result, err := a.Fetch(context.Background(), ref, file, brokenArtifactWriter{mode}, file.Bytes, nil)
+		assertArtifactReason(t, err, "artifact_write_failed")
+		if err == nil || result != (provider.TransferResult{}) {
 			t.Fatal("failed destination reported success", mode)
 		}
 	}

@@ -205,7 +205,7 @@ func (interruptedStorageCleanup) RenewStorageCleanup(context.Context, cleanup.St
 func (interruptedStorageCleanup) BeginStorageCleanup(context.Context, cleanup.StorageWork) error {
 	return nil
 }
-func (r interruptedStorageCleanup) CompleteStorageCleanup(context.Context, cleanup.StorageWork, hoststorage.DeleteOutcome) error {
+func (r interruptedStorageCleanup) CompleteStorageCleanup(context.Context, cleanup.StorageWork, hoststorage.DeleteOutcome, string) error {
 	close(r.completed)
 	return nil
 }
@@ -262,4 +262,8 @@ func TestProviderOutageDuringCleanupRecoveryKeepsRuntimeServing(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal("runtime shutdown failed", err)
 	}
+}
+
+func (r interruptedStorageCleanup) RecordStorageCleanupReason(context.Context, cleanup.StorageWork, string) error {
+	return nil
 }

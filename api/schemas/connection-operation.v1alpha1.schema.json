@@ -78,6 +78,11 @@
     },
     "replay": {
       "type": "boolean"
+    },
+    "cause": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "description": "Closed diagnostic cause of a failed operation; absent when no typed cause is available."
     }
   },
   "allOf": [
@@ -103,6 +108,11 @@
           "problem": {
             "type": "null"
           }
+        },
+        "not": {
+          "required": [
+            "cause"
+          ]
         }
       }
     }

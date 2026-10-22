@@ -91,7 +91,7 @@ func TestStorageEvictionReceiptDischargesChargeAndNewScanRequeues(t *testing.T) 
 		t.Fatalf("wrong exact eviction work: %+v", work)
 	}
 	requireNoError(t, f.s.BeginStorageCleanup(ctx, *work))
-	requireNoError(t, f.s.CompleteStorageCleanup(ctx, *work, hoststorage.DeleteConfirmed))
+	requireNoError(t, f.s.CompleteStorageCleanup(ctx, *work, hoststorage.DeleteConfirmed, "deleted"))
 	if got := charge(); got != 0 {
 		t.Fatalf("confirmed deletion retained %d charged bytes", got)
 	}
@@ -365,7 +365,7 @@ func TestStorageImageEvictionFencesNewPinsAndRequeuesAfterReappearance(t *testin
 		t.Fatalf("image pin crossed accepted deletion fence: %v", err)
 	}
 	requireNoError(t, f.s.BeginStorageCleanup(ctx, *work))
-	requireNoError(t, f.s.CompleteStorageCleanup(ctx, *work, hoststorage.DeleteConfirmed))
+	requireNoError(t, f.s.CompleteStorageCleanup(ctx, *work, hoststorage.DeleteConfirmed, "deleted"))
 	var state, reservation string
 	requireNoError(t, f.s.db.QueryRowContext(ctx, `SELECT state FROM host_application_images WHERE generation_id=?`, generation.ID).Scan(&state))
 	requireNoError(t, f.s.db.QueryRowContext(ctx, `SELECT state FROM host_storage_reservations WHERE mutation_operation_id=?`, generation.OperationID).Scan(&reservation))

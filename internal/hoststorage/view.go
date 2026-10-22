@@ -66,6 +66,7 @@ type View struct {
 		ConnectionRevision int64  `json:"connection_revision"`
 	} `json:"scope"`
 	ObservedAt                     *time.Time           `json:"observed_at"`
+	Reason                         string               `json:"reason,omitempty"`
 	ScanState                      string               `json:"scan_state"`
 	Precision                      string               `json:"precision"`
 	Machine                        MachineTotals        `json:"machine"`

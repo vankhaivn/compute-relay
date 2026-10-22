@@ -14,6 +14,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
@@ -461,5 +462,49 @@ func TestHealthAliasesShareMetricsButKeepRequestPolicy(t *testing.T) {
 	cached, err := f.service.Cached(context.Background(), f.lan.ResourceID)
 	if err != nil || cached.Policy != nil {
 		t.Fatal("machine cache retained connection policy", err)
+	}
+}
+
+func TestHealthServicePersistsClosedCollectionCause(t *testing.T) {
+	for _, tc := range []struct {
+		name, cause string
+		sample      func(*serviceFixture, hosthealth.Target) (hosthealth.Snapshot, error)
+	}{
+		{"transport", "host_unavailable", func(_ *serviceFixture, _ hosthealth.Target) (hosthealth.Snapshot, error) {
+			return hosthealth.Snapshot{}, provider.WithReason(errors.New("private transport canary"), "host_unavailable")
+		}},
+		{"timeout", "health_collection_timeout", func(_ *serviceFixture, _ hosthealth.Target) (hosthealth.Snapshot, error) {
+			return hosthealth.Snapshot{}, context.DeadlineExceeded
+		}},
+		{"invalid", "health_snapshot_invalid", func(_ *serviceFixture, _ hosthealth.Target) (hosthealth.Snapshot, error) {
+			return hosthealth.Snapshot{}, nil
+		}},
+		{"binding", "health_binding_mismatch", func(f *serviceFixture, _ hosthealth.Target) (hosthealth.Snapshot, error) {
+			return healthSample("resource_"+strings.Repeat("b", 64), f.clock.Now(), "Darwin x86_64"), nil
+		}},
+		{"panic", "health_collector_panic", func(_ *serviceFixture, _ hosthealth.Target) (hosthealth.Snapshot, error) {
+			panic("private collector canary")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newServiceFixture(t)
+			f.sample = func(_ context.Context, target hosthealth.Target) (hosthealth.Snapshot, error) {
+				return tc.sample(f, target)
+			}
+			view, err := f.service.Refresh(context.Background(), f.lan)
+			if err != nil || view.Latest == nil || view.Latest.Cause != tc.cause || view.Fresh || view.UnknownReason != "health_observation_failed" || view.Latest.Validate() != nil {
+				t.Fatalf("cause lost: %#v %v", view, err)
+			}
+			raw, _ := json.Marshal(view.Latest)
+			if strings.Contains(string(raw), "canary") {
+				t.Fatal("private detail exposed")
+			}
+			// A fresh process preserves the cause in history but cannot inherit freshness.
+			restarted := f.newService(t)
+			cached, err := restarted.Cached(context.Background(), f.lan.ResourceID)
+			if err != nil || cached.Fresh || cached.Latest.Cause != tc.cause {
+				t.Fatal("durable cause disappeared", cached, err)
+			}
+		})
 	}
 }

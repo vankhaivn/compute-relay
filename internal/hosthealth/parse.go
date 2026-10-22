@@ -87,7 +87,19 @@ func thermalState(s Sample) Metric[int] {
 
 // Parse accepts only bounded, complete successful samples. Every output string is an
 // allowlisted constant; arbitrary host properties cannot enter a snapshot.
-func Parse(resourceID string, observed time.Time, samples map[Source]Sample) Snapshot {
+func Parse(resourceID string, observed time.Time, samples map[Source]Sample) (snapshot Snapshot) {
+	defer func() {
+		for _, source := range []struct {
+			key  Source
+			step string
+		}{{Platform, "health_platform"}, {NativeArchitecture, "health_native_architecture"}, {ThermalState, "health_thermal_state"}, {Thermal, "health_cpu_speed"}, {Power, "health_power"}} {
+			sample, present := samples[source.key]
+			if present && sampleReason(sample) != "source_missing_or_invalid" && sample.Status != Available {
+				snapshot.Cause = source.step + "_" + sampleReason(sample)
+				return
+			}
+		}
+	}()
 	if !resourcePattern.MatchString(resourceID) {
 		return emptySnapshot("", observed, Unavailable, "platform_unknown")
 	}

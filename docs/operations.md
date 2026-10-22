@@ -29,6 +29,8 @@ workers. Stopping Relay never cancels remote work.
 Provider and transport failures become attempt or operation evidence and never stop `serve`. A
 corrupted or inconsistent store does: `serve` exits 1 and prints one line naming the worker and a
 closed error class, for example `Runtime stopped: service=dispatch class=state_corrupt.`
+Startup and HTTP failures name their failed step; a worker’s own expired deadline reports
+`operation_timed_out`. Parent shutdown does not fabricate a worker failure.
 
 ## Local administration
 
@@ -187,6 +189,11 @@ HTTP 429 responses advertise safe operation retry and a cooldown. HTTP 503 respo
 A route deadline reports `REQUEST_TIMEOUT`, not an input-download failure. Preserve the original
 request key and inspect state after a timeout; the deadline alone cannot prove a mutation failed.
 An unexpected handler panic reports `RUNTIME_UNAVAILABLE` without exposing private error text.
+
+Adapter errors retain a closed step identifier matching `^[a-z][a-z0-9_]{0,63}$`.
+Job problems expose it in `details.reason` or `details.cause`; broad codes and retry hints
+remain separate. Collection and cleanup store the same identifiers, including unresolved
+verification after restart. Provider text, paths and credentials are never public details.
 
 For a bug, keep raw state and logs private. Report the binary revision, exact command, actual
 result, possible remote effects and a minimal sanitized reproduction.

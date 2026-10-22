@@ -341,7 +341,10 @@ func (s *Store) CompleteCollection(ctx context.Context, w collection.Work, proof
 	})
 }
 func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collection.Failure) error {
-	if f.Reason != "" && (f.Code != domain.CodeArtifactCollectionFailed || !domain.ValidCollectionReason(f.Reason)) {
+	if f.Reason != "" && !domain.ValidCollectionReason(f.Reason) {
+		return collection.ErrInvalid
+	}
+	if f.Cause != "" && !domain.ValidReason(f.Cause) {
 		return collection.ErrInvalid
 	}
 	switch f.Code {
@@ -373,6 +376,9 @@ func (s *Store) FailCollection(ctx context.Context, w collection.Work, f collect
 		}
 		if f.Reason != "" {
 			p = p.WithDetail(domain.ReasonDetail, f.Reason)
+		}
+		if f.Cause != "" {
+			p = p.WithDetail(domain.CauseDetail, f.Cause)
 		}
 		p = p.WithRetrySemantics(!f.Invalid, true).WithRecommendedAction(domain.RecommendedActionCollect)
 		if f.Code == domain.CodeRemoteIdentityMismatch {

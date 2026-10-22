@@ -162,21 +162,21 @@ func validStoppedPolicy(info containerInfo, internet, secrets bool) bool {
 func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info containerInfo, plan provider.Plan, modules map[string]string, manifest []byte, bindings []cacheBinding, recorded domain.SHA256Digest) (domain.SHA256Digest, error) {
 	req, err := admission.Parse(plan.Job.Specification)
 	if err != nil || !validStoppedPolicy(info, req.Spec().Network.RemoteInternet == "required", len(req.Spec().WorkloadSecrets) > 0) {
-		return "", ErrIdentity
+		return "", failure(errors.Join(ErrIdentity, err), "verify_prepared_bytes_identity_unverified")
 	}
 	if req.Spec().ApplicationImage != nil {
 		if !validApplicationContainer(info, info.Image) {
-			return "", ErrIdentity
+			return "", failure(ErrIdentity, "verify_prepared_bytes_identity_unverified")
 		}
 	} else if info.Config.Labels[labelPrefix+"application-image"] != "" {
-		return "", ErrIdentity
+		return "", failure(ErrIdentity, "verify_prepared_bytes_identity_unverified")
 	}
 	if len(bindings) > 0 {
 		if err := a.verifyCacheMounts(ctx, d, info, plan.Job.Identity, bindings); err != nil {
 			return "", err
 		}
 	} else if len(info.HostConfig.Mounts) != 0 || len(info.Mounts) != 0 {
-		return "", ErrIdentity
+		return "", failure(ErrIdentity, "verify_prepared_bytes_identity_unverified")
 	}
 	expected := expectedStaging(plan, modules, manifest, len(bindings) > 0)
 	if err := a.verifyStagedOnHost(ctx, d, info, plan.Job.Identity, expected); err != nil {
@@ -184,7 +184,7 @@ func (a *Adapter) verifyPreparedBytes(ctx context.Context, d docker, info contai
 	}
 	if recorded != "" {
 		if !preparationHashMatches(info, plan.Digest(), expected, recorded) {
-			return "", ErrIdentity
+			return "", failure(ErrIdentity, "verify_prepared_bytes_identity_unverified")
 		}
 		return recorded, nil
 	}
@@ -208,7 +208,7 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 			return err
 		}
 		if !owned(info, plan.Job.Identity) || info.Started() || info.Config.Labels[labelPrefix+"preparation"] != string(operation) || info.Config.Labels[labelPrefix+"plan"] != string(plan.Digest()) {
-			return ErrIdentity
+			return failure(ErrIdentity, "reconcile_controlled_preparation_identity_unverified")
 		}
 		engine := info.Config.Labels[labelPrefix+"engine"]
 		if err := d.verifyEngine(ctx, engine); err != nil {
@@ -218,7 +218,7 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		if err != nil || pinned != (plan.Job.Inputs.ApplicationImage != nil) ||
 			pinned && !validApplicationContainer(info, applicationID) ||
 			!pinned && info.Config.Labels[labelPrefix+"application-image"] != "" {
-			return ErrIdentity
+			return failure(errors.Join(ErrIdentity, err), "reconcile_controlled_preparation_identity_unverified")
 		}
 		p := provider.Prepared{Identity: plan.Job.Identity, PreparationID: operation, PlanSHA256: plan.Digest(), Resource: encodeRef(name, info.ID, engine), Private: true}
 		raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
@@ -233,12 +233,12 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		var staged marker
 		var bindings []cacheBinding
 		if json.Unmarshal(raw, &staged) != nil || staged.Preparation != operation || staged.Plan != plan.Digest() || staged.Container != info.ID || staged.EngineID != engine || !staged.Verification.Valid() || staged.Cache != (info.Config.Labels[labelPrefix+"cache"] == "volumes/v1") || staged.ApplicationImage != applicationID {
-			return ErrIdentity
+			return failure(ErrIdentity, "reconcile_controlled_preparation_identity_unverified")
 		}
 		if staged.Cache {
 			bindings, err = a.activeCachePlan(ctx, plan)
 			if err != nil || len(bindings) == 0 {
-				return ErrIdentity
+				return failure(errors.Join(ErrIdentity, err), "reconcile_controlled_preparation_identity_unverified")
 			}
 			if err := cacheManifest(manifest, plan, bindings); err != nil {
 				return err
@@ -246,7 +246,7 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 		}
 		rawManifest, _ := json.Marshal(manifest)
 		if staged.Manifest != provider.Digest(rawManifest) {
-			return ErrIdentity
+			return failure(ErrIdentity, "reconcile_controlled_preparation_identity_unverified")
 		}
 		if !pinned {
 			image, found, err := d.inspectImage(ctx, a.config.Image)
@@ -254,7 +254,7 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 				return err
 			}
 			if !found || info.Image != image.ID {
-				return ErrIdentity
+				return failure(ErrIdentity, "reconcile_controlled_preparation_identity_unverified")
 			}
 		}
 		verified, err := a.verifyPreparedBytes(ctx, d, info, plan, modules, rawManifest, bindings, staged.Verification)
@@ -262,14 +262,14 @@ func (a *Adapter) reconcileControlledPreparation(ctx context.Context, plan provi
 			return err
 		}
 		if verified != staged.Verification {
-			return ErrIdentity
+			return failure(ErrIdentity, "reconcile_controlled_preparation_identity_unverified")
 		}
 		p.Ready, p.VerificationSHA256, p.ManifestSHA256 = true, verified, staged.Manifest
 		seen = provider.PreparationObservation{Status: provider.ReconciliationFound, Prepared: &p}
 		return nil
 	})
-	if err == ErrIdentity {
-		problem := provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "prepared container identity or verified bytes changed; no restaging is permitted")
+	if errors.Is(err, ErrIdentity) {
+		problem := provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "prepared container identity or verified bytes changed; no restaging is permitted").WithDetail(domain.ReasonDetail, failureReason(err, "prepared_identity_unverified")).WithCause(err)
 		return provider.PreparationObservation{}, problem
 	}
 	return seen, err
@@ -295,18 +295,18 @@ func (a *Adapter) Start(ctx context.Context, prepared provider.Prepared, authori
 // writing start authority. The on-host verifier does not start the target.
 func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info containerInfo, p provider.Prepared, authorization provider.StartAuthorization) error {
 	if authorization.Validate(p) != nil || info.Config.Labels[labelPrefix+"plan"] != string(p.PlanSHA256) {
-		return ErrIdentity
+		return failure(ErrIdentity, "check_controlled_start_identity_unverified")
 	}
 	raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
 	var m marker
 	ref, refErr := decodeRef(p.Resource, p.Identity)
 	cached := info.Config.Labels[labelPrefix+"cache"] == "volumes/v1"
 	if refErr != nil || err != nil || !found || json.Unmarshal(raw, &m) != nil || m != (marker{Preparation: p.PreparationID, Plan: p.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: p.VerificationSHA256, Manifest: p.ManifestSHA256, Cache: cached, ApplicationImage: info.Config.Labels[labelPrefix+"application-image"]}) {
-		return ErrIdentity
+		return failure(errors.Join(ErrIdentity, refErr, err), "check_controlled_start_identity_unverified")
 	}
 	raw, found, err = readFile(ctx, d, info.ID, "/relay/manifest.json", maxManifestBytes)
 	if err != nil || !found || provider.Digest(raw) != p.ManifestSHA256 {
-		return ErrIdentity
+		return failure(errors.Join(ErrIdentity, err), "check_controlled_start_identity_unverified")
 	}
 	var manifest struct {
 		WorkloadSecrets  []workloadsecret.Slot `json:"workload_secrets"`
@@ -332,20 +332,20 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 		} `json:"timeouts"`
 	}
 	if json.Unmarshal(raw, &manifest) != nil || manifest.ExecutionControl != "prepare_then_start" || !validStoppedPolicy(info, manifest.Network.RemoteInternet == "required", len(manifest.WorkloadSecrets) > 0) || authorization.MaxRemoteWallSeconds > manifest.Timeouts.RemoteWallSeconds || authorization.MaxRemoteWallSeconds <= manifest.Timeouts.SetupSeconds+manifest.Timeouts.FinalizationGraceSeconds {
-		return ErrIdentity
+		return failure(ErrIdentity, "check_controlled_start_identity_unverified")
 	}
 	if len(manifest.WorkloadSecrets) > 0 {
 		if authorization.Secrets == nil || !slices.Equal(manifest.WorkloadSecrets, authorization.Secrets.Slots) {
-			return ErrIdentity
+			return failure(ErrIdentity, "check_controlled_start_identity_unverified")
 		}
 	} else if authorization.Secrets != nil {
-		return ErrIdentity
+		return failure(ErrIdentity, "check_controlled_start_identity_unverified")
 	}
 	if bound := manifest.Timeouts.ExecutionDeadline; bound != "" {
 		original, err := time.Parse(time.RFC3339, bound)
 		deadline, deadlineErr := time.Parse(time.RFC3339, authorization.ExecutionDeadline)
 		if err != nil || deadlineErr != nil || deadline.After(original) {
-			return ErrIdentity
+			return failure(errors.Join(ErrIdentity, err), "check_controlled_start_identity_unverified")
 		}
 	}
 	modules, err := runnerassets.Sources()
@@ -363,13 +363,13 @@ func (a *Adapter) checkControlledStart(ctx context.Context, d docker, info conta
 		}
 	}
 	if !preparationHashMatches(info, p.PlanSHA256, files, p.VerificationSHA256) {
-		return ErrIdentity
+		return failure(ErrIdentity, "check_controlled_start_identity_unverified")
 	}
 	// A stale/mismatched control file cannot be overwritten after a possible write.
 	if _, exists, err := readFile(ctx, d, info.ID, startControlPath, 4096); err != nil {
 		return err
 	} else if exists {
-		return errStartClaimed
+		return failure(errStartClaimed, "start_control_already_exists")
 	}
 	if cached {
 		return a.verifyCachedReadiness(ctx, d, info, p.Identity, p.PlanSHA256, raw, p.ManifestSHA256, p.VerificationSHA256)

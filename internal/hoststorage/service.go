@@ -27,15 +27,26 @@ func NewService(repo CleanupRepository, resolver ProviderResolver) (*Service, er
 	return &Service{repo: repo, resolver: resolver}, nil
 }
 
-func (s *Service) Preview(ctx context.Context, w domain.WorkspaceID, token, connection, orphan string) (Preview, error) {
+func (s *Service) Preview(ctx context.Context, w domain.WorkspaceID, token, connection, orphan string) (preview Preview, err error) {
+	step := "storage_preview_target_failed"
+	defer func() {
+		if recover() != nil {
+			preview, err = Preview{}, provider.WithReason(ErrUnverified, step)
+		}
+		if err != nil {
+			err = provider.WithReason(err, step)
+		}
+	}()
 	candidate, err := s.repo.FindStorageOrphan(ctx, w, token, connection, orphan)
 	if err != nil {
 		return Preview{}, err
 	}
+	step = "storage_preview_binding_unavailable"
 	p, err := s.resolver.Resolve(candidate.Binding)
 	if err != nil {
 		return Preview{}, err
 	}
+	step = "storage_preview_binding_unverified"
 	if err := p.Verify(ctx, candidate.Binding); err != nil {
 		return Preview{}, err
 	}
@@ -43,10 +54,12 @@ func (s *Service) Preview(ctx context.Context, w domain.WorkspaceID, token, conn
 	if !ok {
 		return Preview{}, ErrUnverified
 	}
+	step = "storage_preview_observation_failed"
 	observation, err := observer.ObserveStorageTarget(ctx, candidate.Target)
 	if err != nil {
 		return Preview{}, err
 	}
+	step = "storage_preview_record_failed"
 	return s.repo.RecordStoragePreview(ctx, w, token, candidate, observation)
 }
 

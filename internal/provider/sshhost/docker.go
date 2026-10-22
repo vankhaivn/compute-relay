@@ -63,7 +63,69 @@ func (d docker) run(ctx context.Context, stdin io.Reader, stdout io.Writer, args
 		// context change to redirect a later command in the same operation.
 		command = []string{"/usr/bin/env", "-u", "DOCKER_CONTEXT", "-u", "DOCKER_HOST", d.binary, "--host", d.host}
 	}
-	return d.exec.Run(ctx, d.env(), append(command, args...), stdin, stdout)
+	result, err := d.exec.Run(ctx, d.env(), append(command, args...), stdin, stdout)
+	return result, failure(err, dockerStep(args))
+}
+
+func dockerStep(args []string) string {
+	if len(args) == 0 {
+		return "docker_command_failed"
+	}
+	switch args[0] {
+	case "version":
+		return "docker_version_read_failed"
+	case "info":
+		return "docker_info_read_failed"
+	case "build":
+		return "docker_image_build_failed"
+	case "pull":
+		return "docker_image_pull_failed"
+	case "context":
+		return "docker_context_read_failed"
+	case "system":
+		return "storage_container_summary_failed"
+	}
+	if len(args) > 1 {
+		switch args[0] + "/" + args[1] {
+		case "container/inspect":
+			return "docker_container_inspect_failed"
+		case "container/create":
+			return "docker_container_create_failed"
+		case "container/cp":
+			return "docker_container_copy_failed"
+		case "container/run":
+			return "docker_helper_run_failed"
+		case "container/start":
+			return "container_start_failed"
+		case "container/stop":
+			return "container_stop_failed"
+		case "container/rm":
+			return "container_delete_failed"
+		case "container/logs":
+			return "docker_logs_read_failed"
+		case "container/ls":
+			return "docker_container_list_failed"
+		case "container/exec":
+			return "docker_container_exec_failed"
+		case "volume/inspect":
+			return "cache_volume_inspect_failed"
+		case "volume/create":
+			return "cache_volume_create_failed"
+		case "volume/ls":
+			return "docker_volume_list_failed"
+		case "volume/rm":
+			return "cache_volume_delete_failed"
+		case "image/inspect":
+			return "docker_image_inspect_failed"
+		case "image/ls":
+			return "docker_image_list_failed"
+		case "image/load":
+			return "application_image_load_failed"
+		case "image/rm":
+			return "application_image_delete_failed"
+		}
+	}
+	return "docker_command_failed"
 }
 
 // findDocker returns the configured path or the first executable candidate.
@@ -78,13 +140,13 @@ func findDocker(ctx context.Context, exec executor, configured string) (string, 
 		}
 		result, err := exec.Run(ctx, nil, []string{"test", "-x", candidate}, nil, nil)
 		if err != nil {
-			return "", err
+			return "", failure(err, "docker_cli_probe_failed")
 		}
 		if result.ExitCode == 0 {
 			return candidate, nil
 		}
 	}
-	return "", ErrRemoteDocker
+	return "", failure(ErrRemoteDocker, "docker_cli_unavailable")
 }
 
 func missing(result Result) bool {
@@ -100,7 +162,7 @@ func (d docker) ping(ctx context.Context) error {
 		return err
 	}
 	if result.ExitCode != 0 {
-		return ErrRemoteDocker
+		return failure(errors.Join(ErrRemoteDocker, err), "docker_ping_failed")
 	}
 	return nil
 }
@@ -114,7 +176,7 @@ func (d docker) platform(ctx context.Context) (string, string, error) {
 	}
 	parts := strings.Split(strings.TrimSpace(out.String()), "/")
 	if result.ExitCode != 0 || len(parts) != 2 {
-		return "", "", ErrRemoteDocker
+		return "", "", failure(errors.Join(ErrRemoteDocker, err), "docker_platform_failed")
 	}
 	return parts[0], parts[1], nil
 }
@@ -125,11 +187,11 @@ func (d docker) systemTime(ctx context.Context) (time.Time, error) {
 	var out bytes.Buffer
 	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 128}, "info", "--format", "{{.SystemTime}}")
 	if err != nil || result.ExitCode != 0 {
-		return time.Time{}, ErrRemoteDocker
+		return time.Time{}, failure(errors.Join(ErrRemoteDocker, err), "docker_clock_read_failed")
 	}
 	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(out.String()))
 	if err != nil || at.IsZero() {
-		return time.Time{}, ErrRemoteDocker
+		return time.Time{}, failure(errors.Join(ErrRemoteDocker, err), "docker_clock_read_failed")
 	}
 	return at, nil
 }
@@ -139,7 +201,7 @@ func (d docker) engineID(ctx context.Context) (string, error) {
 	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 256}, "info", "--format", "{{.ID}}")
 	id := strings.TrimSpace(out.String())
 	if err != nil || result.ExitCode != 0 || !engineIdentity.MatchString(id) {
-		return "", ErrRemoteDocker
+		return "", failure(errors.Join(ErrRemoteDocker, err), "docker_engine_read_failed")
 	}
 	return id, nil
 }
@@ -153,7 +215,7 @@ func (d docker) verifyEngine(ctx context.Context, expected string) error {
 		return err
 	}
 	if current != expected {
-		return ErrIdentity
+		return failure(ErrIdentity, "docker_engine_identity_mismatch")
 	}
 	return nil
 }
@@ -179,7 +241,7 @@ func (d docker) inspectImage(ctx context.Context, ref string) (imageInfo, bool, 
 	var images []imageInfo
 	if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &images) != nil || len(images) != 1 ||
 		!strings.HasPrefix(images[0].ID, "sha256:") || images[0].OS == "" || images[0].Architecture == "" {
-		return imageInfo{}, false, ErrRemoteDocker
+		return imageInfo{}, false, failure(errors.Join(ErrRemoteDocker, err), "docker_image_inspect_failed")
 	}
 	return images[0], true, nil
 }
@@ -190,7 +252,7 @@ func (d docker) pull(ctx context.Context, ref string) error {
 		return err
 	}
 	if result.ExitCode != 0 {
-		return ErrRemoteDocker
+		return failure(errors.Join(ErrRemoteDocker, err), "docker_image_pull_failed")
 	}
 	return nil
 }
@@ -272,14 +334,14 @@ func (d docker) inspect(ctx context.Context, name string) (containerInfo, bool, 
 	var containers []containerInfo
 	if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &containers) != nil || len(containers) != 1 ||
 		containers[0].ID == "" {
-		return containerInfo{}, false, ErrRemoteDocker
+		return containerInfo{}, false, failure(errors.Join(ErrRemoteDocker, err), "docker_container_inspect_failed")
 	}
 	if containerID.MatchString(name) {
 		if containers[0].ID != name {
-			return containerInfo{}, false, ErrRemoteDocker
+			return containerInfo{}, false, failure(errors.Join(ErrRemoteDocker, err), "docker_container_inspect_failed")
 		}
 	} else if containers[0].Name != "/"+name {
-		return containerInfo{}, false, ErrRemoteDocker
+		return containerInfo{}, false, failure(errors.Join(ErrRemoteDocker, err), "docker_container_inspect_failed")
 	}
 	return containers[0], true, nil
 }
@@ -345,7 +407,7 @@ func (d docker) create(ctx context.Context, spec containerSpec) (string, error) 
 	}
 	id := strings.TrimSpace(out.String())
 	if result.ExitCode != 0 || len(id) != 64 {
-		return "", ErrRemoteDocker
+		return "", failure(errors.Join(ErrRemoteDocker, err), "docker_container_create_failed")
 	}
 	return id, nil
 }
@@ -357,7 +419,7 @@ func (d docker) copyIn(ctx context.Context, name string, archive io.Reader) erro
 		return err
 	}
 	if result.ExitCode != 0 {
-		return ErrRemoteDocker
+		return failure(errors.Join(ErrRemoteDocker, err), "docker_copy_in_failed")
 	}
 	return nil
 }
@@ -373,7 +435,7 @@ func (d docker) copyOut(ctx context.Context, name, source string, w io.Writer) (
 		if missing(result) || strings.Contains(string(result.Stderr), "Could not find the file") {
 			return false, nil
 		}
-		return false, ErrRemoteDocker
+		return false, failure(errors.Join(ErrRemoteDocker, err), "docker_copy_out_failed")
 	}
 	return true, nil
 }
@@ -391,7 +453,7 @@ func (d docker) logs(ctx context.Context, name string, w io.Writer) (bool, error
 		return false, nil
 	}
 	if result.ExitCode != 0 {
-		return false, ErrRemoteDocker
+		return false, failure(errors.Join(ErrRemoteDocker, err), "docker_logs_read_failed")
 	}
 	return true, nil
 }

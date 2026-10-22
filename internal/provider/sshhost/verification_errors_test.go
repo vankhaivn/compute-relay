@@ -15,17 +15,18 @@ import (
 
 func TestVerifyClassifiesFailuresWithoutExposingDiagnostics(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		cause error
-		code  domain.ErrorCode
+		name   string
+		cause  error
+		code   domain.ErrorCode
+		reason string
 	}{
-		{"transport", ErrUnavailable, domain.CodeProviderUnreachable},
-		{"authentication", ErrCredentialReject, domain.CodeProviderAuthFailed},
-		{"host key", ErrHostKeyMismatch, domain.CodeRemoteIdentityMismatch},
-		{"docker", ErrRemoteDocker, domain.CodeProviderStateUnknown},
-		{"resource unreadable", ErrResourceIdentity, domain.CodeProviderStateUnknown},
-		{"unexpected", errors.New("private diagnostic"), domain.CodeProviderStateUnknown},
-		{"vault denial", credentials.ErrUnavailable, domain.CodeProviderAuthFailed},
+		{"transport", ErrUnavailable, domain.CodeProviderUnreachable, "host_unavailable"},
+		{"authentication", ErrCredentialReject, domain.CodeProviderAuthFailed, "credential_rejected"},
+		{"host key", ErrHostKeyMismatch, domain.CodeRemoteIdentityMismatch, "host_key_mismatch"},
+		{"docker", ErrRemoteDocker, domain.CodeProviderStateUnknown, "remote_docker_failed"},
+		{"resource unreadable", ErrResourceIdentity, domain.CodeProviderStateUnknown, "ssh_resource_identity_unverified"},
+		{"unexpected", errors.New("private diagnostic"), domain.CodeProviderStateUnknown, "ssh_verification_failed"},
+		{"vault denial", credentials.ErrUnavailable, domain.CodeProviderAuthFailed, "ssh_credential_read_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -40,7 +41,7 @@ func TestVerifyClassifiesFailuresWithoutExposingDiagnostics(t *testing.T) {
 			if !errors.As(err, &problem) || problem.Code != tc.code || problem.Validate() != nil {
 				t.Fatalf("verification = %v; want %s", err, tc.code)
 			}
-			if !errors.Is(err, tc.cause) || strings.Contains(err.Error(), "private diagnostic") || len(problem.PublicDetails()) != 0 {
+			if !errors.Is(err, tc.cause) || strings.Contains(err.Error(), "private diagnostic") || problem.PublicDetails()[domain.ReasonDetail] != tc.reason {
 				t.Fatal("verification lost cause or exposed private diagnostics", err)
 			}
 			if h.host.created != 0 || h.host.starts != 0 || h.host.builds != 0 {

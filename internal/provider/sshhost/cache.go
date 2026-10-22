@@ -113,12 +113,12 @@ func (a *Adapter) prepareCache(ctx context.Context, d docker, plan provider.Plan
 			bytes int64
 		}{key.SHA256, key.Bytes}
 		if key.InstallationID != plan.Job.Identity.InstallationID || string(key.MachineID) != a.config.MachineID || string(key.EngineID) != a.config.EngineID || objects[objectKey].SHA256 == "" {
-			return nil, ErrIdentity
+			return nil, failure(ErrIdentity, "prepare_cache_identity_unverified")
 		}
 		byObject[objectKey] = key
 	}
 	if len(byObject) != len(objects) {
-		return nil, ErrIdentity
+		return nil, failure(ErrIdentity, "prepare_cache_identity_unverified")
 	}
 	keys := slices.Collect(maps.Values(byObject))
 	slices.SortFunc(keys, func(x, y hostcache.Key) int {
@@ -149,7 +149,7 @@ func (a *Adapter) prepareCache(ctx context.Context, d docker, plan provider.Plan
 			continue
 		}
 		if generation.State == hostcache.Claimed && generation.WriterPhase != hostcache.WriterFinished {
-			return nil, hostcache.ErrUnknown
+			return nil, failure(hostcache.ErrUnknown, "prepare_cache_cache_state_unknown")
 		}
 		observation, err := a.observeVolume(ctx, d, *generation)
 		if err != nil {
@@ -168,7 +168,7 @@ func (a *Adapter) prepareCache(ctx context.Context, d docker, plan provider.Plan
 			}
 			generation, err = a.cache.Active(ctx, key)
 			if err != nil || generation == nil {
-				return nil, ErrIdentity
+				return nil, failure(errors.Join(ErrIdentity, err), "prepare_cache_identity_unverified")
 			}
 		}
 		ready[key] = *generation
@@ -209,7 +209,7 @@ func (a *Adapter) waitForPeerGeneration(ctx context.Context, key hostcache.Key) 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
-			return nil, hostcache.ErrUnknown
+			return nil, failure(hostcache.ErrUnknown, "wait_for_peer_generation_cache_state_unknown")
 		case <-ticker.C:
 		}
 	}
@@ -234,7 +234,7 @@ func (d docker) inspectVolume(ctx context.Context, name string) (volumeInfo, boo
 	}
 	var found []volumeInfo
 	if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &found) != nil || len(found) != 1 || found[0].Name != name {
-		return volumeInfo{}, false, ErrRemoteDocker
+		return volumeInfo{}, false, failure(errors.Join(ErrRemoteDocker, err), "cache_volume_inspect_failed")
 	}
 	return found[0], true, nil
 }
@@ -254,14 +254,14 @@ func (d docker) inspectOwnedCacheVolume(ctx context.Context, g hostcache.Generat
 		return volumeInfo{}, false, err
 	}
 	if result.ExitCode != 0 {
-		return volumeInfo{}, false, ErrRemoteDocker
+		return volumeInfo{}, false, failure(errors.Join(ErrRemoteDocker, err), "cache_volume_list_failed")
 	}
 	listed := strings.TrimSpace(out.String())
 	if listed == "" {
 		return volumeInfo{}, false, nil
 	}
 	if listed != g.VolumeName {
-		return volumeInfo{}, false, ErrIdentity
+		return volumeInfo{}, false, failure(ErrIdentity, "inspect_owned_cache_volume_identity_unverified")
 	}
 	return d.inspectVolume(ctx, g.VolumeName)
 }
@@ -289,7 +289,7 @@ func (d docker) createVolume(ctx context.Context, g hostcache.Generation) error 
 		return err
 	}
 	if result.ExitCode != 0 || strings.TrimSpace(out.String()) != g.VolumeName {
-		return ErrRemoteDocker
+		return failure(errors.Join(ErrRemoteDocker, err), "cache_volume_create_failed")
 	}
 	return nil
 }
@@ -329,7 +329,7 @@ func (a *Adapter) writeVolume(ctx context.Context, d docker, image string, g hos
 		return true, werr
 	}
 	if result.ExitCode != 0 || werr != nil {
-		return true, ErrArtifact
+		return true, failure(ErrArtifact, "write_volume_artifact_invalid")
 	}
 	return true, nil
 }
@@ -411,7 +411,7 @@ func (a *Adapter) resolveGeneration(ctx context.Context, d docker, owner hostcac
 					}
 					g, err = a.cache.Active(ctx, key)
 					if err != nil || g == nil {
-						return hostcache.Generation{}, 0, ErrIdentity
+						return hostcache.Generation{}, 0, failure(errors.Join(ErrIdentity, err), "resolve_generation_identity_unverified")
 					}
 				}
 				return *g, 0, nil
@@ -433,7 +433,7 @@ func (a *Adapter) resolveGeneration(ctx context.Context, d docker, owner hostcac
 		if _, exists, err := d.inspectOwnedCacheVolume(ctx, *g); err != nil {
 			return hostcache.Generation{}, 0, err
 		} else if exists {
-			return hostcache.Generation{}, 0, ErrIdentity
+			return hostcache.Generation{}, 0, failure(ErrIdentity, "resolve_generation_identity_unverified")
 		}
 		if err := d.createVolume(ctx, *g); err != nil {
 			return hostcache.Generation{}, 0, err
@@ -443,7 +443,7 @@ func (a *Adapter) resolveGeneration(ctx context.Context, d docker, owner hostcac
 			return hostcache.Generation{}, 0, err
 		}
 		if !exists || !validCacheVolume(v, *g) {
-			return hostcache.Generation{}, 0, ErrIdentity
+			return hostcache.Generation{}, 0, failure(ErrIdentity, "resolve_generation_identity_unverified")
 		}
 		image, err := a.standardVerifierImage(ctx, d)
 		if err != nil {
@@ -470,18 +470,18 @@ func (a *Adapter) resolveGeneration(ctx context.Context, d docker, owner hostcac
 			if writeErr != nil {
 				return hostcache.Generation{}, 0, writeErr
 			}
-			return hostcache.Generation{}, 0, ErrArtifact
+			return hostcache.Generation{}, 0, failure(ErrArtifact, "resolve_generation_artifact_invalid")
 		}
 		if err := a.cache.Verify(ctx, o); err != nil {
 			return hostcache.Generation{}, 0, err
 		}
 		g, err = a.cache.Active(ctx, key)
 		if err != nil || g == nil {
-			return hostcache.Generation{}, 0, ErrIdentity
+			return hostcache.Generation{}, 0, failure(errors.Join(ErrIdentity, err), "resolve_generation_identity_unverified")
 		}
 		return *g, key.Bytes, nil
 	}
-	return hostcache.Generation{}, 0, fmt.Errorf("cache generation remained unavailable: %w", ErrIdentity)
+	return hostcache.Generation{}, 0, failure(fmt.Errorf("cache generation remained unavailable: %w", ErrIdentity), "cache_generation_unavailable")
 }
 
 func cacheMounts(bindings []cacheBinding) []dockerMountRequest {
@@ -498,31 +498,31 @@ func cacheMounts(bindings []cacheBinding) []dockerMountRequest {
 // followed by the original generation labels and read-only volume content.
 func (a *Adapter) verifyCacheMounts(ctx context.Context, d docker, info containerInfo, identity provider.Identity, bindings []cacheBinding) error {
 	if len(info.HostConfig.Mounts) != len(bindings) || len(info.Mounts) != len(bindings) {
-		return ErrIdentity
+		return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 	}
 	requested := map[string]dockerMountRequest{}
 	effective := map[string]dockerMount{}
 	for _, mount := range info.HostConfig.Mounts {
 		if _, duplicate := requested[mount.Target]; duplicate {
-			return ErrIdentity
+			return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 		}
 		requested[mount.Target] = mount
 	}
 	for _, mount := range info.Mounts {
 		if _, duplicate := effective[mount.Destination]; duplicate {
-			return ErrIdentity
+			return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 		}
 		effective[mount.Destination] = mount
 	}
 	for _, binding := range bindings {
 		if binding.Key.InstallationID != identity.InstallationID || binding.Path != cacheRelativePath(binding.Key) || binding.Generation.Key != binding.Key || binding.Generation.State != hostcache.Verified {
-			return ErrIdentity
+			return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 		}
 		target := binding.mountTarget()
 		r, rok := requested[target]
 		e, eok := effective[target]
 		if !rok || !eok || r.Type != "volume" || r.Source != binding.Generation.VolumeName || !r.ReadOnly || !r.VolumeOptions.NoCopy || e.Type != "volume" || e.Name != binding.Generation.VolumeName || e.RW {
-			return ErrIdentity
+			return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 		}
 		if a.cache != nil {
 			active, err := a.cache.Active(ctx, binding.Key)
@@ -530,7 +530,7 @@ func (a *Adapter) verifyCacheMounts(ctx context.Context, d docker, info containe
 				return err
 			}
 			if active == nil || active.ID != binding.Generation.ID || active.OperationID != binding.Generation.OperationID {
-				return ErrIdentity
+				return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 			}
 		}
 		o, err := a.observeVolume(ctx, d, binding.Generation)
@@ -538,7 +538,7 @@ func (a *Adapter) verifyCacheMounts(ctx context.Context, d docker, info containe
 			return err
 		}
 		if o.Kind != hostcache.ObservedComplete {
-			return ErrIdentity
+			return failure(ErrIdentity, "verify_cache_mounts_identity_unverified")
 		}
 		if a.cache != nil {
 			if err := a.cache.RecordMount(ctx, hostcache.MountReceipt{Attempt: cacheAttempt(identity), Generation: binding.Generation, ContainerID: info.ID, ReadOnly: true, Labels: o.Labels}); err != nil {
@@ -569,7 +569,7 @@ func cacheManifest(manifest map[string]any, plan provider.Plan, bindings []cache
 		bytes int64
 	}{bundle.SHA256, bundle.Bytes}]
 	if !ok {
-		return ErrIdentity
+		return failure(ErrIdentity, "cache_manifest_identity_unverified")
 	}
 	manifest["bundle"].(map[string]any)["path"] = path
 	inputs := manifest["inputs"].([]map[string]any)
@@ -579,7 +579,7 @@ func cacheManifest(manifest map[string]any, plan provider.Plan, bindings []cache
 			bytes int64
 		}{input.Object.SHA256, input.Object.Bytes}]
 		if !ok {
-			return ErrIdentity
+			return failure(ErrIdentity, "cache_manifest_identity_unverified")
 		}
 		inputs[i]["path"] = path
 	}
@@ -591,7 +591,7 @@ func cacheManifest(manifest map[string]any, plan provider.Plan, bindings []cache
 // a stopped container that still mounts the earlier volume.
 func (a *Adapter) activeCacheBindings(ctx context.Context, identity provider.Identity, files []stagedFile) ([]cacheBinding, error) {
 	if a.cache == nil {
-		return nil, ErrIdentity
+		return nil, failure(ErrIdentity, "active_cache_bindings_identity_unverified")
 	}
 	pins, err := a.cache.Pins(ctx, cacheAttempt(identity))
 	if err != nil {
@@ -608,7 +608,7 @@ func (a *Adapter) activeCacheBindings(ctx context.Context, identity provider.Ide
 		}{file.SHA256, file.Bytes}] = true
 	}
 	if len(pins) != len(wanted) {
-		return nil, ErrIdentity
+		return nil, failure(ErrIdentity, "active_cache_bindings_identity_unverified")
 	}
 	bindings := make([]cacheBinding, 0, len(pins))
 	for _, key := range pins {
@@ -616,14 +616,14 @@ func (a *Adapter) activeCacheBindings(ctx context.Context, identity provider.Ide
 			sha   domain.SHA256Digest
 			bytes int64
 		}{key.SHA256, key.Bytes}] {
-			return nil, ErrIdentity
+			return nil, failure(ErrIdentity, "active_cache_bindings_identity_unverified")
 		}
 		generation, err := a.cache.Active(ctx, key)
 		if err != nil {
 			return nil, err
 		}
 		if generation == nil || generation.State != hostcache.Verified {
-			return nil, ErrIdentity
+			return nil, failure(ErrIdentity, "active_cache_bindings_identity_unverified")
 		}
 		bindings = append(bindings, cacheBinding{Key: key, Generation: *generation, Path: cacheRelativePath(key)})
 	}
@@ -648,7 +648,7 @@ type cacheManifestFile struct {
 // every exact mounted generation independently through the fixed RO verifier.
 func (a *Adapter) verifyCachedReadiness(ctx context.Context, d docker, info containerInfo, identity provider.Identity, planDigest domain.SHA256Digest, rawManifest []byte, manifestDigest, verificationDigest domain.SHA256Digest) error {
 	if provider.Digest(rawManifest) != manifestDigest || info.Config.Labels[labelPrefix+"cache"] != "volumes/v1" {
-		return ErrIdentity
+		return failure(ErrIdentity, "verify_cached_readiness_identity_unverified")
 	}
 	var manifest struct {
 		Bundle  cacheManifestFile   `json:"bundle"`
@@ -659,18 +659,18 @@ func (a *Adapter) verifyCachedReadiness(ctx context.Context, d docker, info cont
 		WorkloadSecrets []json.RawMessage `json:"workload_secrets"`
 	}
 	if json.Unmarshal(rawManifest, &manifest) != nil || !manifest.Bundle.SHA256.Valid() || manifest.Bundle.Bytes < 0 || len(manifest.Inputs) > 256 || !validStoppedPolicy(info, manifest.Network.RemoteInternet == "required", len(manifest.WorkloadSecrets) > 0) {
-		return ErrIdentity
+		return failure(ErrIdentity, "verify_cached_readiness_identity_unverified")
 	}
 	objects := []stagedFile{{Bytes: manifest.Bundle.Bytes, SHA256: manifest.Bundle.SHA256}}
 	for _, input := range manifest.Inputs {
 		if !input.SHA256.Valid() || input.Bytes < 0 {
-			return ErrIdentity
+			return failure(ErrIdentity, "verify_cached_readiness_identity_unverified")
 		}
 		objects = append(objects, stagedFile{Bytes: input.Bytes, SHA256: input.SHA256})
 	}
 	bindings, err := a.activeCacheBindings(ctx, identity, objects)
 	if err != nil || len(bindings) == 0 {
-		return ErrIdentity
+		return failure(errors.Join(ErrIdentity, err), "verify_cached_readiness_identity_unverified")
 	}
 	paths := map[struct {
 		sha   domain.SHA256Digest
@@ -687,7 +687,7 @@ func (a *Adapter) verifyCachedReadiness(ctx context.Context, d docker, info cont
 			sha   domain.SHA256Digest
 			bytes int64
 		}{file.SHA256, file.Bytes}] {
-			return ErrIdentity
+			return failure(ErrIdentity, "verify_cached_readiness_identity_unverified")
 		}
 	}
 	if err := a.verifyCacheMounts(ctx, d, info, identity, bindings); err != nil {
@@ -702,27 +702,27 @@ func (a *Adapter) verifyCachedReadiness(ctx context.Context, d docker, info cont
 		files["runner/relay_runner/"+name] = stagedFile{Bytes: int64(len(source)), SHA256: provider.Digest([]byte(source))}
 	}
 	if !preparationHashMatches(info, planDigest, files, verificationDigest) {
-		return ErrIdentity
+		return failure(ErrIdentity, "verify_cached_readiness_identity_unverified")
 	}
 	return a.verifyStagedOnHost(ctx, d, info, identity, files)
 }
 
 func (a *Adapter) checkCachedStart(ctx context.Context, d docker, info containerInfo, prepared provider.Prepared) error {
 	if !prepared.VerificationSHA256.Valid() || !prepared.ManifestSHA256.Valid() || info.Config.Labels[labelPrefix+"plan"] != string(prepared.PlanSHA256) {
-		return ErrIdentity
+		return failure(ErrIdentity, "check_cached_start_identity_unverified")
 	}
 	raw, found, err := readFile(ctx, d, info.ID, stagedMarker, maxCacheMarkerBytes)
 	if err != nil || !found {
-		return ErrIdentity
+		return failure(errors.Join(ErrIdentity, err), "check_cached_start_identity_unverified")
 	}
 	var proof marker
 	ref, err := decodeRef(prepared.Resource, prepared.Identity)
 	if err != nil || json.Unmarshal(raw, &proof) != nil || proof != (marker{Preparation: prepared.PreparationID, Plan: prepared.PlanSHA256, Container: info.ID, EngineID: ref.EngineID, Verification: prepared.VerificationSHA256, Manifest: prepared.ManifestSHA256, Cache: true, ApplicationImage: info.Config.Labels[labelPrefix+"application-image"]}) {
-		return ErrIdentity
+		return failure(errors.Join(ErrIdentity, err), "check_cached_start_identity_unverified")
 	}
 	manifest, found, err := readFile(ctx, d, info.ID, "/relay/manifest.json", maxManifestBytes)
 	if err != nil || !found {
-		return ErrIdentity
+		return failure(errors.Join(ErrIdentity, err), "check_cached_start_identity_unverified")
 	}
 	return a.verifyCachedReadiness(ctx, d, info, prepared.Identity, prepared.PlanSHA256, manifest, prepared.ManifestSHA256, prepared.VerificationSHA256)
 }

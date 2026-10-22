@@ -4,29 +4,312 @@
   "title": "Connection storage inventory",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "scope", "observed_at", "scan_state", "precision", "machine", "workspaces", "other_workspaces_referenced_bytes", "cache", "retention", "orphans", "foreign", "budget", "truncated"],
+  "required": [
+    "schema_version",
+    "scope",
+    "observed_at",
+    "scan_state",
+    "precision",
+    "machine",
+    "workspaces",
+    "other_workspaces_referenced_bytes",
+    "cache",
+    "retention",
+    "orphans",
+    "foreign",
+    "budget",
+    "truncated"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
-    "scope": {"type": "object", "additionalProperties": false, "required": ["resource_id", "connection_revision"], "properties": {"resource_id": {"type": "string", "pattern": "^resource_[0-9a-f]{64}$"}, "connection_revision": {"type": "integer", "minimum": 1}}},
-    "observed_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
-    "scan_state": {"enum": ["unknown", "complete", "incomplete"]},
-    "precision": {"enum": ["unknown", "measured", "declared_reservation", "upper_bound"]},
-    "machine": {"$ref": "#/$defs/machine"},
-    "workspaces": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/workspace"}},
-    "other_workspaces_referenced_bytes": {"$ref": "#/$defs/bytes"},
-    "cache": {"type": "object", "additionalProperties": false, "required": ["generation_count", "charged_bytes", "live_pin_count"], "properties": {"generation_count": {"$ref": "#/$defs/bytes"}, "charged_bytes": {"$ref": "#/$defs/bytes"}, "live_pin_count": {"$ref": "#/$defs/bytes"}}},
-    "retention": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/retention"}},
-    "orphans": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/orphan"}},
-    "foreign": {"type": "object", "additionalProperties": false, "required": ["containers", "volumes", "images"], "properties": {"containers": {"$ref": "#/$defs/bytes"}, "volumes": {"$ref": "#/$defs/bytes"}, "images": {"$ref": "#/$defs/bytes"}}},
-    "budget": {"type": "object", "additionalProperties": false, "required": ["configured", "effective", "reserved_bytes", "charged_bytes", "state"], "properties": {"configured": {"$ref": "#/$defs/limit"}, "effective": {"$ref": "#/$defs/limit"}, "reserved_bytes": {"$ref": "#/$defs/bytes"}, "charged_bytes": {"$ref": "#/$defs/bytes"}, "state": {"enum": ["below_soft", "above_soft", "hard_refusal", "unknown"]}}},
-    "truncated": {"type": "boolean"}
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_id",
+        "connection_revision"
+      ],
+      "properties": {
+        "resource_id": {
+          "type": "string",
+          "pattern": "^resource_[0-9a-f]{64}$"
+        },
+        "connection_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "observed_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scan_state": {
+      "enum": [
+        "unknown",
+        "complete",
+        "incomplete"
+      ]
+    },
+    "precision": {
+      "enum": [
+        "unknown",
+        "measured",
+        "declared_reservation",
+        "upper_bound"
+      ]
+    },
+    "machine": {
+      "$ref": "#/$defs/machine"
+    },
+    "workspaces": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/workspace"
+      }
+    },
+    "other_workspaces_referenced_bytes": {
+      "$ref": "#/$defs/bytes"
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation_count",
+        "charged_bytes",
+        "live_pin_count"
+      ],
+      "properties": {
+        "generation_count": {
+          "$ref": "#/$defs/bytes"
+        },
+        "charged_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "live_pin_count": {
+          "$ref": "#/$defs/bytes"
+        }
+      }
+    },
+    "retention": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/retention"
+      }
+    },
+    "orphans": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/orphan"
+      }
+    },
+    "foreign": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "containers",
+        "volumes",
+        "images"
+      ],
+      "properties": {
+        "containers": {
+          "$ref": "#/$defs/bytes"
+        },
+        "volumes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "images": {
+          "$ref": "#/$defs/bytes"
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configured",
+        "effective",
+        "reserved_bytes",
+        "charged_bytes",
+        "state"
+      ],
+      "properties": {
+        "configured": {
+          "$ref": "#/$defs/limit"
+        },
+        "effective": {
+          "$ref": "#/$defs/limit"
+        },
+        "reserved_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "charged_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "state": {
+          "enum": [
+            "below_soft",
+            "above_soft",
+            "hard_refusal",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    }
   },
   "$defs": {
-    "bytes": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
-    "limit": {"type": "object", "additionalProperties": false, "required": ["soft_bytes", "hard_bytes"], "properties": {"soft_bytes": {"$ref": "#/$defs/bytes"}, "hard_bytes": {"$ref": "#/$defs/bytes"}}},
-    "machine": {"type": "object", "additionalProperties": false, "required": ["charged_bytes", "cache_bytes", "image_size_upper_bound", "attempt_writable_bytes", "orphan_bytes", "unobserved_reservation_delta_bytes"], "properties": {"charged_bytes": {"$ref": "#/$defs/bytes"}, "cache_bytes": {"$ref": "#/$defs/bytes"}, "image_size_upper_bound": {"$ref": "#/$defs/bytes"}, "attempt_writable_bytes": {"$ref": "#/$defs/bytes"}, "orphan_bytes": {"$ref": "#/$defs/bytes"}, "unobserved_reservation_delta_bytes": {"$ref": "#/$defs/bytes"}}},
-    "workspace": {"type": "object", "additionalProperties": false, "required": ["workspace_id", "referenced_bytes", "attempt_writable_bytes"], "properties": {"workspace_id": {"type": "string"}, "referenced_bytes": {"$ref": "#/$defs/bytes"}, "attempt_writable_bytes": {"$ref": "#/$defs/bytes"}}},
-    "retention": {"type": "object", "additionalProperties": false, "required": ["job_id", "attempt_id", "due_at", "status", "pending"], "properties": {"job_id": {"type": "string"}, "attempt_id": {"type": "string"}, "due_at": {"type": "string", "format": "date-time"}, "status": {"type": "string"}, "operation_id": {"type": "string"}, "pending": {"type": "boolean"}}},
-    "orphan": {"type": "object", "additionalProperties": false, "required": ["orphan_id", "class", "charged_bytes", "eligible_for_preview"], "properties": {"orphan_id": {"type": "string", "pattern": "^orphan_[0-9a-f]{64}$"}, "class": {"enum": ["container", "volume", "image"]}, "charged_bytes": {"$ref": "#/$defs/bytes"}, "eligible_for_preview": {"type": "boolean"}}}
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "limit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "soft_bytes",
+        "hard_bytes"
+      ],
+      "properties": {
+        "soft_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "hard_bytes": {
+          "$ref": "#/$defs/bytes"
+        }
+      }
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "charged_bytes",
+        "cache_bytes",
+        "image_size_upper_bound",
+        "attempt_writable_bytes",
+        "orphan_bytes",
+        "unobserved_reservation_delta_bytes"
+      ],
+      "properties": {
+        "charged_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "cache_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "image_size_upper_bound": {
+          "$ref": "#/$defs/bytes"
+        },
+        "attempt_writable_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "orphan_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "unobserved_reservation_delta_bytes": {
+          "$ref": "#/$defs/bytes"
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "referenced_bytes",
+        "attempt_writable_bytes"
+      ],
+      "properties": {
+        "workspace_id": {
+          "type": "string"
+        },
+        "referenced_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "attempt_writable_bytes": {
+          "$ref": "#/$defs/bytes"
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_id",
+        "attempt_id",
+        "due_at",
+        "status",
+        "pending"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "attempt_id": {
+          "type": "string"
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "pending": {
+          "type": "boolean"
+        }
+      }
+    },
+    "orphan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orphan_id",
+        "class",
+        "charged_bytes",
+        "eligible_for_preview"
+      ],
+      "properties": {
+        "orphan_id": {
+          "type": "string",
+          "pattern": "^orphan_[0-9a-f]{64}$"
+        },
+        "class": {
+          "enum": [
+            "container",
+            "volume",
+            "image"
+          ]
+        },
+        "charged_bytes": {
+          "$ref": "#/$defs/bytes"
+        },
+        "eligible_for_preview": {
+          "type": "boolean"
+        }
+      }
+    }
   }
 }

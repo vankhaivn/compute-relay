@@ -87,6 +87,10 @@ A genuine credential rejection still disables it. An unavailable connection with
 verified selection returns HTTP 503 with `PROVIDER_UNREACHABLE`,
 `details.reason: connection_unavailable`, safe operation retry and `Retry-After: 5`.
 
+Failed operations keep the broad `problem` and may add a closed `cause` identifier for the failed
+provider step. `cause` is absent when no typed diagnostic is available. This diagnostic does not
+change authentication, selection retention or retry policy.
+
 ## Concurrency
 
 The provider descriptor's `capabilities.concurrency` gives `support`, `scope` (`account` for Kaggle,

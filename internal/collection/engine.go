@@ -118,18 +118,34 @@ func (e *Engine) recordFailure(ctx context.Context, w Work, err error) error {
 }
 
 func collectionFailure(err error) Failure {
-	f := Failure{Code: domain.CodeArtifactCollectionFailed}
+	return collectionFailureAt(err, "artifact_collection_failed")
+}
+
+func collectionFailureAt(err error, reason string) Failure {
+	f := Failure{Code: domain.CodeArtifactCollectionFailed, Cause: provider.Reason(err, ""), cause: err}
 	var known Failure
 	if errors.As(err, &known) {
-		f = known
+		f.Code, f.Invalid, f.Reason, f.Cause = known.Code, known.Invalid, known.Reason, known.Cause
 	} else {
-		var problem domain.Problem
-		if errors.As(err, &problem) && problem.Code == domain.CodeArtifactCollectionFailed {
-			f.Reason = problem.Details[domain.ReasonDetail]
+		var value domain.Problem
+		var pointer *domain.Problem
+		if errors.As(err, &value) && value.Code == domain.CodeArtifactCollectionFailed {
+			f.Reason = value.PublicDetails()[domain.ReasonDetail]
+			if !domain.ValidCollectionReason(f.Reason) {
+				f.Cause = ""
+			}
+		} else if errors.As(err, &pointer) && pointer != nil && pointer.Code == domain.CodeArtifactCollectionFailed {
+			f.Reason = pointer.PublicDetails()[domain.ReasonDetail]
+			if !domain.ValidCollectionReason(f.Reason) {
+				f.Cause = ""
+			}
 		}
 	}
-	if f.Code != domain.CodeArtifactCollectionFailed || !domain.ValidCollectionReason(f.Reason) {
-		f.Reason = ""
+	if !domain.ValidCollectionReason(f.Reason) {
+		f.Reason = reason
+	}
+	if !domain.ValidReason(f.Cause) || f.Cause == f.Reason {
+		f.Cause = ""
 	}
 	return f
 }
@@ -137,7 +153,7 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, er
 	defer func() {
 		if recover() != nil {
 			src = nil
-			err = ErrUnavailable
+			err = collectionFailureAt(ErrUnavailable, "artifact_resolver_panic")
 		}
 	}()
 	p, err := e.resolver.Resolve(w.Binding)
@@ -148,11 +164,11 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, er
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_binding_unavailable"}
+		return nil, collectionFailureAt(err, "artifact_binding_unavailable")
 	}
 	src = p
 	if src == nil {
-		return nil, Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_binding_unavailable"}
+		return nil, Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_binding_unavailable", cause: err}
 	}
 	if err := src.Verify(ctx, w.Binding); err != nil {
 		if provider.IsLocalStateError(err) {
@@ -166,7 +182,7 @@ func (e *Engine) resolve(ctx context.Context, w Work) (src provider.Provider, er
 		if errors.As(err, &value) && value.Code == domain.CodeRemoteIdentityMismatch || errors.As(err, &pointer) && pointer != nil && pointer.Code == domain.CodeRemoteIdentityMismatch {
 			return nil, failure(domain.CodeRemoteIdentityMismatch, true)
 		}
-		return nil, Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_account_read_failed"}
+		return nil, collectionFailureAt(err, "artifact_account_read_failed")
 	}
 	return src, nil
 }
@@ -174,7 +190,7 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 	defer func() {
 		if recover() != nil {
 			snapshot = Snapshot{}
-			err = ErrUnavailable
+			err = collectionFailureAt(ErrUnavailable, "artifact_discovery_panic")
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -185,15 +201,15 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 		if provider.IsLocalStateError(err) {
 			return Snapshot{}, err
 		}
-		return Snapshot{}, collectionFailure(err)
+		return Snapshot{}, collectionFailureAt(err, "artifact_catalog_failed")
 	}
 	if len(catalog) > e.config.MaxFiles {
-		return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
+		return Snapshot{}, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_file_limit")
 	}
 	var total int64
 	for _, artifact := range catalog {
 		if artifact.Bytes < 0 || artifact.Bytes > provider.MaxArtifactBytes-total {
-			return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
+			return Snapshot{}, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_byte_limit")
 		}
 		total += artifact.Bytes
 	}
@@ -211,13 +227,13 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 		}
 	}
 	if !collisionFree(paths) {
-		return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
+		return Snapshot{}, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_path_invalid")
 	}
 	if manifestFile == nil {
 		return Snapshot{}, failure(domain.CodeResultManifestMissing, false)
 	}
 	if manifestFile.Bytes > MaxManifestBytes {
-		return Snapshot{}, failure(domain.CodeArtifactCollectionFailed, true)
+		return Snapshot{}, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_byte_limit")
 	}
 	var raw bytes.Buffer
 	writer := newCheckedWriter(ctx, &raw, manifestFile.Bytes)
@@ -226,7 +242,7 @@ func (e *Engine) discover(ctx context.Context, src provider.Provider, w Work) (s
 		if provider.IsLocalStateError(err) {
 			return Snapshot{}, err
 		}
-		return Snapshot{}, collectionFailure(err)
+		return Snapshot{}, collectionFailureAt(err, "artifact_manifest_download_failed")
 	}
 	if !writer.matches(*manifestFile, result) {
 		return Snapshot{}, failure(domain.CodeArtifactDigestMismatch, true)
@@ -237,20 +253,20 @@ func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work)
 	defer func() {
 		if recover() != nil {
 			proof = Verified{}
-			err = ErrUnavailable
+			err = collectionFailureAt(ErrUnavailable, "artifact_verification_panic")
 		}
 	}()
 	if w.Snapshot == nil || ValidateSnapshot(w, *w.Snapshot) != nil {
-		return proof, ErrInvalid
+		return proof, failure(domain.CodeArtifactCollectionFailed, true)
 	}
 	snapshot := w.Snapshot.Clone()
 	if len(snapshot.Files) > e.config.MaxFiles {
-		return proof, ErrInvalid
+		return proof, failure(domain.CodeArtifactCollectionFailed, true)
 	}
 	var total int64
 	for _, file := range snapshot.Files {
 		if file.Object.Bytes > e.config.MaxBytes-total {
-			return proof, ErrInvalid
+			return proof, failure(domain.CodeArtifactCollectionFailed, true)
 		}
 		total += file.Object.Bytes
 	}
@@ -290,7 +306,7 @@ func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work)
 		if file.Path == ManifestPath {
 			meta, err := e.blobs.Put(ctx, file.Object, bytes.NewBufferString(snapshot.Manifest))
 			if err != nil || meta != file.Object {
-				return proof, ErrUnavailable
+				return proof, collectionFailureAt(ErrUnavailable, "artifact_blob_write_failed")
 			}
 		} else {
 			var callback func(int64) error
@@ -301,7 +317,7 @@ func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work)
 				return proof, err
 			}
 			if callback != nil && progress.current != file.Object.Bytes {
-				return proof, ErrInvalid
+				return proof, failure(domain.CodeArtifactCollectionFailed, true)
 			}
 		}
 		present, err = e.existing(ctx, file.Object)
@@ -309,7 +325,7 @@ func (e *Engine) verifyFiles(ctx context.Context, src provider.Provider, w Work)
 			return proof, err
 		}
 		if !present {
-			return proof, ErrUnavailable
+			return proof, collectionFailureAt(ErrUnavailable, "artifact_blob_write_failed")
 		}
 		if file.Role == "output" {
 			progress.completed += file.Object.Bytes
@@ -334,13 +350,13 @@ func (e *Engine) existing(ctx context.Context, m domain.ObjectMetadata) (bool, e
 		return false, nil
 	} // Put is create-only; unreadable existing files cannot be overwritten.
 	if r == nil {
-		return false, ErrUnavailable
+		return false, collectionFailureAt(ErrUnavailable, "artifact_blob_read_failed")
 	}
 	h := sha256.New()
 	n, readErr := io.Copy(h, io.LimitReader(contextReader{ctx, r}, m.Bytes+1))
 	closeErr := r.Close()
 	if readErr != nil || closeErr != nil {
-		return false, ErrUnavailable
+		return false, collectionFailureAt(errors.Join(readErr, closeErr), "artifact_blob_read_failed")
 	}
 	if n != m.Bytes || hex.EncodeToString(h.Sum(nil)) != string(m.SHA256) {
 		return false, failure(domain.CodeArtifactDigestMismatch, true)
@@ -355,7 +371,7 @@ func (e *Engine) transfer(ctx context.Context, src provider.Provider, remote pro
 		var final error
 		defer func() {
 			if recover() != nil {
-				final = ErrUnavailable
+				final = collectionFailureAt(ErrUnavailable, "artifact_transfer_panic")
 			}
 			_ = writer.CloseWithError(final)
 			done <- final
@@ -364,7 +380,7 @@ func (e *Engine) transfer(ctx context.Context, src provider.Provider, remote pro
 		result, err := src.Fetch(ctx, remote, artifact, checked, artifact.Bytes, progress)
 		if err != nil {
 			var progressErr progressWriteError
-			final = collectionFailure(err)
+			final = collectionFailureAt(err, "artifact_download_failed")
 			if provider.IsLocalStateError(err) || errors.As(err, &progressErr) {
 				final = err
 			}
@@ -380,24 +396,43 @@ func (e *Engine) transfer(ctx context.Context, src provider.Provider, remote pro
 	joined := false
 	defer func() {
 		if recover() != nil {
-			err = ErrUnavailable
+			err = collectionFailureAt(ErrUnavailable, "artifact_blob_write_failed")
 		}
 		_ = reader.CloseWithError(ErrUnavailable)
 		if !joined {
 			<-done
 		}
 	}()
-	meta, putErr := e.blobs.Put(ctx, file.Object, reader)
+	input := &transferReader{reader: reader}
+	meta, putErr := e.blobs.Put(ctx, file.Object, input)
 	_ = reader.CloseWithError(putErr)
 	transferErr := <-done
 	joined = true
+	if putErr != nil && !input.failed {
+		return Failure{Code: domain.CodeArtifactCollectionFailed, Reason: "artifact_blob_write_failed", Cause: provider.Reason(putErr, ""), cause: errors.Join(putErr, transferErr)}
+	}
 	if transferErr != nil {
 		return transferErr
 	}
 	if putErr != nil || meta != file.Object {
-		return ErrUnavailable
+		return collectionFailureAt(putErr, "artifact_blob_write_failed")
 	}
 	return nil
+}
+
+// A store write can fail before the provider sees the resulting closed pipe.
+// Remember read failures so that secondary pipe errors do not hide that first step.
+type transferReader struct {
+	reader io.Reader
+	failed bool
+}
+
+func (r *transferReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if err != nil && err != io.EOF {
+		r.failed = true
+	}
+	return n, err
 }
 
 type contextReader struct {

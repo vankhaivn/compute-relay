@@ -1,6 +1,9 @@
 package sshhost
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // HostVerification contains non-secret evidence from the SSH peer and Docker engine.
 type HostVerification struct {
@@ -23,11 +26,11 @@ func VerifyHost(ctx context.Context, raw []byte) (string, error) {
 func VerifyHostDetails(ctx context.Context, raw []byte) (HostVerification, error) {
 	endpoint, err := ParseEndpoint(raw)
 	if err != nil {
-		return HostVerification{}, err
+		return HostVerification{}, failure(err, "ssh_endpoint_invalid")
 	}
 	client, err := Dial(ctx, endpoint.Target, endpoint.Credential)
 	if err != nil {
-		return HostVerification{}, err
+		return HostVerification{}, failure(err, failureReasonForTransport(err))
 	}
 	defer client.Close()
 	return verifyDocker(ctx, client, endpoint, client.HostKey)
@@ -40,7 +43,7 @@ func verifyDocker(ctx context.Context, exec executor, endpoint Endpoint, present
 	}
 	os, arch, err := (docker{exec: exec, binary: binary}).platform(ctx)
 	if err != nil || os != "linux" || !SupportedArchitecture(arch) {
-		return HostVerification{}, ErrRemoteDocker
+		return HostVerification{}, failure(errors.Join(ErrRemoteDocker, err), "docker_platform_unverified")
 	}
 	target := endpoint.Target
 	target.HostKey = presented

@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
 
@@ -68,6 +69,27 @@ func TestStorageRetryRefusalPreservesStudioErrorEnvelope(t *testing.T) {
 			p := decodeHTTPJSON[api.ErrorEnvelope](t, raw).Error
 			if p.Code != domain.CodeResourceRequirementUnsatisfied || p.Stage != domain.FailureStageValidation || p.ComputeMayHaveStarted || p.RecommendedAction != domain.RecommendedActionWait || p.Details[domain.ReasonDetail] != tc.reason || strings.Contains(string(raw), "private-provider-canary") {
 				t.Fatalf("unsafe retry storage refusal: %+v", p)
+			}
+		})
+	}
+}
+
+func TestAdmissionRefusalCarriesClosedFailedStep(t *testing.T) {
+	for _, tc := range []struct {
+		err           error
+		reason, cause string
+	}{
+		{hoststorage.ErrUnknown, "host_storage_unknown", "storage_volumes_list_failed"},
+		{admission.ErrHostUnhealthy, "host_unhealthy", "health_ssh_command_failed"},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			guard := &storageRefusal{err: provider.WithReason(errors.Join(tc.err, errors.New("private-canary")), tc.cause)}
+			f := setupJobHTTPWith(t, jobHTTPOptions{profiles: true, configure: func(cfg *api.Config, _ *auth.Service, _ *sqlite.Store) { cfg.Jobs.WithPreflight(guard) }})
+			_, raw := f.call(t, "POST", "/v1/workspaces/a/jobs", "a", "cause-refused", jobBody, 422)
+			wireSchema(t, "error", raw)
+			problem := decodeHTTPJSON[api.ErrorEnvelope](t, raw).Error
+			if problem.Details[domain.ReasonDetail] != tc.reason || problem.Details[domain.CauseDetail] != tc.cause || problem.ComputeMayHaveStarted || strings.Contains(string(raw), "private-canary") {
+				t.Fatalf("lost closed refusal: %+v", problem)
 			}
 		})
 	}

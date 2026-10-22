@@ -313,7 +313,10 @@ func (problem Problem) PublicDetails() map[string]string {
 	return result
 }
 
-func closedReason(reason string) bool {
+func closedReason(reason string) bool { return ValidReason(reason) }
+
+// ValidReason accepts a bounded diagnostic identifier, never free-form provider text.
+func ValidReason(reason string) bool {
 	if reason == "" || len(reason) > 64 || reason[0] < 'a' || reason[0] > 'z' {
 		return false
 	}

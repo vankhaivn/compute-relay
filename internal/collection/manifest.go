@@ -21,13 +21,13 @@ func parseManifest(w Work, raw []byte) (runnerplan.Result, admission.Spec, error
 		if problem, ok := err.(domain.Problem); ok && problem.Code == domain.CodeRemoteIdentityMismatch {
 			return m, spec, failure(domain.CodeRemoteIdentityMismatch, true)
 		}
-		return m, spec, failure(domain.CodeArtifactCollectionFailed, true)
+		return m, spec, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_manifest_invalid")
 	}
 	if json.Unmarshal(w.Plan.Job.Specification, &spec) != nil {
 		return m, spec, ErrInvalid
 	}
 	if m.Resource.Required != (spec.Resources.Accelerator == "gpu") {
-		return m, spec, failure(domain.CodeArtifactCollectionFailed, true)
+		return m, spec, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_manifest_invalid")
 	}
 	return m, spec, nil
 }
@@ -72,8 +72,11 @@ func collisionFree(paths []string) bool {
 // listing, then selects ONLY declared outputs and a fixed control-file allowlist.
 func BuildSnapshot(w Work, raw []byte, catalog []provider.Artifact, cfg Config) (Snapshot, error) {
 	var empty Snapshot
-	if !cfg.Valid() || len(catalog) > cfg.MaxFiles {
+	if !cfg.Valid() {
 		return empty, ErrInvalid
+	}
+	if len(catalog) > cfg.MaxFiles {
+		return empty, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_file_limit")
 	}
 	m, spec, err := parseManifest(w, raw)
 	if err != nil {
@@ -89,7 +92,7 @@ func BuildSnapshot(w Work, raw []byte, catalog []provider.Artifact, cfg Config) 
 		byPath[a.Path] = a
 	}
 	if !collisionFree(paths) {
-		return empty, failure(domain.CodeArtifactCollectionFailed, true)
+		return empty, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_path_invalid")
 	}
 	control, ok := byPath[ManifestPath]
 	if !ok {
@@ -101,8 +104,11 @@ func BuildSnapshot(w Work, raw []byte, catalog []provider.Artifact, cfg Config) 
 	result := Snapshot{Manifest: string(raw)}
 	var total int64
 	add := func(a provider.Artifact, role, media string) error {
-		if a.Bytes > cfg.MaxBytes-total || len(result.Files) >= cfg.MaxFiles {
-			return failure(domain.CodeArtifactCollectionFailed, false)
+		if a.Bytes > cfg.MaxBytes-total {
+			return failureAt(domain.CodeArtifactCollectionFailed, false, "artifact_byte_limit")
+		}
+		if len(result.Files) >= cfg.MaxFiles {
+			return failureAt(domain.CodeArtifactCollectionFailed, false, "artifact_file_limit")
 		}
 		id := FileIdentity(w.Observation.Remote, a.Path, a.Bytes, a.SHA256)
 		result.Files = append(result.Files, File{ID: id, Path: a.Path, Role: role, MediaType: media, Object: domain.ObjectMetadata{
@@ -127,11 +133,11 @@ func BuildSnapshot(w Work, raw []byte, catalog []provider.Artifact, cfg Config) 
 			}
 		}
 		if matched < 0 {
-			return empty, failure(domain.CodeArtifactCollectionFailed, true)
+			return empty, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_output_undeclared")
 		}
 		output := spec.Outputs[matched]
 		if output.MaxBytes > 0 && a.Bytes > output.MaxBytes-sizes[matched] {
-			return empty, failure(domain.CodeArtifactCollectionFailed, false)
+			return empty, failureAt(domain.CodeArtifactCollectionFailed, false, "artifact_byte_limit")
 		}
 		sizes[matched] += a.Bytes
 		counts[matched]++
@@ -147,7 +153,7 @@ func BuildSnapshot(w Work, raw []byte, catalog []provider.Artifact, cfg Config) 
 		}
 	}
 	if !collisionFree(outputPaths) {
-		return empty, failure(domain.CodeArtifactCollectionFailed, true)
+		return empty, failureAt(domain.CodeArtifactCollectionFailed, true, "artifact_path_invalid")
 	}
 	// The v1 manifest has no directory-presence entries. Empty required directories
 	// cannot establish verified presence; do not silently claim an absent output exists.
@@ -168,7 +174,7 @@ func BuildSnapshot(w Work, raw []byte, catalog []provider.Artifact, cfg Config) 
 	} {
 		if a, ok := byPath[selected.path]; ok {
 			if a.Bytes > selected.max {
-				return empty, failure(domain.CodeArtifactCollectionFailed, false)
+				return empty, failureAt(domain.CodeArtifactCollectionFailed, false, "artifact_byte_limit")
 			}
 			if err = add(a, selected.role, selected.media); err != nil {
 				return empty, err

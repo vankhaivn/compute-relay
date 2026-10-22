@@ -2,9 +2,14 @@ package kaggle
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"path"
 	"testing"
 
+	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/provider"
+	"github.com/vankhaivn/compute-relay/internal/provider/kaggle/kaggleapi"
 )
 
 func TestRuntimeObservationReadCountsRetainIdentityChecks(t *testing.T) {
@@ -57,5 +62,45 @@ func TestRuntimeVerificationDoesNotCacheAccountOrGPUQuota(t *testing.T) {
 	f.owner = "replacement_user"
 	if err := p.Verify(ctx, p.binding); err == nil {
 		t.Fatal("verification reused old account identity")
+	}
+}
+
+func TestRuntimeUnreadableExecutionStateRetainsUnknownAndReason(t *testing.T) {
+	p, plan, saved, _, f := nativeRuntime(t, false)
+	ctx := context.Background()
+	prepared, err := p.Prepare(ctx, plan, "prep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	*saved = prepared
+	submitted := p.Start(ctx, prepared, nil, nil)
+	if submitted.Status != provider.SubmissionAccepted {
+		t.Fatal(submitted)
+	}
+	c, err := p.attempt(ctx, plan.Job.Identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.executor.run = func(ctx context.Context, _ Config, mode string, token []byte, request executionRequest) (executionResponse, error) {
+		client, err := kaggleapi.New(token, kaggleapi.Options{APITransport: apiRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if path.Base(r.URL.Path) == "GetKernelSessionStatus" {
+				return jsonResponse(403, `{"private":"SYNTHETIC_TOKEN"}`), nil
+			}
+			return f.api(r)
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer client.Close()
+		return execute(ctx, client, mode, request), nil
+	}
+	seen, err := p.Observe(ctx, *submitted.Remote)
+	assertStepReason(t, err, "execution_status_read_failed")
+	var problem domain.Problem
+	if !errors.As(err, &problem) || problem.Code != domain.CodeProviderStateUnknown || seen.RemoteActivity == domain.RemoteActivityInactive || seen.Execution == domain.ExecutionFailed {
+		t.Fatal("unreadable status acquired terminal evidence", seen, err)
+	}
+	if retry := p.Start(ctx, prepared, nil, nil); retry.Status != provider.SubmissionUnknown || f.count("SaveKernel") != 1 {
+		t.Fatal("failed observation permitted resubmission", retry)
 	}
 }

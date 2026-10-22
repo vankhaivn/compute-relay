@@ -73,7 +73,9 @@ included:
 | `unsupported` | Not blocked | Continues |
 
 Any healthy, missing, stale reading or restart resets the critical timer. Unknown health never stops
-work. A health stop never retries, resubmits or switches hosts.
+work. An unavailable snapshot may include a closed `cause` naming the failed command or
+read. The snapshot history and queued-job `details.cause` retain it across restart;
+`host_unhealthy` remains the refusal summary. A health stop never retries, resubmits or switches hosts.
 
 ## Host watchdog
 

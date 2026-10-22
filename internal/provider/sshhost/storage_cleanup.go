@@ -2,6 +2,7 @@ package sshhost
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -93,7 +94,7 @@ func observeStorageTarget(ctx context.Context, d docker, target hoststorage.Targ
 // the frozen machine/engine. It does not inspect any foreign object.
 func (a *Adapter) ObserveStorageTarget(ctx context.Context, target hoststorage.Target) (hoststorage.TargetObservation, error) {
 	if a == nil || !target.Valid() || a.config.MachineID != string(target.Scope.MachineID) || a.config.EngineID != string(target.Scope.EngineID) {
-		return hoststorage.TargetObservation{}, hoststorage.ErrUnverified
+		return hoststorage.TargetObservation{}, failure(hoststorage.ErrUnverified, "storage_binding_mismatch")
 	}
 	var observed hoststorage.TargetObservation
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
@@ -108,7 +109,7 @@ func (a *Adapter) ObserveStorageTarget(ctx context.Context, target hoststorage.T
 // Begin intent. Recovery observes that same target and never sends a second rm.
 func (a *Adapter) CleanupStorageTarget(ctx context.Context, target hoststorage.Target, recoverOnly bool) (hoststorage.DeleteOutcome, error) {
 	if a == nil || !target.Valid() || a.config.MachineID != string(target.Scope.MachineID) || a.config.EngineID != string(target.Scope.EngineID) {
-		return hoststorage.DeleteRetained, hoststorage.ErrUnverified
+		return hoststorage.DeleteRetained, failure(hoststorage.ErrUnverified, "storage_binding_mismatch")
 	}
 	outcome := hoststorage.DeleteUnknown
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {
@@ -151,7 +152,7 @@ func (a *Adapter) CleanupStorageTarget(ctx context.Context, target hoststorage.T
 			outcome = hoststorage.AbsentConfirmed
 			return nil
 		}
-		return ErrRemoteDocker
+		return failure(errors.Join(ErrRemoteDocker, err), "storage_target_delete_failed")
 	})
 	return outcome, err
 }

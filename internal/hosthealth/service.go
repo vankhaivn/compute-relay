@@ -9,6 +9,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
@@ -131,14 +132,28 @@ func (s *Service) Refresh(ctx context.Context, target Target) (View, error) {
 		s.mu.Unlock()
 
 		probeCtx, cancel := context.WithTimeout(ctx, RefreshTimeout)
-		snapshot, sampleErr := s.sampler.Sample(probeCtx, target)
+		snapshot, sampleErr := sampleHealth(probeCtx, s.sampler, target)
 		probeErr := probeCtx.Err()
 		cancel()
 		finished := s.clock.Now().UTC()
 		failed := sampleErr != nil || probeErr != nil || snapshot.Validate() != nil || snapshot.ResourceID != target.ResourceID ||
 			snapshot.ObservedAt.Before(now) || snapshot.ObservedAt.After(finished)
 		if failed {
+			cause := "health_snapshot_invalid"
+			switch {
+			case errors.Is(sampleErr, context.DeadlineExceeded) || errors.Is(probeErr, context.DeadlineExceeded):
+				cause = "health_collection_timeout"
+			case sampleErr != nil:
+				cause = provider.Reason(sampleErr, "health_collection_failed")
+			case probeErr != nil:
+				cause = "health_collection_timeout"
+			case snapshot.Validate() != nil:
+				cause = "health_snapshot_invalid"
+			case snapshot.ResourceID != target.ResourceID:
+				cause = "health_binding_mismatch"
+			}
 			snapshot = Parse(target.ResourceID, finished, nil)
+			snapshot.Cause = cause
 		}
 		err := s.repo.RecordHostHealth(ctx, snapshot)
 		s.mu.Lock()
@@ -163,6 +178,16 @@ func (s *Service) Refresh(ctx context.Context, target Target) (View, error) {
 		view, err := s.Cached(ctx, target.ResourceID)
 		return withTargetPolicy(view, target), err
 	}
+}
+
+func sampleHealth(ctx context.Context, sampler Sampler, target Target) (snapshot Snapshot, err error) {
+	defer func() {
+		if recover() != nil {
+			snapshot = Snapshot{}
+			err = provider.WithReason(ErrUnavailable, "health_collector_panic")
+		}
+	}()
+	return sampler.Sample(ctx, target)
 }
 
 func withTargetPolicy(view View, target Target) View {

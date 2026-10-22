@@ -52,7 +52,8 @@ type executionResponse struct {
 	ErrorType        string              `json:"error_type,omitempty"`
 	FailureOperation string              `json:"failure_operation,omitempty"`
 	// Cause names, as a closed lookup reason, why a read refusal before SaveKernel failed.
-	Cause string `json:"cause,omitempty"`
+	Cause       string `json:"cause,omitempty"`
+	StateReason string `json:"-"`
 }
 
 type kernelReference struct {
@@ -185,11 +186,12 @@ func stagingErrorCause(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "staging_read_timeout"
 	}
-	return "staging_read_failed"
+	return provider.Reason(err, "staging_read_failed")
 }
 
 func unknownExecution() provider.SubmissionOutcome {
 	p := provider.Problem(domain.CodeProviderSubmissionUnknown, domain.FailureStageSubmission, "kernel acceptance unresolved; reconcile the original identity without resubmitting")
+	p = p.WithDetail(domain.ReasonDetail, "submission_unresolved")
 	p.ComputeMayHaveStarted = true
 	p.SafeOperationRetry = false
 	p.RecommendedAction = domain.RecommendedActionReconcile
@@ -243,7 +245,12 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 		return rejectedExecution(stopped)
 	}
 	if err != nil {
-		return unknownExecutionFailure(submissionFailure(err))
+		out := unknownExecutionFailure(submissionFailure(err))
+		if reason := provider.Reason(err, ""); reason != "" {
+			p := out.Problem.WithDetail(domain.ReasonDetail, reason)
+			out.Problem = &p
+		}
+		return out
 	}
 	if r.Status == "rejected" {
 		return rejectedStaging(r.Reason, r.Cause)
@@ -260,7 +267,7 @@ func (e *Executor) Start(parent context.Context, prepared provider.Prepared, aut
 
 func (e *Executor) Reconcile(ctx context.Context, identity provider.Identity) (provider.Reconciliation, error) {
 	if e == nil || identity != e.plan.Job.Identity {
-		return provider.Reconciliation{}, ErrExecutionIdentity
+		return provider.Reconciliation{}, provider.WithReason(ErrExecutionIdentity, "execution_reconciliation_invalid")
 	}
 	r, stopped, err := e.call(ctx, "reconcile", "")
 	if provider.IsLocalStateError(err) {
@@ -271,12 +278,12 @@ func (e *Executor) Reconcile(ctx context.Context, identity provider.Identity) (p
 		if err != nil {
 			reason = stopped
 			if reason == "" {
-				reason = executionReadReason(err, "lookup_unavailable", "reconcile")
+				reason = provider.Reason(err, executionReadReason(err, "lookup_unavailable", "reconcile"))
 			}
 		}
 		p := *unknownExecution().Problem
 		return provider.Reconciliation{}, p.WithDetail(domain.ReasonDetail, reason).
-			WithDetail("resource_name", e.request.Owner+"/"+e.request.Slug)
+			WithDetail("resource_name", e.request.Owner+"/"+e.request.Slug).WithCause(err)
 	}
 	switch r.Status {
 	case "absent":
@@ -289,15 +296,20 @@ func (e *Executor) Reconcile(ctx context.Context, identity provider.Identity) (p
 	case "found":
 		remote, err := e.remote(r)
 		if err != nil {
-			return provider.Reconciliation{}, err
+			return provider.Reconciliation{}, provider.WithReason(err, "execution_identity_mismatch")
 		}
 		return provider.Reconciliation{Status: provider.ReconciliationFound, Remote: &remote}, nil
 	default:
-		return provider.Reconciliation{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "kernel no longer matches the original attempt")
+		return provider.Reconciliation{}, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "kernel no longer matches the original attempt").WithDetail(domain.ReasonDetail, "execution_identity_mismatch")
 	}
 }
 
-func (e *Executor) Observe(ctx context.Context, expected provider.RemoteReference) (provider.Observation, error) {
+func (e *Executor) Observe(ctx context.Context, expected provider.RemoteReference) (observation provider.Observation, retErr error) {
+	defer func() {
+		if retErr != nil {
+			retErr = provider.WithReason(retErr, "execution_observation_invalid")
+		}
+	}()
 	var none provider.Observation
 	if e == nil || expected.Validate() != nil || expected.Identity != e.plan.Job.Identity || expected.Version != "1" {
 		return none, ErrExecutionIdentity
@@ -318,12 +330,20 @@ func (e *Executor) Observe(ctx context.Context, expected provider.RemoteReferenc
 			"The recorded kernel is not visible; execution and hardware release remain unconfirmed").WithDetail(domain.ReasonDetail, "remote_not_found")
 	}
 	if r.Status != "found" {
-		return none, ErrUnavailable
+		reason := r.Reason
+		if reason == "" {
+			reason = "execution_observation_unresolved"
+		}
+		return none, provider.WithReason(ErrUnavailable, reason)
 	}
 	actual, err := e.remote(r)
 	if err != nil || actual != expected {
 		return none, provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation,
 			"Kernel identity does not match the recorded attempt").WithCause(ErrExecutionIdentity)
+	}
+	if r.StateReason != "" {
+		return none, provider.Problem(domain.CodeProviderStateUnknown, domain.FailureStageObservation,
+			"The recorded kernel state could not be read; execution and release remain unknown.").WithDetail(domain.ReasonDetail, r.StateReason)
 	}
 	execution, activity := executionState(r.RawState)
 	result := provider.Observation{Remote: expected, Execution: execution, RawState: r.RawState, RemoteActivity: activity, ReleaseEvidence: domain.ReleaseEvidenceNotObservable, ObservedAt: e.now().UTC()}
@@ -363,7 +383,7 @@ func (e *Executor) remote(r executionResponse) (provider.RemoteReference, error)
 }
 
 func (r executionResponse) valid() bool {
-	if r.Protocol != 1 {
+	if r.Protocol != 1 || r.StateReason != "" && (r.Status != "found" || r.StateReason != "execution_status_read_failed") {
 		return false
 	}
 	if r.HTTPStatus != 0 || r.ErrorType != "" || r.FailureOperation != "" {
@@ -396,6 +416,18 @@ func (r executionResponse) valid() bool {
 
 func unknownExecutionFailure(r executionResponse) provider.SubmissionOutcome {
 	out := unknownExecution()
+	reason := "submission_unresolved"
+	switch r.FailureOperation {
+	case "save_kernel":
+		reason = "submission_save_failed"
+	case "verify_kernel":
+		reason = "submission_verification_failed"
+	}
+	if r.Reason != "" {
+		reason = r.Reason
+	}
+	p := out.Problem.WithDetail(domain.ReasonDetail, reason)
+	out.Problem = &p
 	if r.HTTPStatus != 0 {
 		p := out.Problem.WithDetail("submission_http_status", strconv.Itoa(r.HTTPStatus))
 		out.Problem = &p
@@ -410,18 +442,22 @@ func unknownExecutionFailure(r executionResponse) provider.SubmissionOutcome {
 
 // call returns a closed stop reason when the native client was never invoked; after
 // invocation any failure is ambiguous and the reason is empty.
-func (e *Executor) call(parent context.Context, mode, kernelID string) (executionResponse, string, error) {
-	var result executionResponse
+func (e *Executor) call(parent context.Context, mode, kernelID string) (result executionResponse, stopped string, retErr error) {
+	defer func() {
+		if recover() != nil {
+			result, stopped, retErr = executionResponse{}, "", provider.WithReason(ErrUnavailable, "execution_call_failed")
+		}
+	}()
 	ctx, cancel := context.WithTimeout(parent, e.policy.Timeout)
 	defer cancel()
 	select {
 	case e.slot <- struct{}{}:
 		defer func() { <-e.slot }()
 	case <-ctx.Done():
-		return result, stopReason(ctx, ""), ctx.Err()
+		return result, stopReason(ctx, ""), contextStep(ctx.Err(), "execution")
 	}
 	if err := ctx.Err(); err != nil {
-		return result, stopReason(ctx, ""), err
+		return result, stopReason(ctx, ""), contextStep(err, "execution")
 	}
 	request := e.request
 	request.KernelID = kernelID
@@ -457,18 +493,18 @@ func (e *Executor) call(parent context.Context, mode, kernelID string) (executio
 	}
 	if !invoked {
 		if ctx.Err() != nil {
-			return executionResponse{}, stopReason(ctx, ""), ctx.Err()
+			return executionResponse{}, stopReason(ctx, ""), contextStep(ctx.Err(), "execution")
 		}
-		return executionResponse{}, reasonCredential, ErrUnavailable
+		return executionResponse{}, reasonCredential, provider.WithReason(ErrUnavailable, "execution_credential_unavailable")
 	}
 	if ctx.Err() != nil {
-		return executionResponse{}, "", ctx.Err()
+		return executionResponse{}, "", contextStep(ctx.Err(), "execution")
 	}
 	if err != nil || violated {
-		return executionResponse{}, "", ErrUnavailable
+		return executionResponse{}, "", provider.WithReason(ErrUnavailable, provider.Reason(err, "execution_call_failed"))
 	}
 	if !result.valid() || (mode != "submit" && result.Status == "rejected") {
-		return executionResponse{}, "", ErrProtocol
+		return executionResponse{}, "", provider.WithReason(ErrProtocol, "execution_response_invalid")
 	}
 	return result, "", nil
 }

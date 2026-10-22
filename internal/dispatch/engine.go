@@ -221,7 +221,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		}
 		return s.providerFailure(err, domain.CodeConfigurationInvalid)
 	}
-	_, err = control(ctx, e.config.ControlTimeout, func(c context.Context) (struct{}, error) { return struct{}{}, p.Verify(c, binding) })
+	_, err = control(ctx, e.config.ControlTimeout, "verify", func(c context.Context) (struct{}, error) { return struct{}{}, p.Verify(c, binding) })
 	if err != nil {
 		if unconfirmedPreparation(work.Journal) {
 			return s.endUnconfirmedPreparation(err, unansweredRead(err), "")
@@ -259,7 +259,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if err != nil {
 			return s.fail(domain.CodeResourceRequirementUnsatisfied)
 		}
-		plan, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Plan, error) { return p.Validate(c, job.Clone()) })
+		plan, err := control(ctx, e.config.ControlTimeout, "validate", func(c context.Context) (provider.Plan, error) { return p.Validate(c, job.Clone()) })
 		if err != nil {
 			return s.providerFailure(err, errorCode(err, domain.CodeUnsupportedCapability))
 		}
@@ -291,7 +291,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			until, _ := time.Parse(time.RFC3339, work.Gate.Request.ReadyUntil)
 			preparationLimit = min(preparationLimit, until.Sub(e.clock.Now()))
 		}
-		prepared, err := control(observed, preparationLimit, func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
+		prepared, err := control(observed, preparationLimit, "prepare", func(c context.Context) (provider.Prepared, error) { return p.Prepare(c, plan.Clone(), prepID) })
 		if err != nil {
 			if provider.IsLocalStateError(err) {
 				return err
@@ -308,7 +308,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		if unconfirmedPreparation(journal) {
 			limit = min(limit, e.config.ControlTimeout)
 		}
-		seen, err := control(ctx, limit, func(c context.Context) (provider.PreparationObservation, error) {
+		seen, err := control(ctx, limit, "reconcile_preparation", func(c context.Context) (provider.PreparationObservation, error) {
 			return p.ReconcilePrepare(c, journal.Plan.Clone(), journal.PreparationID)
 		})
 		if err != nil {
@@ -321,7 +321,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			if expired && work.Gate != nil {
 				return s.commit(Action{Kind: ExpireDispatch})
 			}
-			return s.fail(domain.CodeStagingFailed)
+			return s.failWith(domain.CodeStagingFailed, problemReason(err))
 		}
 		if seen.Validate(*journal.Plan, journal.PreparationID) != nil {
 			if unconfirmedPreparation(journal) {
@@ -352,7 +352,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 					return nil
 				}
 			}
-			seen, err := control(ctx, preparationLimit, func(c context.Context) (provider.PreparationObservation, error) {
+			seen, err := control(ctx, preparationLimit, "revalidate_preparation", func(c context.Context) (provider.PreparationObservation, error) {
 				return p.ReconcilePrepare(c, work.Journal.Plan.Clone(), work.Journal.PreparationID)
 			})
 			if err != nil {
@@ -384,7 +384,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 			return err
 		}
 		prepared := *s.work().Journal.Prepared
-		outcome, callErr := control(ctx, preparationLimit, func(c context.Context) (provider.SubmissionOutcome, error) {
+		outcome, callErr := control(ctx, preparationLimit, "submit", func(c context.Context) (provider.SubmissionOutcome, error) {
 			var authorization *provider.StartAuthorization
 			var secrets *workloadsecret.Material
 			if start := s.work().Journal.StartAuthorization; start != nil {
@@ -402,7 +402,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.commit(Action{Kind: SubmissionSeen, Submission: &outcome})
 	case Submitting:
 		identity := work.Journal.Plan.Job.Identity
-		seen, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Reconciliation, error) { return p.Reconcile(c, identity) })
+		seen, err := control(ctx, e.config.ControlTimeout, "reconcile_submission", func(c context.Context) (provider.Reconciliation, error) { return p.Reconcile(c, identity) })
 		if err != nil {
 			return s.providerFailure(err, domain.CodeProviderSubmissionUnknown)
 		}
@@ -422,7 +422,7 @@ func (e *Engine) process(parent context.Context, claim scheduler.Claim) (resultE
 		return s.commit(Action{Kind: SubmissionSeen, Submission: &outcome})
 	case Submitted:
 		remote := *work.Journal.Remote
-		obs, err := control(ctx, e.config.ControlTimeout, func(c context.Context) (provider.Observation, error) { return p.Observe(c, remote) })
+		obs, err := control(ctx, e.config.ControlTimeout, "observe", func(c context.Context) (provider.Observation, error) { return p.Observe(c, remote) })
 		if err != nil {
 			var absence provider.RemoteAbsence
 			if errors.As(err, &absence) {
@@ -476,8 +476,8 @@ func (s *session) refuseNewWork(cause error) error {
 		return cause
 	}
 	w := s.work()
-	if w.Journal.Problem == nil || w.Journal.Problem.Details[domain.ReasonDetail] != reason {
-		if err := s.commit(Action{Kind: RefuseNewWork, RefusalReason: reason}); err != nil {
+	if w.Journal.Problem == nil || w.Journal.Problem.Details[domain.ReasonDetail] != reason || w.Journal.Problem.Details[domain.CauseDetail] != provider.Reason(cause, "") {
+		if err := s.commit(Action{Kind: RefuseNewWork, RefusalReason: reason, Cause: provider.Reason(cause, "")}); err != nil {
 			if errors.Is(err, ErrPolicy) {
 				return cause
 			}
@@ -487,37 +487,26 @@ func (s *session) refuseNewWork(cause error) error {
 	return cause
 }
 
-func control[T any](ctx context.Context, limit time.Duration, fn func(context.Context) (T, error)) (value T, err error) {
+func control[T any](ctx context.Context, limit time.Duration, step string, fn func(context.Context) (T, error)) (value T, err error) {
 	bounded, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	defer func() {
 		if recover() != nil {
 			var zero T
 			value = zero
-			err = errors.New("provider call failed without a usable result")
+			err = provider.WithReason(errors.New("provider call failed without a usable result"), step+"_panic")
 		}
 	}()
 	if err := bounded.Err(); err != nil {
-		return value, err
+		return value, provider.WithReason(err, step+"_interrupted")
 	}
-	return fn(bounded)
+	value, err = fn(bounded)
+	return value, provider.WithReason(err, step+"_failed")
 }
 
 // problemReason returns the closed public reason an adapter problem carries, if any.
 func problemReason(err error) string {
-	var read provider.ReadError
-	if errors.As(err, &read) {
-		return read.Reason
-	}
-	var value domain.Problem
-	if errors.As(err, &value) {
-		return value.PublicDetails()[domain.ReasonDetail]
-	}
-	var pointer *domain.Problem
-	if errors.As(err, &pointer) && pointer != nil {
-		return pointer.PublicDetails()[domain.ReasonDetail]
-	}
-	return ""
+	return provider.Reason(err, "")
 }
 
 func errorCode(err error, fallback domain.ErrorCode) domain.ErrorCode {

@@ -167,7 +167,7 @@ func TestStorageImageReplacementAndRepeatedExactDeletionReleaseReservations(t *t
 			t.Fatalf("wrong image eviction: %+v", work)
 		}
 		requireNoError(t, f.s.BeginStorageCleanup(ctx, *work))
-		requireNoError(t, f.s.CompleteStorageCleanup(ctx, *work, hoststorage.DeleteConfirmed))
+		requireNoError(t, f.s.CompleteStorageCleanup(ctx, *work, hoststorage.DeleteConfirmed, "deleted"))
 		var live int
 		requireNoError(t, f.s.db.QueryRowContext(ctx, `SELECT count(*) FROM host_storage_reservations WHERE class='image' AND state!='released'`).Scan(&live))
 		if live != 0 {

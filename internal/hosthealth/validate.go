@@ -4,6 +4,8 @@ import (
 	"errors"
 	"math"
 	"regexp"
+
+	"github.com/vankhaivn/compute-relay/internal/domain"
 )
 
 var ErrSnapshot = errors.New("invalid host health snapshot")
@@ -46,6 +48,9 @@ func oneOf(allowed ...string) func(string) bool {
 // Validate protects persistence and API boundaries, including snapshots decoded from JSON.
 // Errors contain no source text or caller-supplied identifiers.
 func (s Snapshot) Validate() error {
+	if s.Cause != "" && !domain.ValidReason(s.Cause) {
+		return ErrSnapshot
+	}
 	if s.Platform.Status == Unsupported || s.SchemaVersion != SchemaVersion || !resourcePattern.MatchString(s.ResourceID) || s.ObservedAt.IsZero() || s.ObservedAt.Year() < 2000 || s.ObservedAt.Year() > 9999 {
 		return ErrSnapshot
 	}

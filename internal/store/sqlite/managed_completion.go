@@ -32,12 +32,13 @@ func (s *Store) NextConnectionOperation(ctx context.Context) (connections.Record
 			return err
 		}
 		if record.Stage == "ready" {
-			_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET status='running',problem=NULL,updated_at=? WHERE operation_id=?`, now.UTC().Format(time.RFC3339Nano), id)
+			_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET status='running',problem=NULL,cause=NULL,updated_at=? WHERE operation_id=?`, now.UTC().Format(time.RFC3339Nano), id)
 			if err != nil {
 				return dbError(err)
 			}
 			record.Operation.Status = "running"
 			record.Operation.Problem = nil
+			record.Operation.Cause = nil
 			record.Operation.UpdatedAt = now.UTC()
 		}
 		found = true
@@ -45,7 +46,10 @@ func (s *Store) NextConnectionOperation(ctx context.Context) (connections.Record
 	})
 	return record, found, err
 }
-func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, problem string) error {
+func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, problem, cause string) error {
+	if cause != "" && !domain.ValidReason(cause) {
+		return ErrInvalid
+	}
 	switch problem {
 	case "credential_rejected", "credential_store_unavailable", "provider_unavailable", "account_changed", "resource_changed", "active_work", "stale_revision", "unsupported_provider", "image_installation_unknown":
 	default:
@@ -62,10 +66,10 @@ func (s *Store) FailConnection(ctx context.Context, id domain.OperationID, probl
 		if record.Operation.Action == "remove" {
 			// Preserve the deletion fence and exact intent after partial vault deletion. Only
 			// this already-authorized, idempotent local removal may resume in the worker.
-			_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET status='failed',problem=?,updated_at=? WHERE operation_id=?`, problem, now.UTC().Format(time.RFC3339Nano), id)
+			_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET status='failed',problem=?,cause=NULLIF(?,''),updated_at=? WHERE operation_id=?`, problem, cause, now.UTC().Format(time.RFC3339Nano), id)
 			return dbError(err)
 		}
-		return finishManaged(ctx, tx, record, connections.Completion{Problem: problem}, now)
+		return finishManaged(ctx, tx, record, connections.Completion{Problem: problem, Cause: cause}, now)
 	})
 }
 func (s *Store) FinishConnection(ctx context.Context, record connections.Record, completion connections.Completion) error {
@@ -74,6 +78,9 @@ func (s *Store) FinishConnection(ctx context.Context, record connections.Record,
 	})
 }
 func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, result connections.Completion, now time.Time) error {
+	if result.Cause != "" && (result.Problem == "" || !domain.ValidReason(result.Cause)) {
+		return ErrInvalid
+	}
 	current, err := loadManagedOperation(ctx, tx, record.Operation.ID)
 	if err != nil {
 		return err
@@ -242,7 +249,7 @@ func finishManaged(ctx context.Context, tx *sql.Tx, record connections.Record, r
 	if err = refreshManagedAccountPolicy(ctx, tx, scope); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET stage='done',status=?,problem=?,updated_at=? WHERE operation_id=?`, status, problem, stamp, op.ID)
+	_, err = tx.ExecContext(ctx, `UPDATE managed_connection_operations SET stage='done',status=?,problem=?,cause=NULLIF(?,''),updated_at=? WHERE operation_id=?`, status, problem, result.Cause, stamp, op.ID)
 	return dbError(err)
 }
 func (s *Store) ConnectionSecrets(ctx context.Context, id domain.OperationID) ([]string, error) {

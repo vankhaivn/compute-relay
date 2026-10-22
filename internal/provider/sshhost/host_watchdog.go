@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/hostwatchdog"
@@ -33,7 +34,7 @@ const watchdogBootoutTimeout = 35 * time.Second
 
 func (e watchdogBoundedExecutor) bootout(ctx context.Context, a watchdog.Artifact, p hostwatchdog.Plan) error {
 	if p.Validate() != nil || a.Label != "io.compute-relay.host-watchdog."+p.Config.InstallationID {
-		return ErrRequest
+		return failure(ErrRequest, "bootout_request_invalid")
 	}
 	ctx, cancel := context.WithTimeout(ctx, watchdogBootoutTimeout)
 	defer cancel()
@@ -44,7 +45,7 @@ func (e watchdogBoundedExecutor) bootout(ctx context.Context, a watchdog.Artifac
 	result, err := e.executor.Run(ctx, map[string]string{"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"}, []string{"/bin/launchctl", "bootout", "gui/" + p.UID + "/" + a.Label}, nil, &limitedWriter{w: io.Discard, limit: watchdog.MaxStatus})
 	clear(result.Stderr)
 	if err != nil || result.ExitCode != 0 {
-		return hostwatchdog.ErrIntegrity
+		return failure(errors.Join(hostwatchdog.ErrIntegrity, err), "watchdog_bootout_failed")
 	}
 	return nil
 }
@@ -58,35 +59,35 @@ func NewWatchdogRemote(c ports.CredentialResolver) *WatchdogRemote {
 	return &WatchdogRemote{c, func(ctx context.Context, t Target, c Credential) (session, error) { return Dial(ctx, t, c) }}
 }
 func (w *WatchdogRemote) with(ctx context.Context, t hostwatchdog.Target, use func(watchdogBoundedExecutor, docker) error) error {
-	return w.credentials.WithCredential(ctx, t.Health.CredentialRef, func(raw []byte) error {
+	err := w.credentials.WithCredential(ctx, t.Health.CredentialRef, func(raw []byte) error {
 		e, err := ParseEndpoint(raw)
 		if err != nil {
-			return ErrRequest
+			return failure(ErrRequest, "watchdog_endpoint_invalid")
 		}
 		defer clear(e.Credential.Password)
 		defer clear(e.Credential.PrivateKey)
 		defer clear(e.Credential.Passphrase)
 		e, err = e.Pin(t.Health.CanonicalAccount)
 		if err != nil {
-			return err
+			return failure(err, "host_key_mismatch")
 		}
 		c, err := w.dial(ctx, e.Target, e.Credential)
 		if err != nil {
-			return err
+			return failure(err, failureReasonForTransport(err))
 		}
 		defer c.Close()
 		x := watchdogBoundedExecutor{c}
 		machine, err := machineIdentity(ctx, x)
 		if err != nil || "resource_"+machine != t.Health.ResourceID {
-			return ErrResourceIdentity
+			return failure(errors.Join(ErrResourceIdentity, err), "watchdog_machine_identity_unverified")
 		}
 		platform, err := readIdentity(ctx, x, 32, "/usr/bin/uname", "-sm")
 		if err != nil || strings.TrimSpace(string(platform)) != "Darwin x86_64" {
-			return hostwatchdog.ErrUnsupported
+			return failure(errors.Join(hostwatchdog.ErrUnsupported, err), "watchdog_platform_unsupported")
 		}
 		native, err := readIdentity(ctx, x, 16, "/usr/sbin/sysctl", "-n", "hw.cputype")
 		if err != nil || strings.TrimSpace(string(native)) != "7" {
-			return hostwatchdog.ErrUnsupported
+			return failure(errors.Join(hostwatchdog.ErrUnsupported, err), "watchdog_platform_unsupported")
 		}
 		binary, err := findDocker(ctx, x, e.DockerPath)
 		if err != nil {
@@ -98,10 +99,11 @@ func (w *WatchdogRemote) with(ctx context.Context, t hostwatchdog.Target, use fu
 		}
 		engine, err := d.engineIdentity(ctx)
 		if err != nil || t.Engine == "" || engine != t.Engine {
-			return ErrResourceIdentity
+			return failure(errors.Join(ErrResourceIdentity, err), "watchdog_engine_identity_unverified")
 		}
-		return use(x, d)
+		return failure(use(x, d), "watchdog_operation_failed")
 	})
+	return failure(err, "watchdog_credential_read_failed")
 }
 func (w *WatchdogRemote) Plan(ctx context.Context, t hostwatchdog.Target) (hostwatchdog.Plan, error) {
 	var p hostwatchdog.Plan
@@ -112,7 +114,7 @@ func (w *WatchdogRemote) Plan(ctx context.Context, t hostwatchdog.Target) (hostw
 		}
 		parts := strings.Split(strings.TrimSpace(string(raw)), "\n")
 		if len(parts) != 3 || parts[2] != parts[1] {
-			return ErrIdentity
+			return failure(ErrIdentity, "watchdog_home_identity_unverified")
 		}
 		engine, err := d.engineID(ctx)
 		if err != nil {
@@ -163,27 +165,27 @@ func watchdogServiceState(ctx context.Context, x executor, a watchdog.Artifact, 
 	r, err := x.Run(ctx, map[string]string{"LC_ALL": "C"}, []string{"/bin/launchctl", "print", "gui/" + p.UID + "/" + a.Label}, nil, &limitedWriter{w: &out, limit: 32 << 10})
 	defer clear(r.Stderr)
 	if err != nil {
-		return false, ErrUnavailable
+		return false, failure(errors.Join(ErrUnavailable, err), "watchdog_service_read_failed")
 	}
 	if r.ExitCode != 0 {
 		message := string(r.Stderr)
 		if r.ExitCode == 113 && strings.Contains(message, "Could not find service") && strings.Contains(message, a.Label) {
 			return false, nil
 		}
-		return false, ErrUnavailable
+		return false, failure(ErrUnavailable, "watchdog_service_read_failed")
 	}
 	matches := 0
 	for _, line := range strings.Split(out.String(), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "path = ") {
 			if strings.TrimPrefix(line, "path = ") != a.Directory+"/"+watchdog.PlistName {
-				return false, hostwatchdog.ErrIntegrity
+				return false, failure(hostwatchdog.ErrIntegrity, "watchdog_service_invalid")
 			}
 			matches++
 		}
 	}
 	if matches != 1 {
-		return false, hostwatchdog.ErrIntegrity
+		return false, failure(hostwatchdog.ErrIntegrity, "watchdog_service_invalid")
 	}
 	return true, nil
 }
@@ -218,19 +220,19 @@ func watchdogRun(ctx context.Context, x executor, script string) ([]byte, error)
 	r, err := x.Run(ctx, nil, []string{"/usr/bin/env", "-i", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL=C", "/bin/sh", "-s"}, strings.NewReader(script), &limitedWriter{w: &out, limit: watchdog.MaxStatus})
 	clear(r.Stderr)
 	if err != nil || r.ExitCode != 0 {
-		return nil, hostwatchdog.ErrIntegrity
+		return nil, failure(errors.Join(hostwatchdog.ErrIntegrity, err), "watchdog_script_failed")
 	}
 	return out.Bytes(), nil
 }
 func (w *WatchdogRemote) Apply(ctx context.Context, t hostwatchdog.Target, p hostwatchdog.Plan, action string) error {
 	a, err := watchdog.Render(p.Config)
 	if err != nil || p.Validate() != nil {
-		return hostwatchdog.ErrIntegrity
+		return failure(hostwatchdog.ErrIntegrity, "watchdog_apply_unverified")
 	}
 	return w.with(ctx, t, func(x watchdogBoundedExecutor, d docker) error {
 		engine, err := d.engineID(ctx)
 		if err != nil || engine != p.Config.EngineID || d.host != p.Config.DockerHost || d.binary != p.Config.DockerPath {
-			return ErrIdentity
+			return failure(errors.Join(ErrIdentity, err), "watchdog_engine_binding_unverified")
 		}
 		loaded, err := watchdogServiceState(ctx, x, a, p)
 		if err != nil {
@@ -262,7 +264,7 @@ func (w *WatchdogRemote) Apply(ctx context.Context, t hostwatchdog.Target, p hos
 			return err
 		}
 		if loaded != (action == "install_host_watchdog") {
-			return hostwatchdog.ErrIntegrity
+			return failure(hostwatchdog.ErrIntegrity, "watchdog_apply_unverified")
 		}
 		return nil
 	})
@@ -285,7 +287,7 @@ func watchdogMutation(a watchdog.Artifact, p hostwatchdog.Plan, action string, l
 
 	case "remove_host_watchdog":
 		if loaded {
-			return "", ErrRequest
+			return "", failure(ErrRequest, "watchdog_mutation_request_invalid")
 		}
 		b.WriteString("if test ! -e \"$d\" && test ! -L \"$d\"; then exit 0; fi\n" + watchdogCheckFiles(a, p, true))
 
@@ -301,14 +303,14 @@ func watchdogMutation(a watchdog.Artifact, p hostwatchdog.Plan, action string, l
 		}
 		b.WriteString("/bin/rmdir \"$d\"\n")
 	default:
-		return "", ErrRequest
+		return "", failure(ErrRequest, "watchdog_mutation_request_invalid")
 	}
 	return b.String(), nil
 }
 func (w *WatchdogRemote) Status(ctx context.Context, t hostwatchdog.Target, p hostwatchdog.Plan) (*watchdog.Status, error) {
 	a, err := watchdog.Render(p.Config)
 	if err != nil {
-		return nil, err
+		return nil, failure(err, "watchdog_plan_invalid")
 	}
 	var status *watchdog.Status
 	err = w.with(ctx, t, func(x watchdogBoundedExecutor, _ docker) error {
@@ -322,14 +324,14 @@ func (w *WatchdogRemote) Status(ctx context.Context, t hostwatchdog.Target, p ho
 		if err == nil {
 			status = &s
 		}
-		return err
+		return failure(err, "watchdog_status_invalid")
 	})
 	return status, err
 }
 func (w *WatchdogRemote) Observe(ctx context.Context, t hostwatchdog.Target, p hostwatchdog.Plan, action string) (bool, error) {
 	a, err := watchdog.Render(p.Config)
 	if err != nil {
-		return false, err
+		return false, failure(err, "watchdog_plan_invalid")
 	}
 	confirmed := false
 	err = w.with(ctx, t, func(x watchdogBoundedExecutor, _ docker) error {
@@ -338,7 +340,7 @@ func (w *WatchdogRemote) Observe(ctx context.Context, t hostwatchdog.Target, p h
 			return err
 		}
 		if loaded != (action == "install_host_watchdog") {
-			return hostwatchdog.ErrIntegrity
+			return failure(hostwatchdog.ErrIntegrity, "watchdog_observation_unverified")
 		}
 		script := watchdogShellPrelude
 		if loaded {

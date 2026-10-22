@@ -40,21 +40,21 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	}
 	var adapter provider.Provider
 	if s.previewResolver != nil {
-		adapter, _ = s.previewResolver.Resolve(plan.Binding)
+		adapter, err = resolveStorageAdapter(s.previewResolver, plan.Binding)
 	}
 	// One binding check covers every resource of this read-only preview.
-	checked, bindingErr := false, error(nil)
-	verified := func() bool {
-		if !checked {
-			bindingErr = adapter.Verify(ctx, plan.Binding)
+	checked, bindingErr := false, err
+	verified := func() error {
+		if !checked && adapter != nil {
+			bindingErr = verifyStorageAdapter(ctx, adapter, plan.Binding)
 			checked = true
 		}
-		return bindingErr == nil
+		return bindingErr
 	}
 	// Resolve only a settled attempt's original staging intent, with metadata reads.
 	// Exact discovery enriches cleanup evidence; it never reopens dispatch.
 	absent := false
-	if observer, ok := adapter.(StagingObserver); ok && plan.UnconfirmedPlan != nil && verified() {
+	if observer, ok := adapter.(StagingObserver); ok && plan.UnconfirmedPlan != nil && verified() == nil {
 		seen, observeErr := observer.ObserveStagingCleanup(ctx, plan.UnconfirmedPlan.Clone(), plan.PreparationID)
 		if observeErr == nil && seen.Validate(*plan.UnconfirmedPlan, plan.PreparationID) == nil {
 			switch seen.Status {
@@ -100,7 +100,7 @@ func (s *Service) Preview(ctx context.Context, principal auth.Principal, w domai
 	return result, nil
 }
 
-func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, adapter provider.Provider, verified func() bool) (view ResourcePreview) {
+func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, adapter provider.Provider, verified func() error) (view ResourcePreview) {
 	request := resource.Request
 	view = ResourcePreview{ResourceID: request.LedgerID, Purpose: request.Purpose, Fingerprint: resource.Fingerprint(), Observation: "not_checked", Reason: plan.Reason}
 	defer func() {
@@ -113,14 +113,14 @@ func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, a
 	}
 	if adapter == nil {
 		if resource.Reason == "" {
-			view.Reason = "provider_not_configured"
+			view.Reason = cleanupReason(verified(), "provider_not_configured")
 		}
 		return view
 	}
 	description, err := adapter.DescribeCleanup(request)
 	if err != nil || !description.Valid() {
 		if resource.Reason == "" {
-			view.Reason = "identity_unverified"
+			view.Reason = cleanupReason(err, "cleanup_description_failed")
 		}
 		return view
 	}
@@ -132,14 +132,14 @@ func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, a
 		view.Reason = description.Reason
 		return view
 	}
-	if !verified() {
-		view.Observation, view.Reason = "unknown", "binding_unverified"
+	if err := verified(); err != nil {
+		view.Observation, view.Reason = "unknown", cleanupReason(err, "cleanup_binding_unverified")
 		return view
 	}
 	request.Mode = provider.CleanupDryRun
 	outcome, err := adapter.CleanupResource(ctx, request)
 	if err != nil || outcome.Deleted || outcome.WouldDelete && outcome.AlreadyAbsent {
-		view.Observation, view.Reason = "unknown", "remote_state_unverified"
+		view.Observation, view.Reason = "unknown", cleanupReason(err, "cleanup_preview_unconfirmed")
 		return view
 	}
 	switch {
@@ -148,7 +148,7 @@ func previewResource(ctx context.Context, plan PreviewPlan, resource Resource, a
 	case outcome.WouldDelete:
 		view.Eligible, view.Observation, view.Reason = true, "present", "eligible"
 	default:
-		view.Observation, view.Reason = "unknown", "remote_state_unverified"
+		view.Observation, view.Reason = "unknown", cleanupReason(err, "cleanup_preview_unconfirmed")
 	}
 	return view
 }

@@ -142,6 +142,16 @@ func TestMonitorSanitizesCredentialAndTransportFailures(t *testing.T) {
 				})
 			}
 			q, err := m.ReadQuota(context.Background())
+			reason := "quota_call_failed"
+			switch fault {
+			case "missing", "bad-token":
+				reason = "quota_credential_unavailable"
+			case "callback-twice":
+				reason = "quota_credential_callback_invalid"
+			case "protocol":
+				reason = "quota_response_invalid"
+			}
+			assertStepReason(t, err, reason)
 			if err == nil || strings.Contains(err.Error(), "SYNTHETIC_TOKEN") || q.Status != provider.QuotaUnavailable || q.Remaining != nil {
 				t.Fatal("failure leaked success or secret", q, err)
 			}
@@ -215,5 +225,24 @@ func TestMonitorLogFailureAllowlistDoesNotChangeQuotaProtocol(t *testing.T) {
 		if (monitorResponse{Protocol: 1, Status: "unavailable", Reason: reason}).valid("logs") {
 			t.Fatal("untrusted reason accepted", reason)
 		}
+	}
+}
+
+func TestQuotaMalformedResponseAndClockFailureRetainReason(t *testing.T) {
+	m := monitorFixture(t)
+	m.run = func(context.Context, Config, string, []byte, monitorRequest) (monitorResponse, error) {
+		clock := m.clock.(*stagingClock)
+		clock.at = clock.at.Add(-time.Second)
+		return knownQuota("1000000000", "0", "0"), nil
+	}
+	q, err := m.ReadQuota(context.Background())
+	assertStepReason(t, err, "quota_clock_invalid")
+	if !errors.Is(err, ErrProtocol) || q.Status != provider.QuotaUnavailable || q.Remaining != nil {
+		t.Fatal("clock failure manufactured capacity", q, err)
+	}
+	_, err = quotaFromResponse(monitorResponse{}, m.clock.Now())
+	assertStepReason(t, err, "quota_response_invalid")
+	if !errors.Is(err, ErrProtocol) {
+		t.Fatal("quota protocol failure lost classification", err)
 	}
 }

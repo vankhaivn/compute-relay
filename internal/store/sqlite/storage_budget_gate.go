@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 type storageReservation struct {
@@ -36,14 +37,14 @@ func freshStorageChargeInTx(ctx context.Context, tx *sql.Tx, scope hoststorage.S
 		return storageCharge{}, err
 	}
 	if observation.state != "complete" || observation.at.After(now) || now.Sub(observation.at) > hoststorage.ScanFreshness {
-		return storageCharge{}, hoststorage.ErrUnknown
+		return storageCharge{}, provider.WithReason(hoststorage.ErrUnknown, storageObservationReason(observation, now))
 	}
 	charge, err := storageChargeInTx(ctx, tx, scope, observation, "")
 	if err != nil {
 		return charge, err
 	}
 	if charge.unknown {
-		return charge, hoststorage.ErrUnknown
+		return charge, provider.WithReason(hoststorage.ErrUnknown, "storage_charge_unknown")
 	}
 	return charge, nil
 }
@@ -174,4 +175,20 @@ func (s *Store) StorageScopeForProfile(ctx context.Context, w domain.WorkspaceID
 		return nil
 	})
 	return scope, err
+}
+
+func storageObservationReason(observation storageObservation, now time.Time) string {
+	if domain.ValidReason(observation.reason) {
+		return observation.reason
+	}
+	if observation.at.IsZero() {
+		return "storage_not_observed"
+	}
+	if observation.at.After(now) {
+		return "storage_clock_changed"
+	}
+	if now.Sub(observation.at) > hoststorage.ScanFreshness {
+		return "storage_scan_stale"
+	}
+	return "storage_scan_incomplete"
 }

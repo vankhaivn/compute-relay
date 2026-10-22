@@ -772,6 +772,10 @@
           "type": "string",
           "pattern": "^resource_[0-9a-f]{64}$"
         },
+        "cause": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
         "platform": {
           "$ref": "#/$defs/platform_metric"
         },

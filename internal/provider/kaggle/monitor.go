@@ -121,10 +121,19 @@ func (m *Monitor) call(parent context.Context, mode string, target *executionReq
 
 func (m *Monitor) callRequest(parent context.Context, mode string, request monitorRequest) (result monitorResponse, err error) {
 	target := request.Execution
+	reason := mode + "_response_invalid"
 	defer func() {
 		if recover() != nil {
 			result = monitorResponse{}
 			err = ErrUnavailable
+			reason = mode + "_call_failed"
+		}
+		if err != nil && !provider.IsLocalStateError(err) {
+			if ctxErr := parent.Err(); ctxErr != nil {
+				err = contextStep(ctxErr, mode)
+			} else {
+				err = provider.WithReason(err, reason)
+			}
 		}
 	}()
 	if m == nil || mode != "quota" && mode != "logs" || (mode == "quota") != (target == nil) {
@@ -140,12 +149,12 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 	case m.slot <- struct{}{}:
 		defer func() { <-m.slot }()
 	case <-ctx.Done():
-		return result, ctx.Err()
+		return result, contextStep(ctx.Err(), mode)
 	}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	called, violated := false, false
+	called, invoked, violated := false, false, false
 	err = m.credentials.WithCredential(ctx, m.config.CredentialRef, func(token []byte) error {
 		if called {
 			violated = true
@@ -164,6 +173,7 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 			return err
 		}
 		var err error
+		invoked = true
 		result, err = m.run(ctx, m.config, mode, token, request)
 		return err
 	})
@@ -171,10 +181,17 @@ func (m *Monitor) callRequest(parent context.Context, mode string, request monit
 		return monitorResponse{}, err
 	}
 	if ctx.Err() != nil {
-		return monitorResponse{}, ctx.Err()
+		return monitorResponse{}, contextStep(ctx.Err(), mode)
 	}
 	if err != nil || !called || violated {
-		return monitorResponse{}, ErrUnavailable
+		reason = mode + "_call_failed"
+		if !invoked {
+			reason = mode + "_credential_unavailable"
+		}
+		if violated {
+			reason = mode + "_credential_callback_invalid"
+		}
+		return monitorResponse{}, provider.WithReason(ErrUnavailable, provider.Reason(err, reason))
 	} // Never wrap a resolver or API error that may contain a secret.
 	if !result.valid(mode) {
 		return monitorResponse{}, ErrProtocol

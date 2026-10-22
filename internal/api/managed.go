@@ -252,6 +252,9 @@ func validConnectionOperation(operation connections.Operation, workspace domain.
 	if !operation.ID.Valid() || operation.Workspace != workspace || !domain.ObjectID(operation.ConnectionID).Valid() || operation.ConnectionRevision < 1 || operation.CreatedAt.IsZero() || operation.UpdatedAt.Before(operation.CreatedAt) {
 		return false
 	}
+	if operation.Cause != nil && (operation.Status != "failed" || !domain.ValidReason(*operation.Cause)) {
+		return false
+	}
 	switch operation.Action {
 	case "create", "check", "replace_credential", "disable", "enable", "remove", "configure", "install_image":
 	default:

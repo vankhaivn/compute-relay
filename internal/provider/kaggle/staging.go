@@ -95,7 +95,7 @@ func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation doma
 // stagingFailure carries the step that failed as the problem's public reason.
 func stagingFailure(reason string) error {
 	if reason == "" {
-		return ErrStaging
+		reason = "staging_unresolved"
 	}
 	return provider.Problem(domain.CodeStagingFailed, domain.FailureStageProviderPreparation,
 		"Private staging creation did not complete; creation was not repeated.").WithDetail(domain.ReasonDetail, reason).WithCause(ErrStaging)
@@ -121,7 +121,7 @@ func (s *Stager) awaitCreatedVisibility(ctx context.Context, plan provider.Plan,
 			if parent.Err() == nil {
 				return provider.PreparationObservation{Status: provider.ReconciliationUnknown}, nil
 			}
-			return none, parent.Err()
+			return none, contextStep(parent.Err(), "staging_visibility")
 		case <-wait.C:
 		}
 	}
@@ -153,7 +153,7 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	frozen := plan.Clone()
 	plans, err := buildStagingPlans(s.config, s.policy, frozen, operation)
 	if err != nil {
-		return none, "", err
+		return none, "", provider.WithReason(err, "staging_plan_invalid")
 	}
 	p := plans[0]
 	if mode == "create" {
@@ -165,10 +165,10 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	case s.slot <- struct{}{}:
 		defer func() { <-s.slot }()
 	case <-ctx.Done():
-		return none, "", ctx.Err()
+		return none, "", contextStep(ctx.Err(), "staging")
 	}
 	if err := ctx.Err(); err != nil {
-		return none, "", err
+		return none, "", contextStep(err, "staging")
 	}
 	if mode == "create" {
 		// Reject every missing/corrupt local file BEFORE looking up a credential or
@@ -186,6 +186,7 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	}
 	var result stagingResponse
 	called := false
+	invoked := false
 	violated := false
 	err = s.credentials.WithCredential(ctx, s.config.CredentialRef, func(secret []byte) error {
 		if called {
@@ -209,6 +210,7 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		for _, candidate := range plans {
 			var err error
 			p = candidate
+			invoked = true
 			result, err = s.run(ctx, s.config, mode, secret, p, s.blobs)
 			if err != nil || result.Status != "invalid" {
 				return err
@@ -220,17 +222,28 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 		return none, "", err
 	}
 	if ctx.Err() != nil {
-		return none, "", ctx.Err()
+		return none, "", contextStep(ctx.Err(), "staging")
 	}
 	if err != nil || !called || violated {
-		return none, "", ErrStaging
+		reason := "staging_call_failed"
+		if !invoked {
+			reason = "staging_credential_unavailable"
+		}
+		if violated {
+			reason = "staging_credential_callback_invalid"
+		}
+		return none, "", provider.WithReason(ErrStaging, provider.Reason(err, reason))
 	} // Do not reflect secret-bearing callback or API errors.
 	seen, err := result.observation(p, frozen, operation)
 	if err == nil && seen.Status != provider.ReconciliationFound {
 		seen.Cause = result.Reason
 	}
-	if err != nil && result.Reason != "" {
-		err = provider.ReadError{Reason: result.Reason, Err: err}
+	if err != nil {
+		reason := result.Reason
+		if reason == "" {
+			reason = "staging_response_invalid"
+		}
+		err = provider.ReadError{Reason: reason, Err: provider.WithReason(err, reason)}
 	}
 	return seen, result.Reason, err
 }
@@ -238,19 +251,22 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 func verifyStagingInput(ctx context.Context, blobs StagingBlobs, m domain.ObjectMetadata) (result error) {
 	r, err := blobs.Open(ctx, m.WorkspaceID, m.ID)
 	if err != nil {
-		return ErrStagingInput
+		return provider.WithReason(ErrStagingInput, "staging_input_open_failed")
 	}
 	defer func() {
 		if err := r.Close(); err != nil {
-			result = ErrStagingInput
+			result = provider.WithReason(ErrStagingInput, "staging_input_close_failed")
 		}
 	}()
 	h := sha256.New()
 	n, err := io.CopyBuffer(h, io.LimitReader(stagingContextReader{ctx, r}, m.Bytes+1), make([]byte, 65536))
 	if err != nil || n != m.Bytes || hex.EncodeToString(h.Sum(nil)) != string(m.SHA256) {
-		return ErrStagingInput
+		return provider.WithReason(ErrStagingInput, "staging_input_verification_failed")
 	}
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return contextStep(err, "staging_input")
+	}
+	return nil
 }
 
 type stagingContextReader struct {

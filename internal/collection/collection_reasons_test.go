@@ -15,7 +15,11 @@ func TestCollectionFailureSanitizesExistingFailureReasons(t *testing.T) {
 		{Code: domain.CodeArtifactMissing, Invalid: true, Reason: "artifact_output_missing"},
 	} {
 		got := collectionFailure(input)
-		if got.Code != input.Code || got.Invalid != input.Invalid || got.Reason != "" {
+		want := input.Reason
+		if !domain.ValidCollectionReason(want) {
+			want = "artifact_collection_failed"
+		}
+		if got.Code != input.Code || got.Invalid != input.Invalid || got.Reason != want {
 			t.Fatal("changed existing failure semantics or retained arbitrary reason", got)
 		}
 	}
@@ -25,7 +29,7 @@ func TestCollectionFailurePreservesOnlyBoundedCollectionProblemReason(t *testing
 	for _, code := range []domain.ErrorCode{domain.CodeArtifactCollectionFailed, domain.CodeArtifactMissing} {
 		problem := provider.Problem(code, domain.FailureStageResults, "private message").WithDetail(domain.ReasonDetail, "artifact_read_failed").WithCause(errors.New("private cause"))
 		got := collectionFailure(fmt.Errorf("private wrapper: %w", problem))
-		want := ""
+		want := "artifact_collection_failed"
 		if code == domain.CodeArtifactCollectionFailed {
 			want = "artifact_read_failed"
 		}

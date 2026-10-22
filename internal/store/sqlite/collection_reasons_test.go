@@ -50,7 +50,7 @@ func TestCollectionReasonSurvivesEveryProviderReadBoundary(t *testing.T) {
 				if !worked || !errors.As(err, &failure) || failure.Invalid {
 					t.Fatal("provider failure changed retry/invalid semantics", err)
 				}
-				want := ""
+				want := map[string]string{"catalog": "artifact_catalog_failed", "manifest": "artifact_manifest_download_failed", "payload": "artifact_download_failed"}[stage]
 				if domain.ValidCollectionReason(reason) {
 					want = reason
 				}
@@ -107,7 +107,7 @@ func TestFailCollectionRejectsUnknownReasonBeforeMutation(t *testing.T) {
 	requireNoError(t, err)
 	for _, failure := range []collection.Failure{
 		{Code: domain.CodeArtifactCollectionFailed, Reason: "private_provider_canary"},
-		{Code: domain.CodeArtifactDigestMismatch, Reason: "artifact_digest_mismatch"},
+		{Code: domain.CodeArtifactDigestMismatch, Reason: "artifact_digest_mismatch", Cause: "private /path"},
 	} {
 		if err := f.s.FailCollection(t.Context(), *work, failure); !errors.Is(err, collection.ErrInvalid) {
 			t.Fatal("accepted invalid reason", err)

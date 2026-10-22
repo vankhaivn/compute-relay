@@ -70,9 +70,19 @@ func TestManifestIdentityOutputsAndFrozenRequirements(t *testing.T) {
 			w, m, files := manifestFixture(t)
 			tc.change(&w, m, files)
 			raw, catalog := snapshotFixture(t, w, m, files)
-			if _, err := BuildSnapshot(w, raw, catalog, DefaultConfig()); err == nil {
-				t.Fatal("unsafe result accepted")
+			_, err := BuildSnapshot(w, raw, catalog, DefaultConfig())
+			want := "artifact_manifest_invalid"
+			switch tc.name {
+			case "nonce", "job", "attempt", "bundle", "inputs", "unsafe provider path":
+				want = "artifact_remote_identity_mismatch"
+			case "missing", "omitted required":
+				want = "artifact_output_missing"
+			case "wrong digest":
+				want = "artifact_digest_mismatch"
+			case "case collision", "prefix collision":
+				want = "artifact_path_invalid"
 			}
+			assertServiceReason(t, err, want)
 		})
 	}
 	w, m, files := manifestFixture(t)

@@ -23,6 +23,7 @@ func TestApplicationImageIsRejectedBeforeKaggleMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := p.Validate(context.Background(), plan.Job)
+	assertStepReason(t, err, "application_image_unsupported")
 	var problem domain.Problem
 	if !errors.As(err, &problem) || problem.Code != domain.CodeUnsupportedCapability ||
 		remote.count("CreateDataset") != 0 || remote.count("SaveKernel") != 0 {

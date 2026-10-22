@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"slices"
 
@@ -61,7 +62,7 @@ func (a *Adapter) standardVerifierImage(ctx context.Context, d docker) (string, 
 	if !found || !ValidImageID(image.ID) || image.OS != "linux" || !SupportedArchitecture(image.Architecture) ||
 		a.config.ImageRecipeSHA256 == "" && a.config.Image != StandardImage ||
 		a.config.ImageRecipeSHA256 != "" && (image.Config.Labels[imageRecipeLabel] != a.config.ImageRecipeSHA256 || image.Config.Labels["io.compute-relay.image-schema"] != "1" || image.Architecture != a.config.Architecture) {
-		return "", ErrIdentity
+		return "", failure(ErrIdentity, "standard_verifier_image_identity_unverified")
 	}
 	return image.ID, nil
 }
@@ -73,7 +74,7 @@ func (a *Adapter) verifyStagedOnHost(ctx context.Context, d docker, info contain
 	operation := domain.OperationID(labels[labelPrefix+"preparation"])
 	if identity.Validate() != nil || !containerID.MatchString(info.ID) || info.Started() || info.State.Running || !owned(info, identity) || !operation.Valid() ||
 		labels[labelPrefix+"workspace"] != string(identity.WorkspaceID) || labels[labelPrefix+"job"] != string(identity.JobID) || labels[labelPrefix+"nonce"] != identity.Nonce {
-		return ErrIdentity
+		return failure(ErrIdentity, "staging_target_identity_unverified")
 	}
 	imageID, err := a.standardVerifierImage(ctx, d)
 	if err != nil {
@@ -94,7 +95,7 @@ func (a *Adapter) verifyStagedOnHost(ctx context.Context, d docker, info contain
 	}
 	encoded, err := json.Marshal(allowed)
 	if err != nil {
-		return ErrIdentity
+		return failure(errors.Join(ErrIdentity, err), "staging_verifier_request_invalid")
 	}
 	var output verifierOutput
 	argv := []string{"/bin/sh", "-c", hostVerifierShell, "relay-verifier", d.binary, d.host, info.ID, imageID,
@@ -102,29 +103,38 @@ func (a *Adapter) verifyStagedOnHost(ctx context.Context, d docker, info contain
 		string(identity.InstallationID), string(identity.AttemptID), string(operation)}
 	result, err := d.exec.Run(ctx, d.env(), argv, nil, &output)
 	if err != nil {
-		return err
+		if output.overLimit {
+			return failure(err, "staging_verifier_response_limit")
+		}
+		return failure(err, "staging_verifier_transport_failed")
 	}
 	if output.overLimit {
-		return ErrIdentity
+		return failure(ErrIdentity, "staging_verifier_response_limit")
 	}
 	status, raw, ok := bytes.Cut(output.Bytes(), []byte("\n"))
-	if result.ExitCode != 0 || !ok || !bytes.Equal(status, []byte("cp:0")) {
-		return ErrIdentity
+	if result.ExitCode != 0 {
+		return failure(ErrIdentity, "staging_verifier_failed")
+	}
+	if !ok || !bytes.HasPrefix(status, []byte("cp:")) {
+		return failure(ErrIdentity, "staging_verifier_protocol_invalid")
+	}
+	if !bytes.Equal(status, []byte("cp:0")) {
+		return failure(ErrIdentity, "staging_verifier_producer_failed")
 	}
 	var inventory verifierInventory
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&inventory) != nil || decoder.Decode(new(any)) != io.EOF || len(inventory.Files) != len(names) {
-		return ErrIdentity
+		return failure(ErrIdentity, "staging_verifier_inventory_invalid")
 	}
 	for i, name := range names {
 		got, want := inventory.Files[i], expected[name]
 		if got.Bytes != want.Bytes || got.SHA256 != string(want.SHA256) {
-			return ErrIdentity
+			return failure(ErrIdentity, "staging_bytes_mismatch")
 		}
 	}
 	if inventory.Marker != nil && (inventory.Marker.Bytes < 0 || inventory.Marker.Bytes > 4096 || !domain.SHA256Digest(inventory.Marker.SHA256).Valid()) {
-		return ErrIdentity
+		return failure(ErrIdentity, "staging_verifier_marker_invalid")
 	}
 	return nil
 }

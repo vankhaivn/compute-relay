@@ -22,6 +22,7 @@ type storageObservation struct {
 	seq     int64
 	at      time.Time
 	state   string
+	reason  string
 	foreign hoststorage.Foreign
 	objects []hoststorage.Object
 }
@@ -139,7 +140,7 @@ func (s *Store) RecordStorageScan(ctx context.Context, scan hoststorage.Scan) er
 }
 
 func (s *Store) RecordIncompleteStorageScan(ctx context.Context, scope hoststorage.Scope, reason string) error {
-	if !scope.Valid() || len(reason) == 0 || len(reason) > 64 {
+	if !scope.Valid() || !domain.ValidReason(reason) {
 		return hoststorage.ErrInvalid
 	}
 	return s.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
@@ -152,9 +153,9 @@ func (s *Store) RecordIncompleteStorageScan(ctx context.Context, scope hoststora
 func latestStorageObservation(ctx context.Context, tx *sql.Tx, scope hoststorage.Scope) (storageObservation, error) {
 	var o storageObservation
 	var millis int64
-	err := tx.QueryRowContext(ctx, `SELECT scan_seq,observed_ms,status,foreign_containers,foreign_volumes,foreign_images
+	err := tx.QueryRowContext(ctx, `SELECT scan_seq,observed_ms,status,reason,foreign_containers,foreign_volumes,foreign_images
 	 FROM host_storage_scans WHERE installation_id=? AND machine_id=? AND engine_id=? ORDER BY scan_seq DESC LIMIT 1`,
-		scope.InstallationID, scope.MachineID, scope.EngineID).Scan(&o.seq, &millis, &o.state,
+		scope.InstallationID, scope.MachineID, scope.EngineID).Scan(&o.seq, &millis, &o.state, &o.reason,
 		&o.foreign.Containers, &o.foreign.Volumes, &o.foreign.Images)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o, nil
@@ -277,6 +278,9 @@ func storageChargeInTx(ctx context.Context, tx *sql.Tx, scope hoststorage.Scope,
 	c.view.Orphans = []hoststorage.Orphan{}
 	if observation.seq != 0 {
 		c.view.ScanState = observation.state
+		if domain.ValidReason(observation.reason) {
+			c.view.Reason = observation.reason
+		}
 		if observation.state == "complete" {
 			at := observation.at
 			c.view.ObservedAt = &at

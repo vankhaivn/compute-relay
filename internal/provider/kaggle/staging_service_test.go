@@ -103,7 +103,16 @@ func TestStagingCreateChecksAllInputsBeforeCredentials(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s, plan, b, reads := newTestStager(t, true)
 			b.mode = mode
-			if _, err := s.Prepare(context.Background(), plan, "prep"); !errors.Is(err, ErrStagingInput) || *reads != 0 {
+			_, err := s.Prepare(context.Background(), plan, "prep")
+			reason := "staging_input_verification_failed"
+			if mode == "missing" {
+				reason = "staging_input_open_failed"
+			}
+			if mode == "close" {
+				reason = "staging_input_close_failed"
+			}
+			assertStepReason(t, err, reason)
+			if !errors.Is(err, ErrStagingInput) || *reads != 0 {
 				t.Fatal("unsafe preflight", err, *reads)
 			}
 		})
@@ -122,7 +131,14 @@ func TestStagingLocalFailureAndOptInMakeNoSideEffects(t *testing.T) {
 			case "remapped":
 				plan.Job.Binding.ConfigurationRevision = "replacement"
 			}
-			if _, err := s.Prepare(ctx, plan, "prep"); err == nil || *reads != 0 || b.reads != 0 {
+			_, err := s.Prepare(ctx, plan, "prep")
+			if mode == "cancelled" {
+				assertStepReason(t, err, "staging_interrupted")
+			}
+			if mode == "remapped" {
+				assertStepReason(t, err, "staging_plan_invalid")
+			}
+			if err == nil || *reads != 0 || b.reads != 0 {
 				t.Fatal("unsafe early failure", err)
 			}
 		})
@@ -198,7 +214,9 @@ func TestStagingRejectsFalseOrChangedHelperIdentity(t *testing.T) {
 				}
 				return r, nil
 			}
-			if result, err := s.ReconcilePrepare(context.Background(), plan, "prep"); err == nil || result.Prepared != nil {
+			result, err := s.ReconcilePrepare(context.Background(), plan, "prep")
+			assertStepReason(t, err, "staging_response_invalid")
+			if err == nil || result.Prepared != nil {
 				t.Fatal("invalid observation accepted", result, err)
 			}
 		})
@@ -237,9 +255,37 @@ func TestStagingCredentialAndHelperErrorsAreSanitized(t *testing.T) {
 				return stageResponse(p, "ready"), nil
 			}
 			result, err := s.ReconcilePrepare(context.Background(), plan, "prep")
+			reason := "staging_credential_unavailable"
+			if mode == "helper" {
+				reason = "staging_call_failed"
+			}
+			if mode == "double-callback" {
+				reason = "staging_credential_callback_invalid"
+			}
+			assertStepReason(t, err, reason)
 			if err == nil || strings.Contains(err.Error(), "SYNTHETIC_SECRET") || result.Prepared != nil || calls > 1 {
 				t.Fatal("unsafe error/callback", result, err, calls)
 			}
 		})
+	}
+}
+
+func TestStagingCreateUnresolvedRetainsSpecificReason(t *testing.T) {
+	for _, reason := range []string{"", "shared_lookup_failed_http_429"} {
+		s, plan, _, _ := newTestStager(t, true)
+		calls := 0
+		s.run = func(context.Context, Config, string, []byte, stagingPlan, StagingBlobs) (stagingResponse, error) {
+			calls++
+			return stagingResponse{Protocol: 1, Status: "unknown", Reason: reason}, nil
+		}
+		_, err := s.Prepare(context.Background(), plan, "prep")
+		expected := reason
+		if expected == "" {
+			expected = "staging_unresolved"
+		}
+		assertStepReason(t, err, expected)
+		if !errors.Is(err, ErrStaging) || calls != 1 {
+			t.Fatal("unresolved creation lost classification or repeated", err, calls)
+		}
 	}
 }

@@ -63,6 +63,9 @@ func TestApplicationImageIdentitySelectsKnownStoreBeforeLoad(t *testing.T) {
 			if got != tc.want || (tc.want == "") != errors.Is(err, ErrRemoteDocker) || e.calls != 1 {
 				t.Fatalf("identity=%q err=%v calls=%d", got, err, e.calls)
 			}
+			if tc.want == "" {
+				assertFailureReason(t, err, "application_image_store_unverified")
+			}
 		})
 	}
 }

@@ -229,7 +229,7 @@ func TestExecutorRechecksUnresolvedStagingBeforeOneSubmission(t *testing.T) {
 		"identity-changed":        {replies: []string{"replaced"}, want: provider.SubmissionRejected, reason: reasonStagingUnconfirmed, cause: "staging_identity_changed", persistent: true},
 		"stays-public":            {replies: []string{"public"}, want: provider.SubmissionRejected, reason: reasonStagingUnconfirmed, cause: "staging_not_private", persistent: true},
 		"stays-mismatched":        {replies: []string{"mismatch"}, want: provider.SubmissionRejected, reason: reasonStagingRecheck, cause: "shared_files_mismatch", persistent: true},
-		"invalid-without-reason":  {replies: []string{"invalid"}, want: provider.SubmissionRejected, reason: reasonStagingRecheck, cause: "staging_read_failed", persistent: true},
+		"invalid-without-reason":  {replies: []string{"invalid"}, want: provider.SubmissionRejected, reason: reasonStagingRecheck, cause: "staging_response_invalid", persistent: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newExecutionFixture(t)

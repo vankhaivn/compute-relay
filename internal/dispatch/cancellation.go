@@ -58,7 +58,7 @@ func (s *session) cancelOnce(p provider.Provider) (bool, error) {
 		return true, err
 	}
 	// Only this acknowledged transition grants a call. No error path re-arms it.
-	outcome, err := control(s.ctx, s.e.config.ControlTimeout, func(ctx context.Context) (provider.CancellationOutcome, error) {
+	outcome, err := control(s.ctx, s.e.config.ControlTimeout, "cancel", func(ctx context.Context) (provider.CancellationOutcome, error) {
 		return p.Cancel(ctx, *w.Journal.Remote, w.Cancellation.Operation.ID)
 	})
 	if provider.IsLocalStateError(err) {

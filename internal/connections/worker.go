@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/jsonwire"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 func (s *Service) descriptors() []Descriptor {
@@ -117,7 +118,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 				if ctx.Err() != nil {
 					return true, ctx.Err()
 				}
-				return true, s.repo.FailConnection(ctx, op.ID, "credential_store_unavailable")
+				return true, s.repo.FailConnection(ctx, op.ID, "credential_store_unavailable", "")
 			}
 		}
 		return true, s.repo.FinishConnection(ctx, record, Completion{})
@@ -127,7 +128,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	}
 	adapter := s.adapters[record.ProviderType]
 	if adapter == nil {
-		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider")
+		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", "")
 	}
 	var verified Verification
 	timeout := 60 * time.Second
@@ -181,23 +182,23 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		if errors.Is(err, credentials.ErrUnavailable) || errors.Is(err, credentials.ErrUnconfigured) {
 			problem = "credential_store_unavailable"
 		}
-		return true, s.repo.FailConnection(ctx, op.ID, problem)
+		return true, s.repo.FailConnection(ctx, op.ID, problem, provider.Reason(err, ""))
 	}
 	if !domain.ObjectID(verified.CanonicalAccount).Valid() || verified.Quota.Validate() != nil {
-		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable")
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", "")
 	}
 	if record.CanonicalAccount != "" && record.CanonicalAccount != verified.CanonicalAccount {
-		return true, s.repo.FailConnection(ctx, op.ID, "account_changed")
+		return true, s.repo.FailConnection(ctx, op.ID, "account_changed", "")
 	}
 	if verified.Resource != nil && verified.Resource.Validate() != nil {
-		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable")
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", "")
 	}
 	if capability := adapter.Descriptor().Capabilities.Concurrency; capability != nil &&
 		(capability.Scope == "resource") != (verified.Resource != nil) {
-		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable")
+		return true, s.repo.FailConnection(ctx, op.ID, "provider_unavailable", "")
 	}
 	if record.Resource != nil && (verified.Resource == nil || *record.Resource != *verified.Resource) {
-		return true, s.repo.FailConnection(ctx, op.ID, "resource_changed")
+		return true, s.repo.FailConnection(ctx, op.ID, "resource_changed", "")
 	}
 	profile := adapter.Profile(ProfileBinding(op.ConnectionID, op.ConnectionRevision), AccountScope(record.ProviderType, verified.CanonicalAccount))
 	profile.CredentialRef = "vault:" + op.ConnectionID
@@ -214,7 +215,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		}
 	}
 	if profile.Validate() != nil || profile.MaxRemoteWallSeconds > adapter.Descriptor().Capabilities.MaxRemoteWallSeconds {
-		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider")
+		return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", "")
 	}
 	runtimeConfig := verified.RuntimeConfig
 	if len(runtimeConfig) == 0 {
@@ -224,7 +225,7 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 	}
 	if len(runtimeConfig) > 0 {
 		if _, err := jsonwire.Object(runtimeConfig, 8192); err != nil {
-			return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider")
+			return true, s.repo.FailConnection(ctx, op.ID, "unsupported_provider", "")
 		}
 		runtimeConfig = append([]byte(nil), runtimeConfig...)
 	}

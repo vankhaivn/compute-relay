@@ -52,7 +52,7 @@ func artifactContextFailure(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		reason = "artifact_call_timeout"
 	}
-	return artifactFailure(reason).WithCause(err)
+	return artifactFailure(reason).WithCause(errors.Join(ErrArtifactTransfer, err))
 }
 
 // ArtifactPolicy bounds this read-only component; it does not alter a frozen job.
@@ -305,10 +305,13 @@ func (a *ArtifactReader) Fetch(parent context.Context, ref provider.RemoteRefere
 	if provider.IsLocalStateError(err) {
 		return none, err
 	}
+	if checked.failed {
+		return none, artifactFailure("artifact_write_failed")
+	}
 	if err != nil {
 		return none, err
 	}
-	if checked.failed || checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
+	if checked.n != file.Bytes || hex.EncodeToString(checked.hash.Sum(nil)) != string(file.SHA256) {
 		return none, artifactFailure("artifact_digest_mismatch")
 	}
 	if file.Path == artifactManifest {

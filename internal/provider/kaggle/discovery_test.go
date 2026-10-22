@@ -101,7 +101,7 @@ func TestDiscoveryInvalidTokenCannotInvokeChild(t *testing.T) {
 	}
 	for _, token := range []string{"", "space token", "newline\n", "\x00", "\xff", strings.Repeat("x", 8193)} {
 		result, err := d.Discover(context.Background(), []byte(token))
-		if err != ErrCredentialRejected || result.CanonicalAccount() != "" {
+		if !errors.Is(err, ErrCredentialRejected) || result.CanonicalAccount() != "" {
 			t.Fatal("invalid token produced identity", err)
 		}
 	}
@@ -119,7 +119,15 @@ func TestDiscoveryFailureNeverRetainsAccountOrReflectsProviderText(t *testing.T)
 			return discoveryResponse{Protocol: 1, Status: tc.status}, nil
 		}
 		result, err := d.Discover(context.Background(), []byte("SYNTHETIC_TOKEN"))
-		if err != tc.want || result.CanonicalAccount() != "" || !result.Quota().ObservedAt.IsZero() {
+		reason := "discovery_response_invalid"
+		switch tc.status {
+		case "credential_rejected":
+			reason = "discovery_credential_rejected"
+		case "unavailable":
+			reason = "discovery_account_read_failed"
+		}
+		assertStepReason(t, err, reason)
+		if !errors.Is(err, tc.want) || result.CanonicalAccount() != "" || !result.Quota().ObservedAt.IsZero() {
 			t.Fatal("failed verification retained evidence", err)
 		}
 	}
@@ -131,7 +139,7 @@ func TestDiscoveryFailureNeverRetainsAccountOrReflectsProviderText(t *testing.T)
 			return r, nil
 		}
 		result, err := d.Discover(context.Background(), []byte("synthetic_token"))
-		if err != ErrProtocol || result.CanonicalAccount() != "" {
+		if !errors.Is(err, ErrProtocol) || result.CanonicalAccount() != "" {
 			t.Fatal("noncanonical or echoed identity accepted", err)
 		}
 	}
@@ -144,7 +152,8 @@ func TestDiscoveryFailureNeverRetainsAccountOrReflectsProviderText(t *testing.T)
 			return discoveryVerified(), errors.New("SYNTHETIC_TOKEN")
 		}
 		result, err := d.Discover(context.Background(), []byte("SYNTHETIC_TOKEN"))
-		if err != ErrUnavailable || result.CanonicalAccount() != "" {
+		assertStepReason(t, err, "discovery_call_failed")
+		if !errors.Is(err, ErrUnavailable) || result.CanonicalAccount() != "" {
 			t.Fatal("raw error leaked or identity retained", err)
 		}
 	}
@@ -170,7 +179,7 @@ func TestDiscoveryCancellationSerializesAndTimestampPrecedesRead(t *testing.T) {
 	<-entered
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := d.Discover(ctx, []byte("SYNTHETIC_TOKEN")); err != context.Canceled {
+	if _, err := d.Discover(ctx, []byte("SYNTHETIC_TOKEN")); !errors.Is(err, context.Canceled) {
 		t.Fatal("waiting discovery ignored cancellation", err)
 	}
 	close(release)
@@ -179,7 +188,7 @@ func TestDiscoveryCancellationSerializesAndTimestampPrecedesRead(t *testing.T) {
 		d.clock.(*stagingClock).at = at.Add(-time.Minute)
 		return discoveryVerified(), nil
 	}
-	if _, err := d.Discover(context.Background(), []byte("SYNTHETIC_TOKEN")); err != ErrProtocol {
+	if _, err := d.Discover(context.Background(), []byte("SYNTHETIC_TOKEN")); !errors.Is(err, ErrProtocol) {
 		t.Fatal("backwards clock accepted", err)
 	}
 }

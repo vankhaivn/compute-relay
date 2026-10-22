@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"time"
 
@@ -29,7 +30,7 @@ func deliverSecrets(ctx context.Context, d docker, container string, prepared pr
 	raw, err := json.Marshal(packet)
 	if err != nil || len(raw) > workloadsecret.MaxRequestBytes {
 		clear(raw)
-		return ErrRequest
+		return failure(ErrRequest, "deliver_secrets_request_invalid")
 	}
 	defer clear(raw)
 	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -38,7 +39,7 @@ func deliverSecrets(ctx context.Context, d docker, container string, prepared pr
 		"python3", "-E", "-s", "/relay/runner/run.py", "--receive-secrets", "--manifest", "/relay/manifest.json", "--start-control", startControlPath)
 	clear(result.Stderr)
 	if err != nil || result.ExitCode != 0 {
-		return ErrRemoteDocker
+		return failure(errors.Join(ErrRemoteDocker, err), "workload_secret_delivery_failed")
 	}
 	return nil
 }

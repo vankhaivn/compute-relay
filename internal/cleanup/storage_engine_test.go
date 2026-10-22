@@ -17,6 +17,7 @@ type storageStubRepository struct {
 	beginErr  error
 	begins    int
 	completed []hoststorage.DeleteOutcome
+	reasons   []string
 }
 
 func (r *storageStubRepository) ClaimStorageCleanup(context.Context, time.Duration) (*StorageWork, error) {
@@ -31,8 +32,14 @@ func (r *storageStubRepository) BeginStorageCleanup(context.Context, StorageWork
 	r.begins++
 	return r.beginErr
 }
-func (r *storageStubRepository) CompleteStorageCleanup(_ context.Context, _ StorageWork, outcome hoststorage.DeleteOutcome) error {
+func (r *storageStubRepository) CompleteStorageCleanup(_ context.Context, _ StorageWork, outcome hoststorage.DeleteOutcome, reason string) error {
+	r.reasons = append(r.reasons, reason)
 	r.completed = append(r.completed, outcome)
+	return nil
+}
+
+func (r *storageStubRepository) RecordStorageCleanupReason(_ context.Context, _ StorageWork, reason string) error {
+	r.reasons = append(r.reasons, reason)
 	return nil
 }
 

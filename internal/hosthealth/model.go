@@ -32,6 +32,7 @@ type Snapshot struct {
 	SchemaVersion        int             `json:"schema_version"`
 	ObservedAt           time.Time       `json:"observed_at"`
 	ResourceID           string          `json:"resource_id"`
+	Cause                string          `json:"cause,omitempty"`
 	Platform             Metric[string]  `json:"platform"`
 	ThermalLevel         Metric[int]     `json:"thermal_level"` // Foundation NSProcessInfoThermalState (0..3).
 	CPUSpeedLimitPercent Metric[float64] `json:"cpu_speed_limit_percent"`

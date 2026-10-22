@@ -170,7 +170,7 @@ func TestNativeSubmissionLostAcknowledgementReconcilesWithoutSave(t *testing.T) 
 				t.Fatal("lost save acknowledgement became rejection or retry permission", out)
 			}
 			details := out.Problem.PublicDetails()
-			if details["resource_name"] == "" || details["submission_operation"] != "save_kernel" ||
+			if details["reason"] != "submission_save_failed" || details["resource_name"] == "" || details["submission_operation"] != "save_kernel" ||
 				tc.fault == "save-throttled" && (details["submission_http_status"] != "429" || details["submission_error_type"] != "RESOURCE_EXHAUSTED") ||
 				strings.Contains(out.Problem.Error(), "SYNTHETIC_TOKEN") {
 				t.Fatal("submission diagnostics missing or unsafe", details)

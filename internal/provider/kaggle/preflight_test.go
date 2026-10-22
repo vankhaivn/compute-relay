@@ -104,7 +104,9 @@ func TestPreflightRejectsSecretAndSanitizesErrors(t *testing.T) {
 		}
 		return Report{}, errors.New("SYNTHETIC_CANARY")
 	}
-	if _, err := p.Check(context.Background(), ReadOnly); err != ErrUnavailable {
+	_, err := p.Check(context.Background(), ReadOnly)
+	assertStepReason(t, err, "account_read_failed")
+	if !errors.Is(err, ErrUnavailable) {
 		t.Fatal("raw failure reflected", err)
 	}
 }
@@ -160,7 +162,9 @@ func TestPreflightRejectsIgnoredCredentialCallbackViolations(t *testing.T) {
 				calls++
 				return verified(), nil
 			}
-			if report, err := p.Check(context.Background(), ReadOnly); err != ErrProtocol || report != (Report{}) || calls > 1 {
+			report, err := p.Check(context.Background(), ReadOnly)
+			assertStepReason(t, err, "account_response_invalid")
+			if !errors.Is(err, ErrProtocol) || report != (Report{}) || calls > 1 {
 				t.Fatal("resolver violation established verification", report, err, calls)
 			}
 		})

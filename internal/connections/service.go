@@ -246,7 +246,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, w domain.Workspa
 			if ctx.Err() != nil {
 				return Operation{}, ctx.Err()
 			}
-			if failErr := s.repo.FailConnection(ctx, record.Operation.ID, "credential_store_unavailable"); failErr != nil {
+			if failErr := s.repo.FailConnection(ctx, record.Operation.ID, "credential_store_unavailable", ""); failErr != nil {
 				return Operation{}, failErr
 			}
 		} else if err = s.repo.ReadyConnection(ctx, w, p.TokenID(), record.Operation.ID); err != nil {

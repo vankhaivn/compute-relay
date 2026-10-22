@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 const (
@@ -135,6 +136,12 @@ func (p *Prepared) Close() error {
 // on the controller. Callers must commit their separate one-shot load intent only
 // after this succeeds, and must close the result on every path.
 func Normalize(ctx context.Context, source io.Reader, opts Options) (_ *Prepared, err error) {
+	step := "image_options_invalid"
+	defer func() {
+		if err != nil {
+			err = provider.WithReason(err, step)
+		}
+	}()
 	if ctx == nil || source == nil {
 		return nil, ErrInvalidArchive
 	}
@@ -142,6 +149,7 @@ func Normalize(ctx context.Context, source io.Reader, opts Options) (_ *Prepared
 	if err != nil {
 		return nil, err
 	}
+	step = "image_source_file_failed"
 	input, err := os.CreateTemp(opts.TempDir, "relay-image-source-*")
 	if err != nil {
 		return nil, err
@@ -150,17 +158,20 @@ func Normalize(ctx context.Context, source io.Reader, opts Options) (_ *Prepared
 		_ = input.Close()
 		_ = os.Remove(input.Name())
 	}()
+	step = "image_source_space_failed"
 	if err := ensureFreeSpace(input.Name(), opts.ArchiveBytes); err != nil {
 		return nil, err
 	}
+	step = "image_source_read_failed"
 	originalHash := sha256.New()
 	n, err := io.CopyN(io.MultiWriter(input, originalHash), contextReader{ctx, source}, opts.ArchiveBytes)
 	if err != nil || n != opts.ArchiveBytes {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, ErrDigestMismatch
+		return nil, errors.Join(ErrDigestMismatch, err)
 	}
+	step = "image_source_digest_failed"
 	var extra [1]byte
 	got, readErr := io.ReadFull(contextReader{ctx, source}, extra[:])
 	if got != 0 || readErr != io.EOF || hex.EncodeToString(originalHash.Sum(nil)) != string(opts.ArchiveSHA256) {
@@ -169,17 +180,21 @@ func Normalize(ctx context.Context, source io.Reader, opts Options) (_ *Prepared
 		}
 		return nil, ErrDigestMismatch
 	}
+	step = "image_archive_scan_failed"
 	entries, err := scanArchive(ctx, input, limits)
 	if err != nil {
 		return nil, err
 	}
+	step = "image_archive_parse_failed"
 	image, err := parseImage(ctx, input, entries, opts, limits)
 	if err != nil {
 		return nil, err
 	}
+	step = "image_output_space_failed"
 	if err := ensureFreeSpace(input.Name(), estimatedOutputBytes(image, limits)); err != nil {
 		return nil, err
 	}
+	step = "image_output_file_failed"
 	output, err := os.CreateTemp(opts.TempDir, "relay-image-load-*")
 	if err != nil {
 		return nil, err
@@ -191,16 +206,20 @@ func Normalize(ctx context.Context, source io.Reader, opts Options) (_ *Prepared
 		}
 	}()
 	metadata := normalizedMetadata(image)
+	step = "image_archive_write_failed"
 	size, err := writeDockerArchive(ctx, input, output, image, metadata, limits)
 	if err != nil {
 		return nil, err
 	}
+	step = "image_archive_sync_failed"
 	if err = output.Sync(); err != nil {
 		return nil, err
 	}
+	step = "image_archive_verify_failed"
 	if err = verifyCompletedArchive(ctx, output, image, size, limits); err != nil {
 		return nil, err
 	}
+	step = "image_archive_seek_failed"
 	if _, err = output.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}

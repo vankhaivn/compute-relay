@@ -2,6 +2,7 @@ package sshhost
 
 import (
 	"context"
+	"errors"
 	"io"
 	"path"
 	"strings"
@@ -16,24 +17,24 @@ func CollectHealth(ctx context.Context, raw []byte, account, resourceID, engineI
 	if (strings.TrimPrefix(resourceID, "resource_") == resourceID) ||
 		!domain.SHA256Digest(strings.TrimPrefix(resourceID, "resource_")).Valid() ||
 		engineID != "" && !domain.SHA256Digest(engineID).Valid() {
-		return hosthealth.Snapshot{}, ErrResourceIdentity
+		return hosthealth.Snapshot{}, failure(ErrResourceIdentity, "health_binding_mismatch")
 	}
 	endpoint, err := ParseEndpoint(raw)
 	if err != nil {
-		return hosthealth.Snapshot{}, ErrRequest
+		return hosthealth.Snapshot{}, failure(ErrRequest, "health_endpoint_invalid")
 	}
 	defer clear(endpoint.Credential.PrivateKey)
 	defer clear(endpoint.Credential.Passphrase)
 	defer clear(endpoint.Credential.Password)
 	endpoint, err = endpoint.Pin(account)
 	if err != nil {
-		return hosthealth.Snapshot{}, ErrHostKeyMismatch
+		return hosthealth.Snapshot{}, failure(ErrHostKeyMismatch, "host_key_mismatch")
 	}
 	ctx, cancel := context.WithTimeout(ctx, hosthealth.RefreshTimeout)
 	defer cancel()
 	client, err := Dial(ctx, endpoint.Target, endpoint.Credential)
 	if err != nil {
-		return hosthealth.Snapshot{}, err
+		return hosthealth.Snapshot{}, failure(err, failureReasonForTransport(err))
 	}
 	defer client.Close()
 	return collectHealth(ctx, healthBoundedExecutor{client}, endpoint, resourceID, engineID)
@@ -86,31 +87,34 @@ func (e healthExecutor) Run(ctx context.Context, args []string, stdout, stderr i
 		clear(result.Stderr)
 	}
 	if err != nil || result.ExitCode != 0 {
-		return ErrUnavailable
+		return failure(errors.Join(ErrUnavailable, err), "health_probe_failed")
 	}
 	return nil
 }
 
 func collectHealth(ctx context.Context, exec executor, endpoint Endpoint, resourceID, engineID string) (hosthealth.Snapshot, error) {
 	machine, err := machineIdentity(ctx, exec)
-	if err != nil || "resource_"+machine != resourceID {
-		return hosthealth.Snapshot{}, ErrResourceIdentity
+	if err != nil {
+		return hosthealth.Snapshot{}, failure(errors.Join(ErrResourceIdentity, err), "health_machine_identity_failed")
+	}
+	if "resource_"+machine != resourceID {
+		return hosthealth.Snapshot{}, failure(ErrResourceIdentity, "health_machine_identity_mismatch")
 	}
 	var config hosthealth.Config
 	binary, err := findDocker(ctx, exec, endpoint.DockerPath)
 	if err == nil {
 		d, localErr := (docker{exec: exec, binary: binary}).localResource(ctx)
 		if localErr != nil {
-			return hosthealth.Snapshot{}, ErrResourceIdentity
+			return hosthealth.Snapshot{}, failure(errors.Join(ErrResourceIdentity, localErr), "health_docker_identity_failed")
 		}
 		actualEngine, identityErr := d.engineIdentity(ctx)
 		if identityErr == nil && (engineID == "" || actualEngine == engineID) {
 			config = hosthealth.Config{DockerPath: binary, DockerHost: d.host}
 		} else if engineID != "" {
-			return hosthealth.Snapshot{}, ErrResourceIdentity
+			return hosthealth.Snapshot{}, failure(errors.Join(ErrResourceIdentity, identityErr), "health_docker_identity_mismatch")
 		}
 	} else if engineID != "" {
-		return hosthealth.Snapshot{}, ErrResourceIdentity
+		return hosthealth.Snapshot{}, failure(errors.Join(ErrResourceIdentity, err), "health_docker_identity_failed")
 	}
 	// A machine verified before image installation can still expose host metrics.
 	// If its local Docker budget cannot be observed, those metrics remain unavailable.

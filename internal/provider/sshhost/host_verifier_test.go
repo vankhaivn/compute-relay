@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vankhaivn/compute-relay/internal/domain"
 )
 
 func TestHostVerifierShellIsPOSIX(t *testing.T) {
@@ -169,8 +171,21 @@ func TestHostVerifierRejectsProducerAndArchiveFailures(t *testing.T) {
 				}
 			}
 			start := startAuthority(prepared, clock)
-			if out := h.adapter.Start(context.Background(), prepared, &start, nil); out.Status != "rejected" || h.host.starts != 0 {
+			out := h.adapter.Start(context.Background(), prepared, &start, nil)
+			if out.Status != "rejected" || h.host.starts != 0 {
 				t.Fatal("failed verifier allowed Start", out.Status)
+			}
+			want := "staging_verifier_failed"
+			switch kind {
+			case "producer_failure":
+				want = "staging_verifier_producer_failed"
+			case "missing_status":
+				want = "staging_verifier_protocol_invalid"
+			case "oversized_stdout":
+				want = "staging_verifier_response_limit"
+			}
+			if out.Problem == nil || out.Problem.PublicDetails()[domain.CauseDetail] != want {
+				t.Fatalf("readiness refusal lost verifier step %q: %+v", want, out.Problem)
 			}
 		})
 	}

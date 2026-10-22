@@ -40,7 +40,7 @@ func storageContainers(ctx context.Context, d docker, budget *storageScanBudget,
 	}
 	var summaries []storageContainerSummary
 	if json.Unmarshal(raw, &summaries) != nil || summaries == nil || len(summaries) > hoststorage.ScanMaxObjects {
-		return nil, ErrRemoteDocker
+		return nil, failure(ErrRemoteDocker, "storage_container_summary_invalid")
 	}
 	objects := make([]hoststorage.Object, 0, len(summaries))
 	for _, summary := range summaries {
@@ -50,7 +50,7 @@ func storageContainers(ctx context.Context, d docker, budget *storageScanBudget,
 			object.Running = true
 		case "created", "exited", "dead", "removing":
 		default:
-			return nil, ErrRemoteDocker
+			return nil, failure(ErrRemoteDocker, "storage_container_summary_invalid")
 		}
 		if summary.SizeRw != nil && *summary.SizeRw >= 0 {
 			object.SizeKnown, object.SizeBytes = true, *summary.SizeRw
@@ -118,7 +118,7 @@ func (b *storageScanBudget) readDockerJSON(ctx context.Context, d docker, reques
 	runErr := <-done
 	b.remaining -= bounded.n
 	if err != nil || runErr != nil {
-		return nil, errors.Join(ErrRemoteDocker, err, runErr)
+		return nil, failure(errors.Join(ErrRemoteDocker, err, runErr), "storage_container_summary_failed")
 	}
 	return body, nil
 }

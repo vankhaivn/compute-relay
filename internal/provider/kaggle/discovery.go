@@ -57,19 +57,30 @@ func NewDiscovery(clock ports.Clock, pacing *kaggleapi.RequestPacer) (*Discovery
 // the caller owns and clears the original. Successful identity with unknown/unavailable
 // quota is still verified, but cannot establish known GPU capacity.
 func (d *Discovery) Discover(parent context.Context, token []byte) (result DiscoveryResult, err error) {
+	reason := "discovery_response_invalid"
 	defer func() {
 		if recover() != nil {
 			result, err = DiscoveryResult{}, ErrUnavailable
+			reason = "discovery_call_failed"
+		}
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				err = contextStep(err, "discovery")
+			} else {
+				err = provider.WithReason(err, reason)
+			}
 		}
 	}()
 	if d == nil {
 		return result, ErrConfig
 	}
 	if len(token) == 0 || len(token) > credentials.MaxBytes {
+		reason = "discovery_credential_rejected"
 		return result, ErrCredentialRejected
 	}
 	for _, b := range token {
 		if b < 33 || b > 126 {
+			reason = "discovery_credential_rejected"
 			return result, ErrCredentialRejected
 		}
 	}
@@ -94,9 +105,10 @@ func (d *Discovery) Discover(parent context.Context, token []byte) (result Disco
 	}
 	if runErr != nil {
 		// Never reflect arbitrary client or adapter errors containing secrets.
-		if runErr == ErrProtocol {
+		if errors.Is(runErr, ErrProtocol) {
 			return result, ErrProtocol
 		}
+		reason = "discovery_call_failed"
 		return result, ErrUnavailable
 	}
 	if !r.valid() || d.clock.Now().Before(at) {
@@ -104,8 +116,10 @@ func (d *Discovery) Discover(parent context.Context, token []byte) (result Disco
 	}
 	switch r.Status {
 	case "credential_rejected":
+		reason = "discovery_credential_rejected"
 		return result, ErrCredentialRejected
 	case "unavailable":
+		reason = "discovery_account_read_failed"
 		return result, ErrDiscoveryUnavailable
 	case "invalid_response":
 		return result, ErrProtocol

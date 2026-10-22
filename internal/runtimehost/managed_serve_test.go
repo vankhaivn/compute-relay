@@ -192,3 +192,13 @@ func TestManagedWorkerFailureClosesHTTPAndOtherWorkersWithoutRawError(t *testing
 		t.Fatal("failed runtime did not join other workers")
 	}
 }
+
+func TestWorkerOwnDeadlineIsReportedAsClosedServeCause(t *testing.T) {
+	listener := testListener(t)
+	server := &http.Server{Handler: http.NotFoundHandler()}
+	err := runRuntimeServices(context.Background(), server, listener, "managed-workers", Listening{}, func(Listening) error { return nil }, []runtimeService{{"collection", func(context.Context) error { return context.DeadlineExceeded }}})
+	var stopped ServiceStopped
+	if !errors.As(err, &stopped) || stopped.Service != "collection" || stopped.Class != "operation_timed_out" {
+		t.Fatal("worker deadline silently stopped serve", err)
+	}
+}

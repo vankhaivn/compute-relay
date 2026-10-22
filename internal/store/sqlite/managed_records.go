@@ -196,10 +196,10 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 	var r connections.Record
 	var receipt, status, updated string
 	var installation, health []byte
-	var problem sql.NullString
+	var problem, cause sql.NullString
 	var wall, storageSoft, storageHard sql.NullInt64
 	var maxActive, maxProcesses int
-	err := tx.QueryRowContext(ctx, `SELECT r.receipt,o.status,o.problem,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation,c.host_health,c.storage_soft_bytes,c.storage_hard_bytes FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation, &health, &storageSoft, &storageHard)
+	err := tx.QueryRowContext(ctx, `SELECT r.receipt,o.status,o.problem,o.cause,o.updated_at,o.stage,o.credential_key,o.token_id,c.provider_type,c.canonical_account,c.active_credential_key,c.max_remote_wall_seconds,c.max_active_attempts,c.max_processes,o.installation,c.host_health,c.storage_soft_bytes,c.storage_hard_bytes FROM managed_connection_operations o JOIN receipts r ON r.workspace_id=o.workspace_id AND r.namespace='connection' AND r.scope='' AND r.key_sha256=o.key_sha256 JOIN managed_connections c ON c.connection_id=o.connection_id WHERE o.operation_id=?`, id).Scan(&receipt, &status, &problem, &cause, &updated, &r.Stage, &r.CredentialKey, &r.ActorTokenID, &r.ProviderType, &r.CanonicalAccount, &r.ActiveCredentialKey, &wall, &maxActive, &maxProcesses, &installation, &health, &storageSoft, &storageHard)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, connections.ErrNotFound
 	}
@@ -226,6 +226,12 @@ func loadManagedOperation(ctx context.Context, tx *sql.Tx, id domain.OperationID
 	}
 	if problem.Valid {
 		r.Operation.Problem = &problem.String
+	}
+	if cause.Valid {
+		if status != "failed" || !domain.ValidReason(cause.String) {
+			return r, ErrCorrupt
+		}
+		r.Operation.Cause = &cause.String
 	}
 	if wall.Valid {
 		r.Configuration = &connections.Configuration{MaxRemoteWallSeconds: wall.Int64, MaxActiveAttempts: maxActive, MaxProcesses: maxProcesses}

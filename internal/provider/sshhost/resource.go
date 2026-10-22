@@ -38,10 +38,10 @@ func readIdentity(ctx context.Context, exec executor, limit int64, args ...strin
 	var out bytes.Buffer
 	result, err := exec.Run(ctx, nil, args, nil, &limitedWriter{w: &out, limit: limit})
 	if err != nil {
-		return nil, resourceReadError{err}
+		return nil, failure(resourceReadError{err}, "ssh_identity_read_failed")
 	}
 	if result.ExitCode != 0 {
-		return nil, ErrResourceIdentity
+		return nil, failure(ErrResourceIdentity, "ssh_identity_read_failed")
 	}
 	return out.Bytes(), nil
 }
@@ -61,7 +61,7 @@ func machineIdentity(ctx context.Context, exec executor) (string, error) {
 		}
 		id := strings.TrimSpace(string(raw))
 		if !linuxMachineID.MatchString(id) || id == strings.Repeat("0", 32) {
-			return "", ErrResourceIdentity
+			return "", failure(ErrResourceIdentity, "ssh_machine_identity_invalid")
 		}
 		return resourceDigest("linux-machine-id", id), nil
 	case "Darwin":
@@ -71,15 +71,15 @@ func machineIdentity(ctx context.Context, exec executor) (string, error) {
 		}
 		matches := platformUUID.FindAllSubmatch(raw, -1)
 		if len(matches) != 1 {
-			return "", ErrResourceIdentity
+			return "", failure(ErrResourceIdentity, "ssh_machine_identity_invalid")
 		}
 		id := strings.ToLower(string(matches[0][1]))
 		if strings.ReplaceAll(id, "-", "") == strings.Repeat("0", 32) {
-			return "", ErrResourceIdentity
+			return "", failure(ErrResourceIdentity, "ssh_machine_identity_invalid")
 		}
 		return resourceDigest("darwin-platform-uuid", id), nil
 	default:
-		return "", ErrResourceIdentity
+		return "", failure(ErrResourceIdentity, "ssh_machine_identity_invalid")
 	}
 }
 
@@ -95,7 +95,7 @@ func (d docker) localResource(ctx context.Context) (docker, error) {
 	}
 	values := strings.Split(string(raw), "\n")
 	if len(values) != 3 || values[2] != "" {
-		return docker{}, ErrResourceIdentity
+		return docker{}, failure(ErrResourceIdentity, "docker_endpoint_unverified")
 	}
 	host := values[1]
 	if values[0] != "" || host == "" {
@@ -106,15 +106,15 @@ func (d docker) localResource(ctx context.Context) (docker, error) {
 		}
 		result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 4096}, args...)
 		if err != nil {
-			return docker{}, resourceReadError{err}
+			return docker{}, failure(resourceReadError{err}, "docker_context_read_failed")
 		}
 		if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &host) != nil {
-			return docker{}, ErrResourceIdentity
+			return docker{}, failure(ErrResourceIdentity, "docker_endpoint_unverified")
 		}
 	}
 	socket, ok := strings.CutPrefix(host, "unix://")
 	if !ok || !path.IsAbs(socket) || path.Clean(socket) != socket || !printable.MatchString(socket) || len(socket) > 2048 {
-		return docker{}, ErrResourceIdentity
+		return docker{}, failure(ErrResourceIdentity, "docker_endpoint_unverified")
 	}
 	d.host = host
 	return d, nil
@@ -124,11 +124,11 @@ func (d docker) engineIdentity(ctx context.Context) (string, error) {
 	var out bytes.Buffer
 	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 1024}, "info", "--format", "{{json .ID}}")
 	if err != nil {
-		return "", resourceReadError{err}
+		return "", failure(resourceReadError{err}, "docker_engine_identity_read_failed")
 	}
 	var native string
 	if result.ExitCode != 0 || json.Unmarshal(out.Bytes(), &native) != nil || len(native) < 8 || len(native) > 256 || !safeArg.MatchString(native) {
-		return "", ErrResourceIdentity
+		return "", failure(ErrResourceIdentity, "docker_engine_identity_invalid")
 	}
 	return resourceDigest("docker-engine-id", native), nil
 }
@@ -139,14 +139,14 @@ func (d docker) verifyResource(ctx context.Context, machine, engine string) erro
 		return err
 	}
 	if actual != machine {
-		return errors.Join(ErrResourceIdentity, errResourceChanged)
+		return failure(errors.Join(ErrResourceIdentity, errResourceChanged), "ssh_machine_identity_mismatch")
 	}
 	actual, err = d.engineIdentity(ctx)
 	if err != nil {
 		return err
 	}
 	if engine != "" && actual != engine {
-		return errors.Join(ErrResourceIdentity, errResourceChanged)
+		return failure(errors.Join(ErrResourceIdentity, errResourceChanged), "docker_engine_identity_mismatch")
 	}
 	return nil
 }

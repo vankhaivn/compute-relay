@@ -76,17 +76,17 @@ func (a *managedSSHAdapter) VerifyBound(ctx context.Context, raw []byte, account
 
 func sshVerification(raw []byte, host sshhost.HostVerification, err error) (connections.Verification, error) {
 	if errors.Is(err, sshhost.ErrCredentialReject) || errors.Is(err, sshhost.ErrHostKeyMismatch) {
-		return connections.Verification{}, connections.ErrCredentialRejected
+		return connections.Verification{}, provider.WithReason(connections.ErrCredentialRejected, provider.Reason(err, "ssh_credential_rejected"))
 	}
 	if errors.Is(err, sshhost.ErrImageInstallationUnknown) {
-		return connections.Verification{}, connections.ErrImageInstallationUnknown
+		return connections.Verification{}, provider.WithReason(connections.ErrImageInstallationUnknown, provider.Reason(err, "image_installation_unknown"))
 	}
 	if err != nil || !domain.ObjectID(host.Account).Valid() || !domain.SHA256Digest(host.MachineID).Valid() || !domain.SHA256Digest(host.EngineID).Valid() {
-		return connections.Verification{}, connections.ErrUnavailable
+		return connections.Verification{}, provider.WithReason(connections.ErrUnavailable, provider.Reason(err, "ssh_verification_invalid"))
 	}
 	endpoint, err := sshhost.ParseEndpoint(raw)
 	if err != nil {
-		return connections.Verification{}, connections.ErrUnavailable
+		return connections.Verification{}, provider.WithReason(connections.ErrUnavailable, provider.Reason(err, "ssh_verification_invalid"))
 	}
 	image := &connections.ImageEvidence{Status: "missing", RecipeSHA256: sshhost.ImageRecipeDigest()}
 	var runtimeConfig []byte
@@ -101,7 +101,7 @@ func sshVerification(raw []byte, host sshhost.HostVerification, err error) (conn
 		RuntimeConfig: runtimeConfig, SelectionUnavailable: host.ImageID == "",
 		Quota: provider.QuotaObservation{Status: provider.QuotaUnknown, Resource: "cpu", Source: "operator_host"}}
 	if verified.Host.Validate() != nil {
-		return connections.Verification{}, connections.ErrUnavailable
+		return connections.Verification{}, provider.WithReason(connections.ErrUnavailable, provider.Reason(err, "ssh_verification_invalid"))
 	}
 	return verified, nil
 }

@@ -175,6 +175,7 @@ type Operation struct {
 	CreatedAt          time.Time          `json:"created_at"`
 	UpdatedAt          time.Time          `json:"updated_at"`
 	Problem            *string            `json:"problem"`
+	Cause              *string            `json:"cause,omitempty"`
 	Replay             bool               `json:"replay"`
 }
 
@@ -310,6 +311,7 @@ type Completion struct {
 	Verification  Verification
 	Profile       admission.Profile
 	Problem       string
+	Cause         string
 }
 type Repository interface {
 	FingerprintInitialized(context.Context) (bool, error)
@@ -318,7 +320,7 @@ type Repository interface {
 	AcceptConnection(context.Context, Accept) (Record, error)
 	ReadyConnection(context.Context, domain.WorkspaceID, string, domain.OperationID) error
 	DeferConnectionSecret(context.Context, domain.OperationID) error
-	FailConnection(context.Context, domain.OperationID, string) error
+	FailConnection(context.Context, domain.OperationID, string, string) error
 	NextConnectionOperation(context.Context) (Record, bool, error)
 	BeginConnectionInstall(context.Context, domain.OperationID) (bool, error)
 	FinishConnection(context.Context, Record, Completion) error

@@ -366,6 +366,8 @@ func TestApplicationImageUnknownAbsenceNeverRetriesLoad(t *testing.T) {
 	}
 	if _, err := h.adapter.Prepare(context.Background(), plan, testOperation); !errors.Is(err, hostimages.ErrImageState) {
 		t.Fatalf("unresolved load was accepted: %v", err)
+	} else {
+		assertFailureReason(t, err, "application_image_load_failed")
 	}
 	secondImageAttempt(h, repo, key)
 	plan, err = h.adapter.Validate(context.Background(), h.job)
@@ -375,6 +377,8 @@ func TestApplicationImageUnknownAbsenceNeverRetriesLoad(t *testing.T) {
 	if _, err := h.adapter.Prepare(context.Background(), plan, testOperation); !errors.Is(err, hostimages.ErrImageState) ||
 		h.host.applicationLoads != 1 || repo.permits != 1 {
 		t.Fatalf("unknown outcome retried load: err=%v loads=%d permits=%d", err, h.host.applicationLoads, repo.permits)
+	} else {
+		assertFailureReason(t, err, "select_application_image_image_state_unknown")
 	}
 }
 

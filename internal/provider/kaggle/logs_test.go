@@ -112,7 +112,9 @@ func TestLogSnapshotsBoundLinesAndDistinguishEmptyUnavailableAndIdentityFailure(
 func TestLogSnapshotsValidatePageAndCursorBeforeIO(t *testing.T) {
 	reader, ref, count := logFixture(t, func() monitorResponse { t.Fatal("invalid page invoked helper"); return monitorResponse{} })
 	for _, req := range []provider.PageRequest{{Limit: 0}, {Limit: 101}, {Limit: 1, Cursor: "!bad"}, {Limit: 1, Cursor: strings.Repeat("x", 513)}, {Limit: 1, Cursor: base64.RawURLEncoding.EncodeToString([]byte(`{}`))}} {
-		if _, err := reader.Logs(context.Background(), ref, req); !errors.Is(err, ErrLogCursor) {
+		_, err := reader.Logs(context.Background(), ref, req)
+		assertStepReason(t, err, "logs_cursor_invalid")
+		if !errors.Is(err, ErrLogCursor) {
 			t.Fatal("invalid pagination accepted", err)
 		}
 	}
@@ -160,6 +162,7 @@ func TestLogReadFailureReasonsRemainTypedAndContainNoLines(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			reply.Reason = reason
 			page, err := reader.Logs(context.Background(), ref, provider.PageRequest{Limit: 1})
+			assertStepReason(t, err, reason)
 			var failure provider.LogReadFailure
 			if !errors.As(err, &failure) || failure.Reason != reason || !failure.Valid() || len(page.Lines) != 0 || page.NextCursor != "" || page.Source != "" {
 				t.Fatal(page, err)

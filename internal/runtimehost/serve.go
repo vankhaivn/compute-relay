@@ -60,23 +60,23 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	}
 	objectService, err := objects.New(h.access, h.inputs, h.store)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "objects_init_failed"}
 	}
 	jobs, err := admission.New(h.access, h.store, admission.DefaultLimits())
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "admission_init_failed"}
 	}
 	controls, err := operations.New(h.access, h.store, h.inputs, admission.DefaultLimits())
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "operations_init_failed"}
 	}
 	results, err := collection.NewReader(h.access, h.store, h.results)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "results_init_failed"}
 	}
 	cleanups, err := cleanup.NewService(h.access, h.store, nil)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "cleanup_init_failed"}
 	}
 
 	config := DefaultManagedServeConfig()
@@ -120,7 +120,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", serve.Address)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "listener_bind_failed"}
 	}
 	defer listener.Close()
 	cfg := api.DefaultConfig()
@@ -133,15 +133,15 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 	cfg.LocalStorage = localstorage.New(h.root.Path)
 	cfg.InputReleases, err = retention.NewInputReleaser(h.access, h.store, sweeper)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "input_retention_init_failed"}
 	}
 	cfg.ResultReleases, err = retention.NewReleaser(h.access, h.store, sweeper)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "result_retention_init_failed"}
 	}
 	cfg.Logs, err = joblogs.NewReader(h.access, h.store, logResolver)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "logs_init_failed"}
 	}
 	if managed != nil {
 		cfg.Connections, cfg.Authorizations = managed.connections, managed.authorizations
@@ -152,13 +152,13 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		if managed.resolver != nil {
 			cfg.StorageCleanup, err = hoststorage.NewService(h.store, managed.resolver)
 			if err != nil {
-				return ErrState
+				return ServiceStopped{"startup", "storage_cleanup_init_failed"}
 			}
 		}
 	}
 	server, err := api.NewServer(cfg, h.access, objectService, h.store.Ready)
 	if err != nil {
-		return ErrState
+		return ServiceStopped{"startup", "http_init_failed"}
 	}
 	server.ErrorLog = log.New(io.Discard, "", 0)
 	listening := Listening{"listening", cfg.Listen, mode, dispatchEnabled}
@@ -211,11 +211,15 @@ func stopClass(err error) string {
 		{scheduler.ErrInvalid, "scheduler_rejected"}, {scheduler.ErrPhaseGate, "scheduler_phase_gate"},
 		{scheduler.ErrScanLimit, "scheduler_scan_limit"}, {scheduler.ErrLeaseLost, "scheduler_lease_lost"},
 		{context.Canceled, "operation_cancelled"},
+		{context.DeadlineExceeded, "operation_timed_out"},
 		{ErrState, "runtime_state"},
 	} {
 		if errors.Is(err, known.err) {
 			return known.class
 		}
+	}
+	if reason := provider.Reason(err, ""); reason != "" {
+		return reason
 	}
 	if provider.IsLocalStateError(err) {
 		return "local_state"
@@ -262,7 +266,7 @@ func runRuntimeServices(
 			defer func() { workers <- struct{}{} }()
 			err := service.run(runCtx)
 			// The first fatal error is recorded before cancelling, so it names the initiator.
-			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			if err != nil && runCtx.Err() == nil {
 				first.Do(func() { stopped = &ServiceStopped{service.name, stopClass(err)} })
 			}
 			if err != nil && runCtx.Err() == nil {
@@ -281,7 +285,7 @@ func runRuntimeServices(
 		return *stopped
 	}
 	if httpErr != nil {
-		return ServiceStopped{"http", "listener"}
+		return httpErr
 	}
 	return nil
 }

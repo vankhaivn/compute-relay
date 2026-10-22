@@ -43,6 +43,12 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 			return Journal{}, state, "", ErrInvalid
 		}
 		p := provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, message).WithDetail(domain.ReasonDetail, reason).WithRecommendedAction(domain.RecommendedActionWait)
+		if a.Cause != "" {
+			if !domain.ValidReason(a.Cause) {
+				return Journal{}, state, "", ErrInvalid
+			}
+			p = p.WithDetail(domain.CauseDetail, a.Cause)
+		}
 		j.Problem = &p
 		if old.Plan == nil {
 			next.Orchestration = domain.OrchestrationQueued

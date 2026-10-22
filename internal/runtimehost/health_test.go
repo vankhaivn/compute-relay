@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 )
 
@@ -91,5 +93,22 @@ func TestManagedHealthSamplerAllowsMissingImageAndRejectsChangedMachineBeforeCre
 	target.RuntimeConfig = raw
 	if _, err = sampler.Sample(context.Background(), target); !errors.Is(err, hosthealth.ErrUnverified) || resolver.calls != 1 {
 		t.Fatal("changed frozen machine accessed credentials", err)
+	}
+}
+
+func TestManagedHealthRetainsSampleStepThroughGuard(t *testing.T) {
+	target := hosthealth.Target{Workspace: "app", ConnectionID: "con_health", ProviderType: "ssh", CanonicalAccount: "fixture_account", CredentialRef: "vault:con_health", ResourceID: "resource_" + strings.Repeat("2", 64)}
+	sampler := managedHealthSampler{credentials: &healthCredentialFixture{}, collect: func(context.Context, []byte, string, string, string) (hosthealth.Snapshot, error) {
+		return hosthealth.Snapshot{}, provider.WithReason(errors.New("private-provider-canary"), "health_ssh_command_failed")
+	}}
+	_, err := sampler.Sample(t.Context(), target)
+	if !errors.Is(err, hosthealth.ErrUnavailable) || provider.Reason(err, "") != "health_ssh_command_failed" || strings.Contains(err.Error(), "private") {
+		t.Fatal("lost health step", err)
+	}
+	snapshot := hosthealth.Parse(target.ResourceID, time.Now().UTC(), nil)
+	snapshot.Cause = provider.Reason(err, "")
+	refusal := healthRefusal(hosthealth.View{Latest: &snapshot}, hosthealth.Policy{}, time.Now().UTC())
+	if !errors.Is(refusal, admission.ErrHostUnhealthy) || provider.Reason(refusal, "") != snapshot.Cause {
+		t.Fatal("guard discarded cause", refusal)
 	}
 }

@@ -102,9 +102,7 @@ func TestTransferJoinsProviderAfterBlobFailureOrPanic(t *testing.T) {
 		go func() { finished <- engine.transfer(ctx, src, w.Observation.Remote, file, nil) }()
 		select {
 		case err := <-finished:
-			if err == nil {
-				t.Fatal("blob failure reported success")
-			}
+			assertServiceReason(t, err, "artifact_blob_write_failed")
 		case <-ctx.Done():
 			t.Fatal("blob failure left the transfer pipe blocked")
 		}

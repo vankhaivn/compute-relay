@@ -30,13 +30,16 @@ func (b *storageScanBudget) command(ctx context.Context, d docker, args ...strin
 		return nil, ctx.Err()
 	}
 	if err != nil || result.ExitCode != 0 {
-		return nil, ErrRemoteDocker
+		return nil, failure(errors.Join(ErrRemoteDocker, err), dockerStep(args))
 	}
 	return out.Bytes(), nil
 }
 
 // StorageScanReason names, as a closed reason, the step a storage scan failed at.
 func StorageScanReason(err error) string {
+	if reason := failureReason(err, ""); reason != "" {
+		return reason
+	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "remote_scan_timeout"
@@ -212,17 +215,17 @@ func storageInspectObjects(ctx context.Context, d docker, budget *storageScanBud
 		byID := make(map[string]hoststorage.Object, len(inspected))
 		for _, o := range inspected {
 			if _, dup := byID[o.ID]; dup {
-				return nil, ErrRemoteDocker
+				return nil, failure(ErrRemoteDocker, "storage_inspect_incomplete")
 			}
 			byID[o.ID] = o
 		}
 		if len(byID) != len(batch) {
-			return nil, ErrRemoteDocker
+			return nil, failure(ErrRemoteDocker, "storage_inspect_incomplete")
 		}
 		for _, id := range batch {
 			o, ok := byID[id]
 			if !ok {
-				return nil, ErrRemoteDocker
+				return nil, failure(ErrRemoteDocker, "storage_inspect_incomplete")
 			}
 			if o.Labels[storageLabel] != string(scope.InstallationID) || !o.Valid() {
 				return nil, hoststorage.ErrUnverified
@@ -244,7 +247,7 @@ func decodeStorageObjects(kind hoststorage.Kind, raw []byte) ([]hoststorage.Obje
 	case hoststorage.Container:
 		var inspected []storageContainerInspect
 		if json.Unmarshal(raw, &inspected) != nil {
-			return nil, ErrRemoteDocker
+			return nil, failure(ErrRemoteDocker, "storage_inspect_invalid")
 		}
 		for _, c := range inspected {
 			o := hoststorage.Object{Kind: kind, ID: c.ID, Labels: c.Config.Labels, Running: c.State.Running, References: int64(len(c.Mounts))}
@@ -256,7 +259,7 @@ func decodeStorageObjects(kind hoststorage.Kind, raw []byte) ([]hoststorage.Obje
 	case hoststorage.Volume:
 		var inspected []volumeInfo
 		if json.Unmarshal(raw, &inspected) != nil {
-			return nil, ErrRemoteDocker
+			return nil, failure(ErrRemoteDocker, "storage_inspect_invalid")
 		}
 		for _, v := range inspected {
 			o := hoststorage.Object{Kind: kind, ID: v.Name, Labels: v.Labels}
@@ -273,7 +276,7 @@ func decodeStorageObjects(kind hoststorage.Kind, raw []byte) ([]hoststorage.Obje
 	case hoststorage.Image:
 		var inspected []storageImageInspect
 		if json.Unmarshal(raw, &inspected) != nil {
-			return nil, ErrRemoteDocker
+			return nil, failure(ErrRemoteDocker, "storage_inspect_invalid")
 		}
 		for _, i := range inspected {
 			o := hoststorage.Object{Kind: kind, ID: i.ID, Labels: i.Config.Labels, References: int64(len(i.Tags) + len(i.Digests))}
@@ -308,7 +311,7 @@ func scanDockerStorage(ctx context.Context, d docker, scope hoststorage.Scope) (
 	}
 	allContainers = uniqueStorageIDs(allContainers)
 	if len(allContainers) < len(containers) {
-		return hoststorage.Scan{}, ErrRemoteDocker
+		return hoststorage.Scan{}, failure(ErrRemoteDocker, "storage_inventory_inconsistent")
 	}
 	listed := make(map[string]bool, len(allContainers))
 	for _, id := range allContainers {
@@ -316,7 +319,7 @@ func scanDockerStorage(ctx context.Context, d docker, scope hoststorage.Scope) (
 	}
 	for _, object := range containers {
 		if !listed[object.ID] {
-			return hoststorage.Scan{}, ErrRemoteDocker
+			return hoststorage.Scan{}, failure(ErrRemoteDocker, "storage_inventory_inconsistent")
 		}
 	}
 	result.Objects = append(result.Objects, containers...)
@@ -342,7 +345,7 @@ func scanDockerStorage(ctx context.Context, d docker, scope hoststorage.Scope) (
 		// The second list is only counted. Foreign IDs and labels are never
 		// inspected, returned, logged, or persisted.
 		if len(all) < len(own) {
-			return hoststorage.Scan{}, ErrRemoteDocker
+			return hoststorage.Scan{}, failure(ErrRemoteDocker, "storage_inventory_inconsistent")
 		}
 		*class.foreign = int64(len(all) - len(own))
 		objects, err := storageInspectObjects(ctx, d, budget, scope, nativeEngine, class.kind, own)
@@ -363,7 +366,7 @@ func scanDockerStorage(ctx context.Context, d docker, scope hoststorage.Scope) (
 // any list or inspect command runs.
 func (a *Adapter) ScanStorage(ctx context.Context, scope hoststorage.Scope) (hoststorage.Scan, error) {
 	if a == nil || !scope.Valid() || a.config.MachineID != string(scope.MachineID) || a.config.EngineID != string(scope.EngineID) {
-		return hoststorage.Scan{}, hoststorage.ErrUnverified
+		return hoststorage.Scan{}, failure(hoststorage.ErrUnverified, "storage_binding_mismatch")
 	}
 	var scan hoststorage.Scan
 	err := a.withDocker(ctx, func(d docker, _ Endpoint) error {

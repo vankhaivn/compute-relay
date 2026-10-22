@@ -15,10 +15,10 @@ func TestStorageRefusalPreservesUnsubmittedAuthority(t *testing.T) {
 	for _, reason := range []string{"host_storage_limit", "host_storage_unknown"} {
 		t.Run(reason, func(t *testing.T) {
 			w, _, _ := fixtureWork(t)
-			j, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: RefuseNewWork, RefusalReason: reason})
+			j, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: RefuseNewWork, RefusalReason: reason, Cause: "storage_volumes_list_failed"})
 			expected := w.Job.Attempt.State
 			expected.Orchestration = domain.OrchestrationQueued
-			if j.Phase != Local || state != expected || j.Plan != nil || j.SubmitStarted || j.Problem == nil || j.Problem.Details[domain.ReasonDetail] != reason || j.Problem.ComputeMayHaveStarted || j.Problem.SafeOperationRetry {
+			if j.Phase != Local || state != expected || j.Plan != nil || j.SubmitStarted || j.Problem == nil || j.Problem.Details[domain.ReasonDetail] != reason || j.Problem.Details[domain.CauseDetail] != "storage_volumes_list_failed" || j.Problem.ComputeMayHaveStarted || j.Problem.SafeOperationRetry {
 				t.Fatal("storage refusal changed queued authority or terminalized work")
 			}
 			j, state = readyFixture(t)

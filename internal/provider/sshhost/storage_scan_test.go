@@ -265,11 +265,12 @@ func TestStorageScanReasonNamesTheFailedStep(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	_, err := scanDockerStorage(ctx, docker{exec: exec, binary: "/usr/bin/docker"}, scope)
-	if got := StorageScanReason(err); got != "remote_scan_timeout" {
+	if got := StorageScanReason(err); got != "storage_container_summary_failed" {
 		t.Fatalf("a scan over its deadline was reported as %q (%v)", got, err)
 	}
 	for err, want := range map[error]string{ErrRemoteDocker: "remote_docker_failed", errResponseLimit: "remote_response_limit",
-		fmt.Errorf("dial: %w", ErrUnavailable): "host_unavailable", io.EOF: "remote_observation_failed"} {
+		fmt.Errorf("dial: %w", ErrUnavailable): "host_unavailable", io.EOF: "remote_observation_failed",
+		failure(ErrRemoteDocker, "storage_inspect_invalid"): "storage_inspect_invalid"} {
 		if got := StorageScanReason(err); got != want {
 			t.Fatalf("%v reported as %q", err, got)
 		}

@@ -51,10 +51,10 @@ func (*managedKaggleAdapter) Encode(fields map[string]string) ([]byte, error) {
 func (a *managedKaggleAdapter) Verify(ctx context.Context, token []byte) (connections.Verification, error) {
 	result, err := a.discovery.Discover(ctx, token)
 	if errors.Is(err, kaggle.ErrCredentialRejected) {
-		return connections.Verification{}, connections.ErrCredentialRejected
+		return connections.Verification{}, provider.WithReason(connections.ErrCredentialRejected, provider.Reason(err, "account_credential_rejected"))
 	}
 	if err != nil || result.CanonicalAccount() == "" || result.Quota().Validate() != nil {
-		return connections.Verification{}, connections.ErrUnavailable
+		return connections.Verification{}, provider.WithReason(connections.ErrUnavailable, provider.Reason(err, "account_discovery_invalid"))
 	}
 	return connections.Verification{CanonicalAccount: result.CanonicalAccount(), Quota: result.Quota()}, nil
 }

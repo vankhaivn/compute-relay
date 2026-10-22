@@ -30,7 +30,7 @@ func (h *Host) newHostHealthGuard(health *hosthealth.Service, clock ports.Clock)
 func (g *managedHostHealthGuard) PreflightAdmission(ctx context.Context, w domain.WorkspaceID, token, key string, req admission.Request) (context.Context, *admission.Receipt, error) {
 	check, err := g.store.PreviewHostHealthAdmission(ctx, w, token, key, req)
 	if errors.Is(err, hosthealth.ErrUnverified) {
-		return ctx, nil, admission.ErrHostUnhealthy
+		return ctx, nil, provider.WithReason(admission.ErrHostUnhealthy, "health_binding_unverified")
 	}
 	if err != nil {
 		return ctx, nil, err
@@ -54,13 +54,13 @@ func (g *managedHostHealthGuard) PreflightAdmission(ctx context.Context, w domai
 	if err != nil {
 		return ctx, nil, err
 	}
-	return ctx, nil, admission.ErrHostUnhealthy
+	return ctx, nil, healthRefusal(view, *check.Target.Policy, g.clock.Now())
 }
 
 func (g *managedHostHealthGuard) BeforeNewWork(ctx context.Context, record admission.Record) (context.Context, error) {
 	target, err := g.store.HostHealthTargetForAttempt(ctx, record)
 	if errors.Is(err, hosthealth.ErrUnverified) {
-		return sqlite.WithHostHealthEvidence(ctx, record.Profile, hosthealth.Evidence{}), admission.ErrHostUnhealthy
+		return sqlite.WithHostHealthEvidence(ctx, record.Profile, hosthealth.Evidence{}), provider.WithReason(admission.ErrHostUnhealthy, "health_binding_unverified")
 	}
 	if err != nil {
 		return ctx, provider.LocalStateError{Err: err}
@@ -74,7 +74,7 @@ func (g *managedHostHealthGuard) BeforeNewWork(ctx context.Context, record admis
 		return guarded, provider.LocalStateError{Err: err}
 	}
 	if hosthealth.Evaluate(view, *target.Policy, g.clock.Now()).RefuseNew {
-		return guarded, admission.ErrHostUnhealthy
+		return guarded, healthRefusal(view, *target.Policy, g.clock.Now())
 	}
 	return guarded, nil
 }
@@ -108,4 +108,16 @@ func (g *managedHostHealthGuard) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+func healthRefusal(view hosthealth.View, policy hosthealth.Policy, now time.Time) error {
+	cause := "health_observation_failed"
+	decision := hosthealth.Evaluate(view, policy, now)
+	if len(decision.Reasons) > 0 {
+		cause = string(decision.Reasons[0])
+	}
+	if view.Latest != nil && domain.ValidReason(view.Latest.Cause) {
+		cause = view.Latest.Cause
+	}
+	return provider.WithReason(admission.ErrHostUnhealthy, cause)
 }

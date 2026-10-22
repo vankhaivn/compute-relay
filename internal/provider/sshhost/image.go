@@ -41,7 +41,7 @@ func (d docker) installedImage(ctx context.Context, ref, architecture, operation
 	if !ValidImageID(image.ID) || image.OS != "linux" || image.Architecture != architecture ||
 		image.Config.Labels[imageRecipeLabel] != ImageRecipeDigest() || image.Config.Labels["io.compute-relay.image-schema"] != "1" ||
 		operation != "" && image.Config.Labels[imageOperationLabel] != operation {
-		return imageInfo{}, false, ErrIdentity
+		return imageInfo{}, false, failure(ErrIdentity, "installed_image_identity_unverified")
 	}
 	return image, true, nil
 }
@@ -67,14 +67,14 @@ func VerifyManagedHostBound(ctx context.Context, raw []byte, account string) (Ho
 func InstallImage(ctx context.Context, raw []byte, account, machineID, architecture string, operation domain.OperationID, recoverOnly bool) (HostVerification, error) {
 	if !operation.Valid() || !strings.HasPrefix(string(operation), "op_") || account == "" ||
 		machineID == "" && !recoverOnly || machineID != "" && !domain.SHA256Digest(machineID).Valid() || !SupportedArchitecture(architecture) {
-		return HostVerification{}, ErrRequest
+		return HostVerification{}, failure(ErrRequest, "install_image_request_invalid")
 	}
 	return withImageHost(ctx, raw, account, func(ctx context.Context, d docker, verified HostVerification) (HostVerification, error) {
 		if machineID != "" && verified.MachineID != machineID {
-			return HostVerification{}, ErrResourceIdentity
+			return HostVerification{}, failure(ErrResourceIdentity, "install_image_identity_unverified")
 		}
 		if verified.Architecture != architecture {
-			return HostVerification{}, ErrIdentity
+			return HostVerification{}, failure(ErrIdentity, "install_image_identity_unverified")
 		}
 		tag := operationImageTag(operation)
 		image, found, err := d.installedImage(ctx, tag, verified.Architecture, string(operation))
@@ -86,19 +86,23 @@ func InstallImage(ctx context.Context, raw []byte, account, machineID, architect
 			return verified, nil
 		}
 		if recoverOnly {
-			return HostVerification{}, ErrImageInstallationUnknown
+			return HostVerification{}, failure(ErrImageInstallationUnknown, "install_image_outcome_unknown")
 		}
 		// The tar contains only the repository recipe. No job, credential, local context,
 		// provider Dockerfile, build argument or remote URL enters this build.
-		_, err = d.run(ctx, singleFile("Dockerfile", standardDockerfile), nil, "build", "--pull=false", "--network=none",
+		buildResult, err := d.run(ctx, singleFile("Dockerfile", standardDockerfile), nil, "build", "--pull=false", "--network=none",
 			"--platform", "linux/"+verified.Architecture, "--label", imageRecipeLabel+"="+ImageRecipeDigest(),
 			"--label", imageOperationLabel+"="+string(operation), "--tag", tag, "--tag", standardImageTag(), "-")
 		if err != nil {
-			return HostVerification{}, ErrImageInstallationUnknown
+			return HostVerification{}, failure(errors.Join(ErrImageInstallationUnknown, err), "install_image_outcome_unknown")
 		}
 		image, found, err = d.installedImage(ctx, tag, verified.Architecture, string(operation))
 		if err != nil || !found {
-			return HostVerification{}, ErrImageInstallationUnknown
+			reason := "install_image_outcome_unknown"
+			if buildResult.ExitCode != 0 {
+				reason = "docker_image_build_failed"
+			}
+			return HostVerification{}, failure(errors.Join(ErrImageInstallationUnknown, err), reason)
 		}
 		verified.ImageID = image.ID
 		return verified, nil
@@ -108,17 +112,17 @@ func InstallImage(ctx context.Context, raw []byte, account, machineID, architect
 func withImageHost(ctx context.Context, raw []byte, account string, use func(context.Context, docker, HostVerification) (HostVerification, error)) (HostVerification, error) {
 	endpoint, err := ParseEndpoint(raw)
 	if err != nil {
-		return HostVerification{}, err
+		return HostVerification{}, failure(err, "ssh_endpoint_invalid")
 	}
 	if account != "" {
 		endpoint, err = endpoint.Pin(account)
 		if err != nil {
-			return HostVerification{}, err
+			return HostVerification{}, failure(err, "host_key_mismatch")
 		}
 	}
 	client, err := Dial(ctx, endpoint.Target, endpoint.Credential)
 	if err != nil {
-		return HostVerification{}, err
+		return HostVerification{}, failure(err, failureReasonForTransport(err))
 	}
 	defer client.Close()
 	verified, err := verifyDocker(ctx, client, endpoint, client.HostKey)
@@ -135,7 +139,7 @@ func withImageHost(ctx context.Context, raw []byte, account string, use func(con
 	}
 	os, arch, err := d.platform(ctx)
 	if err != nil || os != verified.OS || arch != verified.Architecture {
-		return HostVerification{}, ErrResourceIdentity
+		return HostVerification{}, failure(errors.Join(ErrResourceIdentity, err), "managed_host_identity_unverified")
 	}
 	verified.MachineID, err = machineIdentity(ctx, client)
 	if err != nil {

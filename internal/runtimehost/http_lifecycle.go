@@ -59,14 +59,14 @@ func serveHTTPMode(ctx context.Context, server *http.Server, listener net.Listen
 	var runErr error
 	finished := false
 	if err := announce(); err != nil {
-		runErr = ErrState
+		runErr = ServiceStopped{"http", "announce_failed"}
 	} else {
 		select {
 		case <-ctx.Done():
 		case err := <-done:
 			finished = true
 			if !errors.Is(err, http.ErrServerClosed) {
-				runErr = ErrState
+				runErr = ServiceStopped{"http", "listener_failed"}
 			}
 		}
 	}
@@ -76,11 +76,15 @@ func serveHTTPMode(ctx context.Context, server *http.Server, listener net.Listen
 	cancel()
 	if shutdownErr != nil {
 		_ = server.Close()
-		runErr = ErrState
+		if runErr == nil {
+			runErr = ServiceStopped{"http", "shutdown_failed"}
+		}
 	}
 	if !finished {
 		if err := <-done; !errors.Is(err, http.ErrServerClosed) {
-			runErr = ErrState
+			if runErr == nil {
+				runErr = ServiceStopped{"http", "listener_failed"}
+			}
 		}
 	}
 	drain.requests.Wait()

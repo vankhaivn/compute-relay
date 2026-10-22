@@ -99,6 +99,7 @@ func TestResourceCleanupRunningRaceAndLostAcknowledgement(t *testing.T) {
 			if err == nil || out.Deleted || out.AlreadyAbsent {
 				t.Fatalf("uncertain call invented success: %+v %v", out, err)
 			}
+			assertFailureReason(t, err, "container_delete_failed")
 			h.host.fail = nil
 			if fault == "started" {
 				if h.host.containers[c.name] != c || c.status != "running" {

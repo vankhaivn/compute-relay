@@ -113,11 +113,11 @@ type Client struct {
 // target has none. Context cancellation closes the connection.
 func Dial(ctx context.Context, target Target, credential Credential) (*Client, error) {
 	if err := target.Validate(false); err != nil {
-		return nil, err
+		return nil, failure(err, "ssh_target_invalid")
 	}
 	methods, err := credential.methods()
 	if err != nil {
-		return nil, err
+		return nil, failure(err, "ssh_credential_invalid")
 	}
 	var presented string
 	mismatch := false
@@ -141,9 +141,9 @@ func Dial(ctx context.Context, target Target, credential Credential) (*Client, e
 	conn, err := dialer.DialContext(ctx, "tcp", target.address())
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, errors.Join(ErrUnavailable, ctx.Err())
+			return nil, failure(errors.Join(ErrUnavailable, ctx.Err()), "ssh_dial_failed")
 		}
-		return nil, ErrUnavailable
+		return nil, failure(ErrUnavailable, "ssh_dial_failed")
 	}
 	deadline := time.Now().Add(handshakeTimeout)
 	if limit, ok := ctx.Deadline(); ok && limit.Before(deadline) {
@@ -157,13 +157,13 @@ func Dial(ctx context.Context, target Target, credential Credential) (*Client, e
 		_ = conn.Close()
 		switch {
 		case mismatch:
-			return nil, ErrHostKeyMismatch
+			return nil, failure(ErrHostKeyMismatch, "host_key_mismatch")
 		case ctx.Err() != nil:
-			return nil, errors.Join(ErrUnavailable, ctx.Err())
+			return nil, failure(errors.Join(ErrUnavailable, ctx.Err()), "ssh_handshake_failed")
 		case presented != "" && strings.Contains(err.Error(), "unable to authenticate"):
-			return nil, ErrCredentialReject
+			return nil, failure(ErrCredentialReject, "credential_rejected")
 		}
-		return nil, ErrUnavailable
+		return nil, failure(ErrUnavailable, "ssh_handshake_failed")
 	}
 	_ = conn.SetDeadline(time.Time{})
 	return &Client{conn: ssh.NewClient(sshConn, channels, requests), HostKey: presented, stop: stop}, nil
@@ -189,14 +189,14 @@ type Result struct {
 func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, stdin io.Reader, stdout io.Writer) (Result, error) {
 	command, err := shellCommand(env, argv)
 	if err != nil {
-		return Result{}, err
+		return Result{}, failure(err, "ssh_command_invalid")
 	}
 	session, err := c.conn.NewSession()
 	if err != nil {
 		if ctx.Err() != nil {
-			return Result{}, errors.Join(ErrUnavailable, ctx.Err())
+			return Result{}, failure(errors.Join(ErrUnavailable, ctx.Err()), "ssh_channel_open_failed")
 		}
-		return Result{}, ErrUnavailable
+		return Result{}, failure(ErrUnavailable, "ssh_channel_open_failed")
 	}
 	defer session.Close()
 	stderr := &boundedBuffer{limit: maxStderrBytes}
@@ -207,9 +207,9 @@ func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, 
 	done := make(chan error, 1)
 	if err = session.Start(command); err != nil {
 		if ctx.Err() != nil {
-			return Result{}, errors.Join(ErrUnavailable, ctx.Err())
+			return Result{}, failure(errors.Join(ErrUnavailable, ctx.Err()), "ssh_command_start_failed")
 		}
-		return Result{}, ErrUnavailable
+		return Result{}, failure(ErrUnavailable, "ssh_command_start_failed")
 	}
 	go func() { done <- session.Wait() }()
 	select {
@@ -217,7 +217,7 @@ func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, 
 		_ = session.Signal(ssh.SIGKILL)
 		_ = session.Close()
 		<-done
-		return Result{}, ctx.Err()
+		return Result{}, failure(ctx.Err(), "ssh_command_interrupted")
 	case err = <-done:
 	}
 	var exit *ssh.ExitError
@@ -228,9 +228,9 @@ func (c *Client) Run(ctx context.Context, env map[string]string, argv []string, 
 		return Result{ExitCode: exit.ExitStatus(), Stderr: stderr.Bytes()}, nil
 	}
 	if ctx.Err() != nil {
-		return Result{Stderr: stderr.Bytes()}, errors.Join(ErrUnavailable, ctx.Err())
+		return Result{Stderr: stderr.Bytes()}, failure(errors.Join(ErrUnavailable, ctx.Err()), "ssh_command_wait_failed")
 	}
-	return Result{Stderr: stderr.Bytes()}, ErrUnavailable
+	return Result{Stderr: stderr.Bytes()}, failure(ErrUnavailable, "ssh_command_wait_failed")
 }
 
 func shellCommand(env map[string]string, argv []string) (string, error) {

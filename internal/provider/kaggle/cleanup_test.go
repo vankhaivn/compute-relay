@@ -52,7 +52,16 @@ func TestKaggleCleanupRequiresOriginalIdentityForBothResources(t *testing.T) {
 				case "creation":
 					foreign.OwnershipOperationID = "op_foreign"
 				}
-				if _, err := adapter.DescribeCleanup(foreign); err == nil {
+				_, err := adapter.DescribeCleanup(foreign)
+				reason := "cleanup_staging_identity_invalid"
+				if purpose == "execution" {
+					reason = "cleanup_execution_identity_invalid"
+				}
+				if changed == "creation" {
+					reason = "cleanup_binding_invalid"
+				}
+				assertStepReason(t, err, reason)
+				if err == nil {
 					t.Fatal("changed original resource was accepted", changed)
 				}
 			}
@@ -87,7 +96,7 @@ func TestKaggleCleanupOriginalPlanAndReadOnlyRecovery(t *testing.T) {
 				if mode != expectedMode || string(secret) != "SYNTHETIC_TOKEN" || q.ID == "" || !q.SHA256.Valid() {
 					t.Fatal("invalid cleanup invocation", mode, q)
 				}
-				return cleanupResponse{1, reply}, nil
+				return cleanupResponse{Protocol: 1, Status: reply}, nil
 			}
 			if out, err := p.CleanupResource(context.Background(), request); err != nil || !out.Deleted {
 				t.Fatal(out, err)
@@ -99,7 +108,9 @@ func TestKaggleCleanupOriginalPlanAndReadOnlyRecovery(t *testing.T) {
 				t.Fatal(out, err)
 			}
 			reply = "deleted" // Recovery cannot turn a malformed helper acknowledgement into success.
-			if out, err := p.CleanupResource(context.Background(), request); err == nil || out.Deleted {
+			out, err := p.CleanupResource(context.Background(), request)
+			assertStepReason(t, err, "cleanup_response_invalid")
+			if err == nil || out.Deleted {
 				t.Fatal(out, err)
 			}
 			reply = "absent"
@@ -114,7 +125,9 @@ func TestKaggleCleanupOriginalPlanAndReadOnlyRecovery(t *testing.T) {
 			}
 			before := calls
 			request.PlanSHA256 = provider.Digest([]byte("changed"))
-			if _, err := p.CleanupResource(context.Background(), request); !cleanupProblemCode(err, domain.CodeRemoteIdentityMismatch) || calls != before {
+			_, err = p.CleanupResource(context.Background(), request)
+			assertStepReason(t, err, "cleanup_plan_invalid")
+			if !cleanupProblemCode(err, domain.CodeRemoteIdentityMismatch) || calls != before {
 				t.Fatal("changed plan reached SDK", err)
 			}
 		})

@@ -21,18 +21,31 @@ func runCleanup(parent context.Context, config Config, mode string, token []byte
 	return cleanup(ctx, client, mode, request), nil
 }
 
+var cleanupReasons = map[string]bool{
+	"cleanup_request_invalid": true, "cleanup_account_read_failed": true,
+	"cleanup_account_mismatch": true, "cleanup_resource_read_failed": true,
+	"cleanup_resource_identity_mismatch": true, "cleanup_status_read_failed": true,
+	"cleanup_execution_active": true, "cleanup_marker_download_failed": true,
+	"cleanup_marker_mismatch": true, "cleanup_deletion_unconfirmed": true,
+	"cleanup_delete_failed": true, "cleanup_delete_readback_failed": true,
+	"cleanup_resource_still_visible": true,
+}
+
 func cleanup(ctx context.Context, client *kaggleapi.Client, mode string, request cleanupRequest) cleanupResponse {
-	result := func(status string) cleanupResponse { return cleanupResponse{1, status} }
+	result := func(status string) cleanupResponse { return cleanupResponse{Protocol: 1, Status: status} }
+	failure := func(status, reason string) cleanupResponse {
+		return cleanupResponse{Protocol: 1, Status: status, Reason: reason}
+	}
 	if mode != "preview" && mode != "apply" && mode != "recover" ||
 		request.Kind != "kernel" && request.Kind != "dataset" || !positiveDecimal(request.ID) || !request.SHA256.Valid() {
-		return result("unknown")
+		return failure("unknown", "cleanup_request_invalid")
 	}
 	matched, err := accountMatches(ctx, client, request.Owner)
 	if err != nil {
-		return result("unknown")
+		return failure("unknown", "cleanup_account_read_failed")
 	}
 	if !matched {
-		return result("identity_mismatch")
+		return failure("identity_mismatch", "cleanup_account_mismatch")
 	}
 	resource := kaggleapi.Resource{Owner: request.Owner, Slug: request.Slug}
 	read := func() (bool, bool, error) {
@@ -55,6 +68,7 @@ func cleanup(ctx context.Context, client *kaggleapi.Client, mode string, request
 			*meta.Version == 1 && meta.Private != nil && *meta.Private && meta.Description == stagingDescription(request.SHA256)
 		return true, match, nil
 	}
+	readReason := ""
 	check := func() string {
 		_, matched, err := read()
 		if err != nil {
@@ -62,38 +76,43 @@ func cleanup(ctx context.Context, client *kaggleapi.Client, mode string, request
 			if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
 				return "absent"
 			}
+			readReason = "cleanup_resource_read_failed"
 			return "unknown"
 		}
 		if !matched {
+			readReason = "cleanup_resource_identity_mismatch"
 			return "identity_mismatch"
 		}
 		return ""
 	}
 	if status := check(); status != "" {
-		return result(status)
+		return failure(status, readReason)
 	}
 	if request.Kind == "kernel" {
 		state, err := client.KernelSessionStatus(ctx, resource)
-		if err != nil || state != kaggleapi.KernelComplete && state != kaggleapi.KernelError {
-			return result("active")
+		if err != nil {
+			return failure("active", "cleanup_status_read_failed")
+		}
+		if state != kaggleapi.KernelComplete && state != kaggleapi.KernelError {
+			return failure("active", "cleanup_execution_active")
 		}
 	} else {
 		receipt, err := client.DownloadDatasetFile(ctx, resource, "relay-stage.bin", maxMarkerBytes, io.Discard)
 		if err != nil {
-			return result("unknown")
+			return failure("unknown", "cleanup_marker_download_failed")
 		}
 		if domainDigest(receipt.SHA256[:]) != request.SHA256 {
-			return result("identity_mismatch")
+			return failure("identity_mismatch", "cleanup_marker_mismatch")
 		}
 	}
 	if status := check(); status != "" {
-		return result(status)
+		return failure(status, readReason)
 	}
 	if mode == "preview" {
 		return result("would_delete")
 	}
 	if mode == "recover" {
-		return result("unknown")
+		return failure("unknown", "cleanup_deletion_unconfirmed")
 	}
 	if request.Kind == "kernel" {
 		err = client.DeleteKernel(ctx, resource)
@@ -101,7 +120,7 @@ func cleanup(ctx context.Context, client *kaggleapi.Client, mode string, request
 		err = client.DeleteDataset(ctx, resource)
 	}
 	if err != nil {
-		return result("unknown")
+		return failure("unknown", "cleanup_delete_failed")
 	}
 	_, _, err = read()
 	if err != nil {
@@ -111,6 +130,7 @@ func cleanup(ctx context.Context, client *kaggleapi.Client, mode string, request
 		if errors.As(err, &apiErr) && (apiErr.StatusCode == 404 || apiErr.StatusCode == 403) {
 			return result("deleted")
 		}
+		return failure("unknown", "cleanup_delete_readback_failed")
 	}
-	return result("unknown")
+	return failure("unknown", "cleanup_resource_still_visible")
 }

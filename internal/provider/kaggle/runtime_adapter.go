@@ -117,7 +117,7 @@ func RuntimeCapabilities(shape string) provider.Capabilities {
 
 func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSnapshot) error {
 	if p == nil || expected != p.binding {
-		return provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "The frozen provider binding does not match.")
+		return provider.Problem(domain.CodeRemoteIdentityMismatch, domain.FailureStageObservation, "The frozen provider binding does not match.").WithDetail(domain.ReasonDetail, "account_binding_mismatch")
 	}
 	r, err := p.preflight.check(ctx, ReadOnly, false)
 	if provider.IsLocalStateError(err) {
@@ -139,7 +139,12 @@ func (p *RuntimeAdapter) Verify(ctx context.Context, expected provider.BindingSn
 	case r.Problem == "credential_unavailable" || err == nil && r.Local != "ready":
 		code, stage = domain.CodeConfigurationInvalid, domain.FailureStageLocalRuntime
 	}
-	return provider.Problem(code, stage, "The frozen provider account could not be verified.")
+	reason := "account_" + r.Problem
+	if r.Problem == "" || r.Problem == "none" {
+		reason = "account_verification_failed"
+	}
+	reason = provider.Reason(err, reason)
+	return provider.Problem(code, stage, "The frozen provider account could not be verified.").WithDetail(domain.ReasonDetail, reason)
 }
 
 func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
@@ -153,7 +158,11 @@ func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob)
 			return provider.Plan{}, err
 		}
 		if err != nil || q.Status != provider.QuotaKnown || q.Remaining == nil || *q.Remaining < float64(job.WallSeconds) {
-			return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch")
+			failure := provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "known free GPU quota is required before dispatch").WithDetail(domain.ReasonDetail, "gpu_quota_unconfirmed")
+			if cause := provider.Reason(err, ""); cause != "" {
+				failure = failure.WithDetail(domain.CauseDetail, cause)
+			}
+			return provider.Plan{}, failure
 		}
 	}
 	return plan, nil
@@ -161,35 +170,35 @@ func (p *RuntimeAdapter) Validate(ctx context.Context, job provider.ResolvedJob)
 
 func (p *RuntimeAdapter) localPlan(ctx context.Context, job provider.ResolvedJob) (provider.Plan, error) {
 	if err := ctx.Err(); err != nil {
-		return provider.Plan{}, err
+		return provider.Plan{}, contextStep(err, "plan_validation")
 	}
 	if p == nil || job.Validate() != nil || job.Inputs == nil ||
 		job.Identity.InstanceID != domain.ProviderInstanceID(p.config.InstanceID) ||
 		job.Binding != p.binding.Binding || job.WallSeconds > p.policy.MaxWallSeconds {
-		return provider.Plan{}, ErrRuntimeBinding
+		return provider.Plan{}, provider.WithReason(ErrRuntimeBinding, "plan_binding_invalid")
 	}
 	req, err := admission.Parse(job.Specification)
 	if err != nil {
-		return provider.Plan{}, ErrConfig
+		return provider.Plan{}, provider.WithReason(ErrConfig, "plan_specification_invalid")
 	}
 	spec := req.Spec()
 	if spec.ApplicationImage != nil || job.Inputs.ApplicationImage != nil {
 		return provider.Plan{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation,
-			"application image archives are unsupported by this Kaggle provider")
+			"application image archives are unsupported by this Kaggle provider").WithDetail(domain.ReasonDetail, "application_image_unsupported")
 	}
 	gpu := spec.Resources.Accelerator == "gpu"
 	if gpu != (p.policy.MachineShape != "") || spec.Network.RemoteInternet == "required" && !p.policy.AllowInternet {
-		return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "job requirements exceed the configured Kaggle provider policy")
+		return provider.Plan{}, provider.Problem(domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "job requirements exceed the configured Kaggle provider policy").WithDetail(domain.ReasonDetail, "plan_policy_unsatisfied")
 	}
 	plan := provider.Plan{Job: job.Clone()}
 	for _, name := range job.Required {
 		support := p.Describe().Support(name)
 		if support == domain.CapabilitySupportUnsupported {
-			return provider.Plan{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, "required capability is unsupported by this Kaggle provider instance")
+			return provider.Plan{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, "required capability is unsupported by this Kaggle provider instance").WithDetail(domain.ReasonDetail, "plan_capability_unsupported")
 		}
 		if support != domain.CapabilitySupportSupported {
 			if name != domain.CapabilityGPU || !gpu {
-				return provider.Plan{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, "required capability cannot be verified before dispatch")
+				return provider.Plan{}, provider.Problem(domain.CodeUnsupportedCapability, domain.FailureStageValidation, "required capability cannot be verified before dispatch").WithDetail(domain.ReasonDetail, "plan_capability_unverified")
 			}
 			plan.VerifyAfterStart = append(plan.VerifyAfterStart, domain.CapabilityGPU)
 		}
@@ -204,7 +213,7 @@ func (p *RuntimeAdapter) validPlan(ctx context.Context, plan provider.Plan) erro
 		if err != nil {
 			return err
 		}
-		return ErrRuntimeBinding
+		return provider.WithReason(ErrRuntimeBinding, "plan_digest_mismatch")
 	}
 	return nil
 }
@@ -218,21 +227,21 @@ func (p *RuntimeAdapter) Prepare(ctx context.Context, plan provider.Plan, operat
 
 func (p *RuntimeAdapter) ReconcilePrepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.PreparationObservation, error) {
 	if p == nil || plan.Job.Validate() != nil || plan.Job.Binding != p.binding.Binding {
-		return provider.PreparationObservation{}, ErrRuntimeBinding
+		return provider.PreparationObservation{}, provider.WithReason(ErrRuntimeBinding, "staging_binding_invalid")
 	}
 	return p.stager.ReconcilePrepare(ctx, plan, operation)
 }
 
 func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*runtimeComponents, error) {
 	if p == nil || id.Validate() != nil || id.InstanceID != domain.ProviderInstanceID(p.config.InstanceID) {
-		return nil, ErrRuntimeBinding
+		return nil, provider.WithReason(ErrRuntimeBinding, "attempt_binding_invalid")
 	}
 	plan, prepared, err := p.load(ctx, id)
 	if err != nil {
 		return nil, provider.LocalStateError{Err: err}
 	}
 	if plan.Job.Identity != id || plan.Job.Binding != p.binding.Binding || prepared.Validate(plan, prepared.PreparationID) != nil {
-		return nil, ErrRuntimeBinding
+		return nil, provider.WithReason(ErrRuntimeBinding, "attempt_binding_invalid")
 	}
 	digest := plan.Digest()
 
@@ -240,7 +249,7 @@ func (p *RuntimeAdapter) attempt(ctx context.Context, id provider.Identity) (*ru
 	defer p.mu.Unlock()
 	if existing := p.components[id]; existing != nil {
 		if existing.plan.Digest() != digest || existing.prepared != prepared {
-			return nil, ErrRuntimeBinding
+			return nil, provider.WithReason(ErrRuntimeBinding, "attempt_binding_invalid")
 		}
 		return existing, nil
 	}
@@ -275,7 +284,7 @@ func (p *RuntimeAdapter) Start(ctx context.Context, prepared provider.Prepared, 
 func (p *RuntimeAdapter) Reconcile(ctx context.Context, id provider.Identity) (provider.Reconciliation, error) {
 	c, err := p.attempt(ctx, id)
 	if err != nil {
-		return provider.Reconciliation{}, err
+		return provider.Reconciliation{}, provider.WithReason(err, "execution_binding_unavailable")
 	}
 	return c.executor.Reconcile(ctx, id)
 }
@@ -283,7 +292,7 @@ func (p *RuntimeAdapter) Reconcile(ctx context.Context, id provider.Identity) (p
 func (p *RuntimeAdapter) Observe(ctx context.Context, ref provider.RemoteReference) (provider.Observation, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
-		return provider.Observation{}, err
+		return provider.Observation{}, provider.WithReason(err, "execution_binding_unavailable")
 	}
 	return c.executor.Observe(ctx, ref)
 }
@@ -310,21 +319,21 @@ func (p *RuntimeAdapter) Fetch(ctx context.Context, ref provider.RemoteReference
 }
 func (p *RuntimeAdapter) Cancel(ctx context.Context, ref provider.RemoteReference, operation domain.OperationID) (provider.CancellationOutcome, error) {
 	if err := ctx.Err(); err != nil {
-		return provider.CancellationOutcome{}, err
+		return provider.CancellationOutcome{}, contextStep(err, "cancellation")
 	}
 	if p == nil || ref.Validate() != nil || !operation.Valid() || ref.Identity.InstanceID != domain.ProviderInstanceID(p.config.InstanceID) {
-		return provider.CancellationOutcome{}, ErrRuntimeBinding
+		return provider.CancellationOutcome{}, provider.WithReason(ErrRuntimeBinding, "cancellation_binding_invalid")
 	}
 	return provider.CancellationOutcome{Status: domain.CancellationManual}, nil
 }
 func (p *RuntimeAdapter) Logs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
 	c, err := p.attempt(ctx, ref.Identity)
 	if err != nil {
-		return provider.LogPage{}, err
+		return provider.LogPage{}, provider.WithReason(err, "logs_binding_unavailable")
 	}
 	logs, err := NewLogReader(c.executor, p.monitor)
 	if err != nil {
-		return provider.LogPage{}, err
+		return provider.LogPage{}, provider.WithReason(err, "logs_binding_unavailable")
 	}
 	return logs.Logs(ctx, ref, page)
 }

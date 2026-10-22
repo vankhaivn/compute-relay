@@ -27,7 +27,7 @@ func (m *Monitor) ReadQuota(ctx context.Context) (provider.QuotaObservation, err
 		return unknown, err
 	}
 	if m.clock.Now().Before(at) {
-		return unknown, ErrProtocol
+		return unknown, provider.WithReason(ErrProtocol, "quota_clock_invalid")
 	}
 	return quotaFromResponse(r, at)
 }
@@ -35,7 +35,7 @@ func (m *Monitor) ReadQuota(ctx context.Context) (provider.QuotaObservation, err
 func quotaFromResponse(r monitorResponse, at time.Time) (provider.QuotaObservation, error) {
 	q := provider.QuotaObservation{Status: provider.QuotaUnavailable, Resource: "gpu", Unit: "seconds", Source: quotaSource, Precision: "unknown", ObservedAt: at}
 	if at.IsZero() || !r.valid("quota") {
-		return q, ErrProtocol
+		return q, provider.WithReason(ErrProtocol, "quota_response_invalid")
 	}
 	if r.Status == "unknown" {
 		q.Status = provider.QuotaUnknown

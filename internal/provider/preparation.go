@@ -99,7 +99,12 @@ type ReadError struct {
 	Err    error
 }
 
-func (e ReadError) Error() string { return e.Err.Error() }
+func (e ReadError) Error() string {
+	if domain.ValidReason(e.Reason) {
+		return "provider read failed: " + e.Reason
+	}
+	return "provider read failed"
+}
 func (e ReadError) Unwrap() error { return e.Err }
 
 // PreparationObservation is one read of staging. Unknown means the provider did not

@@ -10,24 +10,24 @@ import (
 // The caller supplies only a vault-resolved credential for this bounded call.
 func CollectStorage(ctx context.Context, raw []byte, account string, scope hoststorage.Scope) (hoststorage.Scan, error) {
 	if !scope.Valid() {
-		return hoststorage.Scan{}, hoststorage.ErrInvalid
+		return hoststorage.Scan{}, failure(hoststorage.ErrInvalid, "storage_scope_invalid")
 	}
 	endpoint, err := ParseEndpoint(raw)
 	if err != nil {
-		return hoststorage.Scan{}, ErrRequest
+		return hoststorage.Scan{}, failure(ErrRequest, "storage_endpoint_invalid")
 	}
 	defer clear(endpoint.Credential.PrivateKey)
 	defer clear(endpoint.Credential.Passphrase)
 	defer clear(endpoint.Credential.Password)
 	endpoint, err = endpoint.Pin(account)
 	if err != nil {
-		return hoststorage.Scan{}, ErrHostKeyMismatch
+		return hoststorage.Scan{}, failure(ErrHostKeyMismatch, "host_key_mismatch")
 	}
 	ctx, cancel := context.WithTimeout(ctx, hoststorage.ScanTimeout)
 	defer cancel()
 	client, err := Dial(ctx, endpoint.Target, endpoint.Credential)
 	if err != nil {
-		return hoststorage.Scan{}, err
+		return hoststorage.Scan{}, failure(err, failureReasonForTransport(err))
 	}
 	defer client.Close()
 	binary, err := findDocker(ctx, client, endpoint.DockerPath)

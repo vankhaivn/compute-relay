@@ -5,6 +5,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
 	"github.com/vankhaivn/compute-relay/internal/ports"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 )
 
@@ -32,10 +33,10 @@ func (s managedHealthSampler) Sample(ctx context.Context, target hosthealth.Targ
 		return err
 	})
 	if err != nil {
-		return hosthealth.Snapshot{}, hosthealth.ErrUnavailable
+		return hosthealth.Snapshot{}, provider.WithReason(hosthealth.ErrUnavailable, provider.Reason(err, "health_credential_read_failed"))
 	}
 	if snapshot.Validate() != nil || snapshot.ResourceID != target.ResourceID {
-		return hosthealth.Snapshot{}, hosthealth.ErrUnavailable
+		return hosthealth.Snapshot{}, provider.WithReason(hosthealth.ErrUnavailable, "health_snapshot_invalid")
 	}
 	return snapshot, nil
 }

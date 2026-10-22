@@ -284,12 +284,18 @@ func TestStorageOrphanRestartAfterIntentRecoversWithoutSecondDelete(t *testing.T
 		t.Fatal("accepted orphan was not claimable")
 	}
 	requireNoError(t, f.s.BeginStorageCleanup(ctx, *work))
+	requireNoError(t, f.s.RecordStorageCleanupReason(ctx, *work, "storage_delete_verification_failed"))
 	options := f.s.options
 	requireNoError(t, f.s.Close())
 	now = now.Add(2 * time.Minute)
 	reopened, err := Open(ctx, f.root, options)
 	requireNoError(t, err)
 	t.Cleanup(func() { _ = reopened.Close() })
+	saved, err := reopened.ReadStorageCleanup(ctx, "a", token, op.OperationID)
+	requireNoError(t, err)
+	if saved.Status != "running" || saved.Reason != "storage_delete_verification_failed" {
+		t.Fatal("lost unresolved cleanup reason", saved)
+	}
 	adapter := &storageRecoveryProvider{binding: candidate.Binding}
 	engine, err := cleanup.New(reopened, storageRecoveryResolver{adapter}, cleanup.DefaultConfig())
 	requireNoError(t, err)
@@ -313,5 +319,34 @@ func TestStorageOrphanRestartAfterIntentRecoversWithoutSecondDelete(t *testing.T
 	requireNoError(t, err)
 	if replay != receipt {
 		t.Fatalf("restart lost original unknown receipt: %+v", replay)
+	}
+}
+
+func TestStorageScanCauseSurvivesRestartAndRejectsUnsafeText(t *testing.T) {
+	f := cacheAdmissionFixture(t)
+	ctx := t.Context()
+	scope := storageFixtureScope(t, f.s)
+	for _, reason := range []string{"", "private /path", "A", strings.Repeat("x", 65)} {
+		if err := f.s.RecordIncompleteStorageScan(ctx, scope, reason); !errors.Is(err, hoststorage.ErrInvalid) {
+			t.Fatal("accepted unsafe reason", err)
+		}
+	}
+	requireNoError(t, f.s.RecordIncompleteStorageScan(ctx, scope, "storage_volumes_list_failed"))
+	options := f.s.options
+	requireNoError(t, f.s.Close())
+	reopened, err := Open(ctx, f.root, options)
+	requireNoError(t, err)
+	t.Cleanup(func() { _ = reopened.Close() })
+	view, err := reopened.ConnectionStorage(ctx, "a", f.p.TokenID(), "con_admission_a")
+	requireNoError(t, err)
+	if view.ScanState != "incomplete" || view.Reason != "storage_volumes_list_failed" {
+		t.Fatalf("lost durable scan reason: %+v", view)
+	}
+	err = reopened.write(ctx, func(ctx context.Context, tx *sql.Tx, now time.Time) error {
+		_, err := freshStorageChargeInTx(ctx, tx, scope, now)
+		return err
+	})
+	if !errors.Is(err, hoststorage.ErrUnknown) || provider.Reason(err, "") != view.Reason {
+		t.Fatal("admission discarded scan cause", err)
 	}
 }

@@ -140,8 +140,10 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 	}
 	id = string(kernel.Metadata.ID)
 	state, err := client.KernelSessionStatus(ctx, resource)
+	stateReason := ""
 	if err != nil {
 		state = kaggleapi.KernelUnknown
+		stateReason = "execution_status_read_failed"
 	}
 	kernel, err = client.GetKernel(ctx, resource)
 	if err != nil {
@@ -154,7 +156,7 @@ func execute(ctx context.Context, client *kaggleapi.Client, mode string, request
 		return empty("invalid")
 	}
 	return executionResponse{Protocol: 1, Status: "found", KernelID: id, Reference: resource.Owner + "/" + resource.Slug,
-		Version: 1, SourceSHA256: request.SourceSHA256, RawState: string(state)}
+		Version: 1, SourceSHA256: request.SourceSHA256, RawState: string(state), StateReason: stateReason}
 }
 
 // A name miss is not a historical non-acceptance receipt. In particular Kaggle

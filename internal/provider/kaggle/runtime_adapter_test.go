@@ -26,12 +26,16 @@ func TestRuntimePreparePlanCheckDoesNotRepeatGPUQuotaRead(t *testing.T) {
 	}
 	changed := plan.Clone()
 	changed.VerifyAfterStart = nil
-	if err := p.validPlan(context.Background(), changed); !errors.Is(err, ErrRuntimeBinding) {
+	err := p.validPlan(context.Background(), changed)
+	assertStepReason(t, err, "plan_digest_mismatch")
+	if !errors.Is(err, ErrRuntimeBinding) {
 		t.Fatal("changed plan accepted", err)
 	}
 	changed = plan.Clone()
 	changed.Job.Binding.ConfigurationRevision = "other"
-	if err := p.validPlan(context.Background(), changed); !errors.Is(err, ErrRuntimeBinding) {
+	err = p.validPlan(context.Background(), changed)
+	assertStepReason(t, err, "plan_binding_invalid")
+	if !errors.Is(err, ErrRuntimeBinding) {
 		t.Fatal("changed binding accepted", err)
 	}
 
@@ -63,7 +67,9 @@ func TestRuntimeVerifyPreservesFailureClass(t *testing.T) {
 			}
 			adapter := &RuntimeAdapter{preflight: preflight}
 			var problem domain.Problem
-			if err := adapter.Verify(context.Background(), adapter.binding); !errors.As(err, &problem) || problem.Code != tc.code {
+			err = adapter.Verify(context.Background(), adapter.binding)
+			assertStepReason(t, err, "account_"+tc.name)
+			if !errors.As(err, &problem) || problem.Code != tc.code {
 				t.Fatalf("Verify: %v; expected %s", err, tc.code)
 			}
 		})
@@ -81,7 +87,9 @@ func TestRuntimeVerifyTransportAndQuotaUncertainty(t *testing.T) {
 	for _, cause := range []error{errors.New("private-response-canary"), context.DeadlineExceeded} {
 		preflight.run = func(context.Context, Config, Mode, []byte, bool) (Report, error) { return Report{}, cause }
 		var problem domain.Problem
-		if err := adapter.Verify(context.Background(), adapter.binding); !errors.As(err, &problem) || problem.Code != domain.CodeProviderUnreachable || strings.Contains(err.Error(), "canary") {
+		err := adapter.Verify(context.Background(), adapter.binding)
+		assertStepReason(t, err, "account_read_failed")
+		if !errors.As(err, &problem) || problem.Code != domain.CodeProviderUnreachable || strings.Contains(err.Error(), "canary") {
 			t.Fatal("transport failure mislabeled or exposed", err)
 		}
 	}
@@ -98,5 +106,52 @@ func TestRuntimeVerifyTransportAndQuotaUncertainty(t *testing.T) {
 	var problem domain.Problem
 	if err := adapter.Verify(context.Background(), changed); !errors.As(err, &problem) || problem.Code != domain.CodeRemoteIdentityMismatch {
 		t.Fatal("binding mismatch hidden", err)
+	}
+}
+
+func TestRuntimeValidationRefusalsRetainStep(t *testing.T) {
+	for _, tc := range []struct{ fault, reason string }{
+		{"binding", "plan_binding_invalid"},
+		{"specification", "plan_specification_invalid"},
+		{"policy", "plan_policy_unsatisfied"},
+		{"unsupported", "plan_capability_unsupported"},
+		{"unverified", "plan_capability_unverified"},
+		{"quota", "gpu_quota_unconfirmed"},
+	} {
+		t.Run(tc.fault, func(t *testing.T) {
+			c, plan, _ := executionFixture(t)
+			p := &RuntimeAdapter{config: c, binding: provider.BindingSnapshot{Binding: plan.Job.Binding}, policy: DefaultExecutionPolicy()}
+			switch tc.fault {
+			case "binding":
+				plan.Job.Binding.ConfigurationRevision = "replacement"
+			case "specification":
+				plan.Job.Specification = []byte(`{"version":"unknown"}`)
+				plan.Job.SpecificationSHA256 = provider.Digest(plan.Job.Specification)
+			case "policy":
+				p.policy.AllowInternet = false
+				plan.Job.Specification = []byte(strings.Replace(executionSpec, `"remote_internet":"disabled"`, `"remote_internet":"required"`, 1))
+				plan.Job.SpecificationSHA256 = provider.Digest(plan.Job.Specification)
+			case "unsupported":
+				plan.Job.Required = append(plan.Job.Required, domain.CapabilityEphemeralSecrets)
+			case "unverified":
+				plan.Job.Required = append(plan.Job.Required, domain.CapabilityLogsWhileRunning)
+			case "quota":
+				p.policy.MachineShape = "NvidiaTeslaT4"
+				plan.Job.Specification = []byte(strings.Replace(executionSpec, `"accelerator":"cpu"`, `"accelerator":"gpu","minimum_gpu_count":1`, 1))
+				plan.Job.SpecificationSHA256 = provider.Digest(plan.Job.Specification)
+				p.monitor = monitorFixture(t)
+				p.monitor.run = func(context.Context, Config, string, []byte, monitorRequest) (monitorResponse, error) {
+					return monitorResponse{}, errors.New("SYNTHETIC_TOKEN")
+				}
+			}
+			_, err := p.Validate(context.Background(), plan.Job)
+			assertStepReason(t, err, tc.reason)
+			if tc.fault == "quota" {
+				var failure domain.Problem
+				if !errors.As(err, &failure) || failure.PublicDetails()[domain.CauseDetail] != "quota_call_failed" {
+					t.Fatal("quota refusal lost failed read", err)
+				}
+			}
+		})
 	}
 }

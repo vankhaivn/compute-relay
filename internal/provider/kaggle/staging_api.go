@@ -43,7 +43,6 @@ func stagingLicense(value string) string {
 // preparation, and the remote runner rehashes every input before use. "create" and
 // "observe" also confirm the dataset did not change while it was read.
 func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stagingPlan, blobs StagingBlobs) (stagingResponse, error) {
-	empty := func(status string) stagingResponse { return stagingResponse{Protocol: 1, Status: status} }
 	failed := func(status, reason string) stagingResponse {
 		return stagingResponse{Protocol: 1, Status: status, Reason: reason}
 	}
@@ -71,7 +70,7 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 		if mode == "cleanup_observe" {
 			var failure *kaggleapi.Error
 			if !errors.As(err, &failure) || failure.StatusCode != 404 {
-				return empty("unknown"), nil
+				return failed("unknown", "staging_lookup_failed"+failureSuffix(err)), nil
 			}
 		}
 		return failed("not_found", "staging_absent"+failureSuffix(err)), nil

@@ -171,7 +171,20 @@ func (p *Preflight) Check(ctx context.Context, mode Mode) (Report, error) {
 	return p.check(ctx, mode, true)
 }
 
-func (p *Preflight) check(ctx context.Context, mode Mode, checkQuota bool) (Report, error) {
+func (p *Preflight) check(ctx context.Context, mode Mode, checkQuota bool) (report Report, retErr error) {
+	defer func() {
+		if retErr != nil {
+			if errors.Is(retErr, context.Canceled) || errors.Is(retErr, context.DeadlineExceeded) {
+				retErr = contextStep(retErr, "account_verification")
+			} else {
+				reason := "account_response_invalid"
+				if errors.Is(retErr, ErrUnavailable) {
+					reason = "account_read_failed"
+				}
+				retErr = provider.WithReason(retErr, reason)
+			}
+		}
+	}()
 	if p == nil {
 		return Report{}, ErrConfig
 	}

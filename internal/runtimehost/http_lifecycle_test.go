@@ -109,8 +109,9 @@ func TestHTTPAnnouncementFailureClosesListener(t *testing.T) {
 	address := listener.Addr().String()
 	server := &http.Server{Handler: http.NotFoundHandler()}
 	err := serveHTTPMode(context.Background(), server, listener, time.Second, "managed-workers", func() error { return errors.New("SYNTHETIC_PRIVATE_OUTPUT") })
-	if !errors.Is(err, ErrState) {
-		t.Fatal("unacknowledged startup succeeded", err)
+	var stopped ServiceStopped
+	if !errors.Is(err, ErrState) || !errors.As(err, &stopped) || stopped.Class != "announce_failed" {
+		t.Fatal("unacknowledged startup lost step", err)
 	}
 	c, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
 	if err == nil {

@@ -41,7 +41,7 @@ func (r *connectionWriteRepository) BeginConnectionInstall(context.Context, doma
 	}
 	return r.failure == nil, r.failure
 }
-func (r *connectionWriteRepository) FailConnection(context.Context, domain.OperationID, string) error {
+func (r *connectionWriteRepository) FailConnection(context.Context, domain.OperationID, string, string) error {
 	r.failed++
 	return nil
 }

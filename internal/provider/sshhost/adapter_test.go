@@ -412,11 +412,15 @@ func TestObserveMapsDockerExitEvidence(t *testing.T) {
 	h.host.container(t).status = "removing"
 	if _, err := h.adapter.Observe(context.Background(), remote); !errors.Is(err, ErrRemoteDocker) {
 		t.Fatalf("unknown state: %v", err)
+	} else {
+		assertFailureReason(t, err, "container_state_unrecognized")
 	}
 	other := remote
 	other.Version = strings.Repeat("f", 64)
 	if _, err := h.adapter.Observe(context.Background(), other); !errors.Is(err, ErrIdentity) {
 		t.Fatalf("replaced container: %v", err)
+	} else {
+		assertFailureReason(t, err, "inspect_remote_identity_unverified")
 	}
 }
 
@@ -429,14 +433,14 @@ func TestValidateRefusesWorkBeyondTheConnectionPolicy(t *testing.T) {
 	} {
 		job := testJob(t, spec, h.blobs)
 		var problem domain.Problem
-		if _, err := h.adapter.Validate(ctx, job); !errors.As(err, &problem) || problem.Code != domain.CodeResourceRequirementUnsatisfied {
+		if _, err := h.adapter.Validate(ctx, job); !errors.As(err, &problem) || problem.Code != domain.CodeResourceRequirementUnsatisfied || problem.PublicDetails()[domain.ReasonDetail] != "ssh_policy_unsatisfied" {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 	job := h.job
 	job.Required = append(slices.Clone(job.Required), domain.CapabilityGPU)
 	var problem domain.Problem
-	if _, err := h.adapter.Validate(ctx, job); !errors.As(err, &problem) || problem.Code != domain.CodeUnsupportedCapability {
+	if _, err := h.adapter.Validate(ctx, job); !errors.As(err, &problem) || problem.Code != domain.CodeUnsupportedCapability || problem.PublicDetails()[domain.ReasonDetail] != "ssh_capability_unsupported" {
 		t.Fatalf("gpu capability: %v", err)
 	}
 	job = h.job

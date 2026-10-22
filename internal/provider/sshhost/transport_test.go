@@ -1,6 +1,7 @@
 package sshhost
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -64,6 +65,8 @@ func TestDialPinsPresentedHostKeyOnlyWhenNoneIsSupplied(t *testing.T) {
 	target.HostKey = "SHA256:" + strings.Repeat("A", 43)
 	if _, err = Dial(context.Background(), target, Credential{Password: []byte("secret")}); !errors.Is(err, ErrHostKeyMismatch) {
 		t.Fatalf("changed host key: %v", err)
+	} else {
+		assertFailureReason(t, err, "host_key_mismatch")
 	}
 }
 
@@ -72,15 +75,21 @@ func TestDialClassifiesRejectedAndUnreachableHosts(t *testing.T) {
 	server.Password = "secret"
 	if _, err := Dial(context.Background(), server.target(), Credential{Password: []byte("wrong")}); !errors.Is(err, ErrCredentialReject) {
 		t.Fatalf("wrong password: %v", err)
+	} else {
+		assertFailureReason(t, err, "credential_rejected")
 	}
 	other, _ := newClientKey(t, nil)
 	if _, err := Dial(context.Background(), server.target(), Credential{PrivateKey: other}); !errors.Is(err, ErrCredentialReject) {
 		t.Fatalf("unknown key: %v", err)
+	} else {
+		assertFailureReason(t, err, "credential_rejected")
 	}
 	closed := server.target()
 	_ = server.Close()
 	if _, err := Dial(context.Background(), closed, Credential{Password: []byte("secret")}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("closed listener: %v", err)
+	} else {
+		assertFailureReason(t, err, "ssh_dial_failed")
 	}
 }
 
@@ -123,12 +132,19 @@ func TestDialPreservesCancellationDuringHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer peer.Close()
+	if err := peer.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bufio.NewReader(peer).ReadString('\n'); err != nil {
+		t.Fatal("SSH handshake did not begin", err)
+	}
 	cancel()
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrUnavailable) {
 			t.Fatal("handshake lost cancellation or transport identity", err)
 		}
+		assertFailureReason(t, err, "ssh_handshake_failed")
 	case <-time.After(time.Second):
 		t.Fatal("handshake ignored cancellation")
 	}
@@ -231,5 +247,7 @@ func TestRunStopsWhenContextEnds(t *testing.T) {
 	defer cancel()
 	if _, err = client.Run(ctx, nil, []string{"sleep", "60"}, nil, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Run: %v", err)
+	} else {
+		assertFailureReason(t, err, "ssh_command_interrupted")
 	}
 }

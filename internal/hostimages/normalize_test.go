@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 type testMember struct {
@@ -334,8 +335,13 @@ func TestLimitsAreEnforcedWithoutLeavingTempFiles(t *testing.T) {
 			opts := testOptions(source, dir)
 			opts.Limits = DefaultLimits()
 			tc.change(&opts.Limits)
-			if _, err := Normalize(context.Background(), bytes.NewReader(source), opts); !errors.Is(err, ErrLimitExceeded) {
+			_, err := Normalize(context.Background(), bytes.NewReader(source), opts)
+			if !errors.Is(err, ErrLimitExceeded) {
 				t.Fatal("limit not enforced", err)
+			}
+			want := map[string]string{"input": "image_options_invalid", "output": "image_archive_write_failed", "members": "image_archive_scan_failed", "metadata": "image_archive_parse_failed", "layers": "image_options_invalid"}[tc.name]
+			if provider.Reason(err, "") != want {
+				t.Fatal("lost limit step", tc.name, err)
 			}
 			assertTempEmpty(t, dir)
 		})

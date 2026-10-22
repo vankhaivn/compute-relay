@@ -11,6 +11,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 // jobs is reached only after the existing server's auth, Host/Origin, rate, body,
@@ -135,9 +136,11 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 		respond(w, 422, ErrorEnvelope{Error: ErrorBody{Code: domain.CodeResourceRequirementUnsatisfied,
 			Message: message, Stage: domain.FailureStageValidation, RequestID: RequestID(r.Context()),
-			RecommendedAction: domain.RecommendedActionWait, Details: map[string]string{domain.ReasonDetail: reason}}})
+			RecommendedAction: domain.RecommendedActionWait, Details: refusalDetails(err, reason)}})
 	case errors.Is(err, admission.ErrHostUnhealthy):
-		respondError(w, r, 422, domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "host health does not permit new work; inspect connection health")
+		respond(w, 422, ErrorEnvelope{Error: ErrorBody{Code: domain.CodeResourceRequirementUnsatisfied,
+			Message: "host health does not permit new work; inspect connection health", Stage: domain.FailureStageValidation, RequestID: RequestID(r.Context()),
+			RecommendedAction: domain.RecommendedActionWait, Details: refusalDetails(err, "host_unhealthy")}})
 	case errors.Is(err, admission.ErrRequirements):
 		respondError(w, r, 422, domain.CodeResourceRequirementUnsatisfied, domain.FailureStageValidation, "job exceeds the resolved profile policy")
 	case errors.Is(err, admission.ErrExpired):
@@ -148,4 +151,12 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		mapError(w, r, err)
 	}
+}
+
+func refusalDetails(err error, reason string) map[string]string {
+	details := map[string]string{domain.ReasonDetail: reason}
+	if cause := provider.Reason(err, ""); cause != "" {
+		details[domain.CauseDetail] = cause
+	}
+	return details
 }

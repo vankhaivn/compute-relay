@@ -56,7 +56,7 @@ func (g *managedStorageGuard) scanProfile(ctx context.Context, workspace domain.
 		if recordErr := g.store.RecordIncompleteStorageScan(ctx, scope, reason); recordErr != nil {
 			return recordErr
 		}
-		return hoststorage.ErrUnknown
+		return provider.WithReason(hoststorage.ErrUnknown, reason)
 	}
 	if err := g.store.RecordStorageScan(ctx, scan); err != nil {
 		return err

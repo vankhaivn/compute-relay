@@ -81,7 +81,9 @@ func TestStagingVisibilityWaitStopsOnCancel(t *testing.T) {
 		time.AfterFunc(10*time.Millisecond, cancel)
 		return stageResponse(p, "not_found"), nil
 	}
-	if _, err := s.Prepare(ctx, plan, "prep"); !errors.Is(err, context.Canceled) || strings.Join(modes, ",") != "create,observe" {
+	_, err := s.Prepare(ctx, plan, "prep")
+	assertStepReason(t, err, "staging_visibility_interrupted")
+	if !errors.Is(err, context.Canceled) || strings.Join(modes, ",") != "create,observe" {
 		t.Fatal("visibility wait outlived its context or repeated a call", err, modes)
 	}
 }
@@ -145,6 +147,9 @@ func TestStagingCleanupObservationRequiresStrictAbsence(t *testing.T) {
 					t.Fatal(seen, err)
 				}
 			default:
+				if seen.Cause != "staging_lookup_failed_http_403" {
+					t.Fatal("cleanup observation lost lookup cause", seen.Cause)
+				}
 				if err != nil || seen.Status != provider.ReconciliationUnknown {
 					t.Fatal(seen, err)
 				}

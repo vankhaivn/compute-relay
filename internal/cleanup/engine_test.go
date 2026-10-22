@@ -128,7 +128,7 @@ func TestEngineMapsEveryOutcome(t *testing.T) {
 		{"unresolved", &stubTarget{err: provider.Problem(domain.CodeRemoteExecutionUnresolved, domain.FailureStageOperation, "adapter-canary")}, nil, operations.Failed, domain.CodeRemoteExecutionUnresolved, 1},
 		{"unknown", &stubTarget{err: errors.New("adapter-canary")}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
 		{"panic", &stubTarget{panics: true}, nil, operations.Failed, domain.CodeProviderStateUnknown, 1},
-		{"binding", &stubTarget{verify: errors.New("adapter-canary")}, nil, operations.Failed, domain.CodeRemoteIdentityMismatch, 0},
+		{"binding", &stubTarget{verify: errors.New("adapter-canary")}, nil, operations.Failed, domain.CodeProviderStateUnknown, 0},
 		{"unconfigured", &stubTarget{}, errors.New("adapter-canary"), operations.Failed, domain.CodeConfigurationInvalid, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {

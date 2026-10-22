@@ -711,3 +711,19 @@ func TestHostHealthAdmissionCheckRaceKeepsSampleAndFrozenRequest(t *testing.T) {
 		t.Fatal("check race changed frozen request")
 	}
 }
+
+func TestHealthGuardCausePersistsOnUnsubmittedJobAfterRestart(t *testing.T) {
+	g := newHostGuardFixture(t, "ok")
+	job := g.admit(t, "guard-cause-persist", g.spec(t))
+	g.f.authorizeJob(t, job)
+	g.sampler.set("failed")
+	g.f.advance(t, hosthealth.DemandCache)
+	if err := g.step(t); !errors.Is(err, admission.ErrHostUnhealthy) {
+		t.Fatal("failed health read permitted mutation", err)
+	}
+	g.f.reopen(t)
+	record := g.read(t, job)
+	if record.Problem == nil || record.Problem.Details[domain.ReasonDetail] != "host_unhealthy" || record.Problem.Details[domain.CauseDetail] != "health_collection_failed" || record.Problem.ComputeMayHaveStarted || g.f.backend.Stats().PrepareCalls != 0 {
+		t.Fatal("lost persisted health cause/authority", record.Problem)
+	}
+}

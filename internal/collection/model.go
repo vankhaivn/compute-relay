@@ -32,10 +32,29 @@ type Failure struct {
 	Code    domain.ErrorCode
 	Invalid bool
 	Reason  string
+	Cause   string
+	cause   error
 }
 
-func (f Failure) Error() string                         { return "collection failed: " + string(f.Code) }
-func failure(code domain.ErrorCode, invalid bool) error { return Failure{Code: code, Invalid: invalid} }
+func (f Failure) Error() string         { return "collection failed: " + string(f.Code) }
+func (f Failure) Unwrap() error         { return f.cause }
+func (f Failure) FailureReason() string { return f.Reason }
+func failure(code domain.ErrorCode, invalid bool) error {
+	reason := "artifact_request_invalid"
+	switch code {
+	case domain.CodeRemoteIdentityMismatch:
+		reason = "artifact_remote_identity_mismatch"
+	case domain.CodeResultManifestMissing:
+		reason = "artifact_manifest_missing"
+	case domain.CodeArtifactDigestMismatch:
+		reason = "artifact_digest_mismatch"
+	case domain.CodeArtifactMissing:
+		reason = "artifact_output_missing"
+	case domain.CodeArtifactCollectionFailed:
+		reason = "artifact_catalog_invalid"
+	}
+	return Failure{Code: code, Invalid: invalid, Reason: reason}
+}
 
 // Lease is an internal capability. Wall-clock expiry never changes remote state.
 type Lease struct {
@@ -184,4 +203,8 @@ func FinalState(s domain.AttemptState, phase string) (domain.AttemptState, error
 		}
 	}
 	return s, s.Validate()
+}
+
+func failureAt(code domain.ErrorCode, invalid bool, reason string) error {
+	return Failure{Code: code, Invalid: invalid, Reason: reason}
 }

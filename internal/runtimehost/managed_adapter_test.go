@@ -8,7 +8,9 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/provider/kaggle"
+	"github.com/vankhaivn/compute-relay/internal/provider/sshhost"
 )
 
 type discoveryFailure struct{ err error }
@@ -62,7 +64,7 @@ func TestManagedKaggleVerificationSanitizesErrorsAndProfileUsesFinitePolicy(t *t
 	} {
 		a := &managedKaggleAdapter{discovery: discoveryFailure{tc.input}}
 		verified, err := a.Verify(context.Background(), []byte("SYNTHETIC_TOKEN"))
-		if err != tc.want || verified.CanonicalAccount != "" {
+		if !errors.Is(err, tc.want) || verified.CanonicalAccount != "" {
 			t.Fatal("invalid result or raw failure escaped", err)
 		}
 	}
@@ -94,5 +96,17 @@ func TestManagedKaggleRuntimePolicyIsClosedAndContainsNoLocalInterpreter(t *test
 		if _, err := parseManagedKaggleRuntimeConfig([]byte(invalid)); err != ErrRequest {
 			t.Fatal("invalid frozen policy accepted")
 		}
+	}
+}
+
+func TestManagedVerificationKeepsClosedDiscoveryStep(t *testing.T) {
+	adapter := &managedKaggleAdapter{discovery: discoveryFailure{provider.WithReason(kaggle.ErrProtocol, "account_discovery_read_failed")}}
+	_, err := adapter.Verify(t.Context(), []byte("SYNTHETIC"))
+	if !errors.Is(err, connections.ErrUnavailable) || provider.Reason(err, "") != "account_discovery_read_failed" {
+		t.Fatal("lost discovery step", err)
+	}
+	_, err = sshVerification(nil, sshhost.HostVerification{}, provider.WithReason(sshhost.ErrRemoteDocker, "docker_info_read_failed"))
+	if !errors.Is(err, connections.ErrUnavailable) || provider.Reason(err, "") != "docker_info_read_failed" {
+		t.Fatal("lost SSH verification step", err)
 	}
 }

@@ -36,13 +36,18 @@ type logCursor struct {
 	Offset    int                 `json:"offset"`
 }
 
-func (l *LogReader) Logs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (provider.LogPage, error) {
+func (l *LogReader) Logs(ctx context.Context, ref provider.RemoteReference, page provider.PageRequest) (logPage provider.LogPage, retErr error) {
+	defer func() {
+		if retErr != nil {
+			retErr = provider.WithReason(retErr, "logs_response_invalid")
+		}
+	}()
 	var none provider.LogPage
 	if l == nil || page.Validate() != nil {
-		return none, ErrLogCursor
+		return none, provider.WithReason(ErrLogCursor, "logs_cursor_invalid")
 	}
 	if err := ctx.Err(); err != nil {
-		return none, err
+		return none, contextStep(err, "logs")
 	}
 	if err := l.executor.checkOperationalReference(ref); err != nil {
 		return none, err
@@ -53,14 +58,14 @@ func (l *LogReader) Logs(ctx context.Context, ref provider.RemoteReference, page
 	if page.Cursor != "" {
 		raw, err := base64.RawURLEncoding.Strict().DecodeString(page.Cursor)
 		if err != nil || closedObject(raw, &cursor) != nil || cursor.Reference != expected || !cursor.Prefix.Valid() || cursor.Offset < 0 || cursor.Offset > 32<<20 || base64.RawURLEncoding.EncodeToString(raw) != page.Cursor {
-			return none, ErrLogCursor
+			return none, provider.WithReason(ErrLogCursor, "logs_cursor_invalid")
 		}
 	}
 	request := l.executor.request
 	request.Source = ""
 	var recorded kernelReference
 	if closedObject([]byte(ref.Resource), &recorded) != nil {
-		return none, ErrExecutionIdentity
+		return none, provider.WithReason(ErrExecutionIdentity, "logs_identity_mismatch")
 	}
 	request.KernelID = recorded.KernelID
 	r, err := l.monitor.callRequest(ctx, "logs", monitorRequest{Protocol: 1, Owner: l.monitor.config.AccountName, Execution: &request, LogOffset: cursor.Offset, LogPrefix: string(cursor.Prefix), LogLimit: page.Limit})
@@ -68,13 +73,13 @@ func (l *LogReader) Logs(ctx context.Context, ref provider.RemoteReference, page
 		return none, err
 	}
 	if r.Status == "reset" {
-		return none, ErrLogChanged
+		return none, provider.WithReason(ErrLogChanged, "logs_cursor_changed")
 	}
 	if r.Status == "invalid" {
-		return none, ErrExecutionIdentity
+		return none, provider.WithReason(ErrExecutionIdentity, "logs_identity_mismatch")
 	}
 	if r.Status == "unavailable" {
-		return none, provider.LogReadFailure{Reason: r.Reason}
+		return none, provider.WithReason(provider.LogReadFailure{Reason: r.Reason}, r.Reason)
 	}
 	raw, err := base64.StdEncoding.Strict().DecodeString(r.TextB64)
 	if err != nil {
@@ -85,7 +90,7 @@ func (l *LogReader) Logs(ctx context.Context, ref provider.RemoteReference, page
 	}
 	digest := provider.Digest(raw)
 	if !r.Replay && page.Cursor != "" && (cursor.Offset > len(raw) || cursor.Prefix != provider.Digest(raw[:cursor.Offset])) {
-		return none, ErrLogChanged
+		return none, provider.WithReason(ErrLogChanged, "logs_cursor_changed")
 	}
 	lines := []string{}
 	if len(raw) > 0 {
@@ -97,12 +102,12 @@ func (l *LogReader) Logs(ctx context.Context, ref provider.RemoteReference, page
 	start := 0
 	if !r.Replay {
 		if cursor.Offset > len(raw) {
-			return none, ErrLogChanged
+			return none, provider.WithReason(ErrLogChanged, "logs_cursor_changed")
 		}
 		start = len(strings.Split(string(raw[:cursor.Offset]), "\n")) - 1
 	}
 	if start > len(lines) {
-		return none, ErrLogCursor
+		return none, provider.WithReason(ErrLogCursor, "logs_cursor_invalid")
 	}
 	end := min(start+page.Limit, len(lines))
 	result := provider.LogPage{Source: "provider", Availability: r.Availability, Lines: append([]string{}, lines[start:end]...), Truncated: r.Truncated}
