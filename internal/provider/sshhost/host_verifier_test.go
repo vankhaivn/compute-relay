@@ -26,6 +26,7 @@ if [ "$3" = container ] && [ "$4" = cp ]; then
   exit "${FAKE_CP_STATUS-0}"
 fi
 if [ "$3" = container ] && [ "$4" = run ]; then
+  [ "$5" = --rm ] || exit 126
   cat >/dev/null
   printf '{"files":[],"marker":null}\n'
   exit 0

@@ -63,6 +63,16 @@ CPU selection pinned to that image. `image_installation_unknown` means the build
 running in Docker; check the host, then use `check` to pick up a finished image. Deleting an image
 that admitted jobs still use breaks their preparation.
 
+Fresh standard-runner builds require a complete inventory with fewer than 16 runner image IDs
+(schema label `io.compute-relay.image-schema=1`, across recipe versions). Duplicate tags count once;
+matching legacy or foreign images conservatively consume capacity. A full inventory refuses with
+`runner_image_count_limit`; an incomplete inventory remains unknown. Exact operation recovery
+still inspects its recorded image without rebuilding or consulting capacity. Relay never deletes
+runner images to make room. The control plane also reserves at most 16 historical installation
+operations per verified physical machine, across connection aliases, including uncertain outcomes.
+These reservations do not expire with age or failure; an unverified physical association refuses
+new installation. See [remote resource bounds](ssh-storage.md#remote-resource-bounds).
+
 ## Limits and capacity
 
 Defaults: one attempt at a time per machine, 4096 processes per container. Change them with

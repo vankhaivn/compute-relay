@@ -12,6 +12,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostimages"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/provider"
@@ -80,14 +81,30 @@ func (s *Store) QueueStorageEvictions(ctx context.Context, scope hoststorage.Sco
 		}
 		// Idle cache volumes are also bounded by count: small volumes never reach the
 		// byte limit, yet each one adds work to every storage scan.
-		volumes := 0
+		volumes, images := 0, 0
 		for _, object := range observation.objects {
 			if object.Kind == hoststorage.Volume && object.Labels[storageLabelPrefix+"kind"] == "cache" {
 				volumes++
 			}
+			if object.Kind == hoststorage.Image && object.Labels[hostimages.LabelKind] == "application" && object.Labels[hostimages.LabelMachine] == string(scope.MachineID) && object.Labels[hostimages.LabelEngine] == string(scope.EngineID) {
+				images++
+			}
 		}
 		excess := volumes - cacheVolumeLimit
-		if charge.view.Machine.ChargedBytes <= effective.SoftBytes && excess <= 0 {
+		imageExcess := images - hostimages.ImageRetentionTarget
+		if imageExcess > 0 {
+			var scheduled int
+			if err := tx.QueryRowContext(ctx, `SELECT count(DISTINCT object_id) FROM host_storage_cleanup_operations
+			 WHERE installation_id=? AND machine_id=? AND engine_id=? AND class='image'
+			 AND object_id IN (SELECT object_id FROM host_storage_objects WHERE scan_seq=? AND class='image')
+			 AND (status IN ('accepted','running') OR result='unknown'
+			 OR (result IN ('deleted','absent') AND confirmed_scan_seq>=?))`,
+				scope.InstallationID, scope.MachineID, scope.EngineID, observation.seq, observation.seq).Scan(&scheduled); err != nil {
+				return dbError(err)
+			}
+			imageExcess -= scheduled
+		}
+		if charge.view.Machine.ChargedBytes <= effective.SoftBytes && excess <= 0 && imageExcess <= 0 {
 			return nil
 		}
 		const eligible = `SELECT 'volume',g.volume_name,g.bytes,g.last_used_at,g.generation_id,g.operation_id,g.sha256
@@ -135,15 +152,19 @@ func (s *Store) QueueStorageEvictions(ctx context.Context, scope hoststorage.Sco
 		}
 		remaining := charge.view.Machine.ChargedBytes - effective.SoftBytes
 		for _, item := range candidates {
-			if remaining <= 0 && excess <= 0 {
+			if remaining <= 0 && excess <= 0 && imageExcess <= 0 {
 				break
 			}
 			reason := "soft_limit_lru"
 			if remaining <= 0 {
-				if item.class != hoststorage.Volume {
+				switch {
+				case item.class == hoststorage.Volume && excess > 0:
+					reason = "count_limit_lru"
+				case item.class == hoststorage.Image && imageExcess > 0:
+					reason = "image_count_limit_lru"
+				default:
 					continue
 				}
-				reason = "count_limit_lru"
 			}
 			object, present := objects[storageObjectKey(item.class, item.id)]
 			if !present || !object.SizeKnown || object.References != 0 || item.bytes < 0 {
@@ -205,6 +226,8 @@ func (s *Store) QueueStorageEvictions(ctx context.Context, scope hoststorage.Sco
 			remaining -= freed
 			if item.class == hoststorage.Volume {
 				excess--
+			} else if item.class == hoststorage.Image {
+				imageExcess--
 			}
 		}
 		return nil

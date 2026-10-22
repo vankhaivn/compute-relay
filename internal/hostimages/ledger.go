@@ -10,6 +10,12 @@ import (
 )
 
 var ErrImageState = errors.New("application image load state is not authorizable")
+var ErrCountLimit = errors.New("application image count limit reached")
+
+// ImageCountLimit includes resident images and distinct pending image pins.
+// Idle retention leaves one slot for the next image; pinned/unknown images stay.
+const ImageCountLimit = 16
+const ImageRetentionTarget = ImageCountLimit - 1
 
 type Key struct {
 	InstallationID domain.RuntimeInstallationID

@@ -91,6 +91,19 @@ Failed operations keep the broad `problem` and may add a closed `cause` identifi
 provider step. `cause` is absent when no typed diagnostic is available. This diagnostic does not
 change authentication, selection retention or retry policy.
 
+Standard SSH runner image installation has a count budget of 16 accepted operations per physical
+machine in this installation, shared by every retained connection alias. Admission reserves the
+slot before work; the worker checks again before committing the one-shot build intent. Completed,
+queued and uncertain installations all count. Removing a connection, an elapsed timeout or manual
+image deletion does not erase that reservation. This conservative budget has no automatic reset or
+deletion authority; exhausting it requires a separately reviewed retention/reclamation operation.
+Exact request replay and observation of an already-started installation remain available at the
+limit. Legacy records over the cap block fresh builds without deleting or rebuilding anything.
+The adapter independently requires a complete bounded engine inventory before a fresh build and
+refuses 16 or more matching runner images, including legacy images it cannot claim for deletion.
+Closed causes are `runner_image_count_limit`, `runner_image_scope_unknown` and
+`runner_image_inventory_unknown`; provider transport failures retain their specific closed cause.
+
 ## Concurrency
 
 The provider descriptor's `capabilities.concurrency` gives `support`, `scope` (`account` for Kaggle,

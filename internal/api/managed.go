@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/workloadsecret"
 )
 
@@ -288,6 +289,8 @@ func connectionError(w http.ResponseWriter, r *http.Request, err error) {
 		respondError(w, r, 409, domain.CodeIdempotencyConflict, domain.FailureStageOperation, "connection revision or original idempotent request does not match")
 	case errors.Is(err, connections.ErrActiveWork):
 		respondError(w, r, 409, domain.CodeIllegalStateTransition, domain.FailureStageOperation, "retained work still requires this connection")
+	case errors.Is(err, provider.ErrResourceCountLimit):
+		respondResourceCountRefusal(w, r, err)
 	case errors.Is(err, connections.ErrLimit):
 		w.Header().Set("Retry-After", "1")
 		respondError(w, r, 429, domain.CodeRequestLimitExceeded, domain.FailureStageLocalRuntime, "saved connection limit reached")

@@ -1,6 +1,7 @@
 package sshhost
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 )
 
 //go:embed image/Dockerfile
@@ -16,6 +18,10 @@ var standardDockerfile []byte
 
 const imageRecipeLabel = "io.compute-relay.image-recipe"
 const imageOperationLabel = "io.compute-relay.image-operation"
+
+// RunnerImageCountLimit bounds fresh standard-runner builds independently of bytes.
+// Historical installation intents are separately bounded by the control plane.
+const RunnerImageCountLimit = provider.RunnerImageCountLimit
 
 var ErrImageInstallationUnknown = errors.New("image installation outcome unknown")
 
@@ -31,6 +37,30 @@ func operationImageTag(operation domain.OperationID) string {
 }
 func ValidImageID(id string) bool {
 	return strings.HasPrefix(id, "sha256:") && domain.SHA256Digest(strings.TrimPrefix(id, "sha256:")).Valid()
+}
+
+func (d docker) runnerImageCapacity(ctx context.Context) error {
+	var out bytes.Buffer
+	result, err := d.run(ctx, nil, &limitedWriter{w: &out, limit: 64 << 10}, "image", "ls", "--all", "--no-trunc",
+		"--filter", "label=io.compute-relay.image-schema=1", "--format", "{{.ID}}")
+	if err != nil || result.ExitCode != 0 {
+		return failure(errors.Join(ErrImageInstallationUnknown, err), "runner_image_inventory_unknown")
+	}
+	ids := map[string]bool{}
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if out.Len() == 0 {
+		lines = nil
+	}
+	for _, id := range lines {
+		if !ValidImageID(id) {
+			return failure(ErrImageInstallationUnknown, "runner_image_inventory_unknown")
+		}
+		ids[id] = true
+	}
+	if len(ids) >= RunnerImageCountLimit {
+		return failure(ErrImageInstallationUnknown, "runner_image_count_limit")
+	}
+	return nil
 }
 
 func (d docker) installedImage(ctx context.Context, ref, architecture, operation string) (imageInfo, bool, error) {
@@ -87,6 +117,9 @@ func InstallImage(ctx context.Context, raw []byte, account, machineID, architect
 		}
 		if recoverOnly {
 			return HostVerification{}, failure(ErrImageInstallationUnknown, "install_image_outcome_unknown")
+		}
+		if err := d.runnerImageCapacity(ctx); err != nil {
+			return HostVerification{}, err
 		}
 		// The tar contains only the repository recipe. No job, credential, local context,
 		// provider Dockerfile, build argument or remote URL enters this build.

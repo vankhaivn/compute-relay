@@ -19,7 +19,10 @@ func insertResource(ctx context.Context, tx *sql.Tx, work dispatch.Work, j dispa
 }
 func writeDispatchLedger(ctx context.Context, tx *sql.Tx, work dispatch.Work, j dispatch.Journal, kind dispatch.Kind, now time.Time) error {
 	if kind == dispatch.BeginPreparation {
-		return insertResource(ctx, tx, work, j, "staging", string(j.PreparationID), now)
+		if err := insertResource(ctx, tx, work, j, "staging", string(j.PreparationID), now); err != nil {
+			return err
+		}
+		return reservePreparationSharedResources(ctx, tx, work, j, now)
 	}
 	if j.Plan == nil {
 		return nil

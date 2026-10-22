@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostimages"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
 )
 
 func TestStorageRefusalPreservesUnsubmittedAuthority(t *testing.T) {
-	for _, reason := range []string{"host_storage_limit", "host_storage_unknown"} {
+	for _, reason := range []string{"host_storage_limit", "host_storage_unknown", "host_image_count_limit", "remote_staging_dataset_limit", "remote_kernel_limit", "remote_attempt_container_limit", "remote_resource_scope_unknown", "remote_shared_dataset_limit"} {
 		t.Run(reason, func(t *testing.T) {
 			w, _, _ := fixtureWork(t)
 			j, state := apply(t, w.Journal, w.Job.Attempt.State, Action{Kind: RefuseNewWork, RefusalReason: reason, Cause: "storage_volumes_list_failed"})
@@ -39,7 +41,7 @@ func TestStorageRefusalPreservesUnsubmittedAuthority(t *testing.T) {
 }
 
 func TestStorageRefusalDoesNotTerminateDispatchWorkers(t *testing.T) {
-	for _, cause := range []error{hoststorage.ErrHardLimit, hoststorage.ErrUnknown} {
+	for _, cause := range []error{hoststorage.ErrHardLimit, hoststorage.ErrUnknown, hostimages.ErrCountLimit, provider.WithReason(provider.ErrResourceCountLimit, "remote_staging_dataset_limit"), provider.WithReason(provider.ErrResourceCountLimit, "remote_shared_dataset_limit")} {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		repo := &workerFaultRepo{faults: []error{cause}, cancel: cancel}
 		cfg := DefaultConfig()

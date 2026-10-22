@@ -63,6 +63,13 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 		return failed("unknown", "staging_lookup_failed"+failureSuffix(err)), nil
 	}
 	if err == nil {
+		// Old inline markers are tried after the shared layout. Do not reserve
+		// shared identities for a candidate that does not match this dataset.
+		if mode != "cleanup_observe" && matchingStaging(meta, r) {
+			if err := trackSharedInputs(ctx, plan); err != nil {
+				return stagingResponse{}, err
+			}
+		}
 		return observeStaging(ctx, client, plan, meta, mode == "observe" || mode == "create", mode == "cleanup_observe"), nil
 	}
 	if mode != "create" {
@@ -77,6 +84,9 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 	}
 	// Shared datasets come first, so an attempt dataset exists only after every shared
 	// input it names was created. A missing one is created once under this preparation.
+	if err := trackSharedInputs(ctx, plan); err != nil {
+		return stagingResponse{}, err
+	}
 	var missing []sharedInput
 	for _, entry := range plan.shared {
 		switch state, reason := observeShared(ctx, client, entry); state {
@@ -96,6 +106,19 @@ func stage(ctx context.Context, client *kaggleapi.Client, mode string, plan stag
 	}
 	provider.ReportPreparationProgress(ctx, 0, progress.total)
 	for _, entry := range missing {
+		allowed, err := plan.claims.ClaimSharedCreation(ctx, sharedClaim(plan, entry))
+		if err != nil {
+			return stagingResponse{}, provider.WithReason(err, "shared_creation_claim_failed")
+		}
+		if !allowed {
+			state, reason := awaitSharedCreation(ctx, client, entry)
+			if state == "ready" || state == "pending" {
+				progress.total -= entry.object.Bytes
+				provider.ReportPreparationProgress(ctx, progress.sent, progress.total)
+				continue
+			}
+			return failed(state, reason), nil
+		}
 		files, status, reason := uploadStaging(ctx, client, "shared", entry.request, entry.marker, []domain.ObjectMetadata{entry.object}, blobs, progress)
 		if status != "" {
 			return failed(status, reason), nil
@@ -206,23 +229,57 @@ func createDataset(ctx context.Context, client *kaggleapi.Client, r stagingReque
 // sharedCreated observes, within the visibility grace, whether a shared dataset whose
 // create was not acknowledged exists with its exact identity.
 func sharedCreated(ctx context.Context, client *kaggleapi.Client, entry sharedInput) bool {
-	deadline := time.Now().Add(stagingVisibilityGrace)
+	state, _ := awaitSharedCreation(ctx, client, entry)
+	return state == "ready" || state == "pending"
+}
+
+// A durable claim belongs to its first invocation. Another invocation only
+// observes the exact resource, even when the provider still answers absent.
+func awaitSharedCreation(parent context.Context, client *kaggleapi.Client, entry sharedInput) (string, string) {
+	ctx, cancel := context.WithTimeout(parent, stagingVisibilityGrace)
+	defer cancel()
 	for {
-		switch state, _ := observeShared(ctx, client, entry); state {
-		case "ready", "pending":
-			return true
-		case "invalid":
-			return false
+		state, reason := observeShared(ctx, client, entry)
+		switch state {
+		case "ready", "pending", "invalid":
+			return state, reason
 		}
-		if !time.Now().Before(deadline) {
-			return false
+		if ctx.Err() != nil {
+			return "unknown", "shared_creation_unresolved"
 		}
+		timer := time.NewTimer(stagingVisibilityPoll)
 		select {
 		case <-ctx.Done():
-			return false
-		case <-time.After(stagingVisibilityPoll):
+			timer.Stop()
+			return "unknown", "shared_creation_unresolved"
+		case <-timer.C:
 		}
 	}
+}
+
+func sharedClaim(plan stagingPlan, entry sharedInput) provider.SharedResourceClaim {
+	claim := plan.claim
+	claim.ContentSHA256, claim.Bytes = entry.object.SHA256, entry.object.Bytes
+	return claim
+}
+
+func trackSharedInputs(ctx context.Context, plan stagingPlan) error {
+	if len(plan.shared) == 0 {
+		return nil
+	}
+	if plan.claims == nil {
+		return provider.WithReason(ErrConfig, "shared_claims_unavailable")
+	}
+	for _, entry := range plan.shared {
+		claim := sharedClaim(plan, entry)
+		if !claim.Valid() {
+			return provider.WithReason(ErrConfig, "shared_claim_invalid")
+		}
+		if err := plan.claims.TrackSharedUse(ctx, claim); err != nil {
+			return provider.WithReason(err, "shared_use_record_failed")
+		}
+	}
+	return nil
 }
 
 // failureSuffix adds the provider HTTP status or a timeout to a closed reason; it

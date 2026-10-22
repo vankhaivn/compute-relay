@@ -65,47 +65,48 @@ type fakeApplicationImage struct {
 // fakeHost is an in-memory Docker host behind the executor seam. It understands only
 // the fixed argument arrays the adapter issues and records every command.
 type fakeHost struct {
-	t                       *testing.T
-	mu                      sync.Mutex
-	images                  map[string]imageInfo
-	applicationImages       map[string]fakeApplicationImage
-	applicationLoads        int
-	applicationLoadAckLost  bool
-	applicationLoadMissing  bool
-	containerdImages        bool
-	builds                  int
-	buildExit               int
-	buildInput              []byte
-	platform                string
-	engineTime              time.Time
-	image                   bool
-	registry                bool // pull succeeds
-	containers              map[string]*fakeContainer
-	volumes                 map[string]*fakeVolume
-	writes                  int
-	volumeVerifications     int
-	cacheBatchVerifications int
-	cacheInventoryCalls     int
-	cacheBatchOutput        []byte
-	cacheInventoryReply     string
-	calls                   [][]string
-	wireCalls               [][]string
-	machineID               string
-	engineID                string
-	dockerHost              string
-	starts                  int
-	created                 int
-	secretPackets           [][]byte
-	secretAckLost           bool
-	verifierOutput          [][]byte
-	verifierTarFault        func([]byte) []byte
-	verifierMutate          func(*fakeContainer)
-	verifierProducerStatus  int
-	verifierOmitStatus      bool
-	verifierExit            int
-	verifierExtraOutput     []byte
-	closed                  int
-	fail                    func(args []string) (Result, bool)
+	t                         *testing.T
+	mu                        sync.Mutex
+	images                    map[string]imageInfo
+	applicationImages         map[string]fakeApplicationImage
+	applicationLoads          int
+	applicationLoadAckLost    bool
+	applicationLoadMissing    bool
+	containerdImages          bool
+	builds                    int
+	buildExit                 int
+	buildInput                []byte
+	platform                  string
+	engineTime                time.Time
+	image                     bool
+	registry                  bool // pull succeeds
+	containers                map[string]*fakeContainer
+	volumes                   map[string]*fakeVolume
+	writes                    int
+	volumeVerifications       int
+	cacheBatchVerifications   int
+	cacheInventoryCalls       int
+	cacheBatchOutput          []byte
+	cacheInventoryReply       string
+	runnerImageInventoryReply string
+	calls                     [][]string
+	wireCalls                 [][]string
+	machineID                 string
+	engineID                  string
+	dockerHost                string
+	starts                    int
+	created                   int
+	secretPackets             [][]byte
+	secretAckLost             bool
+	verifierOutput            [][]byte
+	verifierTarFault          func([]byte) []byte
+	verifierMutate            func(*fakeContainer)
+	verifierProducerStatus    int
+	verifierOmitStatus        bool
+	verifierExit              int
+	verifierExtraOutput       []byte
+	closed                    int
+	fail                      func(args []string) (Result, bool)
 }
 
 func newFakeHost(t *testing.T) *fakeHost {
@@ -416,6 +417,23 @@ func (h *fakeHost) Run(ctx context.Context, env map[string]string, argv []string
 			return noSuch("image"), nil
 		}
 		_, _ = fmt.Fprintf(stdout, `[{"Id":%q,"Os":"linux","Architecture":"amd64"}]`, fakeImageID)
+		return Result{}, nil
+	case len(args) == 8 && slices.Equal(args[:5], []string{"image", "ls", "--all", "--no-trunc", "--filter"}) && args[5] == "label=io.compute-relay.image-schema=1" && slices.Equal(args[6:], []string{"--format", "{{.ID}}"}):
+		if h.runnerImageInventoryReply != "" {
+			_, err := io.WriteString(stdout, h.runnerImageInventoryReply)
+			return Result{}, err
+		}
+		ids := map[string]bool{}
+		for _, image := range h.images {
+			if image.Config.Labels["io.compute-relay.image-schema"] == "1" {
+				ids[image.ID] = true
+			}
+		}
+		for _, id := range slices.Sorted(maps.Keys(ids)) {
+			if _, err := io.WriteString(stdout, id+"\n"); err != nil {
+				return Result{}, err
+			}
+		}
 		return Result{}, nil
 	case len(args) == 8 && slices.Equal(args[:5], []string{"image", "ls", "--all", "--no-trunc", "--filter"}) &&
 		slices.Equal(args[6:], []string{"--format", "{{.ID}}"}):

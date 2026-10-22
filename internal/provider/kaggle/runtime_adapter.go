@@ -61,6 +61,7 @@ func NewRuntimeAdapter(
 	load RuntimeLoader,
 	policy ExecutionPolicy,
 	allowMutations bool,
+	sharedClaims ...provider.SharedResourceClaims,
 ) (*RuntimeAdapter, error) {
 	if c.Validate() != nil || !binding.Valid() || resolver == nil || blobs == nil || clock == nil || load == nil || !policy.valid() {
 		return nil, ErrConfig
@@ -71,7 +72,7 @@ func NewRuntimeAdapter(
 		binding.CredentialRef != string(c.CredentialRef) {
 		return nil, ErrRuntimeBinding
 	}
-	stager, err := NewStager(c, DefaultStagingPolicy(), resolver, blobs, allowMutations)
+	stager, err := NewStager(c, DefaultStagingPolicy(), resolver, blobs, allowMutations, sharedClaims...)
 	if err != nil {
 		return nil, err
 	}

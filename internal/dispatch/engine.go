@@ -9,6 +9,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostimages"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -459,6 +460,10 @@ func (s *session) guardNewWork() error {
 
 func newWorkRefusalReason(err error) string {
 	switch {
+	case errors.Is(err, provider.ErrResourceCountLimit):
+		return provider.Reason(err, "remote_resource_count_limit")
+	case errors.Is(err, hostimages.ErrCountLimit):
+		return "host_image_count_limit"
 	case errors.Is(err, admission.ErrHostUnhealthy):
 		return "host_unhealthy"
 	case errors.Is(err, hoststorage.ErrHardLimit):

@@ -163,6 +163,9 @@ func (s *Service) RunOnce(ctx context.Context) (bool, error) {
 		return err
 	})
 	if installErr != nil {
+		if errors.Is(installErr, provider.ErrResourceCountLimit) {
+			return true, s.repo.FailConnection(ctx, op.ID, "image_installation_unknown", provider.Reason(installErr, "runner_image_count_limit"))
+		}
 		return true, installErr
 	}
 	if ctx.Err() != nil {

@@ -27,6 +27,7 @@ changing the flag, run a connection `check` to get a selection for it.
 | Request pacing | API requests are admitted at least 500 ms apart per configured account, plus 0–100 ms jitter, and at least 100 ms apart across the provider. Concurrent callers share admission through response headers. |
 | Read retries | Metadata, logs and download tickets retry HTTP 429, temporary 5xx and transport failures, with up to three sends per read. HTTP 429 honors `Retry-After` (seconds or HTTP date); missing or invalid delays use 30 s then 60 s. Other temporary read faults wait 1 s then 2 s. Waiting uses the caller's budget, capped at one hour; each HTTP request keeps its own timeout. Mutations remain one-shot. |
 | GPU quota | A GPU authorization needs fresh, sufficient known quota. Connections to one account share it. No reset time is reported. |
+| Retained resources | Per canonical account and installation: at most 128 attempt datasets, 128 actual or reserved future kernels, and 128 unique shared datasets. Unknown creations retain capacity; byte limits do not replace these counts. New work stops at a bound while exact existing cleanup remains available. |
 | Internet | Disabled unless the policy allows it **and** the job requests it. |
 | GPU proof | Success requires the runner's hardware evidence, not just a requested GPU or a quota deduction. |
 | Unsupported | `prepare_then_start`, absolute deadlines, workload secrets, `application_image`, SSH cache. |
@@ -117,10 +118,20 @@ installation and account as its own private dataset, named from its SHA-256 and 
 attempts with the same bytes mount it instead of uploading again. A kernel mounts its attempt
 dataset plus at most 7 shared ones; further large inputs stay in the attempt dataset.
 
-- A missing shared dataset is created by the preparation that needs it. If the create response is
-  lost, Relay only observes; it never creates it twice.
+- Before trusting or creating a shared dataset, Relay durably records its content identity against
+  the canonical account and installation. At most 128 unique shared identities may be retained,
+  including uncertain creation intents. Reusing an already recorded identity consumes no new slot.
+  Managed preparations reserve their full selected shared-input set together; a count refusal
+  consumes no partial set of new shared slots or preparation intent.
+- The original preparation can claim creation once, before uploading any shared bytes. Every later
+  invocation, restart or attempt only observes that identity. An uncertain upload or create keeps its
+  slot and creation permit consumed; an absent name never grants another create.
 - An existing one is used only if name, version 1, privacy, marker and exact file list match;
   otherwise preparation stops without replacing it.
 - Attempt cleanup and retention never delete shared datasets. They count toward the account's
-  Kaggle storage until you delete them in Kaggle — only when no waiting attempt mounts them; the
-  next attempt that needs one uploads it again.
+  Kaggle storage until removed in Kaggle; removal must wait until no waiting attempt mounts them.
+  Removal does not reset the durable claim: later attempts needing missing content stop unresolved.
+  Relay provides no automatic shared deletion, claim reset or recreation authority.
+- Existing inline preparations keep their original markers and layout. Upgrade recovery records
+  conservative shared identities from retained frozen inputs; it cannot prove that every historical
+  shared object still exists or discover identities whose local history is no longer retained.

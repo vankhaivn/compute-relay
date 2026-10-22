@@ -23,6 +23,7 @@ func (a *managedImageAdapter) Verify(ctx context.Context, secret []byte) (connec
 		image.Status, image.ID = "ready", "sha256:"+strings.Repeat("b", 64)
 	}
 	verified.Host = &connections.HostEvidence{HostKeyFingerprint: "SHA256:" + strings.Repeat("A", 43), OS: "linux", Architecture: "amd64", Image: image}
+	verified.Resource = &connections.ResourceIdentity{Kind: "machine", ID: "resource_" + strings.Repeat("c", 64)}
 	verified.SelectionUnavailable = !a.installed
 	return verified, err
 }

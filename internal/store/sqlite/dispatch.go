@@ -13,6 +13,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/dispatch"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/executionauth"
+	"github.com/vankhaivn/compute-relay/internal/hostimages"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/scheduler"
@@ -212,6 +213,12 @@ func newMutationPolicy(ctx context.Context, tx *sql.Tx, work dispatch.Work, now 
 	// preparation barrier, starting that exact prepared work does not reserve
 	// another container or content object.
 	if work.Journal.Plan == nil {
+		if err := checkRemoteResourceNewWork(ctx, tx, work); err != nil {
+			return err
+		}
+		if err := checkApplicationImageNewWork(ctx, tx, work.Job, now); err != nil {
+			return err
+		}
 		if err := checkStorageNewWork(ctx, tx, work.Job, now); err != nil {
 			return err
 		}
@@ -273,6 +280,13 @@ func (s *Store) CommitDispatch(ctx context.Context, h dispatch.Handle, action di
 					return dispatch.ErrInvalid
 				}
 				refusal, expected = checkHostNewWork(ctx, tx, work.Job, now), admission.ErrHostUnhealthy
+			case "remote_staging_dataset_limit", "remote_kernel_limit", "remote_attempt_container_limit", "remote_resource_scope_unknown", "remote_shared_dataset_limit":
+				refusal, expected = checkRemoteResourceNewWork(ctx, tx, work), provider.ErrResourceCountLimit
+				if provider.Reason(refusal, "") != action.RefusalReason {
+					return dispatch.ErrPolicy
+				}
+			case "host_image_count_limit":
+				refusal, expected = checkApplicationImageNewWork(ctx, tx, work.Job, now), hostimages.ErrCountLimit
 			case "host_storage_limit":
 				refusal, expected = checkStorageNewWork(ctx, tx, work.Job, now), hoststorage.ErrHardLimit
 			case "host_storage_unknown":

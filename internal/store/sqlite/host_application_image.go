@@ -139,6 +139,9 @@ func (s *Store) ClaimImage(ctx context.Context, owner hostimages.Owner, key host
 			result = *active
 			return nil
 		}
+		if err := claimApplicationImageKeyInTx(ctx, tx, key); err != nil {
+			return err
+		}
 		id, err := randomID("img_", 16)
 		if err != nil {
 			return err
@@ -330,6 +333,11 @@ func pinHostApplicationImageAdmission(ctx context.Context, tx *sql.Tx, w domain.
 		if fenced {
 			return hoststorage.ErrIneligible
 		}
+		key := hostimages.Key{InstallationID: target.installation, MachineID: target.machine, EngineID: target.engine, ArchiveSHA256: ref.Object.SHA256, ArchiveBytes: ref.Object.Bytes}
+		if err := admitApplicationImageKeyInTx(ctx, tx, key); err != nil {
+			return err
+		}
+
 		_, err = tx.ExecContext(ctx, `INSERT INTO host_application_image_pins
 		 (workspace_id,job_id,attempt_id,installation_id,machine_id,engine_id,archive_sha256,archive_bytes,object_id,created_at)
 		 VALUES(?,?,?,?,?,?,?,?,?,?)`, w, job, attempt, target.installation, target.machine, target.engine,
@@ -340,7 +348,19 @@ func pinHostApplicationImageAdmission(ctx context.Context, tx *sql.Tx, w domain.
 }
 
 func pinHostApplicationImageRetry(ctx context.Context, tx *sql.Tx, oldWorkspace domain.WorkspaceID, oldJob domain.JobID, oldAttempt, newAttempt domain.AttemptID, now time.Time) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO host_application_image_pins
+	var key hostimages.Key
+	err := tx.QueryRowContext(ctx, `SELECT installation_id,machine_id,engine_id,archive_sha256,archive_bytes
+	 FROM host_application_image_pins WHERE workspace_id=? AND job_id=? AND attempt_id=?`, oldWorkspace, oldJob, oldAttempt).
+		Scan(&key.InstallationID, &key.MachineID, &key.EngineID, &key.ArchiveSHA256, &key.ArchiveBytes)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return dbError(err)
+	}
+	if err == nil {
+		if err := admitApplicationImageKeyInTx(ctx, tx, key); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO host_application_image_pins
 	 (workspace_id,job_id,attempt_id,installation_id,machine_id,engine_id,archive_sha256,archive_bytes,object_id,created_at)
 	 SELECT workspace_id,job_id,?,installation_id,machine_id,engine_id,archive_sha256,archive_bytes,object_id,?
 	 FROM host_application_image_pins WHERE workspace_id=? AND job_id=? AND attempt_id=?`,

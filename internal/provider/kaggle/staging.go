@@ -56,20 +56,25 @@ type stagingInvocation func(context.Context, Config, string, []byte, stagingPlan
 // creation enabled. Recovery must use ReconcilePrepare. No registration or
 // executable mutation command is installed by NewStager.
 type Stager struct {
-	config      Config
-	policy      StagingPolicy
-	credentials ports.CredentialResolver
-	blobs       StagingBlobs
-	allowCreate bool
-	slot        chan struct{}
-	run         stagingInvocation
+	config       Config
+	policy       StagingPolicy
+	credentials  ports.CredentialResolver
+	blobs        StagingBlobs
+	allowCreate  bool
+	slot         chan struct{}
+	run          stagingInvocation
+	sharedClaims provider.SharedResourceClaims
 }
 
-func NewStager(c Config, policy StagingPolicy, resolver ports.CredentialResolver, blobs StagingBlobs, allowCreate bool) (*Stager, error) {
-	if c.Validate() != nil || !policy.valid() || resolver == nil || blobs == nil {
+func NewStager(c Config, policy StagingPolicy, resolver ports.CredentialResolver, blobs StagingBlobs, allowCreate bool, claims ...provider.SharedResourceClaims) (*Stager, error) {
+	if c.Validate() != nil || !policy.valid() || resolver == nil || blobs == nil || len(claims) > 1 {
 		return nil, ErrConfig
 	}
-	return &Stager{config: c, policy: policy, credentials: resolver, blobs: blobs, allowCreate: allowCreate, slot: make(chan struct{}, 1), run: runStaging}, nil
+	s := &Stager{config: c, policy: policy, credentials: resolver, blobs: blobs, allowCreate: allowCreate, slot: make(chan struct{}, 1), run: runStaging}
+	if len(claims) == 1 {
+		s.sharedClaims = claims[0]
+	}
+	return s, nil
 }
 
 func (s *Stager) Prepare(ctx context.Context, plan provider.Plan, operation domain.OperationID) (provider.Prepared, error) {
@@ -155,6 +160,10 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	if err != nil {
 		return none, "", provider.WithReason(err, "staging_plan_invalid")
 	}
+	for i := range plans {
+		plans[i].claims = s.sharedClaims
+		plans[i].claim = provider.SharedResourceClaim{Identity: frozen.Job.Identity, PreparationID: operation, PlanSHA256: frozen.Digest()}
+	}
 	p := plans[0]
 	if mode == "create" {
 		plans = plans[:1]
@@ -220,6 +229,12 @@ func (s *Stager) check(parent context.Context, mode string, plan provider.Plan, 
 	})
 	if provider.IsLocalStateError(err) {
 		return none, "", err
+	}
+	if errors.Is(err, provider.ErrResourceCountLimit) {
+		return none, "", provider.WithReason(provider.ErrResourceCountLimit, provider.Reason(err, "remote_shared_dataset_limit"))
+	}
+	if errors.Is(err, ErrConfig) {
+		return none, "", provider.WithReason(ErrConfig, provider.Reason(err, "staging_configuration_invalid"))
 	}
 	if ctx.Err() != nil {
 		return none, "", contextStep(ctx.Err(), "staging")

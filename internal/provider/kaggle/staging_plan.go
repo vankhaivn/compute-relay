@@ -36,7 +36,7 @@ type StagingPolicy struct {
 // cut before creation merely because the inputs are large. The shared threshold keeps a kernel at a
 // few mounts while catching large unchanged inputs such as an application runtime.
 func DefaultStagingPolicy() StagingPolicy {
-	return StagingPolicy{License: "other", MaxBytes: maxStagingBytes, Timeout: time.Hour, SharedMinBytes: 256 << 20}
+	return StagingPolicy{License: "other", MaxBytes: maxStagingBytes, Timeout: time.Hour, SharedMinBytes: provider.DefaultSharedInputMinBytes}
 }
 func (p StagingPolicy) valid() bool {
 	return (p.License == "other" || p.License == "unknown") &&
@@ -63,7 +63,9 @@ type stagingPlan struct {
 	marker  []byte
 	objects []domain.ObjectMetadata // Same order as Files[1:]; never sent to the provider.
 	shared  []sharedInput
-	inputs  []stagedInput // One per frozen input, in plan order.
+	inputs  []stagedInput                 // One per frozen input, in plan order.
+	claims  provider.SharedResourceClaims // Local durable authority; never part of marker bytes.
+	claim   provider.SharedResourceClaim
 }
 
 // stagedInput is where the remote runner finds one frozen input: a file in the
@@ -77,7 +79,7 @@ const (
 	sharedMarkerFile = "relay-shared.bin"
 	sharedBlobFile   = "blob.bin"
 	// maxSharedInputs leaves one of Kaggle's kernel mounts for the attempt dataset.
-	maxSharedInputs = 7
+	maxSharedInputs = provider.DefaultSharedInputLimit
 )
 
 // sharedInput is one content-addressed private dataset holding a single large input.
@@ -158,24 +160,21 @@ func buildStagingPlan(c Config, policy StagingPolicy, plan provider.Plan, operat
 	inputs := make([]markerInput, 0, len(job.Inputs.Inputs))
 	var shared []sharedInput
 	var sharedRefs []markerShared
-	bySlug := map[string]bool{}
+	byContent := map[string]sharedInput{}
+	for _, object := range provider.SelectSharedInputs(job.Inputs.Inputs, policy.SharedMinBytes, maxSharedInputs) {
+		entry, err := buildSharedInput(c, policy, id.InstallationID, object)
+		if err != nil {
+			return result, err
+		}
+		byContent[provider.SharedResourceKey(object.SHA256, object.Bytes)] = entry
+		shared = append(shared, entry)
+		sharedRefs = append(sharedRefs, markerShared{entry.request.Slug, object.SHA256, object.Bytes})
+	}
 	for i, input := range job.Inputs.Inputs {
-		if policy.SharedMinBytes > 0 && input.Object.Bytes >= policy.SharedMinBytes {
-			entry, err := buildSharedInput(c, policy, id.InstallationID, input.Object)
-			if err != nil {
-				return result, err
-			}
-			// Beyond the kernel's mount bound, further large inputs stay with the attempt.
-			if bySlug[entry.request.Slug] || len(shared) < maxSharedInputs {
-				if !bySlug[entry.request.Slug] {
-					bySlug[entry.request.Slug] = true
-					shared = append(shared, entry)
-					sharedRefs = append(sharedRefs, markerShared{entry.request.Slug, input.Object.SHA256, input.Object.Bytes})
-				}
-				inputs = append(inputs, markerInput{input.Name, input.Target, sharedBlobFile, entry.request.Slug})
-				result.inputs = append(result.inputs, stagedInput{entry.request.Slug, sharedBlobFile})
-				continue
-			}
+		if entry, ok := byContent[provider.SharedResourceKey(input.Object.SHA256, input.Object.Bytes)]; ok {
+			inputs = append(inputs, markerInput{input.Name, input.Target, sharedBlobFile, entry.request.Slug})
+			result.inputs = append(result.inputs, stagedInput{entry.request.Slug, sharedBlobFile})
+			continue
 		}
 		name := fmt.Sprintf("input-%03d.bin", i)
 		objects = append(objects, input.Object)

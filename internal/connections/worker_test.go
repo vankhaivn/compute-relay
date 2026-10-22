@@ -7,6 +7,7 @@ import (
 
 	"github.com/vankhaivn/compute-relay/internal/credentials"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/provider"
 	"github.com/vankhaivn/compute-relay/internal/worker"
 )
 
@@ -21,6 +22,7 @@ type connectionWriteRepository struct {
 	failure                        error
 	committed                      bool
 	begin, ready, deferred, failed int
+	failedCause                    string
 }
 
 func (r *connectionWriteRepository) NextConnectionOperation(context.Context) (Record, bool, error) {
@@ -41,9 +43,21 @@ func (r *connectionWriteRepository) BeginConnectionInstall(context.Context, doma
 	}
 	return r.failure == nil, r.failure
 }
-func (r *connectionWriteRepository) FailConnection(context.Context, domain.OperationID, string, string) error {
+func (r *connectionWriteRepository) FailConnection(_ context.Context, _ domain.OperationID, _, cause string) error {
 	r.failed++
+	r.failedCause = cause
 	return nil
+}
+
+func TestConnectionImageCountRefusalKeepsWorkerAndOriginalIntent(t *testing.T) {
+	r := &connectionWriteRepository{failure: provider.WithReason(provider.ErrResourceCountLimit, "runner_image_count_limit"),
+		record: Record{Stage: "ready", ProviderType: "ssh", Installation: &ImageInstallation{}, Operation: Operation{Action: "install_image"}}}
+	a := &connectionWriteInstaller{}
+	s := Service{repo: r, vault: connectionWriteVault{}, adapters: map[string]Adapter{"ssh": a}}
+	worked, err := s.RunOnce(t.Context())
+	if err != nil || !worked || r.begin != 1 || r.failed != 1 || r.failedCause != "runner_image_count_limit" || a.calls != 0 || r.record.Stage != "ready" {
+		t.Fatal("count refusal stopped worker or authorized a build", worked, err, r.failedCause, a.calls)
+	}
 }
 
 type connectionWriteVault struct {

@@ -1,8 +1,8 @@
 # SSH storage, cache and application images
 
-Relay keeps three kinds of Docker objects on an SSH host. All are labelled with the installation
-and scoped to one verified machine + Docker engine, so every connection alias to that machine shares
-them. Kaggle uses none of this; it reuses large inputs through
+Relay accounts for cache volumes, application images and attempt containers on an SSH host.
+These objects are labelled with the installation and scoped to one verified machine + Docker
+engine, so every connection alias to that machine shares them. Kaggle uses none of this; it reuses large inputs through
 [shared datasets](kaggle.md#shared-input-datasets).
 
 ```mermaid
@@ -22,7 +22,7 @@ flowchart LR
 | Object | Lifetime | Removed by |
 |---|---|---|
 | Cache volume | Shared across jobs and workspaces | Soft-limit or count-limit eviction when unreferenced |
-| Application image | Reused across jobs | Soft-limit eviction when unreferenced |
+| Application image | Reused across jobs | Soft-limit or count-limit eviction when unreferenced |
 | Attempt container | One attempt | [Cleanup or retention](results-and-cleanup.md#cleanup) |
 
 ## Input cache
@@ -61,6 +61,16 @@ re-labels it without tags and loads it once; later jobs reuse the same image ID.
 declare an entrypoint or volumes (Relay's runner must be the process). No Dockerfile build, registry
 pull, package install or `docker tag` happens. Kaggle rejects the field.
 
+Each installation on a verified machine and Docker engine has **16 application-image
+slots**, counting distinct resident or uncertain image identities and pending image pins.
+Reusing an existing image key needs no new slot. A new image at the limit is refused with
+`host_image_count_limit` before preparation starts; an unknown load retains its slot.
+The storage worker keeps an idle target of **15 images**, leaving one slot for the next
+image. It removes only exact, unpinned, unreferenced images through the normal cleanup
+journal. Pending or uncertain deletion does not free a slot or permit repeating that deletion.
+Older installations already above the limit retain pinned and uncertain images; existing
+active keys remain usable while new distinct images wait for safe cleanup.
+
 ## Budget
 
 New SSH connections default to a **64 GiB soft** and **80 GiB hard** limit. Set your own via
@@ -78,6 +88,7 @@ is a conservative upper bound.
 | Below soft | Nothing. |
 | Above soft | Evict unreferenced cache entries and images, least recently used first. |
 | Over 64 cache volumes | Evict unreferenced cache volumes, least recently used first, whatever their size (`count_limit_lru`). |
+| Over 15 application images | Evict unreferenced application images, least recently used first, independent of size (`image_count_limit_lru`); active pins and uncertain loads remain. |
 | At or near hard, or unknown | New admission and preparation get HTTP 422 `RESOURCE_REQUIREMENT_UNSATISFIED` with `details.reason` `host_storage_limit` or `host_storage_unknown`; queued work retries every 30 s. Running work is never stopped. |
 
 Size the budget to Docker's own capacity (the Docker VM on macOS), not host `df`.
@@ -103,3 +114,31 @@ paths under `/v1/workspaces/{w}`):
 
 Attempt containers that match a job use ordinary [attempt cleanup](results-and-cleanup.md#cleanup)
 instead. See the [storage schema](../api/schemas/connection-storage.v1alpha1.schema.json).
+
+## Remote resource bounds
+
+These limits complement byte accounting; tiny objects and uncertain mutations still consume
+capacity. Admission shares the physical host scope across connection aliases. Unknown creation
+outcomes never free a reservation or authorize a repeated create, image load or build.
+
+| Resource created by Relay | Count or lifetime bound | Ownership and removal |
+|---|---|---|
+| Attempt container and private writable data | 128 retained, live or uncertain attempt reservations per physical resource; configured running concurrency also applies | One exact attempt container; ordinary cleanup or retention rechecks identity before removal. |
+| Private job volumes | None | Standard runner recipes declare no volumes; application archives with declared volumes are rejected. Inputs/outputs live in the container layer; optional secrets use a bounded tmpfs removed with that container. |
+| Shared input-cache volumes | 64-generation count policy plus byte budget; active pins prevent unsafe eviction | One exact labelled generation per content key; only unreferenced owned generations are eligible for eviction. |
+| Application images | 16-generation count policy plus byte budget | Exact verified image IDs, tag-free; only unreferenced owned generations are eligible for eviction. |
+| Standard runner images and tags | Fresh builds require fewer than 16 distinct matching IDs; at most 16 durable installation operations per physical machine | Each operation can build once and has one operation tag plus its recipe tag. Existing operation recovery never builds; no age, prefix or legacy-image deletion. |
+| Cache writer helpers | Fixed generation name, one writer invocation, two-hour process alarm, `--rm` | Durable write intent precedes the one-shot writer. Unknown results are observed without repeating the writer. |
+| Cache and stopped-container verifier helpers | One-hour process alarm, `--rm`; up to 64 exact read-only cache mounts per helper | No job code runs in helpers. Disconnected helpers can remain until their process exits; later observation may launch another verifier, never another attempt. |
+| macOS host watchdog | One fixed installation directory and launchd label per installed plan | Three managed files and five fixed runtime file paths; the stop ledger holds at most 64 IDs. A changed plan requires explicit removal; unknown unload preserves files. |
+
+The standard runner inventory is a complete, bounded `image ls --all --no-trunc` response filtered
+by the runner schema label. It counts matching legacy and foreign images only as occupied capacity;
+that observation grants no deletion authority and exposes no image IDs in public reasons.
+Malformed, partial, oversized or failed inventory replies block fresh builds with a closed failed-step
+reason. Exact operation recovery bypasses this capacity gate because it cannot create anything.
+
+The pinned Python base image is a shared Docker dependency, not a Relay-owned deletion target.
+Unrelated images and objects left by external tools are outside these creation limits and never
+become removable through a name prefix or an age threshold. The bounds do not claim to impose a
+quota on external Docker clients or to reap a stopped Docker daemon's objects while it is offline.

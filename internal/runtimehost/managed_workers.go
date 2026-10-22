@@ -190,7 +190,8 @@ func (h *Host) managedProvider(config ManagedServeConfig, resolver ports.Credent
 		return nil, ErrRequest
 	}
 	// The repository consumes a durable permit before every preparation intent.
-	adapter, err := kaggle.NewRuntimeAdapter(providerConfig, inner, resolver, h.inputs, clock{}, h.store.LoadProviderAttempt, policy, true)
+	adapter, err := kaggle.NewRuntimeAdapter(providerConfig, inner, resolver, h.inputs, clock{}, h.store.LoadProviderAttempt, policy, true,
+		managedSharedClaims{store: h.store, account: outer.AccountScope})
 	if err != nil {
 		return nil, ErrRequest
 	}

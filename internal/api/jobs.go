@@ -10,6 +10,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/admission"
 	"github.com/vankhaivn/compute-relay/internal/auth"
 	"github.com/vankhaivn/compute-relay/internal/domain"
+	"github.com/vankhaivn/compute-relay/internal/hostimages"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/provider"
 )
@@ -129,6 +130,8 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 		respondError(w, r, 404, domain.CodeInputNotFound, domain.FailureStageInputPreparation, "referenced input is missing or not visible")
 	case errors.Is(err, admission.ErrNotFound):
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "job not found or not visible")
+	case errors.Is(err, provider.ErrResourceCountLimit), errors.Is(err, hostimages.ErrCountLimit):
+		respondResourceCountRefusal(w, r, err)
 	case errors.Is(err, hoststorage.ErrHardLimit), errors.Is(err, hoststorage.ErrUnknown), errors.Is(err, hoststorage.ErrIneligible):
 		reason, message := "host_storage_limit", "host storage budget does not permit new work; inspect connection storage"
 		if errors.Is(err, hoststorage.ErrUnknown) || errors.Is(err, hoststorage.ErrIneligible) {
@@ -151,6 +154,14 @@ func jobError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		mapError(w, r, err)
 	}
+}
+
+func respondResourceCountRefusal(w http.ResponseWriter, r *http.Request, err error) {
+	reason := provider.Reason(err, "remote_resource_count_limit")
+	respond(w, 422, ErrorEnvelope{Error: ErrorBody{Code: domain.CodeResourceRequirementUnsatisfied,
+		Message: "retained remote resources do not permit new work; inspect resource retention",
+		Stage:   domain.FailureStageValidation, RequestID: RequestID(r.Context()),
+		RecommendedAction: domain.RecommendedActionWait, Details: refusalDetails(err, reason)}})
 }
 
 func refusalDetails(err error, reason string) map[string]string {

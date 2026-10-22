@@ -35,6 +35,10 @@ func Apply(old Journal, state domain.AttemptState, a Action, now time.Time) (Jou
 		switch reason {
 		case "", "host_unhealthy":
 			reason = "host_unhealthy"
+		case "remote_staging_dataset_limit", "remote_kernel_limit", "remote_attempt_container_limit", "remote_resource_scope_unknown", "remote_shared_dataset_limit":
+			message = "Retained or unconfirmed remote resources fill the operator count budget."
+		case "host_image_count_limit":
+			message = "Retained application images fill the operator count budget."
 		case "host_storage_limit":
 			message = "Host storage budget refuses new preparation or execution."
 		case "host_storage_unknown":

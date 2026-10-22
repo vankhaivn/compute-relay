@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,10 +46,82 @@ func TestStagingWithoutSharedInputsKeepsV1Marker(t *testing.T) {
 	}
 }
 
+func TestSharedSelectionBoundaryDuplicatesAndMountLimit(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		threshold int64
+		marker    domain.SHA256Digest
+	}{
+		{"default", 256 << 20, "1ca6a9004ba49b000259ca46874fa6b13a7629c3a1e554cb0a415a6fc0babba6"},
+		{"custom", 3, "a5c711aad06bcf83369320c73910221e087ca3e94d682d92fafeb5eb0aa0f88f"},
+		{"disabled", 0, "b53a6635738aa89d17dee6512ad0dfd03af94c70d378e283b6025786cdbac07a"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, plan := stagingFixture(t)
+			policy := DefaultStagingPolicy()
+			policy.SharedMinBytes = test.threshold
+			unit := max(test.threshold, 3)
+			plan.Job.Inputs.Inputs = nil
+			for i := 0; i < 11; i++ {
+				bytes := unit
+				content := i
+				switch i {
+				case 0:
+					bytes--
+				case 2:
+					bytes++
+				case 9:
+					content = 1
+				case 10:
+					content = 1
+					bytes++
+				}
+				plan.Job.Inputs.Inputs = append(plan.Job.Inputs.Inputs, provider.FrozenInput{
+					Name: fmt.Sprintf("input%d", i), Target: fmt.Sprintf("data/%d.bin", i),
+					Object: domain.ObjectMetadata{ID: domain.ObjectID(fmt.Sprintf("object%d", i)), WorkspaceID: plan.Job.Identity.WorkspaceID,
+						Bytes: bytes, SHA256: provider.Digest([]byte(fmt.Sprintf("content%d", content)))},
+				})
+			}
+			plan.Job.Identity.InputManifestSHA256 = plan.Job.Inputs.InputDigest()
+			stage, err := buildStagingPlan(c, policy, plan, "prep")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantShared := 7
+			if test.threshold == 0 {
+				wantShared = 0
+			}
+			if len(stage.shared) != wantShared {
+				t.Fatal("incorrect unique mount count", len(stage.shared))
+			}
+			for i, input := range stage.inputs {
+				want := test.threshold > 0 && (i >= 1 && i <= 7 || i == 9)
+				if got := input.Slug != stage.request.Slug; got != want {
+					t.Fatal("boundary, overflow or duplicate input mapped incorrectly", i, input)
+				}
+			}
+			// Captured before the shared selection helper replaced the adapter loop.
+			if stage.request.MarkerSHA256 != test.marker {
+				t.Fatal("selection changed frozen marker bytes", stage.request.MarkerSHA256)
+			}
+			selected := provider.SelectSharedInputs(plan.Job.Inputs.Inputs, policy.SharedMinBytes, provider.DefaultSharedInputLimit)
+			if len(selected) != len(stage.shared) {
+				t.Fatal("store selection and mounted identities differ")
+			}
+			for i, object := range selected {
+				if object != stage.shared[i].object {
+					t.Fatal("store selection and mounted order differ", i)
+				}
+			}
+		})
+	}
+}
+
 func sharedRuntime(t *testing.T) (*RuntimeAdapter, provider.Plan, *provider.Prepared, *stagingTestBlobs, *nativeFixture) {
 	t.Helper()
 	p, plan, saved, blobs, f := nativeRuntime(t, false)
 	p.stager.policy = sharedPolicy()
+	p.stager.sharedClaims = newSharedClaimsFixture()
 	return p, plan, saved, blobs, f
 }
 
@@ -82,6 +155,8 @@ func TestNativeSharedInputUploadsOnceAndMountsWithoutReadBack(t *testing.T) {
 		t.Fatal("kernel does not mount the shared dataset", f.kernel.Datasets)
 	}
 	f.state = "COMPLETE"
+	// Cleanup of an exact attempt remains possible without shared creation authority.
+	p.stager.sharedClaims = nil
 	for _, purpose := range []string{"execution", "staging"} {
 		remote, operation := *out.Remote, domain.OperationID(plan.Job.Identity.IntentID)
 		if purpose == "staging" {
