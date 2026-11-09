@@ -77,6 +77,16 @@ work. An unavailable snapshot may include a closed `cause` naming the failed com
 read. The snapshot history and queued-job `details.cause` retain it across restart;
 `host_unhealthy` remains the refusal summary. A health stop never retries, resubmits or switches hosts.
 
+## This machine
+
+`GET /v1/workspaces/{w}/local-machine/health` (read token, `local_machine_health` feature) reports
+the machine Relay itself runs on with the same collector, metrics and `resource_id` an SSH
+connection to that Mac would report. It returns `latest`, `level`, `reasons`, `diagnostics`,
+`critical_since`, newest-first `history` and the default `policy`, but no `refuse_new` or `stop`:
+the level only warns and never refuses or stops work. Sampling is on demand with the 15 s cache;
+history lives in memory, keeps 120 rows / 24 h and starts empty after a restart. Apple Silicon
+reports `unsupported`. Schema: [local-machine-health](../api/schemas/local-machine-health.v1alpha1.schema.json).
+
 ## Host watchdog
 
 An optional user-level `launchd` agent on the host that enforces the critical thresholds even when

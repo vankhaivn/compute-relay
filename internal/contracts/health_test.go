@@ -120,3 +120,24 @@ func TestHealthSchemaGuardEnumsMatchEvaluator(t *testing.T) {
 		t.Fatal("health diagnostics drifted")
 	}
 }
+
+func TestLocalMachineHealthContractCarriesNoControlDecision(t *testing.T) {
+	root := repositoryRoot(t)
+	compiler := jsonschema.NewCompiler()
+	compiler.DefaultDraft(jsonschema.Draft2020)
+	compiler.AssertFormat()
+	schema, err := compiler.Compile(filepath.Join(root, "api/schemas/local-machine-health.v1alpha1.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"refuse_new", "stop", "guard", "fresh"} {
+		value, err := readJSONValue(filepath.Join(root, "api/examples/local-machine-health.ok.valid.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		value.(map[string]any)[field] = false
+		if schema.Validate(value) == nil {
+			t.Fatal("local machine health accepted", field)
+		}
+	}
+}

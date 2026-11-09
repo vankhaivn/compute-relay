@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +18,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/connections"
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hosthealth"
+	"github.com/vankhaivn/compute-relay/internal/localhealth"
 	"github.com/vankhaivn/compute-relay/internal/ports"
 	"github.com/vankhaivn/compute-relay/internal/store/sqlite"
 )
@@ -299,4 +302,66 @@ func TestConnectionHealthHTTPUsesBoundedProbeDeadlineAndRejectsCorruptHistory(t 
 			t.Fatal("corrupt historical source escaped")
 		}
 	})
+}
+
+// localMac answers the collector like an Intel Mac whose Foundation thermal state is thermal.
+type localMac struct{ thermal string }
+
+func (m localMac) Run(_ context.Context, argv []string, stdout, _ io.Writer) error {
+	output := map[string]string{
+		"/usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice": `"IOPlatformUUID" = "A1234567-89AB-CDEF-0123-456789ABCDEF"` + "\n",
+		"/usr/bin/uname -sm":                             "Darwin x86_64\n",
+		"/usr/sbin/sysctl -n hw.cputype":                 "7\n",
+		"/usr/sbin/sysctl hw.ncpu hw.memsize vm.loadavg": "hw.ncpu: 16\nhw.memsize: 68719476736\nvm.loadavg: { 1.0 1.0 1.0 }\n",
+		"/usr/bin/pmset -g therm":                        "CPU_Speed_Limit = 100\n",
+		"/usr/bin/pmset -g batt":                         "Now drawing from 'AC Power'\n",
+	}[strings.Join(argv, " ")]
+	if argv[0] == "/usr/bin/osascript" {
+		output = m.thermal
+	}
+	if output == "" {
+		return errors.New("source not exposed")
+	}
+	_, err := io.WriteString(stdout, output)
+	return err
+}
+
+const localHealthPath = "/v1/workspaces/a/local-machine/health"
+
+func TestLocalMachineHealthHTTPWarnsWithoutControlAuthority(t *testing.T) {
+	clock := &healthHTTPClock{now: time.Date(2026, 11, 9, 6, 0, 0, 0, time.UTC)}
+	f := setupJobHTTPWith(t, jobHTTPOptions{extraScopes: map[string][]auth.Scope{"manage": {auth.Manage}}, configure: func(cfg *api.Config, _ *auth.Service, _ *sqlite.Store) {
+		cfg.LocalHealth = localhealth.NewWith(localMac{thermal: "1\n"}, clock.Now)
+		cfg.Now = clock.Now
+	}})
+	for _, tt := range []struct {
+		method, path, who string
+		status            int
+	}{{"GET", localHealthPath, "", 401}, {"GET", localHealthPath, "b", 403}, {"GET", localHealthPath, "manage", 403}, {"POST", localHealthPath, "read", 405}, {"GET", localHealthPath + "?refresh=true", "read", 400}} {
+		t.Run(tt.method+tt.path+tt.who, func(t *testing.T) {
+			_, raw := f.call(t, tt.method, tt.path, tt.who, "", "", tt.status)
+			managedSafeResponse(t, raw)
+		})
+	}
+	_, raw := f.call(t, "GET", localHealthPath, "read", "", "", 200)
+	wireSchema(t, "local-machine-health", raw)
+	managedSafeResponse(t, raw)
+	for _, control := range []string{`"refuse_new"`, `"stop"`, `"guard"`} {
+		if strings.Contains(string(raw), control) {
+			t.Fatal("local machine health carries a control decision", control)
+		}
+	}
+	response := decodeHTTPJSON[api.LocalMachineHealth](t, raw)
+	if response.Level != hosthealth.LevelWarning || !slices.Contains(response.Reasons, hosthealth.ReasonThermalWarning) || len(response.History) != 1 || response.Latest == nil {
+		t.Fatal(response)
+	}
+	_, info := f.call(t, "GET", "/v1/info", "read", "", "", 200)
+	if !strings.Contains(string(info), `"`+api.FeatureLocalMachineHealth+`"`) {
+		t.Fatal("info does not advertise local machine health")
+	}
+	without := setupJobHTTP(t)
+	without.call(t, "GET", localHealthPath, "read", "", "", 404)
+	if _, info = without.call(t, "GET", "/v1/info", "read", "", "", 200); strings.Contains(string(info), api.FeatureLocalMachineHealth) {
+		t.Fatal("unconfigured Relay advertised local machine health")
+	}
 }

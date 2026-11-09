@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Relay local-machine-health v1alpha1",
+  "description": "Health of the machine this Relay runs on. Level and reasons are warnings only: nothing here refuses or stops work.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "resource_id",
+    "latest",
+    "level",
+    "reasons",
+    "history",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "resource_id": {
+      "$ref": "connection-health.v1alpha1.schema.json#/properties/resource_id"
+    },
+    "latest": {
+      "$ref": "connection-health.v1alpha1.schema.json#/$defs/snapshot"
+    },
+    "level": {
+      "$ref": "connection-health.v1alpha1.schema.json#/$defs/guard/properties/level"
+    },
+    "reasons": {
+      "$ref": "connection-health.v1alpha1.schema.json#/$defs/guard/properties/reasons"
+    },
+    "diagnostics": {
+      "$ref": "connection-health.v1alpha1.schema.json#/$defs/guard/properties/diagnostics"
+    },
+    "critical_since": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "$ref": "connection-health.v1alpha1.schema.json#/$defs/snapshot"
+      },
+      "minItems": 1,
+      "maxItems": 120
+    },
+    "policy": {
+      "$ref": "connection-health.v1alpha1.schema.json#/$defs/policy"
+    }
+  }
+}

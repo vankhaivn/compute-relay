@@ -51,7 +51,8 @@
           "job_cleanup_preview",
           "result_release",
           "input_release",
-          "local_storage"
+          "local_storage",
+          "local_machine_health"
         ]
       }
     },

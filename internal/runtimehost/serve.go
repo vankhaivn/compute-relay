@@ -18,6 +18,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/domain"
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
+	"github.com/vankhaivn/compute-relay/internal/localhealth"
 	"github.com/vankhaivn/compute-relay/internal/localstorage"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -131,6 +132,7 @@ func (h *Host) ServeConfigured(ctx context.Context, serve ServeConfig, announce 
 		return err
 	}
 	cfg.LocalStorage = localstorage.New(h.root.Path)
+	cfg.LocalHealth = localhealth.New()
 	cfg.InputReleases, err = retention.NewInputReleaser(h.access, h.store, sweeper)
 	if err != nil {
 		return ServiceStopped{"startup", "input_retention_init_failed"}

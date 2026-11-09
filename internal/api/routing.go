@@ -118,6 +118,9 @@ func (h *handler) routes() {
 	if h.config.LocalStorage != nil {
 		add("GET", "local-storage", routePolicy{query: true}, h.localStorage)
 	}
+	if h.config.LocalHealth != nil {
+		add("GET", "local-machine/health", routePolicy{remote: true}, h.localHealth)
+	}
 	if h.config.InputReleases != nil {
 		add("POST", "input-release-preview", routePolicy{bodyLimit: inputReleaseBodyLimit}, h.inputRelease)
 		add("POST", "input-releases", routePolicy{bodyLimit: inputReleaseBodyLimit}, h.inputRelease)

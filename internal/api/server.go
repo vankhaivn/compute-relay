@@ -32,6 +32,7 @@ import (
 	"github.com/vankhaivn/compute-relay/internal/hoststorage"
 	"github.com/vankhaivn/compute-relay/internal/hostwatchdog"
 	"github.com/vankhaivn/compute-relay/internal/joblogs"
+	"github.com/vankhaivn/compute-relay/internal/localhealth"
 	"github.com/vankhaivn/compute-relay/internal/localstorage"
 	"github.com/vankhaivn/compute-relay/internal/objects"
 	"github.com/vankhaivn/compute-relay/internal/operations"
@@ -51,6 +52,8 @@ type Config struct {
 	Results        *collection.Reader     // nil disables published artifact reads; no provider fallback.
 	InputReleases  *retention.InputReleaser
 	LocalStorage   *localstorage.Reader
+	// LocalHealth observes the machine Relay runs on; it never gates work.
+	LocalHealth    *localhealth.Monitor
 	ResultReleases *retention.Releaser // Exact local result release; no provider effects.
 	Operations     *operations.Service // nil disables durable controls; never use an in-memory fallback.
 	Cleanup        *cleanup.Service    // nil disables explicit remote cleanup admission; requires Operations.
@@ -79,6 +82,7 @@ const FeatureJobCleanupPreview = "job_cleanup_preview"
 const FeatureResultRelease = "result_release"
 const FeatureInputRelease = "input_release"
 const FeatureLocalStorage = "local_storage"
+const FeatureLocalMachineHealth = "local_machine_health"
 
 func DefaultConfig() Config {
 	return Config{
@@ -301,6 +305,9 @@ func (h *handler) info(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.config.LocalStorage != nil {
 		features = append(features, FeatureLocalStorage)
+	}
+	if h.config.LocalHealth != nil {
+		features = append(features, FeatureLocalMachineHealth)
 	}
 	if h.config.ResultReleases != nil {
 		features = append(features, FeatureResultRelease)

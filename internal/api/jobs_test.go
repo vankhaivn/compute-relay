@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -211,7 +212,11 @@ func wireSchema(t *testing.T, name string, data []byte) {
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.AssertFormat()
-	for _, file := range []string{"common", "workload-secrets", name} {
+	files := []string{"common", "workload-secrets", "connection-health"}
+	if !slices.Contains(files, name) {
+		files = append(files, name)
+	}
+	for _, file := range files {
 		b, err := schemas.Files.ReadFile(file + ".v1alpha1.schema.json")
 		requireNoError(t, err)
 		var value any

@@ -26,6 +26,39 @@ type ConnectionHealth struct {
 
 var healthResourcePattern = regexp.MustCompile(`^resource_[0-9a-f]{64}$`)
 
+// LocalMachineHealth reports the machine Relay runs on. Its level and reasons are warnings
+// evaluated with the default policy; this machine has no refuse or stop decision.
+type LocalMachineHealth struct {
+	SchemaVersion int                   `json:"schema_version"`
+	ResourceID    string                `json:"resource_id"`
+	Latest        *hosthealth.Snapshot  `json:"latest"`
+	Level         hosthealth.Level      `json:"level"`
+	Reasons       []hosthealth.Reason   `json:"reasons"`
+	Diagnostics   []hosthealth.Reason   `json:"diagnostics,omitempty"`
+	CriticalSince *time.Time            `json:"critical_since,omitempty"`
+	History       []hosthealth.Snapshot `json:"history"`
+	Policy        hosthealth.Policy     `json:"policy"`
+}
+
+func (h *handler) localHealth(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
+	if !managedScope(w, r, p, workspace, auth.Read) {
+		return
+	}
+	view, err := h.config.LocalHealth.Read(r.Context())
+	if err != nil {
+		healthError(w, r, err)
+		return
+	}
+	projected, err := projectConnectionHealth(view, h.config.Now().UTC())
+	if err != nil {
+		healthError(w, r, err)
+		return
+	}
+	respond(w, http.StatusOK, LocalMachineHealth{SchemaVersion: 1, ResourceID: projected.ResourceID, Latest: projected.Latest,
+		Level: projected.Guard.Level, Reasons: projected.Guard.Reasons, Diagnostics: projected.Guard.Diagnostics,
+		CriticalSince: projected.Guard.CriticalSince, History: projected.History, Policy: projected.Policy})
+}
+
 func (h *handler) health(w http.ResponseWriter, r *http.Request, p auth.Principal, workspace domain.WorkspaceID) {
 	if h.config.Health == nil {
 		respondError(w, r, 404, domain.CodeInvalidRequest, domain.FailureStageValidation, "host health is not configured")

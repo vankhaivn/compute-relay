@@ -36,6 +36,7 @@ request returns the original receipt, and a changed request with the same key co
 | `GET /providers`, `GET /connections[/{id}]`, `GET /connection-operations/{id}` | read | [Connections](../docs/connections.md) |
 | `POST /connections`, `POST /connections/{id}/actions` | manage | [Connections](../docs/connections.md) |
 | `GET /connections/{id}/health` | read | [Host health](../docs/ssh-host-health.md) |
+| `GET /local-machine/health` | read | [This machine](../docs/ssh-host-health.md#this-machine) |
 | `…/host-watchdog/actions/{action}`; `GET …/host-watchdog`, `/host-watchdog-operations/{id}` | manage; read | [Host health](../docs/ssh-host-health.md#host-watchdog) |
 | `GET /connections/{id}/storage`, `/storage-cleanup-operations/{id}` | read | [SSH storage](../docs/ssh-storage.md) |
 | `GET`/`POST /connections/{id}/storage/orphans/{o}/cleanup` | manage | [SSH storage](../docs/ssh-storage.md#storage-view-and-orphans) |
