@@ -23,10 +23,7 @@ func (resourceReadError) Error() string        { return ErrResourceIdentity.Erro
 func (e resourceReadError) Unwrap() error      { return e.cause }
 func (resourceReadError) Is(target error) bool { return target == ErrResourceIdentity }
 
-var (
-	linuxMachineID = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	platformUUID   = regexp.MustCompile(`(?m)^\s*"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})"\s*$`)
-)
+var linuxMachineID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // resourceDigest namespaces native identifiers before they enter durable state.
 // Raw machine UUIDs, endpoint names and socket paths are never public evidence.
@@ -69,15 +66,11 @@ func machineIdentity(ctx context.Context, exec executor) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		matches := platformUUID.FindAllSubmatch(raw, -1)
-		if len(matches) != 1 {
+		digest, ok := hostidentity.DarwinPlatform(raw)
+		if !ok {
 			return "", failure(ErrResourceIdentity, "ssh_machine_identity_invalid")
 		}
-		id := strings.ToLower(string(matches[0][1]))
-		if strings.ReplaceAll(id, "-", "") == strings.Repeat("0", 32) {
-			return "", failure(ErrResourceIdentity, "ssh_machine_identity_invalid")
-		}
-		return resourceDigest("darwin-platform-uuid", id), nil
+		return digest, nil
 	default:
 		return "", failure(ErrResourceIdentity, "ssh_machine_identity_invalid")
 	}
